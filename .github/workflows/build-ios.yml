@@ -1,0 +1,36 @@
+name: Build unsigned iOS IPA
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npx expo prebuild --platform ios
+      - name: Discover scheme name
+        id: scheme
+        run: |
+          cd ios
+          SCHEME=$(xcodebuild -list -workspace *.xcworkspace -json | python3 -c "import json,sys; print(json.load(sys.stdin)['workspace']['schemes'][0])")
+          echo "Detected scheme: $SCHEME"
+          echo "name=$SCHEME" >> $GITHUB_OUTPUT
+      - name: Build unsigned .app
+        run: |
+          cd ios
+          xcodebuild -workspace *.xcworkspace -scheme "${{ steps.scheme.outputs.name }}" \
+            -configuration Debug -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Package as .ipa
+        run: |
+          mkdir -p Payload
+          cp -r ios/build/Build/Products/Debug-iphoneos/*.app Payload/
+          zip -r scray-native.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scray-native-ipa
+          path: scray-native.ipa

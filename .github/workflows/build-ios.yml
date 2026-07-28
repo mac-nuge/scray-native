@@ -15,7 +15,7 @@ jobs:
         id: scheme
         run: |
           cd ios
-          WORKSPACE=$(ls *.xcworkspace)
+          WORKSPACE=$(ls -d *.xcworkspace)
           SCHEME="${WORKSPACE%.xcworkspace}"
           echo "Detected scheme: $SCHEME"
           echo "name=$SCHEME" >> $GITHUB_OUTPUT

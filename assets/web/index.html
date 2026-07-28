@@ -22,10 +22,7 @@
     "keyboard-config.js",
     "db.js",
     "context-menu.js",
-    "desktop-layout.js",
-    "onedrive.js",
-    "auth.js",
-    "excel-sheets.js",
+    "local-scores-cache.js",
     "file-operations.js",
     "randomiser.js",
     "ui.js",
@@ -34,6 +31,7 @@
     "history.js",
     "random-panel.js",
     "render.js",
+    "local-library.js",
     "player.js"
   ];
   localScripts.forEach(src => {
@@ -283,12 +281,11 @@
 
 <!-- ✅ Compact button row -->
 <div class="top-buttons-row">
-<button id="loginBtn">OneDrive</button>
-<button id="refreshAllAccountsBtn">Refresh</button>
+<button id="pickFolderBtn">Choose Video Folder</button>
+<button id="rescanLibraryBtn">Rescan Library</button>
 <button id="excelOnlineConnectBtn">📊 Excel</button>
 <button id="refreshScoresBtn" style="display:none;" title="Refresh Excel authentication">🔄</button></div>
 
-<div id="accountLoadButtons" style="margin: 10px 0;"></div>
 <br>
 
 <!-- Desktop sections (empty, will be populated by JS) -->

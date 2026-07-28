@@ -1,5 +1,6 @@
 {
   "expo": {
+    "plugins": ["./plugins/withWebAssets.js"],
     "name": "scray-native",
     "slug": "scray-native",
     "version": "1.0.0",

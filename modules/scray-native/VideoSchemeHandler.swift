@@ -2,8 +2,12 @@ import WebKit
 
 class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
-        guard let url = task.request.url,
-              let fileURL = BookmarkStore.shared.resolveFile(forId: url.host ?? "") else {
+        guard let url = task.request.url else {
+            task.didFailWithError(NSError(domain: "scray", code: 404)); return
+        }
+        let rawPath = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
+        let relativePath = rawPath.removingPercentEncoding ?? rawPath
+        guard let fileURL = BookmarkStore.shared.resolveFile(forId: relativePath) else {
             task.didFailWithError(NSError(domain: "scray", code: 404)); return
         }
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),

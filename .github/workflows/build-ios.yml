@@ -15,7 +15,8 @@ jobs:
         id: scheme
         run: |
           cd ios
-          SCHEME=$(xcodebuild -list -workspace *.xcworkspace -json | python3 -c "import json,sys; print(json.load(sys.stdin)['workspace']['schemes'][0])")
+          WORKSPACE=$(ls *.xcworkspace)
+          SCHEME="${WORKSPACE%.xcworkspace}"
           echo "Detected scheme: $SCHEME"
           echo "name=$SCHEME" >> $GITHUB_OUTPUT
       - name: Build unsigned .app

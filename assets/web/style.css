@@ -1,0 +1,5111 @@
+/* =========================================
+LOCK HORIZONTAL SCROLL - MOBILE
+========================================= */
+html, body {
+overflow-x: hidden;
+max-width: 100vw;
+position: relative;
+}
+
+/* Prevent any child from causing horizontal overflow */
+body > * {
+max-width: 100vw;
+box-sizing: border-box;
+}
+
+/* Ensure video container respects viewport */
+@media (max-width: 768px) {
+#inlineVideoContainer:not(.mini-player) {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  width: 100% !important;
+  max-width: 100vw !important;
+}
+}
+
+/* Ensure panels don't cause overflow */
+#basketPanel,
+#historyPanel {
+max-width: 100vw;
+box-sizing: border-box;
+}
+
+/* Ensure corner buttons don't overflow */
+#cornerButtons {
+max-width: calc(100vw - 20px);
+box-sizing: border-box;
+}
+
+/* Ensure floating pills don't overflow */
+#floatingTagPillsBar {
+max-width: 100vw;
+box-sizing: border-box;
+padding-right: 10px;
+}
+
+
+/* =========================================
+⚙️ ADJUSTABLE SETTING: Permanent progress bar visibility.
+Change this single value to control how visible the progress bar track is
+(0 = fully invisible, 1 = fully opaque). Currently 0.3 = 30% visible.
+========================================= */
+:root {
+--scray-progress-bar-opacity: 0.3;
+}
+
+/* =========================================
+GLOBAL BASE STYLES
+========================================= */
+body {
+font-family: Arial, sans-serif;
+margin: 0;
+padding: 10px;
+font-size: 0.75rem;
+}.permanent-progress-bar {
+width: 100%;
+height: 6px;
+background: #000; /* Black background on progress bar itself */
+overflow: visible; /* Changed from hidden so markers can extend slightly beyond bar */
+cursor: pointer;
+position: relative;
+transition: height 0.15s ease, opacity 0.15s ease;
+z-index: 50; /* Keep progress bar clickable */
+opacity: var(--scray-progress-bar-opacity); /* ⚙️ see :root variable above to adjust */
+}
+
+h1 {
+color: pink;
+margin-top: 0;
+}
+
+html, body {
+touch-action: manipulation;   /* disables double-tap zoom while preserving scroll/tap */
+-webkit-touch-callout: none;  /* prevents callout menu on long press in Safari */
+}
+
+* {
+touch-action: manipulation;   /* apply to all elements so double-tap never triggers zoom */
+}
+
+/* =========================================
+HISTORY LIST
+========================================= */
+#historyList li { margin-bottom: 6px; }
+#historyList button {
+margin-left: 8px;
+padding: 4px 8px;
+font-size: 0.9rem;
+}
+
+/* =========================================
+GENERIC SMALL BUTTON
+========================================= */
+.dropdown-btn {
+width: 32px;
+height: 32px;
+margin-left: 4px;
+background: #15589e;
+color: white;
+border: none;
+border-radius: 4px;
+cursor: pointer;
+font-size: 0.8rem;
+vertical-align: middle;
+}
+.dropdown-btn:hover { background: #555; }
+
+
+/* =========================================
+SORT BUTTONS CONTAINER (5 buttons side by side)
+========================================= */
+.sort-buttons-container {
+display: flex;
+gap: 4px;
+margin: 8px 0;
+width: 100%;
+}
+
+.sort-btn {
+flex: 1;
+background: #555;
+color: white;
+border: none;
+padding: 6px 2px;
+cursor: pointer;
+border-radius: 4px;
+font-size: 0.65rem;
+transition: background 0.2s ease;
+white-space: nowrap;
+overflow: hidden;
+text-overflow: ellipsis;
+min-width: 0;
+}
+
+.sort-btn:hover {
+ background: #333;
+}
+
+.sort-btn[data-sort-state="asc"],
+.sort-btn[data-sort-state="desc"] {
+ background: #007bff;
+}
+
+.sort-btn[data-sort-state="asc"]:hover,
+.sort-btn[data-sort-state="desc"]:hover {
+ background: #0056b3;
+}
+
+/* Desktop: slightly larger text */
+@media (min-width: 769px) {
+.sort-btn {
+    font-size: 0.65rem;
+    padding: 6px 4px;
+}
+
+.sort-buttons-container {
+    gap: 4px;
+}
+}
+
+/* Mobile: tighter spacing */
+@media (max-width: 768px) {
+.sort-btn {
+  font-size: 0.6rem;
+  padding: 6px 2px;
+}
+
+.sort-buttons-container {
+  gap: 3px;
+}
+}
+
+/* =========================================
+INLINE CONSOLE
+========================================= */
+#inlineConsoleToolbar {
+display: flex;
+justify-content: flex-end;
+margin-bottom: 4px;
+}
+#inlineConsoleToolbar button {
+font-size: 0.7rem;
+padding: 2px 6px;
+border: 1px solid #999;
+background: #eee;
+cursor: pointer;
+}
+#inlineConsoleToolbar button:hover { background: #ddd; }
+#inlineConsole {
+font-family: Courier, monospace;
+font-size: 0.5rem;
+line-height: 1.3;
+background: #f9f9f9;
+border: 1px solid #ccc;
+padding: 6px;
+height: 100px;
+overflow-y: auto;
+white-space: pre-wrap;
+}
+#inlineConsole .log-entry.error,
+#inlineConsole .log-entry.warn { color: red; }
+#inlineConsole .log-entry.log { color: black; }
+#inlineConsoleCopyStatus { transition: opacity 0.5s ease; }
+
+/* =========================================
+FLOATING TAG PILLS
+========================================= */
+#floatingTagPillsBar {
+position: fixed;
+bottom: calc(env(safe-area-inset-bottom,0px) + 63px);
+left: 0;
+width: 100%;
+display: flex;
+flex-wrap: wrap;
+gap: 4px;
+background: transparent;
+padding: 0;
+z-index: 2600;
+font-size: 0.8rem;
+pointer-events: none;
+}
+
+/* ✅ Portrait mobile: move pills higher to clear raised corner buttons */
+@media (max-width: 768px) and (orientation: portrait) {
+#floatingTagPillsBar {
+bottom: calc(env(safe-area-inset-bottom,0px) + 133px) !important;
+}
+}
+
+/* ✅ Landscape mobile: keep pills at original position */
+@media (max-width: 1024px) and (orientation: landscape) {
+#floatingTagPillsBar {
+bottom: calc(env(safe-area-inset-bottom,0px) + 58px) !important;
+}
+}
+
+.floating-tag-pill {
+pointer-events: auto;
+padding: 2px 6px;
+border-radius: 12px;
+font-size: 0.75rem;
+line-height: 1;
+cursor: pointer;
+display: inline-flex;
+align-items: center;
+}
+.floating-tag-include { background-color: #007bff; color: white; }
+.floating-tag-exclude { background-color: #f94144; color: white; }
+.floating-tag-search { background-color: hsl(330, 100%, 84%); color: #333; }
+
+/* Blinking cursor on the search pill while the on-screen keyboard is
+   active, so it's clear the search box is still focused/typing */
+body.keyboard-active .floating-tag-search::after {
+content: '|';
+margin-left: 2px;
+animation: searchPillCursorBlink 1s step-end infinite;
+}
+
+@keyframes searchPillCursorBlink {
+0%, 50% { opacity: 1; }
+50.01%, 100% { opacity: 0; }
+}
+
+/* Compact Edit/Clear popup for the search pill */
+.search-pill-popup {
+position: fixed;
+display: flex;
+flex-direction: row;
+gap: 4px;
+background: #222;
+border-radius: 6px;
+padding: 4px;
+z-index: 2147483647;
+box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.search-pill-popup-btn {
+background: #444;
+color: white;
+border: none;
+border-radius: 4px;
+padding: 4px 8px;
+font-size: 0.75rem;
+cursor: pointer;
+white-space: nowrap;
+}
+
+.search-pill-popup-btn:hover {
+background: #555;
+}
+
+.floating-tag-score { background-color: #ff9800; color: white; }
+.floating-tag-score-inactive { background-color: #999; color: white; }
+.floating-tag-excel-connected { background-color: #28a745; color: white; }
+.floating-tag-excel-disconnected { background-color: #999; color: white; }
+.floating-tag-pill:hover { filter: brightness(0.9); }
+
+/* =========================================
+SELECT2 ENHANCEMENTS
+========================================= */
+.select2-container { width: 100% !important; }
+.select2-dropdown { min-width: 100% !important; max-width: none !important; }
+.select2-results__option { padding: 10px; font-size: 1.2rem; }
+
+/* Mobile: smaller dropdown options */
+@media (max-width: 768px) {
+.select2-results__option { 
+  padding: 8px; 
+  font-size: 0.95rem; 
+}
+}.select2-selection__choice { font-size: 1.1rem; padding: 4px 8px; }
+.tag-container {
+display: flex;
+flex-wrap: wrap;
+gap: 6px;
+margin-bottom: 6px;
+display: none !important;
+}
+.tag-pill {
+display: inline-flex;
+align-items: center;
+background: #007bff;
+color: white;
+padding: 4px 8px;
+border-radius: 16px;
+font-size: 0.9rem;
+}
+.tag-pill button {
+background: transparent;
+border: none;
+color: white;
+margin-left: 6px;
+cursor: pointer;
+font-size: 1rem;
+}
+.tag-pill button:hover { color: #ffdddd; }
+.select2-selection__choice { display: none !important; }
+
+/* Select2 fields background */
+.select2-container .select2-selection,
+.select2-container .select2-search__field {
+background-color: #ffffff !important;
+}
+
+/* =========================================
+BURGER BUTTONS & CORNER BUTTONS
+========================================= */
+.burger-btn {
+font-size: 0.82rem;
+background: #333;
+color: white;
+padding: 7px 13px;
+border: none;
+cursor: pointer;
+border-radius: 4px;
+text-align: center;
+}
+.burger-btn:hover { background: #555; }
+#jumpSearchBtn {
+font-size: 0.85rem;
+background: #333;
+color: white;
+border: none;
+border-radius: 4px;
+cursor: pointer;
+min-width: 32px;
+text-align: center;
+padding: 5px 0;
+}
+#jumpSearchBtn:hover { background: #555; }
+
+#cornerButtons {
+position: fixed;
+bottom: calc(env(safe-area-inset-bottom,0px) + 10px);
+left: calc(env(safe-area-inset-left,0px) + 10px);
+z-index: 9999 !important;
+display: flex;
+gap: 6px;
+background: transparent;
+pointer-events: auto; /* ✅ Changed from "none" - iOS needs this to scroll */
+padding-left: env(safe-area-inset-left,0px);
+box-sizing: border-box;
+transition: left 0.3s ease, opacity 0.3s ease; /* ✅ Add transition for position change */
+
+
+/* ✅ Move corner buttons above history panel when it's open */
+body:has(#historyPanel.history-open) #cornerButtons {
+ left: calc(80% + 10px); /* Move to right of history panel */
+}
+
+/* Mobile: adjust for narrower history panel (49%) */
+@media (max-width: 768px) {
+ body:has(#historyPanel.history-open) #cornerButtons {
+   left: calc(49% + 10px);
+ }
+}
+
+/* Desktop: adjust for 25% history panel width */
+@media (min-width: 769px) {
+ body:has(#historyPanel.history-open) #cornerButtons {
+   left: calc(25% + 10px);
+ }
+}
+
+/* ✅ Horizontal scrolling */
+overflow-x: auto;
+overflow-y: hidden;
+max-width: calc(100vw - 40px);
+white-space: nowrap;
+-webkit-overflow-scrolling: touch;
+touch-action: pan-x; /* ✅ Explicitly allow horizontal panning on iOS */
+
+/* ✅ Hide scrollbar */
+scrollbar-width: none;
+-ms-overflow-style: none;
+}
+
+/* ✅ Hide scrollbar for Chrome/Safari */
+#cornerButtons::-webkit-scrollbar {
+display: none;
+}
+
+#cornerButtons .burger-btn {
+flex: 0 0 auto;
+pointer-events: auto;
+width: auto;
+align-items: center;
+justify-content: center;
+min-width: 32px; /* ✅ Reduced from 40px */
+padding: 6px 8px; /* ✅ Reduced from 8px 10px */
+}
+
+/* ✅ Even tighter on mobile to trigger scroll earlier */
+@media (max-width: 768px) {
+#cornerButtons {
+max-width: calc(100vw - 40px);
+}
+}
+
+/* ✅ Raise corner buttons in portrait mode (raised further to clear the bottom-docked player stack) */
+@media (max-width: 768px) and (orientation: portrait) {
+#cornerButtons {
+  bottom: calc(env(safe-area-inset-bottom,0px) + 90px) !important;
+}
+}
+
+/* =========================================
+PINK RANDOM PLAY BUTTON (all screens)
+========================================= */
+.burger-btn-pink {
+background: hsl(330, 100%, 84%) !important; /* Hot pink */
+}
+
+.burger-btn-pink:hover {
+background: hsl(330, 100%, 84%) !important; /* Deeper pink */
+}
+
+
+/* =========================================
+BASKET PANEL
+========================================= */
+#basketPanel {
+position: fixed;
+top: 0;
+right: -80%;
+width: 80%;
+/* max-width: 400px; */
+height: 100%;
+background: #f7f7f7;
+box-shadow: -2px 0 6px rgba(0,0,0,0.3);
+transition: right 0.3s ease;
+z-index: 2500;
+display: flex;
+flex-direction: column;
+-webkit-overflow-scrolling: touch;
+}
+
+/* Mobile portrait: push the panel down below the address bar so its top
+   isn't cut off. ⚙️ Adjust BASKET_PANEL_TOP_OFFSET below if the gap
+   needs to be bigger/smaller for your target browsers. */
+@media (max-width: 768px) and (orientation: portrait) {
+#basketPanel {
+    top: calc(env(safe-area-inset-top, 0px) + 144px); /* ⚙️ 44px URL bar + 100px extra buffer */
+    /* Anchor bottom independently (instead of deriving height from top
+       alone) so it lifts clear of the fixed corner buttons, which sit at
+       ~90px + safe-area from the true screen bottom. ⚙️ Adjust the 160px
+       below if buttons still overlap or there's too big a gap. */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 160px);
+    height: auto;
+}
+}
+#basketPanel.basket-open { right: 0; }
+
+#basketList {
+overflow-y: auto;
+flex-grow: 1;
+max-height: calc(100% - 50px); /* ✅ Changed from 120px - accounts only for tools bar */
+}
+
+#basketList li {
+background: #fff;
+border: 1px solid #ccc;
+padding: 6px;
+margin-bottom: 6px;
+display: flex;
+flex-direction: row;
+flex-wrap: wrap;
+align-items: center;
+gap: 4px;
+font-size: 0.9rem;
+width: 100%;
+box-sizing: border-box;
+}
+
+/* ✅ Extra spacing for basket item buttons */
+#basketList li .compact-btn-group {
+margin-right: 8px;
+}
+
+/* ✅ Remove inherent UL indentation so basket items sit flush */
+#basketList {
+list-style: none; /* remove bullets */
+padding: 0;       /* remove browser default left indent */
+margin: 0;        /* remove browser top/  margins */
+}
+
+#basketList li {
+margin: 0 0 6px 0; /* keep only bottom space between items */
+}
+
+.basket-action-btn,
+.basket-play-btn,
+.remove-btn {
+font-size: 0.65rem;      /* smaller font */
+padding: 2px 4px;        /* shorter height (less top/bottom padding) */
+border-radius: 3px;
+}
+.basket-action-btn { background: #007bff; color: white; text-decoration: none; }
+.basket-action-btn:hover { background: #0056b3; }
+.remove-btn { background: red; color: white; border: none; }
+.remove-btn:hover { background: darkred; }
+
+/* ✅ Basket buttons consistent spacing inside each item */
+#basketList .basket-btn-group {
+display: flex;
+gap: 4px; /* tighter gap between buttons */
+}
+#basketList .basket-btn-group > * {
+margin: 0 !important; /* remove any default <button>/<a> margins */
+}
+
+.basket-header {
+background: #333;
+color: white;
+padding: 10px;
+display: flex;
+
+}
+
+
+/* =========================================
+Mobile Basket Tools: Simplified 3-button layout
+========================================= */
+
+@media (max-width: 768px) {
+.basket-tools {
+display: flex !important;
+gap: 3px;
+padding: 5px;
+background: #eee;
+}
+
+.basket-tools button {
+/* Default: no flex, will be overridden per button */
+font-size: 0.7rem;
+padding: 6px 4px;
+margin: 0;
+white-space: nowrap;
+background: #555;
+color: white;
+border: none;
+border-radius: 4px;
+cursor: pointer;
+min-width: 0;
+overflow: hidden;
+text-overflow: ellipsis;
+}
+
+.basket-tools button:hover {
+background: #333;
+}
+
+/* ✅ Icon buttons - fixed narrow width */
+#basketSaveBtn,
+#basketLoadBtn {
+flex: 0 0 36px;
+min-width: 36px;
+max-width: 36px;
+font-size: 0.85rem;
+padding: 6px 2px;
+}
+
+/* ✅ Text buttons - share remaining space with smaller size */
+#basketSelectAllBtn,
+#basketRemoveBtn {
+flex: 1 1 auto;
+min-width: 0;
+font-size: 0.6rem;
+padding: 6px 2px;
+}
+
+/* ✅ Overflow button - fixed narrow width */
+#basketMoreBtn {
+flex: 0 0 36px;
+min-width: 36px;
+max-width: 36px;
+background: #6c757d;
+font-weight: bold;
+padding: 6px 2px;
+}
+}
+
+@media (max-width: 768px) {
+/* ✅ Squeeze entire page content when basket is open */
+body:has(#basketPanel.basket-open) {
+max-width: 51vw;
+overflow-x: hidden;
+}
+
+/* Reset individual element widths since body handles it */
+#basketPanel.basket-open ~ #playlist,
+#basketPanel.basket-open ~ #taggedVideosContainer,
+#basketPanel.basket-open ~ .search-wrapper,
+#basketPanel.basket-open ~ #inlineVideoContainer:not(.mini-player) {
+width: 100%; /* full width within squeezed body */
+box-sizing: border-box;
+}
+
+/* ✅ PORTRAIT: Also squeeze video player directly (it may not be a sibling) */
+body:has(#basketPanel.basket-open) #inlineVideoContainer:not(.mini-player) {
+width: 51vw !important;
+max-width: 51vw !important;
+margin-left: 0 !important;
+}
+}
+
+/* =========================================
+Basket Tools Buttons Styling - Base rules only
+========================================= */
+
+/* Base style for all buttons in basket-tools */
+.basket-tools button {
+background: #555;
+color: white;
+border: none;
+padding: 4px 6px;
+font-size: 0.7rem;
+border-radius: 4px;
+cursor: pointer;
+}
+
+.basket-tools button:hover {
+background: #333;
+}
+
+/* Basket buttons consistent spacing inside each item */
+#basketList .basket-btn-group {
+display: flex;
+gap: 4px;
+}
+
+#basketList .basket-btn-group > * {
+margin: 0 !important;
+}
+
+/* =========================================
+VIDEO LISTS
+========================================= */
+#filenameSearchBox { background-color: #ffe4e1; }
+.basket-added { background-color: rgb(249,215,221); }
+#playlist {
+background-color: #d6ecff;
+padding: 10px;
+border-radius: 4px;
+}
+
+/* =========================================
+NO RESULTS PLACEHOLDER
+⚙️ Adjust height (currently 400px) and font-size below to taste.
+========================================= */
+.no-results-message {
+height: 400px;
+display: flex;
+align-items: center;
+justify-content: center;
+font-size: 1.8rem;
+font-weight: bold;
+color: #999;
+text-align: center;
+letter-spacing: 1px;
+}
+
+.basket-selected {
+ background-color: #ffefc1 !important; /* light yellow highlight */
+ border: 2px solid #ffa500;              /* orange border for emphasis */
+}
+
+#playlist li,
+#taggedVideosContainer li {
+font-size: 0.75rem;
+padding: 6px 6px;
+margin-bottom: 0px;
+display: flex;
+align-items: center;
+flex-wrap: wrap;
+gap: 4px;
+}
+
+.search-wrapper { 
+position: relative; 
+width: 300px;
+}
+
+/* Mobile Portrait: Proper flex layout for search + basket button */
+@media (max-width: 768px) and (orientation: portrait) {
+/* Force parent flex container to fill width */
+.search-wrapper {
+width: auto !important;
+flex: 1 !important;
+min-width: 0 !important;
+max-width: none !important;
+}
+
+/* Ensure search input fills wrapper */
+.search-wrapper #filenameSearchBox {
+width: 100% !important;
+box-sizing: border-box !important;
+}
+}
+
+/* Mobile Landscape: also allow flex */
+@media (max-width: 1024px) and (orientation: landscape) {
+.search-wrapper {
+width: auto !important;
+flex: 1 !important;
+min-width: 0 !important;
+}
+}
+
+.add-filtered-basket-btn {
+background: #e91e63;
+color: white;
+border: none;
+padding: 8px 12px;
+border-radius: 4px;
+cursor: pointer;
+font-size: 0.75rem;
+font-weight: bold;
+display: none;
+transition: background 0.2s ease;
+white-space: nowrap;
+flex-shrink: 0;
+min-width: fit-content;
+}
+
+/* Mobile Portrait: Compact button with max-width */
+@media (max-width: 768px) and (orientation: portrait) {
+.add-filtered-basket-btn {
+padding: 6px 8px !important;
+font-size: 0.7rem !important;
+max-width: 80px !important;
+flex: 0 0 auto !important;
+}
+}
+
+/* Mobile Landscape: slightly more room */
+@media (max-width: 1024px) and (orientation: landscape) {
+.add-filtered-basket-btn {
+padding: 8px 10px;
+font-size: 0.7rem;
+}
+}
+
+.add-filtered-basket-btn:hover {
+background: #c2185b;
+}
+
+.add-filtered-basket-btn:active {
+transform: scale(0.95);
+}
+
+.add-filtered-basket-btn:disabled {
+background: #999;
+cursor: not-allowed;
+opacity: 0.6;
+}
+
+.clear-x {
+position: absolute;
+right: 8px;
+top: 50%;
+transform: translateY(-50%);
+cursor: pointer;
+font-size: 1.2rem;
+color: #888;
+display: none;
+}
+.clear-x:hover { color: red; }
+
+
+/* =========================================
+ACCOUNT PILLS
+========================================= */
+.account-pill {
+display: inline-flex;
+align-items: center;
+background-color: #eee;
+border-radius: 14px; /* Reduced from 20px */
+padding: 2px 4px; /* Reduced from 4px 8px */
+margin: 2px; /* Reduced from 4px */
+}
+.account-load-btn {
+background: rgb(255,216,222);
+color: black;
+border: none;
+padding: 3px 7px; /* Reduced from 6px 10px */
+border-radius: 12px; /* Reduced from 16px */
+font-size: 0.8rem; /* Added - slightly larger than floating pills (0.75rem) */
+line-height: 1.2; /* Added for better text fit */
+}
+.account-load-btn.loading {
+background: #c1c1c1;
+color: rgb(71,71,71);
+}
+.account-remove-cross { 
+margin-left: 4px; /* Reduced from 8px */
+cursor: pointer; 
+font-weight: bold;
+font-size: 0.9rem; /* Added - scale down the × symbol */
+}
+.account-remove-cross:hover { color: red; }
+
+/* =========================================
+MOBILE FIRST
+========================================= */
+@media (max-width: 1024px) {  /* ✅ Changed from 768px */
+body { font-size: 1.1rem; }
+h1 { font-size: 1.8rem; }
+button, select, input {
+  font-size: 1.1rem;
+  padding: 12px;
+  width: 100%;
+  margin-bottom: 10px;
+}
+label { font-size: 1.1rem; }
+
+/* ✅ Video player normal height */
+#inlineVideoContainer:not(.mini-player) {
+    width: 100%;
+    height: auto;
+}
+
+#playlist li, #taggedVideosContainer li { 
+    font-size: 0.75rem; /* Updated to match basket */
+    line-height: 1.4;
+}
+
+/* Basket narrower */
+#basketPanel {
+  width: 49%;
+  right: -49%;
+  max-width: none;
+}
+
+/* Static basket list alignment */
+#basketList {
+  overflow-y: auto;
+  flex-grow: 1;
+  max-height: calc(100% - 50px); /* ✅ Changed from 120px */
+  padding: 0 4px; /* maximise width inside panel */
+}
+
+/* Smaller font for items */
+#basketList li {
+font-size: 0.75rem !important;  /* ✅ Lock size for both orientations */
+line-height: 1.3;
+align-items: flex-start;
+word-break: break-all;
+overflow-wrap: break-word;
+white-space: normal;
+}
+}
+
+@media (max-width: 768px) {
+.keyboard-active #floatingTagPillsBar {
+position: fixed !important;
+bottom: calc(env(safe-area-inset-bottom,0px) + var(--keyboard-offset, 0px)) !important;
+transform: translateY(var(--keyboard-scroll-offset, 0px)) !important;
+}
+
+/* When keyboard is open AND a search pill is visible, hide the video
+   player + its info bar so the results list has room to show live
+   filtering above the keyboard. */
+.keyboard-active.search-pill-active #inlineVideoContainer,
+.keyboard-active.search-pill-active .current-video-info {
+display: none !important;
+}
+
+/* Move the filter bar off-screen instead of display:none - it
+   contains the focused input, and hiding it would blur/dismiss the
+   keyboard. Positioning off-screen keeps the input focused. */
+.keyboard-active.search-pill-active #mobileElements .search-wrapper {
+position: absolute !important;
+left: -9999px !important;
+top: -9999px !important;
+bottom: auto !important;
+}
+
+/* Hide the bottom-dock backdrop too - it's sized/positioned to sit
+   below the video player, but since the player is hidden in this state,
+   the backdrop ends up covering the results list instead. */
+.keyboard-active.search-pill-active #bottomDockBackdrop {
+display: none !important;
+}
+}
+
+/* =========================================
+DESKTOP
+========================================= */
+@media (min-width: 1025px) {  /* ✅ Changed from 769px */
+body { max-width: 1000px; margin: 0 auto; }
+#tagFilterSelect, #excludeTagSelect, .select2-container { width: 300px !important; }
+
+/* ✅ Basket wider and stretch list items */
+#basketPanel {
+  max-width: none;    /* remove desktop width cap */
+  width: 25%;         /* adjust to taste, e.g. 25% or match mobile's 35% */
+}
+
+#basketList {
+  display: flex;
+  flex-direction: column;
+}
+
+#basketList li {
+  width: 100%;                 /* fill horizontal width */
+  /* flex: 1 1 auto;  REMOVE THIS LINE ENTIRELY */
+  align-self: stretch;         /* keep stretch for width only */
+  box-sizing: border-box;      /* optional: keep width calc clean */
+}
+}
+
+
+
+/* =========================================
+FOLDER POPUP
+========================================= */
+#folderPopup h3 { margin-top: 0; }
+#folderList div { padding: 4px; }
+#folderList input { margin-right: 8px; }
+#folderPopup .button-row { display: flex; gap: 10px; margin-top: 10px; }
+#folderPopup .button-row button { flex: 1; }
+#confirmFoldersBtn {
+background: #007bff; color: white; border: none;
+padding: 8px 16px; cursor: pointer; border-radius: 4px;
+}
+#confirmFoldersBtn:hover { background: #0056b3; }
+#cancelFoldersBtn {
+background: #ccc; color: black; border: none;
+padding: 8px 16px; cursor: pointer; border-radius: 4px;
+}
+#cancelFoldersBtn:hover { background: #bbb; }
+
+/* =========================================
+DROPDOWN ROW WITH L BUTTON (both desktop & mobile)
+Keeps the dropdown and its L-button in one row, button on the right.
+Z-index ensures button stays clickable above dropdown results but below basket.
+========================================= */
+.dropdown-row {
+display: flex;
+align-items: center;
+gap: 6px; /* space between select and button */
+}
+
+.dropdown-row select {
+flex: 1; /* dropdown takes the available width */
+}
+
+.dropdown-row .dropdown-btn {
+flex: 0 0 40px;       /* fixed width button */
+height: 40px;
+font-size: 0.8rem;
+padding: 0;
+text-align: center;
+position: relative;
+z-index: 2000;        /* ✅ above Select2 panel but below basket (basket z-index 2500) */
+}
+
+@media (min-width: 769px) {
+.dropdown-row .dropdown-btn {
+    margin-left: 2px;   /* space between select and button */
+    margin-right: 2px;  /* optional space after button */
+}
+}
+
+@media (min-width: 769px) {
+.dropdown-row {
+    gap: 8px;             /* more space between select2 & button */
+    margin-bottom: 8px;   /* more vertical space between rows */
+}
+}
+
+
+/* Remove basket header completely */
+.basket-header { display: none !important; }
+
+/* =========================================
+Mobile basket height adjust for corner buttons
+========================================= */
+/* Mobile PORTRAIT: adjust for narrower history panel (49%) and move buttons to bottom */
+@media (max-width: 768px) and (orientation: portrait) {
+/* height/max-height removed here - #basketPanel's top/bottom/height
+   are now fully controlled by the earlier "push down below URL bar"
+   media query block above, so this block no longer fights it. */
+#historyPanel {
+height: calc(100% - 70px);
+max-height: calc(100vh - 70px);
+}
+
+/* Move basket-tools to bottom on portrait mobile ONLY */
+.basket-tools {
+order: 2; /* Move to bottom */
+margin-top: auto; /* Push to bottom of flex container */
+}
+
+#basketList {
+order: 1; /* Keep at top */
+padding-bottom: 0; /* Remove bottom padding since tools moved */
+max-height: calc(100% - 50px); /* Account for tools height at bottom */
+}
+}
+
+/* Mobile LANDSCAPE: keep buttons at top (default order) */
+@media (max-width: 1024px) and (orientation: landscape) {
+.basket-tools {
+order: 1; /* Keep at top */
+margin-top: 0;
+}
+
+#basketList {
+order: 2; /* Below tools */
+max-height: calc(100% - 50px); /* Account for tools height at top */
+}
+}
+
+/* =========================================
+Desktop Basket Tools: Simplified 3-button layout
+========================================= */
+
+@media (min-width: 769px) {
+.basket-tools {
+display: flex !important;
+gap: 6px;
+padding: 8px;
+background: #eee;
+}
+
+.basket-tools button {
+flex: 1;
+font-size: 0.8rem;
+padding: 8px 6px;
+margin: 0;
+text-align: center;
+background: #555;
+color: white;
+border: none;
+border-radius: 4px;
+cursor: pointer;
+}
+
+.basket-tools button:hover {
+background: #333;
+}
+
+#basketMoreBtn {
+background: #6c757d;
+}
+
+/* Ensure basket list fills full width below tools */
+#basketList {
+width: 100%;
+flex-grow: 1;
+display: flex;
+flex-direction: column;
+}
+
+#basketList li {
+width: 100%;
+align-self: stretch;
+box-sizing: border-box;
+}
+
+#basketPanel {
+max-width: none;
+width: 25%;
+}
+}
+
+/* =========================================
+BASKET ITEM BUTTONS - INLINE DISPLAY
+========================================= */
+
+/* Base styling for basket item buttons */
+#basketList .compact-btn-group {
+display: inline-flex;
+gap: 2px;
+margin-left: 6px;
+}
+
+#basketList .compact-btn {
+margin: 0 !important;
+box-sizing: border-box;
+}
+
+/* Mobile portrait: show buttons inline */
+@media (max-width: 768px) and (orientation: portrait) {
+#basketList .compact-btn-group,
+#basketPanel #basketList .compact-btn-group,
+body #basketList .compact-btn-group {
+display: inline-flex !important;
+visibility: visible !important;
+opacity: 1 !important;
+}
+}
+
+/* Mobile landscape: show buttons inline */
+@media (max-width: 1024px) and (orientation: landscape) {
+#basketList .compact-btn-group {
+display: inline-flex !important;
+}
+}
+
+/* Mobile: larger gap for basket buttons */
+@media (max-width: 1024px) {
+#basketList .compact-btn-group,
+#basketPanel #basketList .compact-btn-group,
+body #basketList .compact-btn-group {
+gap: 15px !important;
+}
+}
+
+/* Desktop: show buttons inline */
+@media (min-width: 769px) {
+#basketList .compact-btn-group {
+display: inline-flex !important;
+gap: 2px !important;
+}
+
+/* ✅ Ensure desktop basket in browser.html shows buttons inline */
+#desktopBasketColumn #basketList .compact-btn-group {
+display: inline-flex !important;
+}
+}
+
+/* =========================================
+BASKET & RANDOMLIST TOTAL SIZE BAR
+========================================= */
+
+.basket-total-size, .randomlist-total-size {
+background: #f9f9f9;
+border-bottom: 1px solid #ccc;
+}
+
+/* =========================================
+SELECT2 FULL HEIGHT DROPDOWN
+========================================= */
+
+.select2-container .select2-dropdown.full-height-dropdown {
+max-height: 100vh !important; /* limit size instead of forcing */
+}
+
+.select2-results__options {
+max-height: calc(100vh - 40px) !important; /* limit instead of force */
+}
+
+/* Mobile: limit dropdown to 1/3 screen height */
+@media (max-width: 768px) {
+ .select2-container .select2-dropdown.full-height-dropdown {
+   max-height: 33vh !important;
+ }
+ 
+ .select2-results__options {
+   max-height: calc(33vh - 40px) !important;
+ }
+}
+
+/* =========================================
+INLINE VIDEO PLAYER CONTAINER FOR MOBILE LANDSCAPE
+========================================= */
+
+/* Base mini-player styling */
+#inlineVideoContainer.mini-player {
+  position: fixed;
+  z-index: 2000;
+  background: #000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+#inlineVideoContainer.mini-player .plyr {
+height: 100%;
+width: 100%;
+display: flex;
+align-items: center;  /* center vertically inside container */
+justify-content: center; /* center horizontally inside mini-player */
+background: #000; /* solid background to mask black bars/crooked edges */
+}
+#inlineVideoContainer.mini-player .plyr__video-wrapper {
+display: flex;
+align-items: center;
+justify-content: center;
+}
+#inlineVideoContainer.mini-player video {
+max-height: 100%;
+max-width: 100%;
+}
+
+
+/* Landscape: bottom-left, flush above corner buttons */
+@media screen and (orientation: landscape) {
+#inlineVideoContainer.mini-player {
+bottom: 80px; /* ✅ Changed from 90px - now flush above buttons */
+left: 10px;   
+height: 20vh;
+}
+#inlineVideoContainer.mini-player video,
+#inlineVideoContainer.mini-player .plyr {
+height: 100%;
+width: auto;
+}
+}
+
+/* Portrait: bottom-left, minimal gap above pills */
+@media screen and (orientation: portrait) {
+#inlineVideoContainer.mini-player {
+top: auto;
+bottom: 115px;
+left: 10px;
+right: auto;
+height: 20vh;
+}
+}
+
+/* Mini-player close button */
+
+#inlineVideoContainer.mini-player .mini-close-btn {
+position: absolute;
+top: 4px;          /* slightly down from top */
+right: 4px;        /* slightly in from right */
+background: rgba(255,255,255,0.8);
+color: #000;
+border: none;
+border-radius: 50%;
+width: 22px;       /* larger so glyph has breathing room */
+height: 22px;
+font-size: 16px;   /* size adjusted for circle */
+line-height: 22px; /* matches height → vertically center text */
+text-align: center;
+cursor: pointer;
+z-index: 10;
+padding: 0;        /* remove default button padding */
+}
+
+#inlineVideoContainer.mini-player .mini-close-btn:hover {
+background: rgba(255,255,255,1);
+}
+
+/* =========================================
+LOADING OVERLAY FOR VIDEO PLAYER
+========================================= */
+
+#plyr-loading-overlay {
+position: absolute;
+top: 50%; left: 50%;
+transform: translate(-50%, -50%);
+background: rgba(0,0,0,0.7);
+color: white;
+font-size: 0.75rem; /* Smaller default font */
+padding: 8px 16px;
+border-radius: 4px;
+z-index: 99998; /* Just under our feedback overlay */
+pointer-events: none;
+display: none; /* Hidden by default */
+max-width: 90%; /* Constrain width */
+text-align: center;
+word-wrap: break-word;
+white-space: normal; /* Allow wrapping */
+line-height: 1.3; /* Better line height */
+}
+
+/* Squeeze loading overlay when panels are open - center in visible squeezed player */
+@media (max-width: 1024px) and (orientation: landscape) {
+body:has(#basketPanel.basket-open) #plyr-loading-overlay,
+body:has(#randomPlaylistPanel.random-panel-open) #plyr-loading-overlay {
+max-width: 40vw !important;
+font-size: 0.75rem !important;
+padding: 6px 12px !important;
+word-wrap: break-word !important;
+white-space: normal !important;
+line-height: 1.2 !important;
+left: 25.5vw !important;
+transform: translate(-50%, -50%) !important;
+}
+}
+
+.plyr__control:focus,
+.plyr__control:active {
+ outline: none !important;
+ box-shadow: none !important;
+ background-color: inherit !important; /* keep your usual background */
+}
+
+/* Ensure Plyr fullscreen layer covers everything visually AND blocks clicks */
+/* ✅ FIX: Respect iOS safe-area to prevent right-side cropping in landscape */
+.plyr--fullscreen {
+z-index: 2147483647 !important; /* keep it above everything */
+pointer-events: auto;
+}
+
+@supports(padding: env(safe-area-inset-left)) {
+@media screen and (orientation: landscape) {
+.plyr--fullscreen {
+  left: env(safe-area-inset-left, 0px) !important;
+  right: env(safe-area-inset-right, 0px) !important;
+  width: calc(100% - env(safe-area-inset-left) - env(safe-area-inset-right)) !important;
+}
+.plyr--fullscreen video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain;
+}
+}
+}
+
+/* Prevent clicks on page content when fullscreen */
+.plyr--fullscreen ~ * {
+pointer-events: none;
+}
+
+/* Prevent clicks on page content when fullscreen */
+.plyr--fullscreen ~ * {
+pointer-events: none;  /* disable all siblings while fullscreen */
+}
+
+/* =========================================
+FULLSCREEN MODE - UNIFIED RULES FOR ALL ENTRY METHODS
+========================================= */
+
+/* Hide ALL page elements when in fullscreen */
+body.fullscreen-active #cornerButtons,
+body.fullscreen-active .dropdown-row,
+body.fullscreen-active #basketPanel,
+body.fullscreen-active #historyPanel,
+body.fullscreen-active #pipPlayerContainer,
+body.fullscreen-active #randomPlaylistPanel,
+body.fullscreen-active #inlineConsole,
+body.fullscreen-active #inlineConsoleToolbar,
+body.fullscreen-active #floatingTagPillsBar,
+body.fullscreen-active #currentVideoInfo,
+body.fullscreen-active #accountLoadButtons,
+body.fullscreen-active .top-buttons-row,
+body.fullscreen-active .auto-track-label,
+body.fullscreen-active #versionCorner {
+display: none !important;
+visibility: hidden !important;
+opacity: 0 !important;
+pointer-events: none !important;
+z-index: -1 !important;
+}
+
+/* ✅ UNIFIED FULLSCREEN MODE - Works identically from both squeezed and normal states */
+
+/* Ensure fullscreen player is ALWAYS on top and accepts ALL touch gestures */
+.plyr--fullscreen,
+body.fullscreen-active .plyr--fullscreen,
+body.fullscreen-active #inlineVideoContainer {
+z-index: 2147483647 !important;
+pointer-events: auto !important;
+touch-action: manipulation !important;
+overflow: visible !important;
+}
+
+/* ✅ CRITICAL: Force touch-action on ALL fullscreen descendants */
+.plyr--fullscreen *,
+.plyr--fullscreen .plyr__video-wrapper,
+.plyr--fullscreen .plyr__video-embed,
+.plyr--fullscreen video,
+body.fullscreen-active .plyr--fullscreen *,
+body.fullscreen-active #inlineVideoContainer *,
+body.fullscreen-active .plyr__video-wrapper,
+body.fullscreen-active video {
+pointer-events: auto !important;
+touch-action: manipulation !important;
+-webkit-user-select: none !important;
+user-select: none !important;
+}
+
+/* ✅ Explicitly override any inherited touch-action from inline mode */
+@media (max-width: 1024px) and (orientation: landscape) {
+body.fullscreen-active #inlineVideoContainer,
+body.fullscreen-active #inlineVideoContainer.video-portrait,
+body.fullscreen-active #inlineVideoContainer.video-landscape {
+    touch-action: manipulation !important;
+    overflow: visible !important;
+}
+}
+
+/* ✅ UNIFIED: Remove ALL body constraints when entering fullscreen (landscape mobile) */
+@media (max-width: 1024px) and (orientation: landscape) {
+  body.fullscreen-active {
+      width: 100vw !important;
+      max-width: 100vw !important;
+      overflow: auto !important;
+      overflow-x: hidden !important;
+      position: static !important;
+  }
+  
+  /* Force panels completely off-screen */
+  body.fullscreen-active #randomPlaylistPanel,
+  body.fullscreen-active #basketPanel {
+      display: none !important;
+      transform: translateX(100%) !important;
+  }
+  
+  /* Ensure video container takes full width */
+  body.fullscreen-active #inlineVideoContainer {
+      width: 100vw !important;
+      max-width: 100vw !important;
+      left: 0 !important;
+      right: 0 !important;
+  }
+}
+
+/* Lock body so nothing moves in fullscreen */
+body.fullscreen-active {
+overflow: hidden;       /* no scrollbars */
+height: 100%;
+width: 100% !important; /* ✅ Override any squeeze constraints */
+max-width: 100% !important; /* ✅ Override 51vw */
+}
+
+/* =========================================
+MINI-PLAYER (portrait + landscape): no Plyr controls, only close button
+========================================= */
+
+/* Hide entire Plyr controls bar in mini-player modes */
+body.landscape-mini .plyr__controls,
+body.portrait-mini  .plyr__controls {
+display: none !important;
+} 
+
+
+/* =========================================
+INLINE VIDEO PLAYER CONTAINER ADJUSTMENTS FOR PORTRAIT MODE
+========================================= */
+
+/* Portrait: limit mini-player width so it doesn't stretch full screen */
+@media screen and (orientation: portrait) {
+#inlineVideoContainer.mini-player {
+    width: auto;             /* Let content define width */
+    max-width: 50vw;         /* Half the viewport width */
+}
+#inlineVideoContainer.mini-player .plyr {
+    width: auto;             /* Prevent full stretch */
+    max-width: 100%;         /* Respect container's width */
+}
+}
+
+
+/* =========================================
+FULLSCREEN PLYR CONTROLS - RAISED POSITION (1/5th up screen)
+========================================= */
+
+.plyr--fullscreen.plyr--video .plyr__controls {
+bottom: 20vh !important;
+padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+position: absolute !important;
+}
+
+/* Mobile-specific - ensure it works on both orientations */
+@media (max-width: 768px) {
+.plyr--fullscreen .plyr__controls {
+    bottom: 20vh !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+}
+}
+
+/* Desktop */
+@media (min-width: 769px) {
+.plyr--fullscreen .plyr__controls {
+    bottom: 20vh !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+}
+}
+
+/* =========================================
+PLYR PROGRESS BAR - STRETCH TO FILL SPACE
+========================================= */
+
+.plyr__controls {
+display: flex !important;
+align-items: center;
+gap: 4px;
+}
+
+/* Progress bar container must stretch */
+.plyr__controls .plyr__progress {
+flex: 1 1 auto !important; /* grow and shrink */
+min-width: 0 !important;
+max-width: none !important;
+}
+
+/* All other controls stay fixed width */
+.plyr__controls .plyr__control,
+.plyr__controls .plyr__time {
+flex: 0 0 auto !important; /* don't grow or shrink */
+}
+
+/* Ensure stop button doesn't stretch */
+.plyr__controls .plyr-stop {
+flex: 0 0 auto !important;
+min-width: 50px !important;
+max-width: 50px !important;
+}
+
+/* Time display fixed width */
+.plyr__controls .plyr__time {
+flex: 0 0 auto !important;
+white-space: nowrap;
+}
+
+/* =========================================
+PLYR CONTROLS - TRANSPARENT BACKGROUND
+========================================= */
+
+.plyr__controls {
+background: transparent !important;
+background-image: none !important;
+background-color: transparent !important;
+}
+
+/* Remove any gradient backgrounds Plyr adds */
+.plyr--video .plyr__controls {
+background: transparent !important;
+background-image: none !important;
+}
+
+/* In fullscreen too */
+.plyr--fullscreen .plyr__controls {
+background: transparent !important;
+background-image: none !important;
+}
+
+/* =========================================
+PLYR CONTROLS - OFFSET FROM LEFT (10%)
+========================================= */
+
+.plyr__controls {
+left: 10% !important;
+right: 0 !important;
+width: 90% !important;
+}
+
+.plyr--fullscreen .plyr__controls {
+left: 10% !important;
+right: 0 !important;
+width: 90% !important;
+}
+
+/* Forced landscape mode only: nudge buttons further right (away from
+   the left edge) to accommodate browsers with a narrower viewable area.
+   ⚙️ Adjust FORCED_LANDSCAPE_CONTROLS_EXTRA below (currently 25px) if
+   it needs more/less. Width is reduced by the same amount so the row
+   doesn't overflow the right edge. */
+body.manual-rotate-landscape .plyr__controls,
+body.landscape-fullscreen .plyr__controls {
+left: 40px !important; /* ⚙️ FORCED_LANDSCAPE_CONTROLS_INSET = 40px on each side */
+right: 40px !important;
+width: auto !important;
+gap: 1px !important;
+justify-content: center !important;
+}
+
+/* ⚙️ Forced landscape: let the button cluster sit centered as a group
+   instead of the progress bar stretching to fill remaining space (which
+   pushed all buttons to the left edge). Adjust the px value below to
+   taste - it's the progress bar's width within the centered row. */
+body.manual-rotate-landscape .plyr__controls .plyr__progress,
+body.landscape-fullscreen .plyr__controls .plyr__progress {
+flex: 0 1 160px !important;
+min-width: 80px !important;
+max-width: none !important;
+}
+
+/*  Forced landscape: shrink all control buttons so X, H<, B, BM, >
+   fit closely together without crowding */
+body.manual-rotate-landscape .plyr__controls .plyr__control,
+body.manual-rotate-landscape .plyr-stop,
+body.manual-rotate-landscape .plyr-ios-fullscreen,
+body.manual-rotate-landscape .plyr-manual-rotate,
+body.manual-rotate-landscape .plyr-scroll-lock,
+body.manual-rotate-landscape .plyr-random-video,
+body.manual-rotate-landscape .plyr-history-sequence,
+body.manual-rotate-landscape .plyr-play-next,
+body.manual-rotate-landscape .plyr-basket-quick,
+body.manual-rotate-landscape .plyr-bookmark-quick,
+body.landscape-fullscreen .plyr__controls .plyr__control,
+body.landscape-fullscreen .plyr-stop,
+body.landscape-fullscreen .plyr-ios-fullscreen,
+body.landscape-fullscreen .plyr-manual-rotate,
+body.landscape-fullscreen .plyr-scroll-lock,
+body.landscape-fullscreen .plyr-random-video,
+body.landscape-fullscreen .plyr-history-sequence,
+body.landscape-fullscreen .plyr-play-next,
+body.landscape-fullscreen .plyr-basket-quick,
+body.landscape-fullscreen .plyr-bookmark-quick {
+min-width: 32px !important;
+min-height: 32px !important;
+font-size: 0.75rem !important;
+padding: 1px !important;
+}
+
+/* =========================================
+PLYR STOP & FULLSCREEN BUTTONS - BIGGER SIZE
+========================================= */
+
+.plyr-stop {
+min-width: 50px !important;
+min-height: 50px !important;
+font-size: 1.5rem !important;
+flex: 0 0 auto;
+}
+
+/* iOS Native Fullscreen button - transparent background */
+.plyr-ios-fullscreen {
+min-width: 50px !important;
+min-height: 50px !important;
+font-size: 1.5rem !important;
+flex: 0 0 auto;
+background: transparent !important;
+}
+
+.plyr-ios-fullscreen:hover {
+background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.plyr-ios-fullscreen:active {
+background: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Desktop: hide iOS fullscreen button completely */
+@media (min-width: 769px) {
+ .plyr-ios-fullscreen {
+     display: none !important;
+ }
+}
+
+/* Manual rotate-to-landscape button */
+.plyr-manual-rotate {
+min-width: 50px !important;
+min-height: 50px !important;
+font-size: 1.4rem !important;
+flex: 0 0 auto;
+background: transparent !important;
+}
+
+.plyr-manual-rotate:hover {
+background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.plyr-manual-rotate:active {
+background: rgba(255, 255, 255, 0.3) !important;
+}
+
+.plyr-manual-rotate.active {
+background: #007bff !important;
+color: white !important;
+}
+
+/* Desktop: hide rotate button completely */
+@media (min-width: 769px) {
+ .plyr-manual-rotate {
+     display: none !important;
+ }
+}
+
+/* Scroll-lock (padlock) button - only shown while forced/manual rotation is active */
+.plyr-scroll-lock {
+min-width: 50px !important;
+min-height: 50px !important;
+flex: 0 0 auto;
+background: transparent !important;
+display: none !important; /* hidden unless in manual rotation mode */
+flex-direction: column;
+align-items: center;
+justify-content: center;
+line-height: 1.1;
+padding: 2px !important;
+}
+
+body.manual-rotate-landscape .plyr-scroll-lock {
+display: flex !important;
+}
+
+.plyr-scroll-lock .scroll-lock-svg {
+color: #fff; /* drives the padlock's stroke/fill via currentColor */
+}
+
+.plyr-scroll-lock .scroll-lock-num {
+font-size: 0.5rem;
+color: #fff;
+opacity: 0.85;
+padding: 1px 3px;
+border-radius: 3px;
+}
+
+.plyr-scroll-lock .scroll-lock-num:active {
+background: rgba(255, 255, 255, 0.25);
+}
+
+.plyr-scroll-lock:hover {
+background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.plyr-scroll-lock:active {
+background: rgba(255, 255, 255, 0.3) !important;
+}
+
+.plyr-scroll-lock.active {
+background: #dc3545 !important; /* red = locked */
+color: white !important;
+}
+
+/* Desktop: hide scroll-lock button completely */
+@media (min-width: 769px) {
+.plyr-scroll-lock {
+    display: none !important;
+}
+}
+
+/* =========================================
+FRAME-BY-FRAME STEP BUTTONS (MOBILE ONLY)
+========================================= */
+.plyr-frame-step-group {
+position: absolute;
+right: 10px;
+bottom: 10px;
+display: flex;
+gap: 8px;
+z-index: 90;
+pointer-events: auto;
+opacity: 1;
+transition: opacity 0.3s ease;
+}
+
+.plyr-frame-step {
+width: 32px;
+height: 32px;
+min-width: 32px;
+min-height: 32px;
+max-width: 32px;
+max-height: 32px;
+border-radius: 50%;
+background: rgba(0, 0, 0, 0.18);
+border: none;
+padding: 0;
+box-sizing: border-box;
+pointer-events: auto;
+-webkit-tap-highlight-color: transparent;
+touch-action: manipulation;
+}
+
+.plyr-frame-step:active {
+background: rgba(0, 0, 0, 0.4);
+}
+
+/* Desktop: hide frame-step buttons completely */
+@media (min-width: 769px) {
+.plyr-frame-step-group {
+    display: none !important;
+}
+}
+
+/* Hide in mini-player modes - too small to be usable */
+body.landscape-mini .plyr-frame-step-group,
+body.portrait-mini .plyr-frame-step-group {
+display: none !important;
+}
+
+/* Fade out together with Plyr's own controls fade */
+.plyr--hide-controls .plyr-frame-step-group {
+opacity: 0;
+pointer-events: none;
+}
+
+/* ⚙️ Mobile portrait: raised further above the controls bar, and shifted
+   left, since controls sit centered near the bottom on narrow screens. */
+@media (max-width: 768px) and (orientation: portrait) {
+.plyr-frame-step-group {
+    right: 40px !important;
+    bottom: 50px !important;
+}
+}
+
+/* ⚙️ Forced landscape (manual rotate): raised and shifted left more, to
+   clear the custom control row (X, H<, B, BM, > etc) which sits centered
+   near the bottom in this mode. Shifted an extra 80px left (2.5x circle
+   width) from the previous value. */
+body.manual-rotate-landscape .plyr-frame-step-group {
+right: 140px !important;
+bottom: 70px !important;
+}
+
+/* Play/pause circle - same size/shape as frame-step circles, orange tint */
+.plyr-frame-playpause {
+background: rgba(255, 140, 0, 0.18);
+}
+
+.plyr-frame-playpause:active {
+background: rgba(255, 140, 0, 0.4);
+}
+
+/* =========================================
+SINGLE-TAP FRAME-STEP ZONES (landscape mobile only)
+Invisible overlays over the LEFT half of the player (previously the
+right half, which conflicted with the -3/+3 etc seek columns there).
+Only tappable while Plyr's own controls are visible (pointer-events
+toggled below) and only in landscape mobile - otherwise a tap falls
+straight through to the video underneath, which lets Plyr's default
+behaviour reveal the controls first. A double-tap in either zone toggles
+play/pause instead of stepping (handled in JS, not here).
+========================================= */
+.frame-step-tap-zone {
+position: absolute;
+top: 0;
+bottom: 0;
+width: 25%;
+pointer-events: none;
+z-index: 85;
+}
+
+.frame-step-tap-zone-left { left: 0; }
+.frame-step-tap-zone-right { left: 25%; }
+
+/* Active only in landscape mobile (real or forced/manual-rotate), and
+   only while controls are visible (.plyr NOT carrying plyr--hide-controls) */
+body.landscape-fullscreen .plyr:not(.plyr--hide-controls) .frame-step-tap-zone,
+body.landscape-inline .plyr:not(.plyr--hide-controls) .frame-step-tap-zone,
+body.manual-rotate-landscape .plyr:not(.plyr--hide-controls) .frame-step-tap-zone {
+pointer-events: auto;
+}
+
+/* Desktop: never active */
+@media (min-width: 769px) {
+.frame-step-tap-zone {
+    display: none !important;
+}
+}
+
+/* Mini-player: too small to be usable */
+body.landscape-mini .frame-step-tap-zone,
+body.portrait-mini .frame-step-tap-zone {
+display: none !important;
+}
+
+/* Player controls opacity while in forced (manual) rotation - reuses the
+   same --scray-progress-bar-opacity variable as the progress bar (defined
+   near the top of this file) so both stay in sync at 30%. Change that one
+   variable to adjust both together, or replace the var() below with your
+   own value/variable to make this independent. */
+body.manual-rotate-landscape .plyr__controls,
+body.landscape-fullscreen .plyr__controls {
+opacity: 0.5;
+background: rgba(0, 0, 0, 0.5) !important;
+border-radius: 6px;
+padding: 2px 4px !important;
+transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+/* ⚙️ Forced landscape: hide the mobile filter bar entirely - it isn't
+   inside the fullscreen element, so it can otherwise render on top of
+   the loading overlay/video depending on stacking context. */
+body.manual-rotate-landscape #mobileElements .search-wrapper {
+display: none !important;
+}
+
+/* Quick-action buttons: random video (X), play-through-history (H<),
+   basket quick-view (B), bookmark quick-add (BM), and play-next (>) */
+.plyr-random-video,
+.plyr-history-sequence,
+.plyr-play-next,
+.plyr-basket-quick,
+.plyr-bookmark-quick {
+min-width: 40px !important;
+min-height: 50px !important;
+font-size: 0.85rem !important;
+font-weight: bold;
+flex: 0 0 auto;
+background: transparent !important;
+color: #fff;
+}
+
+.plyr-random-video:hover,
+.plyr-history-sequence:hover,
+.plyr-play-next:hover,
+.plyr-basket-quick:hover,
+.plyr-bookmark-quick:hover {
+background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.plyr-random-video:active,
+.plyr-history-sequence:active,
+.plyr-play-next:active,
+.plyr-basket-quick:active,
+.plyr-bookmark-quick:active {
+background: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Desktop: hide quick-action buttons completely */
+@media (min-width: 769px) {
+.plyr-random-video,
+.plyr-history-sequence,
+.plyr-play-next,
+.plyr-basket-quick,
+.plyr-bookmark-quick {
+    display: none !important;
+}
+}
+
+/* Mobile portrait only (and NOT forced/manual-rotate landscape) - hide
+   X (random) / H< (history) / > (play next) / B (basket) and shrink the
+   remaining controls so the play button isn't pushed out */
+@media (max-width: 768px) and (orientation: portrait) {
+body:not(.manual-rotate-landscape) .plyr-random-video,
+body:not(.manual-rotate-landscape) .plyr-history-sequence,
+body:not(.manual-rotate-landscape) .plyr-play-next,
+body:not(.manual-rotate-landscape) .plyr-basket-quick,
+body:not(.manual-rotate-landscape) .plyr-bookmark-quick {
+    display: none !important;
+}
+
+body:not(.manual-rotate-landscape) .plyr-stop,
+body:not(.manual-rotate-landscape) .plyr-ios-fullscreen,
+body:not(.manual-rotate-landscape) .plyr-manual-rotate,
+body:not(.manual-rotate-landscape) .plyr-scroll-lock,
+body:not(.manual-rotate-landscape) .plyr__controls .plyr__control[data-plyr="fullscreen"],
+body:not(.manual-rotate-landscape) .plyr__controls .plyr__control[data-plyr="play"] {
+    min-width: 38px !important;
+    min-height: 38px !important;
+    font-size: 1.1rem !important;
+}
+
+body:not(.manual-rotate-landscape) .plyr__controls {
+    gap: 2px !important;
+}
+}
+
+.plyr__controls .plyr__control[data-plyr="fullscreen"] {
+min-width: 50px !important;
+min-height: 50px !important;
+font-size: 1.5rem !important;
+}
+
+/* Also make the play button match for consistency */
+.plyr__controls .plyr__control[data-plyr="play"] {
+min-width: 50px !important;
+min-height: 50px !important;
+}
+
+
+/* Mobile landscape: FORCE button to be visible */
+@media (max-width: 1024px) and (orientation: landscape) {
+   .plyr-ios-fullscreen {
+       display: inline-block !important;
+       visibility: visible !important;
+       opacity: 1 !important;
+   }
+}
+
+/* Mobile portrait: also ensure visible */
+@media (max-width: 768px) and (orientation: portrait) {
+   .plyr-ios-fullscreen {
+       display: inline-block !important;
+       visibility: visible !important;
+       opacity: 1 !important;
+   }
+}
+
+/* =========================================
+VIDEO LISTS FONT SIZE - ALL LISTS LOCKED TO 0.75rem
+Mobile breakpoint set to 1024px to catch landscape phones
+========================================= */
+#playlist li,
+#taggedVideosContainer li {
+font-size: 0.75rem;
+padding: 8px 6px;
+margin-bottom: 1px;
+line-height: 1.4;
+}
+
+#playlist li a,
+#taggedVideosContainer li a {
+font-size: 0.75rem;
+}
+
+/* Mobile & Tablet: Lock ALL lists to 0.75rem (includes landscape phones) */
+@media (max-width: 1024px) {
+/* Main video lists */
+#playlist li,
+#taggedVideosContainer li,
+#playlist li a,
+#playlist li span,
+#taggedVideosContainer li a,
+#taggedVideosContainer li span {
+  font-size: 0.75rem !important;
+  line-height: 1.4 !important;
+}
+
+/* Tighter spacing on mobile */
+#playlist li,
+#taggedVideosContainer li {
+padding: 5px 6px !important;
+margin-bottom: 0px !important;
+}
+
+/* Basket list */
+#basketList li,
+#basketList li span {
+  font-size: 0.75rem !important;
+  line-height: 1.3 !important;
+}
+
+/* History list */
+#historyList li,
+#historyList li span {
+  font-size: 0.75rem !important;
+  line-height: 1.3 !important;
+}
+}
+
+/* Extra insurance: explicit orientation locks */
+@media (max-width: 1024px) and (orientation: landscape) {
+#basketList li,
+#historyList li,
+#playlist li,
+#taggedVideosContainer li {
+  font-size: 0.75rem !important;
+}
+}
+
+@media (max-width: 1024px) and (orientation: portrait) {
+#basketList li,
+#historyList li,
+#playlist li,
+#taggedVideosContainer li {
+  font-size: 0.75rem !important;
+}
+}
+
+/* =========================================
+DESKTOP BASKET TOGGLE BUTTON BEHAVIOR
+========================================= */
+
+
+/* =========================================
+HIDE LAYOUT SWITCH LINK ON MOBILE
+========================================= */
+@media (max-width: 768px) {
+.layout-switch-link {
+  display: none !important;
+}
+}
+
+/* =========================================
+DURATION & SIZE CONTROLS - SINGLE ROW LAYOUT
+========================================= */
+
+/* Base styling - applies to all screen sizes */
+.sizeRow,
+.minRow,
+.randomRow {
+display: flex !important;
+align-items: center;
+gap: 8px;
+margin-bottom: 10px;
+flex-wrap: nowrap; /* Prevent wrapping */
+}
+
+.sizeRow label,
+.minRow label,
+.randomRow label {
+white-space: nowrap;
+min-width: 70px; /* Give labels consistent width */
+flex-shrink: 0;
+}
+
+/* Override mobile 100% width AND desktop 200px width for these specific selects */
+.sizeRow select,
+.minRow select,
+.randomRow select {
+width: 80px !important; /* Default size */
+flex: 0 0 80px !important; /* Don't grow or shrink */
+min-width: 60px !important;
+max-width: 100px !important;
+}
+
+/* Mobile: slightly narrower and adjust padding */
+@media (max-width: 768px) {
+.sizeRow select,
+.minRow select,
+.randomRow select {
+    width: 70px !important;
+    flex: 0 0 70px !important;
+    min-width: 55px !important;
+    padding: 8px 4px !important; /* Less padding on mobile */
+    font-size: 1rem !important;
+}
+
+.sizeRow label,
+.minRow label,
+.randomRow label {
+    font-size: 1rem;
+    min-width: 60px;
+}
+
+.sizeRow,
+.minRow,
+.randomRow {
+    gap: 6px;
+}
+}
+
+/* Desktop: slightly wider and more space */
+@media (min-width: 769px) {
+.sizeRow select,
+.minRow select,
+.randomRow select {
+    width: 90px !important;
+    flex: 0 0 90px !important;
+}
+
+.sizeRow,
+.minRow,
+.randomRow {
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.sizeRow label,
+.minRow label,
+.randomRow label {
+    min-width: 80px;
+}
+}
+
+/* =========================================
+DESKTOP OTHER CONTROLS - Override the generic select width
+========================================= */
+@media (min-width: 769px) {
+/* Specific override for controls moved to desktop layout */
+#desktopOtherControls .sizeRow select,
+#desktopOtherControls .minRow select,
+#desktopOtherControls .randomRow select {
+    width: 90px !important; /* Override the generic 200px rule */
+    flex: 0 0 90px !important;
+}
+}
+
+/* =========================================
+CURRENT VIDEO INFO DISPLAY
+========================================= */
+.current-video-info {
+font-size: 0.75rem;
+color: #555;
+padding: 4px 8px;
+background: #f9f9f9;
+border: 1px solid #ddd;
+border-top: none;
+border-radius: 0 0 4px 4px;
+text-align: center;
+word-break: break-word;
+line-height: 1.3;
+margin-bottom: 10px; /* Space below */
+/* ✅ Always positioned directly below player */
+position: relative;
+order: 2; /* Comes after player (order: 1) */
+}
+
+/* Empty state - hide when no video */
+.current-video-info:empty {
+display: none;
+}
+
+/* Desktop: constrain width to match video column */
+@media (min-width: 769px) {
+.current-video-info {
+    max-width: 100%;
+}
+}
+
+/* Mobile: full width */
+@media (max-width: 768px) {
+.current-video-info {
+    font-size: 0.7rem;
+    padding: 3px 6px;
+}
+}
+
+/* Show video info when it has content */
+.current-video-info:not(:empty) {
+display: block !important;
+}
+
+/* =========================================
+/* VIDEO INFO BUTTON GROUP STYLING
+========================================= */
+
+/* Ensure buttons in video info display properly */
+.current-video-info .compact-btn-group {
+display: inline-flex !important;
+gap: 8px; /* ✅ Increased from 2px to 8px */
+margin-left: 8px;
+vertical-align: middle;
+}
+
+.current-video-info .compact-btn {
+margin: 0 !important;
+box-sizing: border-box;
+}
+
+/* Mobile: larger gap in video info */
+@media (max-width: 1024px) {
+.current-video-info .compact-btn-group {
+ gap: 16px !important; /* ✅ Increased from 8px to 12px */
+}
+}
+
+/* Landscape mobile: even tighter layout */
+@media (max-width: 1024px) and (orientation: landscape) {
+.current-video-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.current-video-info .compact-btn-group {
+  gap: 6px !important;
+}
+}
+
+/* =========================================
+HISTORY PANEL (same width as basket on desktop)
+========================================= */
+#historyPanel {
+position: fixed;
+top: 0;
+left: -80%;
+width: 80%;
+height: 100%;
+background: #f7f7f7;
+box-shadow: 2px 0 6px rgba(0,0,0,0.3);
+transition: left 0.3s ease;
+z-index: 2500;
+display: flex;
+flex-direction: column;
+overflow-x: hidden;
+overflow-y: hidden;
+}
+
+#historyPanel.history-open { left: 0; }
+
+#historyList {
+overflow-y: auto;
+overflow-x: hidden;
+flex-grow: 1;
+max-height: calc(100% - 50px);
+list-style: none;
+padding: 0;
+margin: 0;
+-webkit-overflow-scrolling: touch;
+}
+
+/* ✅ UPDATED: Horizontal layout with checkbox on left */
+#historyList li {
+background: #fff;
+border: 1px solid #ccc;
+padding: 4px 6px;
+margin-bottom: 6px;
+display: flex !important;
+flex-direction: row !important;
+align-items: center !important;
+flex-wrap: wrap;
+gap: 4px !important;
+font-size: 0.9rem;
+width: 100%;
+box-sizing: border-box;
+}
+
+/* ✅ History checkbox styling - on the left */
+.history-checkbox {
+width: 18px !important;
+height: 18px !important;
+min-width: 18px;
+margin: 0 !important;
+cursor: pointer;
+flex-shrink: 0;
+align-self: center;
+}
+
+/* ✅ Content wrapper (text + buttons inline) */
+.history-content-wrapper {
+flex: 1;
+display: inline-flex;
+flex-wrap: wrap;
+align-items: center;
+gap: 4px;
+min-width: 0;
+}
+
+
+/* Text elements inline */
+.history-content-wrapper > span {
+display: inline;
+}
+
+/* ✅ Selected state: yellow background only */
+.history-selected {
+background-color: #ffefc1 !important;
+border: 1px solid #ccc;
+}
+
+/* ✅ All history spans get consistent padding to prevent layout shift */
+#historyList li span {
+padding: 2px 4px;
+border-radius: 2px;
+background-color: transparent;
+}
+
+/* ✅ Selected AND in basket: yellow box + pink text */
+#historyList li.history-selected.basket-added span {
+background-color: rgb(249,215,221) !important;
+}
+
+/* ✅ In basket but NOT selected: pink text only */
+#historyList li.basket-added:not(.history-selected) span {
+background-color: rgb(249,215,221) !important;
+}
+
+/* ✅ History action buttons - compact inline layout */
+.history-action-btn {
+background: transparent;
+color: #007bff;
+text-decoration: none;
+font-size: 0.75rem;
+padding: 0;
+margin: 0;
+display: inline;
+}
+
+.history-action-btn:hover {
+text-decoration: underline;
+}
+
+/* ✅ History uses compact-btn-group (not history-btn-group) */
+#historyList .compact-btn-group {
+display: flex;
+gap: 2px;
+align-items: center;
+flex-wrap: nowrap;
+}
+
+/* Mobile: maintain compact size */
+@media (max-width: 1024px) {
+#historyList .compact-btn-group {
+gap: 2px;
+}
+
+#historyList .compact-btn {
+font-size: 0.7rem;
+padding: 3px 6px;
+min-height: 20px;
+}
+}
+
+/* =========================================
+HISTORY ITEM BUTTONS - INLINE DISPLAY
+========================================= */
+#historyList .compact-btn-group {
+display: inline-flex !important;
+gap: 2px;
+margin-left: 6px;
+}
+
+#historyList .compact-btn {
+margin: 0 !important;
+box-sizing: border-box;
+}
+
+/* Mobile: larger gap for history buttons */
+@media (max-width: 1024px) {
+#historyList .compact-btn-group,
+#historyPanel #historyList .compact-btn-group,
+body #historyList .compact-btn-group {
+gap: 15px !important;
+}
+}
+
+.history-tools {
+display: flex !important;
+gap: 4px;
+padding: 6px;
+background: #eee;
+}
+
+.history-tools button {
+flex: 1;
+font-size: 0.75rem;
+padding: 8px 4px;
+margin: 0;
+white-space: nowrap;
+background: #555;
+color: white;
+border: none;
+border-radius: 4px;
+cursor: pointer;
+}
+
+.history-tools button:hover {
+background: #333;
+}
+
+#historyMoreBtn {
+background: #6c757d;
+}
+
+.history-tools button:hover {
+background: #333;
+}
+
+.history-total-size {
+background: #f9f9f9;
+border-bottom: 1px solid #ccc;
+}
+
+/* Desktop - match basket width */
+@media (min-width: 769px) {
+#historyPanel {
+width: 25%;
+left: -25%;
+}
+
+#historyPanel.history-open {
+left: 0;
+}
+
+.history-tools {
+ display: flex !important;
+ gap: 8px;
+ padding: 8px;
+ background: #eee;
+}
+
+.history-tools button {
+ flex: 1;
+ font-size: 0.85rem;
+ padding: 10px 8px;
+ text-align: center;
+}
+
+#historyList {
+width: 100%;
+flex-grow: 1;
+display: flex;
+flex-direction: column;
+}
+
+#historyList li {
+width: 100%;
+align-self: stretch;
+box-sizing: border-box;
+}
+}
+
+/* ✅ Show history panel on desktop */
+@media (min-width: 769px) {
+#historyPanel {
+display: flex !important;
+}
+}
+
+
+.history-total-size {
+background: #f9f9f9;
+border-bottom: 1px solid #ccc;
+}
+
+/* Desktop - match basket width */
+@media (min-width: 769px) {
+#historyPanel {
+  width: 25%;
+  left: -25%;
+}
+
+#historyPanel.history-open {
+  left: 0;
+}
+
+.history-tools {
+  display: flex !important;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 6px;
+  background: #eee;
+}
+
+.history-tools button {
+  flex: 1 1 auto;
+  width: auto;
+  font-size: 0.8rem;
+  padding: 6px 6px;
+  text-align: center;
+}
+
+#historyList {
+  width: 100%;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+#historyList li {
+  width: 100%;
+  align-self: stretch;
+  box-sizing: border-box;
+}
+}
+
+/* ✅ Hide history panel on desktop (mobile behavior only for now) */
+@media (min-width: 769px) {
+#historyPanel {
+  display: flex !important;
+}
+}
+
+/* =========================================
+BASKET DRAG AND DROP
+========================================= */
+
+#basketList li[draggable="true"] {
+ cursor: grab;
+ user-select: none;
+ -webkit-user-select: none;
+ -moz-user-select: none;
+ -ms-user-select: none;
+}
+
+#basketList li[draggable="true"]:active {
+ cursor: grabbing;
+}
+
+/* Dragged item - slightly transparent */
+#basketList li.dragging {
+ opacity: 0.4;
+}
+
+/* ✅ Custom drag ghost - narrow card with filename only */
+.basket-drag-ghost {
+ position: fixed;
+ background: #e3f2fd;
+ border: 2px solid #2196F3;
+ border-radius: 4px;
+ padding: 8px 12px;
+ font-size: 0.75rem;
+ max-width: 250px;
+ white-space: nowrap;
+ overflow: hidden;
+ text-overflow: ellipsis;
+ box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+ pointer-events: none;
+ z-index: 9999;
+ transform: translate(-50%, -50%);
+}
+
+/* Drop indicator - simple line showing gap */
+.drop-indicator {
+ height: 4px !important;
+ background: #2196F3 !important;
+ margin: 4px 0 !important;
+ border-radius: 2px;
+ box-shadow: 0 0 6px rgba(33, 150, 243, 0.8);
+ display: block !important;
+ width: 100%;
+ min-height: 4px;
+ flex-shrink: 0;
+ pointer-events: none;
+}
+
+/* Prevent text selection during drag */
+#basketList li.dragging * {
+ user-select: none !important;
+ -webkit-user-select: none !important;
+ pointer-events: none;
+}
+
+/* Mobile: prevent text selection on long press */
+@media (max-width: 768px) {
+ #basketList li[draggable="true"] {
+     -webkit-tap-highlight-color: transparent;
+     -webkit-touch-callout: none;
+ }
+ 
+ /* Make touch area slightly larger */
+ #basketList li {
+     padding: 8px 6px;
+ }
+}
+
+/* =========================================
+COPY FEEDBACK TOOLTIP
+========================================= */
+.copy-feedback-tooltip {
+background: rgba(0, 0, 0, 0.8);
+color: white;
+padding: 6px 12px;
+border-radius: 4px;
+font-size: 0.85rem;
+pointer-events: none;
+z-index: 10002;  /* ✅ Above context menu (10001) */
+opacity: 0;
+transition: opacity 0.3s ease;
+white-space: nowrap;
+}
+
+.copy-feedback-tooltip.show {
+   opacity: 1;
+}
+
+/* =========================================
+SCORE CONFIRMATION TOOLTIP - BOTTOM OF SCREEN, ABOVE EVERYTHING
+========================================= */
+.score-confirmation-tooltip {
+position: fixed;
+left: 50%;
+bottom: 120px; /* Above corner buttons and floating pills */
+transform: translateX(-50%);
+background: #28a745;
+color: white;
+padding: 16px 24px;
+border-radius: 8px;
+font-size: 1.2rem;
+font-weight: bold;
+pointer-events: none;
+z-index: 2147483647; /* Above everything including fullscreen */
+opacity: 0;
+transition: opacity 0.3s ease;
+white-space: nowrap;
+box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.score-confirmation-tooltip.show {
+   opacity: 1;
+}
+
+/* Mobile: slightly smaller and adjust position */
+@media (max-width: 768px) {
+.score-confirmation-tooltip {
+    font-size: 1rem;
+    padding: 12px 20px;
+    bottom: 100px; /* Adjust for mobile button positions */
+}
+}
+
+/* Portrait mobile: raise even higher to clear corner buttons */
+@media (max-width: 768px) and (orientation: portrait) {
+.score-confirmation-tooltip {
+    bottom: 120px;
+}
+}
+
+/* Landscape mobile: adjust for different button layout */
+@media (max-width: 1024px) and (orientation: landscape) {
+.score-confirmation-tooltip {
+    bottom: 100px;
+}
+}
+
+/* =========================================
+SYNC CONFIRMATION TOOLTIP - BOTTOM OF SCREEN, ABOVE EVERYTHING
+========================================= */
+.sync-confirmation-tooltip {
+ position: fixed;
+ left: 50%;
+ bottom: 120px; /* Above corner buttons and floating pills */
+ transform: translateX(-50%);
+ background: #28a745;
+ color: white;
+ padding: 16px 24px;
+ border-radius: 8px;
+ font-size: 1.2rem;
+ font-weight: bold;
+ pointer-events: none;
+ z-index: 2147483647; /* Above everything including fullscreen */
+ opacity: 0;
+ transition: opacity 0.3s ease;
+ white-space: nowrap;
+ box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.sync-confirmation-tooltip.show {
+ opacity: 1;
+}
+
+/* Mobile: slightly smaller and adjust position */
+@media (max-width: 768px) {
+ .sync-confirmation-tooltip {
+     font-size: 1rem;
+     padding: 12px 20px;
+     bottom: 100px; /* Adjust for mobile button positions */
+ }
+}
+
+/* Portrait mobile: raise even higher to clear corner buttons */
+@media (max-width: 768px) and (orientation: portrait) {
+ .sync-confirmation-tooltip {
+     bottom: 120px;
+ }
+}
+
+/* Landscape mobile: adjust for different button layout */
+@media (max-width: 1024px) and (orientation: landscape) {
+ .sync-confirmation-tooltip {
+     bottom: 100px;
+ }
+}
+
+/* =========================================
+BOOKMARK CONFIRMATION TOOLTIP - SMALLER VARIANT
+========================================= */
+.bookmark-confirmation-tooltip {
+position: fixed;
+left: 50%;
+bottom: 120px;
+transform: translateX(-50%);
+background: #28a745;
+color: white;
+padding: 8px 14px;
+border-radius: 6px;
+font-size: 0.8rem;
+font-weight: bold;
+pointer-events: none;
+z-index: 2147483647;
+opacity: 0;
+transition: opacity 0.3s ease;
+white-space: nowrap;
+box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+.bookmark-confirmation-tooltip.show {
+   opacity: 1;
+}
+
+@media (max-width: 768px) {
+.bookmark-confirmation-tooltip {
+    font-size: 0.7rem;
+    padding: 6px 12px;
+    bottom: 100px;
+}
+}
+
+@media (max-width: 768px) and (orientation: portrait) {
+.bookmark-confirmation-tooltip {
+    bottom: 120px;
+}
+}
+
+@media (max-width: 1024px) and (orientation: landscape) {
+.bookmark-confirmation-tooltip {
+    bottom: 100px;
+}
+}
+
+/* Copy button styling (replaces remove button) */
+.copy-btn {
+   background: #007bff;
+   color: white;
+   border: none;
+   cursor: pointer;
+   font-size: 0.65rem;
+   padding: 2px 4px;
+   border-radius: 3px;
+}
+
+.copy-btn:hover {
+   background: #0056b3;
+}
+
+/* Current video info - clickable */
+.current-video-info {
+   transition: background-color 0.2s ease;
+}
+
+.current-video-info:hover {
+   background-color: #e8e8e8;
+}
+
+/* =========================================
+BASKET JSON IMPORT/EXPORT MODALS
+========================================= */
+
+.basket-json-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2147483000;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+/* .file-operation-modal was referenced by several modals (clear
+   database, bulk rename/delete confirm) but was never actually defined as
+   an overlay - so those modals rendered inline in the page instead of as
+   a fixed full-screen layer, letting fixed elements like the docked
+   filter bar sit visually on top of them. */
+.file-operation-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2147483000;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.basket-json-modal-content {
+background: white;
+border-radius: 8px;
+padding: 24px;
+max-width: 400px;
+width: 100%;
+max-height: 90vh; /* Prevent overflow on all screens */
+overflow-y: auto; /* Make content scrollable */
+box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+box-sizing: border-box;
+}
+
+.basket-json-modal-wide {
+max-width: 600px;
+}
+
+/* Landscape mobile: tighter constraints */
+@media (max-width: 1024px) and (orientation: landscape) {
+.basket-json-modal-content {
+  max-height: 85vh; /* Tighter height for landscape */
+  padding: 16px; /* Reduce padding to maximize space */
+}
+
+.basket-json-modal-wide {
+  max-width: 85%; /* Use percentage for better fit */
+  max-height: 85vh;
+}
+
+/* Reduce heading size */
+.basket-json-modal-content h3 {
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+}
+
+/* Reduce paragraph margins */
+.basket-json-modal-content p {
+  font-size: 0.8rem;
+  margin-bottom: 8px;
+}
+
+/* Compact basket picker list */
+#basketPickerList {
+  max-height: 50vh !important; /* Reduced from 400px */
+}
+
+/* Smaller basket picker items */
+.basket-picker-item {
+  padding: 8px;
+  margin-bottom: 6px;
+}
+
+.basket-picker-info strong {
+  font-size: 0.8rem;
+}
+
+.basket-picker-info span {
+  font-size: 0.7rem;
+}
+
+/* Smaller buttons */
+.basket-picker-load-btn,
+.basket-picker-delete-btn {
+  padding: 6px 12px;
+  font-size: 0.75rem;
+}
+
+.modal-btn {
+  padding: 8px 16px;
+  font-size: 0.85rem;
+}
+}
+
+.basket-json-modal-content h3 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  color: #333;
+}
+
+.basket-json-modal-content p {
+  margin-bottom: 16px;
+  color: #666;
+}
+
+.basket-json-modal-buttons {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.modal-btn {
+  flex: 1;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: bold;
+  transition: all 0.2s ease;
+}
+
+.modal-btn-primary {
+  background: #007bff;
+  color: white;
+}
+
+.modal-btn-primary:hover {
+  background: #0056b3;
+  transform: translateY(-1px);
+}
+
+.modal-btn-cancel {
+  background: #6c757d;
+  color: white;
+  width: 100%;
+}
+
+.modal-btn-secondary {
+background: #6c757d;
+color: white;
+}
+
+.modal-btn-secondary:hover {
+background: #545b62;
+}
+
+#pasteJSONTextarea {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+
+#pasteJSONTextarea:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .basket-json-modal {
+      padding: 10px;
+  }
+
+  .basket-json-modal-content {
+      padding: 20px;
+      max-width: 95%;
+  }
+
+  .modal-btn {
+      font-size: 0.95rem;
+      padding: 10px 16px;
+  }
+
+  #pasteJSONTextarea {
+      font-size: 0.75rem;
+  }
+}
+
+
+/* =========================================
+TAG SELECTION OVERLAY
+========================================= */
+
+.tag-selection-overlay {
+position: fixed;
+top: 0;
+left: 0;
+width: 100%;
+height: 100%;
+background: rgba(0, 0, 0, 0.7);
+display: flex;
+align-items: center;
+justify-content: center;
+z-index: 10000;
+padding: 20px;
+box-sizing: border-box;
+}
+
+.tag-selection-content {
+background: white;
+border-radius: 8px;
+padding: 20px;
+max-width: 600px;
+max-height: 80vh;
+width: 100%;
+overflow-y: auto;
+box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.tag-selection-content h3 {
+margin-top: 0;
+margin-bottom: 16px;
+color: #333;
+}
+
+.tag-selection-grid {
+display: flex;
+flex-wrap: wrap;
+gap: 8px;
+margin-bottom: 16px;
+}
+
+.tag-selection-item {
+background: #007bff;
+color: white;
+padding: 8px 12px;
+border-radius: 16px;
+cursor: pointer;
+font-size: 0.85rem;
+transition: all 0.2s ease;
+user-select: none;
+}
+
+.tag-selection-item:hover {
+background: #0056b3;
+transform: translateY(-1px);
+}
+
+.tag-selection-item:active {
+transform: translateY(0);
+}
+
+/* Exclude tag styling in modal */
+.tag-selection-item-exclude {
+background: #f94144 !important;
+}
+
+.tag-selection-item-exclude:hover {
+background: #dc3545 !important;
+}
+
+.tag-selection-close {
+width: 100%;
+padding: 10px;
+background: #6c757d;
+color: white;
+border: none;
+border-radius: 6px;
+cursor: pointer;
+font-size: 1rem;
+}
+
+.tag-selection-close:hover {
+background: #545b62;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+.tag-selection-overlay {
+  padding: 10px;
+}
+
+.tag-selection-content {
+  padding: 16px;
+  max-width: 95%;
+}
+
+.tag-selection-item {
+  font-size: 0.75rem;
+  padding: 6px 10px;
+}
+}
+
+/* =========================================
+SCORE FILTER BUTTON
+========================================= */
+.scoreFilterRow {
+   margin: 8px 0;
+}
+
+.score-filter-btn {
+   background: #555;
+   color: white;
+   border: none;
+   padding: 10px 20px;
+   border-radius: 4px;
+   cursor: pointer;
+   font-size: 0.9rem;
+   transition: background 0.2s ease;
+   width: 200px;
+}
+
+.score-filter-btn:hover {
+   background: #333;
+}
+
+/* Mobile: full width */
+@media (max-width: 768px) {
+   .score-filter-btn {
+       width: 100% !important;
+       padding: 12px !important;
+       font-size: 1.1rem !important;
+   }
+}
+
+/* =========================================
+ORIENTATION & MIME TYPE FILTERS
+========================================= */
+#orientationFilter {
+width: 200px;
+padding: 8px;
+}
+
+#mimeTypeFilter {
+ width: 200px;
+ min-height: 60px;
+}
+
+@media (max-width: 768px) {
+ #orientationFilter,
+ #mimeTypeFilter {
+   width: 100% !important;
+   padding: 12px !important;
+   font-size: 1.1rem !important;
+ }
+}
+
+/* =========================================
+BASKET & HISTORY PANELS - COMPLETE TOUCH ISOLATION (MOBILE)
+========================================= */
+@media (max-width: 1024px) {
+/* Create a complete barrier - panels intercept ALL touches */
+#basketPanel,
+#historyPanel {
+pointer-events: auto !important;
+/* isolation: isolate; */ /* ✅ REMOVED - was preventing corner buttons from appearing above */
+}
+
+/* Prevent ANY touch from passing through panel wrapper */
+#basketPanel::before,
+#historyPanel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: -1;
+  pointer-events: auto;
+}
+
+/* Lists can scroll vertically */
+#basketList,
+#historyList {
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
+  overscroll-behavior: contain; /* Prevent scroll chaining to page */
+}
+}
+
+
+/* =========================================
+LANDSCAPE MOBILE MODE - MINIMAL UI
+========================================= */
+@media (max-width: 1024px) and (orientation: landscape) {
+/* Remove all top padding/margin from body and ensure proper width */
+body {
+padding-top: 0 !important;
+margin-top: 0 !important;
+width: 100% !important;
+max-width: 100% !important;
+overflow-x: hidden !important;
+box-sizing: border-box !important;
+}
+
+/* ✅ Add bottom padding to basket list to clear corner buttons */
+#basketList {
+padding-bottom: 80px !important;
+}
+
+/* ✅ Add bottom padding to random/main panel lists to clear corner buttons */
+#randomPlaylistPanelList,
+#panelTaggedList {
+padding-bottom: 80px !important;
+}
+/* Hide header */
+h1 {
+display: none !important;
+}
+
+/* Hide ONLY +B basket button in landscape mobile */
+#addFilteredToBasketBtn {
+display: none !important;
+}
+
+/* Hide original main lists and search - they're now in the panel */
+#playlist,
+#taggedVideosContainer,
+#paginationControls,
+#videoStats,
+.sort-buttons-container,
+.search-wrapper {
+ display: none !important;
+}
+
+/* ✅ Hide ONLY auto-track checkbox in landscape mobile */
+label:has(#autoTrackVideosCheckbox) {
+  display: none !important;
+}
+
+/* ✅ Show account pills in landscape mobile */
+#accountLoadButtons {
+  display: block !important;
+}
+
+/* ✅ Top buttons row stays visible in landscape mobile */
+/* Show console at bottom of page (not fixed) */
+#inlineConsoleToolbar,
+#inlineConsole {
+display: block !important;
+}
+
+/* Hide all tag dropdown rows */
+.dropdown-row {
+  display: none !important;
+}
+
+/* Show all corner buttons in landscape mobile */
+#jumpTagsBtn,
+#jumpSearchBtn {
+display: block !important;
+}
+
+/* ✅ Extend basket full height */
+#basketPanel {
+  height: 100% !important;
+  max-height: 100vh !important;
+}
+
+/* Squeeze page content when basket is open (landscape) */
+body:has(#basketPanel.basket-open) {
+ width: 51vw !important; /* ✅ Changed from max-width to width */
+ max-width: 51vw !important;
+ overflow-x: hidden !important;
+ overflow-y: auto;
+ position: relative; /* ✅ Lock positioning */
+}
+
+/* ✅ Video player fits within squeezed space */
+body:has(#basketPanel.basket-open) #inlineVideoContainer:not(.mini-player) {
+  width: 100% !important; /* 100% of the 51vw */
+  max-width: 51vw !important;
+}
+
+/* ✅ Show REF, S.ALL, ... buttons in compact layout */
+.basket-tools {
+display: flex !important;
+gap: 4px !important;
+padding: 4px !important;
+background: #eee;
+}
+
+.basket-tools button {
+display: none !important; /* Hide all by default */
+}
+
+#basketLoadBtn,
+#basketSaveBtn,
+#basketSelectAllBtn,
+#basketRemoveBtn,
+#basketMoreBtn {
+display: block !important; /* Show all five buttons */
+flex: 1;
+font-size: 0.7rem !important;
+padding: 6px 8px !important;
+margin: 0 !important;
+background: #555;
+color: white;
+border: none;
+border-radius: 4px;
+}
+
+#basketMoreBtn {
+background: #6c757d !important;
+}
+
+/* Show basket item buttons in landscape */
+#basketList .compact-btn-group {
+ display: flex !important;
+}
+
+/* Make video info flush with player and small font */
+.current-video-info {
+position: static !important;
+width: 100% !important;
+max-width: 100% !important;
+margin: -12px 0 0 0 !important;
+padding: 1px 8px !important;
+font-size: 0.4rem !important;
+background: #f9f9f9 !important;
+border: none !important;
+border-radius: 0 !important;
+z-index: 1500 !important;
+box-sizing: border-box;
+line-height: 1.1 !important;
+overflow-x: hidden !important;
+}
+
+/* Force Plyr container to have no bottom margin/padding in landscape */
+.plyr {
+margin-bottom: 0 !important;
+padding-bottom: 0 !important;
+}
+
+/* Force permanent progress bar to have no margins */
+#permanentProgressBar {
+margin: 0 !important;
+}
+
+/* Reduce size of ALL spans in video info (score and file size) */
+.current-video-info span {
+font-size: 0.4rem !important;
+}
+
+/* Extra specificity for score spans */
+.current-video-info span[style*="ff9800"],
+.current-video-info span[style*="color: #ff9800"] {
+font-size: 0.4rem !important;
+}
+
+/* Extra specificity for file size spans */
+.current-video-info span[style*="666"],
+.current-video-info span[style*="color: #666"] {
+font-size: 0.4rem !important;
+}
+
+/* Hide when empty */
+.current-video-info:empty {
+display: none !important;
+}
+
+/* Squeeze video info when basket is open */
+body:has(#basketPanel.basket-open) .current-video-info {
+width: 51vw !important;
+max-width: 51vw !important;
+word-wrap: break-word !important;
+overflow-wrap: break-word !important;
+white-space: normal !important;
+}
+
+/* ✅ Also squeeze video info when random/main panel is open */
+body:has(#randomPlaylistPanel.random-panel-open) .current-video-info {
+width: 51vw !important;
+max-width: 51vw !important;
+word-wrap: break-word !important;
+overflow-wrap: break-word !important;
+white-space: normal !important;
+}
+
+
+/* Make video player flush with top using absolute positioning */
+body:not(.fullscreen-active):not(.video-loading-landscape) #inlineVideoContainer:not(.mini-player) {
+width: 100% !important;
+max-width: 100% !important;
+height: 75vh !important;
+margin: 0 !important;
+padding: 0 !important;
+position: absolute !important;
+top: 20px !important;
+left: 0 !important;
+right: 0 !important;
+z-index: 1500 !important;
+transform: translateX(0) !important;
+overflow: hidden !important;
+box-sizing: border-box !important;
+}
+
+/* ✅ When panel is open, constrain video width */
+body:has(#randomPlaylistPanel.random-panel-open):not(.fullscreen-active):not(.video-loading-landscape) #inlineVideoContainer:not(.mini-player) {
+width: 51vw !important;
+max-width: 51vw !important;
+}
+
+/* ✅ When entering fullscreen, remove ALL squeeze constraints */
+body.fullscreen-active #inlineVideoContainer {
+width: 100vw !important;
+max-width: 100vw !important;
+height: 100vh !important;
+max-height: 100vh !important;
+left: 0 !important;
+right: 0 !important;
+top: 0 !important;
+bottom: 0 !important;
+margin: 0 !important;
+padding: 0 !important;
+position: fixed !important;
+}
+
+/* During video load: use static positioning to help browser buffer */
+body.video-loading-landscape:not(.fullscreen-active) #inlineVideoContainer:not(.mini-player) {
+width: 100% !important;
+max-width: 100% !important;
+height: auto !important;
+margin: 0 !important;
+padding: 0 !important;
+position: static !important;
+z-index: 1500 !important;
+box-sizing: border-box !important;
+overflow-x: hidden !important;
+}
+
+/* ✅ During load: normal video sizing */
+body.video-loading-landscape:not(.fullscreen-active) #inlineVideoContainer:not(.mini-player) video {
+width: 100% !important;
+height: auto !important;
+max-height: 70vh !important;
+}
+
+/* ✅ White strip above player using ::before */
+body:not(.fullscreen-active):not(.video-loading-landscape) #inlineVideoContainer:not(.mini-player)::before {
+content: '';
+position: absolute;
+top: -20px; /* ⚙️ If player top = 30px, change to -30px */
+left: 0;
+width: 100%;
+height: 20px; /* ⚙️ If player top = 30px, change to 30px */
+background: #fff;
+z-index: -1;
+}
+
+/* Keep strip visible during loading */
+body.video-loading-landscape #inlineVideoContainer:not(.mini-player)::before {
+content: '';
+position: absolute;
+top: -20px;
+left: 0;
+width: 100%;
+height: 20px;
+background: #fff;
+z-index: -1;
+}
+
+body:not(.fullscreen-active) #inlineVideoContainer:not(.mini-player) video {
+width: 100% !important;
+height: 100% !important;
+max-height: 75vh !important;
+object-fit: contain;
+}
+
+body:not(.fullscreen-active) #inlineVideoContainer:not(.mini-player) .plyr,
+body:not(.fullscreen-active) #inlineVideoContainer:not(.mini-player) .plyr__video-wrapper {
+width: 100% !important;
+height: 100% !important;
+}
+
+/* ✅ UPDATED: Push content to account for strip + player + buffer */
+body:not(.fullscreen-active):not(.video-loading-landscape) {
+padding-top: calc(20px + 75vh + 15px) !important; /* ⚙️ If player top = 30px, change first 20px to 30px */
+}
+
+/* ✅ During load: add padding for white buffer space */
+body.video-loading-landscape:not(.fullscreen-active) {
+padding-top: 20px !important; /* Match the white strip height */
+}
+
+/* … Keep corner buttons anchored at bottom (right-aligned in landscape mobile) */
+#cornerButtons {
+position: fixed !important;
+bottom: 10px !important;
+left: auto !important; /* ✅ stop anchoring to left */
+right: calc(env(safe-area-inset-right, 0px) + 10px) !important; /* ✅ anchor to right */
+top: auto !important;
+z-index: 1600 !important;
+max-width: calc(100vw - 40px) !important; /* a bit more room for right safe-area */
+opacity: 1 !important;
+pointer-events: auto !important;
+
+/* ✅ optional: make the strip “hug” the right side visually */
+justify-content: flex-end !important;
+}
+
+/* ✅ Force corner buttons above panels in landscape mobile */
+@media (max-width: 1024px) and (orientation: landscape) {
+#cornerButtons {
+  z-index: 9999 !important;
+
+  /* ✅ reinforce right anchoring even if other rules set left */
+  left: auto !important;
+  right: calc(env(safe-area-inset-right, 0px) + 10px) !important;
+  justify-content: flex-end !important;
+}
+}
+
+/* Move floating pills behind player */
+#floatingTagPillsBar {
+z-index: 1400 !important; /* Below player (1500) */
+}
+
+/* ✅ Lock all elements horizontally when panel is open - prevent wobble */
+body:has(#randomPlaylistPanel.random-panel-open) * {
+ transform: translateX(0) !important;
+}
+
+/* ✅ FIX: keep corner buttons RIGHT-anchored even when panel is open */
+@media (max-width: 1024px) and (orientation: landscape) {
+ body:has(#randomPlaylistPanel.random-panel-open) #cornerButtons {
+   left: auto !important;
+   right: calc(env(safe-area-inset-right, 0px) + 10px) !important;
+   justify-content: flex-end !important;
+ }
+}
+
+/* ✅ Ensure floating pills stay anchored */
+body:has(#randomPlaylistPanel.random-panel-open) #floatingTagPillsBar {
+ left: 0 !important;
+ right: auto !important;
+}
+
+}
+ 
+
+
+
+/* =========================================
+PANEL SECTION STYLES (landscape mobile)
+========================================= */
+.panel-section-header {
+background: #e3f2fd;
+border-bottom: 1px solid #90caf9;
+flex-shrink: 0;
+display: flex; /* ✅ Make it a flex container */
+flex-direction: column;
+gap: 0; /* ✅ No gap between children */
+}
+
+.panel-sort-buttons {
+display: flex;
+gap: 2px;
+padding: 2px 6px 3px 6px; /* ✅ Tighter padding, less bottom gap */
+}
+
+.panel-sort-btn {
+flex: 1;
+background: #555;
+color: white;
+border: none;
+padding: 3px 2px; /* ✅ Reduced horizontal padding to fit 5 buttons */
+cursor: pointer;
+border-radius: 3px;
+font-size: 0.55rem; /* ✅ Reduced to fit 5 buttons */
+transition: background 0.2s ease;
+white-space: nowrap;
+line-height: 1.1; /* ✅ Tighter line height */
+min-width: 0;
+overflow: hidden;
+text-overflow: ellipsis;
+}
+
+.panel-sort-btn:hover {
+ background: #333;
+}
+
+.panel-sort-btn[data-sort-state="asc"],
+.panel-sort-btn[data-sort-state="desc"] {
+ background: #007bff;
+}
+
+#panelPaginationControls {
+ display: flex;
+ gap: 6px;
+ padding: 6px;
+ background: #f0f0f0;
+ border-top: 1px solid #ddd;
+ flex-shrink: 0;
+}
+
+.panelPageSizeBtn {
+ flex: 1;
+ background: #555;
+ color: white;
+ border: none;
+ padding: 6px 4px;
+ cursor: pointer;
+ border-radius: 4px;
+ font-size: 0.7rem;
+}
+
+.panelPageSizeBtn:hover {
+ background: #333;
+}
+
+#panelTaggedList {
+list-style: none;
+padding: 0 4px;
+margin: 0;
+overflow-y: auto !important;
+overflow-x: hidden;
+flex-grow: 1;
+flex-shrink: 1;
+min-height: 0;
+-webkit-overflow-scrolling: touch;
+}
+
+#panelTaggedList li {
+background: #fff;
+border: 1px solid #ccc;
+padding: 4px 6px;
+margin-bottom: 6px;
+font-size: 0.75rem !important;
+line-height: 1.3;
+display: flex;
+align-items: center;
+flex-wrap: wrap;
+gap: 4px;
+width: 100%;
+box-sizing: border-box;
+}
+
+/* ✅ Remove top margin from first item to sit flush under sort buttons */
+#panelTaggedList li:first-child {
+margin-top: 0;
+}
+
+#panelVideoStats {
+ font-weight: bold;
+ font-size: 0.7rem;
+ padding: 4px 6px;
+ background: #bbdefb;
+ border-bottom: 1px solid #90caf9;
+}
+
+/* =========================================
+RANDOM PLAYLIST PANEL (landscape mobile only)
+========================================= */
+#randomPlaylistPanel {
+ position: fixed;
+ top: 0;
+ right: -49%;
+ width: 49%;
+ height: 100%;
+ background: #d6ecff;
+ box-shadow: -2px 0 6px rgba(0,0,0,0.3);
+ transition: right 0.3s ease;
+ z-index: 2500;
+ display: none;
+ flex-direction: column;
+ overflow-x: hidden;
+ overflow-y: hidden;
+ -webkit-overflow-scrolling: touch;
+}
+
+/* Only show in landscape mobile */
+@media (max-width: 1024px) and (orientation: landscape) {
+ #randomPlaylistPanel {
+   display: flex;
+ }
+}
+
+#randomPlaylistPanel.random-panel-open { 
+ right: 0; 
+}
+
+/* ✅ CRITICAL: Both lists need explicit scroll behavior */
+#randomPlaylistPanelList,
+#panelTaggedList {
+list-style: none;
+padding: 0 4px;
+margin: 0;
+overflow-y: scroll !important;
+overflow-x: hidden;
+flex: 1 1 0; /* ✅ Changed from 'auto' to '0' - forces proper flexbox calculation */
+min-height: 0; /* ✅ Critical for flex children to shrink */
+-webkit-overflow-scrolling: touch;
+background: #d6ecff;
+}
+
+/* Random section - full height when active */
+#panelRandomSection {
+display: flex;
+flex-direction: column;
+height: 100%;
+width: 100%;
+min-height: 0; /* ✅ Allow flexbox to work properly */
+overflow: hidden;
+}
+
+#panelRandomSection #randomPlaylistPanelList {
+flex: 1 1 0; /* ✅ Changed from 'auto' */
+min-height: 0; /* ✅ Critical */
+overflow-y: scroll !important;
+overflow-x: hidden;
+}
+
+/* Tagged section - with header and pagination */
+#panelTaggedSection {
+display: flex;
+flex-direction: column;
+height: 100%;
+width: 100%;
+min-height: 0; /* ✅ Allow flexbox to work properly */
+overflow: hidden;
+}
+
+/* Header: fixed size, doesn't scroll */
+#panelTaggedSection .panel-section-header {
+flex: 0 0 auto;
+flex-shrink: 0; /* ✅ Never shrink header */
+overflow: visible;
+}
+
+/* List: scrollable, takes remaining space */
+#panelTaggedSection #panelTaggedList {
+flex: 1 1 0; /* ✅ Changed from 'auto' - critical for proper calculation */
+min-height: 0; /* ✅ Critical for flex children to shrink */
+overflow-y: scroll !important;
+overflow-x: hidden;
+}
+
+/* Pagination: fixed size at bottom */
+#panelTaggedSection #panelPaginationControls {
+flex: 0 0 auto;
+flex-shrink: 0; /* ✅ Never shrink pagination */
+overflow: visible;
+}
+
+#randomPlaylistPanelList li {
+background: #fff;
+border: 1px solid #ccc;
+padding: 4px 6px;
+margin-bottom: 6px;
+font-size: 0.75rem !important;
+line-height: 1.3;
+display: flex;
+align-items: center;
+flex-wrap: wrap;
+gap: 4px;
+width: 100%;
+box-sizing: border-box;
+}
+
+/* ✅ Remove margin from total size bar at top */
+#randomPlaylistPanelList .randomlist-total-size {
+margin-bottom: 4px !important; /* ✅ Reduced from 6px */
+}
+
+/* ✅ Remove top margin from first list item */
+#randomPlaylistPanelList li:first-child {
+margin-top: 0;
+}
+
+/* PINK HIGHLIGHTING for basketed items in both panel lists */
+#randomPlaylistPanelList li.basket-added,
+#panelTaggedList li.basket-added {
+background-color: rgb(249,215,221) !important;
+}
+
+/* Match basket font sizes for all text */
+#randomPlaylistPanelList li span {
+font-size: 0.75rem !important;
+line-height: 1.3 !important;
+}
+
+#randomPlaylistPanelList li a {
+ font-size: 0.7rem !important;
+}
+
+/* ✅ Total size bar at top */
+#randomPlaylistPanelList .randomlist-total-size {
+ font-size: 0.75rem !important;
+ padding: 6px;
+ background: #b3d9ff;
+ border-bottom: 1px solid #88c1ff;
+ margin-bottom: 6px;
+}
+
+/* Squeeze page content when random panel is open (landscape mobile) */
+@media (max-width: 1024px) and (orientation: landscape) {
+/* ✅ Only apply squeeze when NOT in fullscreen */
+body:has(#randomPlaylistPanel.random-panel-open):not(.fullscreen-active) {
+  width: 51vw !important; /* ✅ Changed from max-width to width - prevents wobble */
+  max-width: 51vw !important;
+  overflow-x: hidden !important;
+  overflow-y: auto; /* ✅ Only allow vertical scroll */
+  position: relative; /* ✅ Establish positioning context */
+}
+
+/* ✅ Only squeeze video when NOT in fullscreen */
+body:has(#randomPlaylistPanel.random-panel-open):not(.fullscreen-active) #inlineVideoContainer:not(.mini-player) {
+  width: 100% !important;
+  max-width: 51vw !important;
+}
+
+/* ✅ In fullscreen, video takes full width */
+body.fullscreen-active:has(#randomPlaylistPanel.random-panel-open) #inlineVideoContainer {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  margin-left: 0 !important; /* ✅ Lock to left edge */
+  margin-right: 0 !important;
+  left: 0 !important; /* ✅ Lock horizontal position */
+}
+}
+
+/* =========================================
+PORTRAIT MOBILE MODE - FULL WIDTH PLAYER & MAXIMIZED HEIGHT
+========================================= */
+@media (max-width: 768px) and (orientation: portrait) {
+/* ===== INLINE MODE (not fullscreen) ===== */
+
+/* ✅ ADD BUFFER AT TOP TO PUSH VIDEO PLAYER DOWN */
+#inlineVideoContainer:not(.mini-player):not(.plyr--fullscreen) {
+margin-top: 30vh !important; /* Adjust this value: 20vh = small buffer, 40vh = large buffer */
+}
+
+/* Squeeze video player when basket is open */
+body:has(#basketPanel.basket-open) #inlineVideoContainer:not(.mini-player):not(.plyr--fullscreen) {
+width: 51vw !important;
+max-width: 51vw !important;
+margin-left: 0 !important;
+margin-right: auto !important;
+}
+
+/* Squeeze video info when basket is open */
+body:has(#basketPanel.basket-open) .current-video-info {
+width: 51vw !important;
+max-width: 51vw !important;
+margin-left: 0 !important;
+word-wrap: break-word !important;
+overflow-wrap: break-word !important;
+white-space: normal !important;
+}
+
+/* Full-width inline video player - flush to screen edges */
+#inlineVideoContainer:not(.mini-player):not(.plyr--fullscreen) {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  margin-left: -10px !important;
+  margin-right: -10px !important;
+  padding: 0 !important;
+  box-sizing: border-box;
+}
+
+#inlineVideoContainer:not(.mini-player):not(.plyr--fullscreen) video {
+  width: 100% !important;
+  max-width: 100vw !important;
+  height: auto !important;
+  max-height: 100vh !important;
+  object-fit: contain;
+}
+
+#inlineVideoContainer:not(.mini-player):not(.plyr--fullscreen) .plyr,
+#inlineVideoContainer:not(.mini-player):not(.plyr--fullscreen) .plyr__video-wrapper {
+  width: 100% !important;
+  max-width: 100vw !important;
+  height: auto !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.current-video-info {
+  margin-left: -10px !important;
+  margin-right: -10px !important;
+  width: 100vw !important;
+  max-width: 100vw !important;
+  box-sizing: border-box;
+  border-radius: 0 !important;
+}
+
+
+/* ===== FULLSCREEN MODE ===== */
+
+/* Override ALL Plyr fullscreen defaults */
+.plyr--fullscreen,
+#inlineVideoContainer.plyr--fullscreen,
+body.fullscreen-active .plyr--fullscreen,
+body.portrait-fullscreen .plyr--fullscreen {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Wrapper fills screen */
+.plyr--fullscreen .plyr__video-wrapper,
+body.fullscreen-active .plyr--fullscreen .plyr__video-wrapper {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: block !important;
+}
+
+/* Video element - THIS IS THE KEY */
+.plyr--fullscreen video,
+.plyr--fullscreen .plyr__video-embed,
+body.fullscreen-active .plyr--fullscreen video,
+body.fullscreen-active .plyr--fullscreen .plyr__video-embed {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  min-width: 100vw !important;
+  min-height: 100vh !important;
+  object-fit: contain !important;
+  object-position: center !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Controls at bottom */
+.plyr--fullscreen .plyr__controls {
+  position: fixed !important;
+  bottom: 5vh !important;
+  left: 0 !important;
+  width: 100vw !important;
+  z-index: 999999 !important;
+}
+}
+
+
+/* =========================================
+BOTTOM-DOCKED VIDEO PLAYER - MOBILE PORTRAIT ONLY
+Always-on fixed stack, from screen bottom upward:
+corner buttons -> info bar -> video player -> filter bar -> normal page
+========================================= */
+
+/* Opaque backdrop covering everything below the video player, so the
+   page underneath (which isn't interactable there anyway) never bleeds
+   through the small gaps between the info bar / corner buttons / pills.
+   Sits above the page, below the floating pills (2600) and corner buttons. */
+#bottomDockBackdrop {
+    display: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #fff;
+    z-index: 1900;
+}
+
+@media (max-width: 768px) and (orientation: portrait) {
+#bottomDockBackdrop.active {
+    display: block;
+}
+}
+
+@media (max-width: 768px) and (orientation: portrait) {
+#inlineVideoContainer.bottom-docked:not(.mini-player):not(.plyr--fullscreen) {
+    position: fixed !important;
+    /* bottom is set dynamically via JS, stacked above the corner buttons */
+    left: 0 !important;
+    right: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    margin-top: 0 !important;
+    z-index: 2100 !important;
+    background: #000;
+}
+
+/* Dock the "now playing" info strip directly above the corner buttons */
+.current-video-info.info-bottom-docked {
+    position: fixed !important;
+    /* bottom is set dynamically via JS */
+    left: 0 !important;
+    right: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    z-index: 2100 !important;
+    box-sizing: border-box;
+}
+
+/* Dock the filter/search bar directly above the video player */
+.search-wrapper.filter-bottom-docked {
+    position: fixed !important;
+    /* bottom is set dynamically via JS */
+    left: 0 !important;
+    right: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    z-index: 2100 !important;
+    box-sizing: border-box;
+    background: #fff;
+    padding: 6px 10px !important;
+    border-top: 1px solid #ddd;
+}
+}
+
+/* =========================================
+DESKTOP PORTRAIT VIDEO CONSTRAINTS (with orientation classes)
+========================================= */
+
+@media (min-width: 769px) {
+/* Inline mode - portrait videos */
+#inlineVideoContainer.video-portrait:not(.mini-player):not(.plyr--fullscreen) video {
+  max-height: 60vh !important;
+  width: auto !important;
+}
+
+#inlineVideoContainer.video-portrait:not(.mini-player):not(.plyr--fullscreen) .plyr__video-wrapper {
+  max-height: 60vh !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Fullscreen mode - portrait videos */
+#inlineVideoContainer.video-portrait.plyr--fullscreen video,
+.plyr--fullscreen #inlineVideoContainer.video-portrait video {
+  max-height: 100vh !important;
+  width: auto !important;
+  object-fit: contain !important;
+}
+}
+
+
+/* =========================================
+PERMANENT MINIMAL PROGRESS BAR BELOW VIDEO - MINIMAL BLACK/WHITE
+========================================= */
+#permanentProgressBar {
+position: relative;
+width: 100%;
+background: transparent; /* Transparent container */
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: 4px;
+padding: 4px 16px 8px 16px;
+z-index: 50;
+box-sizing: border-box;
+order: 1;
+pointer-events: auto;
+}
+
+.permanent-progress-timestamp {
+color: #fff;
+font-size: 0.7rem;
+font-weight: normal;
+white-space: nowrap;
+text-align: left; /* ✅ Changed from center to left */
+background: transparent; /* ✅ Transparent background */
+text-shadow: 1px 1px 2px rgba(0,0,0,0.8); /* ✅ Add text shadow for readability */
+position: absolute; /* ✅ Position it absolutely */
+bottom: 15px; /* ✅ RAISED: Position above the progress bar (was 12px, now 15px) */
+left: 10%; /* ✅ Changed from 50% to 10% - aligns with play button */
+transform: none; /* ✅ Changed from translateX(-50%) to none */
+z-index: 40; /* ✅ Behind controls (which are z-index 50+) */
+pointer-events: none;
+transition: opacity 1s ease; /* ✅ Smooth fade transition */
+}
+
+.permanent-progress-bar {
+width: 100%;
+height: 6px;
+background: #000; /* Black background on progress bar itself */
+overflow: visible; /* Changed from hidden so markers can extend slightly beyond bar */
+cursor: pointer;
+position: relative;
+transition: height 0.15s ease;
+z-index: 50; /* Keep progress bar clickable */
+}
+
+/* =========================================
+BOOKMARK MARKERS ON PROGRESS BAR
+========================================= */
+.progress-bookmark-marker {
+position: absolute;
+top: 50%;
+transform: translate(-50%, -50%);
+width: 8px;
+height: 8px;
+background: #ff9800;
+border: 1px solid #fff;
+border-radius: 50%;
+cursor: pointer;
+z-index: 60; /* Above the filled progress */
+box-shadow: 0 0 3px rgba(0,0,0,0.6);
+transition: transform 0.15s ease, background 0.15s ease;
+pointer-events: auto;
+}
+
+.progress-bookmark-marker:hover {
+background: #ffc107;
+transform: translate(-50%, -50%) scale(1.4);
+}
+
+/* Invisible expanded touch target - doesn't affect visible marker size */
+.progress-bookmark-marker::before {
+content: '';
+position: absolute;
+top: 50%;
+left: 50%;
+transform: translate(-50%, -50%);
+width: 32px;
+height: 32px;
+background: transparent;
+}
+
+/* Slightly bigger touch target on mobile */
+@media (max-width: 768px) {
+.progress-bookmark-marker {
+    width: 10px;
+    height: 10px;
+}
+
+.progress-bookmark-marker::before {
+    width: 40px;
+    height: 40px;
+}
+}
+
+/*  Forced landscape: bookmark markers don't accept taps at all by
+   default - the progress bar must be tapped first to "arm" them for a
+   short window, so nearby control buttons always win normal taps. */
+body.manual-rotate-landscape .progress-bookmark-marker,
+body.landscape-fullscreen .progress-bookmark-marker {
+pointer-events: none !important;
+}
+
+body.manual-rotate-landscape .permanent-progress-bar.bookmarks-armed .progress-bookmark-marker,
+body.landscape-fullscreen .permanent-progress-bar.bookmarks-armed .progress-bookmark-marker {
+pointer-events: auto !important;
+} 
+
+/* Hide in mini-player modes */
+body.landscape-mini .progress-bookmark-marker,
+body.portrait-mini .progress-bookmark-marker {
+display: none;
+}
+
+/* =========================================
+BOOKMARK MARKER TOOLTIP
+========================================= */
+.bookmark-marker-tooltip {
+position: absolute;
+bottom: 18px;
+left: 50%;
+transform: translateX(-50%);
+background: rgba(0, 0, 0, 0.85);
+color: #fff;
+padding: 4px 8px;
+border-radius: 4px;
+font-size: 0.65rem;
+white-space: nowrap;
+max-width: 200px;
+overflow: hidden;
+text-overflow: ellipsis;
+pointer-events: none;
+z-index: 70;
+opacity: 0;
+transition: opacity 0.15s ease;
+}
+
+.bookmark-marker-tooltip.show {
+opacity: 1;
+}
+
+@media (max-width: 768px) {
+.bookmark-marker-tooltip {
+    font-size: 0.6rem;
+    max-width: 150px;
+}
+}
+
+/* =========================================
+BOOKMARK MARKERS ON PROGRESS BAR
+========================================= */
+.progress-bookmark-marker {
+position: absolute;
+top: 50%;
+transform: translate(-50%, -50%);
+width: 8px;
+height: 8px;
+background: #ff9800;
+border: 1px solid #fff;
+border-radius: 50%;
+cursor: pointer;
+z-index: 60; /* Above the filled progress */
+box-shadow: 0 0 3px rgba(0,0,0,0.6);
+transition: transform 0.15s ease, background 0.15s ease;
+pointer-events: auto;
+}
+
+.progress-bookmark-marker:hover {
+background: #ffc107;
+transform: translate(-50%, -50%) scale(1.4);
+}
+
+/* Invisible expanded touch target - doesn't affect visible marker size */
+.progress-bookmark-marker::before {
+content: '';
+position: absolute;
+top: 50%;
+left: 50%;
+transform: translate(-50%, -50%);
+width: 32px;
+height: 32px;
+background: transparent;
+}
+
+/* Slightly bigger touch target on mobile */
+@media (max-width: 768px) {
+.progress-bookmark-marker {
+    width: 10px;
+    height: 10px;
+}
+
+.progress-bookmark-marker::before {
+    width: 40px;
+    height: 40px;
+}
+}
+
+/*  Forced landscape: bookmark markers don't accept taps at all by
+   default - the progress bar must be tapped first to "arm" them for a
+   short window, so nearby control buttons always win normal taps. */
+body.manual-rotate-landscape .progress-bookmark-marker,
+body.landscape-fullscreen .progress-bookmark-marker {
+pointer-events: none !important;
+}
+
+body.manual-rotate-landscape .permanent-progress-bar.bookmarks-armed .progress-bookmark-marker,
+body.landscape-fullscreen .permanent-progress-bar.bookmarks-armed .progress-bookmark-marker {
+pointer-events: auto !important;
+}
+
+/* Hide in mini-player modes */
+body.landscape-mini .progress-bookmark-marker,
+body.portrait-mini .progress-bookmark-marker {
+display: none;
+}
+
+/* Hover effect - slightly taller, and fully visible while interacting */
+.permanent-progress-bar:hover {
+height: 8px;
+opacity: 1;
+}
+
+/* Active/pressed state - fully visible while dragging/seeking */
+.permanent-progress-bar:active {
+height: 10px;
+opacity: 1;
+}
+
+.permanent-progress-filled {
+height: 100%;
+background: #fff;
+width: 0%;
+transition: width 0.1s linear;
+}
+
+/* Hide in mini-player modes */
+body.landscape-mini #permanentProgressBar,
+body.portrait-mini #permanentProgressBar {
+display: none;
+}
+
+/* Hide timestamp when Plyr hides controls */
+.plyr--hide-controls .permanent-progress-timestamp {
+opacity: 0 !important;
+}
+
+/* Fullscreen adjustments */
+.plyr--fullscreen #permanentProgressBar {
+padding: 6px 20px 10px 20px;
+}
+
+.plyr--fullscreen .permanent-progress-timestamp {
+font-size: 0.75rem;
+bottom: 17px; /* ✅ RAISED: Slightly higher in fullscreen (was 14px, now 17px) */
+}
+
+/* Mobile: adjust sizing */
+@media (max-width: 768px) {
+#permanentProgressBar {
+padding: 4px 10px 8px 10px;
+gap: 3px;
+}
+
+.permanent-progress-timestamp {
+font-size: 0.65rem;
+bottom: 13px; /* ✅ RAISED: Adjust for mobile (was 10px, now 13px) */
+}
+
+.permanent-progress-bar {
+height: 8px;
+}
+
+.permanent-progress-bar:active {
+height: 12px;
+}
+}
+
+/* =========================================
+FORCE CONTROLS LOWER IN FULLSCREEN
+========================================= */
+.plyr--fullscreen .plyr__controls {
+bottom: 7vh !important;
+}
+
+/* Ensure it works across all states */
+body.fullscreen-active .plyr__controls,
+body.landscape-fullscreen .plyr__controls,
+body.portrait-fullscreen .plyr__controls {
+bottom: 7vh !important;
+}
+
+/* =========================================
+WORD SELECTOR FOR RENAME MODAL
+========================================= */
+.word-selector-container {
+flex: 1;
+padding: 8px 12px;
+background: #f5f5f5;
+border: 2px solid #ddd;
+border-radius: 4px;
+min-height: 40px;
+display: flex;
+flex-wrap: wrap;
+align-items: center;
+gap: 0;
+cursor: default;
+user-select: none;
+-webkit-user-select: none;
+font-size: 0.9rem;
+line-height: 1.3;
+}
+
+.word-selectable {
+cursor: pointer;
+padding: 2px 4px;
+border-radius: 3px;
+transition: background 0.15s ease;
+}
+
+.word-selectable:hover {
+background: rgba(0, 123, 255, 0.1);
+}
+
+.word-selectable.word-selected {
+background: #007bff;
+color: white;
+font-weight: bold;
+}
+
+.word-separator {
+color: #666;
+cursor: pointer;
+white-space: pre;
+}
+
+.bracket-btn {
+background: #17a2b8;
+color: white;
+border: none;
+padding: 8px 12px;
+border-radius: 4px;
+cursor: pointer;
+font-size: 0.9rem;
+font-weight: bold;
+white-space: nowrap;
+flex-shrink: 0;
+transition: background 0.2s ease;
+}
+
+.bracket-btn:hover {
+background: #138496;
+}
+
+.bracket-btn:active {
+transform: scale(0.95);
+}
+
+/* Mobile adjustments for word selector */
+@media (max-width: 768px) {
+.word-selector-container {
+font-size: 0.75rem;
+padding: 6px 8px;
+min-height: 36px;
+}
+
+.word-selectable {
+padding: 2px 4px;
+min-height: 24px;
+font-size: 0.75rem;
+}
+
+.bracket-btn {
+padding: 0;
+font-size: 0.8rem;
+min-width: 36px;
+max-width: 36px;
+width: 36px;
+height: 36px;
+flex-shrink: 0;
+display: flex;
+align-items: center;
+justify-content: center;
+}
+
+/* Make word selector + button layout responsive */
+.basket-json-modal-content > div:has(#wordSelectorContainer) {
+display: flex !important;
+align-items: stretch !important;
+gap: 6px !important;
+}
+
+.basket-json-modal-content #wordSelectorContainer {
+flex: 1 !important;
+min-width: 0 !important;
+}
+
+.basket-json-modal-content #addBracketsBtn {
+flex-shrink: 0 !important;
+}
+}
+
+.file-operation-modal-content {
+background: white;
+border-radius: 8px;
+padding: 24px;
+max-width: 500px;
+width: 100%;
+max-height: 90vh;
+overflow-y: auto;
+box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.file-operation-modal-content h3 {
+   margin-top: 0;
+   margin-bottom: 16px;
+   color: #333;
+}
+
+.file-operation-path {
+   font-size: 0.85rem;
+   color: #666;
+   margin-bottom: 12px;
+   word-break: break-word;
+}
+
+.file-operation-filename {
+   font-size: 0.95rem;
+   color: #333;
+   margin-bottom: 16px;
+   word-break: break-word;
+}
+
+.file-operation-warning {
+   color: #f44336;
+   font-weight: bold;
+   margin-bottom: 12px;
+   padding: 8px;
+   background: #ffebee;
+   border-radius: 4px;
+}
+
+.file-operation-extension {
+   font-size: 0.85rem;
+   color: #666;
+   margin-top: 8px;
+   margin-bottom: 16px;
+}
+
+#renameInput {
+   width: 100%;
+   padding: 10px;
+   font-size: 1rem;
+   border: 2px solid #ddd;
+   border-radius: 4px;
+   box-sizing: border-box;
+   margin-bottom: 8px;
+}
+
+#renameInput:focus {
+   outline: none;
+   border-color: #007bff;
+}
+
+.file-operation-buttons {
+display: flex;
+gap: 10px;
+margin-top: 20px;
+}
+
+/* Make delete button smaller */
+.file-operation-buttons .modal-btn-danger {
+flex: 0 0 auto;  /* Don't grow */
+min-width: 100px;
+max-width: 120px;
+}
+
+.file-operation-buttons .modal-btn-cancel {
+flex: 1;  /* Cancel button takes remaining space */
+}
+
+.modal-btn-danger:hover {
+   background: #d32f2f;
+}
+
+.modal-btn-danger:disabled {
+  opacity: 0.5;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+.file-operation-modal {
+    padding: 10px;
+}
+
+.file-operation-modal-content {
+    padding: 16px;
+    max-width: 95%;
+    max-height: 85vh;
+}
+
+.file-operation-modal-content h3 {
+    font-size: 1rem;
+    margin-bottom: 12px;
+}
+
+.file-operation-path {
+    font-size: 0.75rem;
+    margin-bottom: 8px;
+}
+
+#renameInput {
+    font-size: 16px; /* Prevent iOS zoom */
+}
+}
+
+/* =========================================
+UK TIME CLOCK IN PLAYER (TOP RIGHT)
+========================================= */
+#plyr-uk-clock {
+position: absolute;
+top: 8px;
+right: 60px; /* Changed from 8px to 60px - shifted left */
+background: rgba(0, 0, 0, 0.6);
+color: #fff;
+padding: 3px 6px;
+border-radius: 3px;
+font-size: 0.6rem; /* Reduced from 0.7rem to 0.6rem */
+font-family: 'Courier New', monospace;
+font-weight: bold;
+pointer-events: auto; /* Changed from none - clock is now tappable */
+cursor: pointer;
+z-index: 99998;
+letter-spacing: 0.5px;
+transition: background 0.15s ease;
+}
+
+#plyr-uk-clock:hover,
+#plyr-uk-clock:active {
+background: rgba(0, 0, 0, 0.85);
+}
+
+/* Slightly larger in fullscreen */
+.plyr--fullscreen #plyr-uk-clock {
+font-size: 0.65rem; /* Reduced from 0.75rem to 0.65rem */
+padding: 4px 8px;
+top: 12px;
+right: 80px; /* Also shifted left in fullscreen */
+}
+
+/* Forced landscape mode only: nudge clock further left (away from
+   right edge) to accommodate browsers with a narrower viewable area.
+   ⚙️ Adjust FORCED_LANDSCAPE_CLOCK_EXTRA below (currently +30px on top
+   of the 80px fullscreen value = 110px total) if it needs more/less. */
+body.manual-rotate-landscape #plyr-uk-clock {
+right: 110px !important; /* ⚙️ FORCED_LANDSCAPE_CLOCK_EXTRA = 30px added to 80px */
+}
+
+/* Hide in mini-player modes */
+body.landscape-mini #plyr-uk-clock,
+body.portrait-mini #plyr-uk-clock {
+display: none;
+}
+
+/* =========================================
+GOOGLE SHEETS BASKET PICKER
+========================================= */
+.basket-picker-item {
+   display: flex;
+   justify-content: space-between;
+   align-items: center;
+   padding: 12px;
+   border: 1px solid #ddd;
+   border-radius: 4px;
+   margin-bottom: 8px;
+   background: #f9f9f9;
+}
+
+.basket-picker-item:hover {
+   background: #e9e9e9;
+}
+
+.basket-picker-info {
+   display: flex;
+   flex-direction: column;
+   gap: 4px;
+   flex: 1;
+}
+
+.basket-picker-load-btn {
+   background: #007bff;
+   color: white;
+   border: none;
+   padding: 8px 16px;
+   border-radius: 4px;
+   cursor: pointer;
+   font-weight: bold;
+}
+
+.basket-picker-delete-btn {
+  background: #f44336;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.basket-picker-delete-btn:hover {
+  background: #d32f2f;
+}
+
+.basket-picker-delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Mobile: basket info 80% width, load button 20% width */
+@media (max-width: 768px) {
+.basket-picker-item {
+  padding: 8px;
+  gap: 8px;
+}
+
+.basket-picker-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.basket-picker-info strong {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.2;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.basket-picker-info span {
+  font-size: 0.65rem;
+  line-height: 1.2;
+}
+
+.basket-picker-delete-btn {
+ flex: 0 0 20%;
+ padding: 8px 4px;
+ font-size: 0.7rem;
+ white-space: nowrap;
+}
+
+.basket-picker-item > div:last-child {
+ flex: 0 0 40%;
+ display: flex;
+ gap: 4px;
+}
+}
+
+/* Auto-track checkbox */
+#autoTrackVideosCheckbox {
+   cursor: pointer;
+   width: auto !important;
+   margin: 0 4px 0 0 !important;
+   vertical-align: middle;
+}
+
+/* =========================================
+PIP PLAYER (DESKTOP ONLY)
+========================================= */
+#pipPlayerContainer {
+display: none; /* ✅ Hidden by default */
+position: fixed;
+width: 400px;
+height: 280px;
+background: #000;
+box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+z-index: 3000;
+border-radius: 8px;
+overflow: hidden;
+min-width: 200px;
+min-height: 180px;
+resize: none;
+flex-direction: column;
+border: 2px solid transparent;
+transition: border-color 0.2s ease;
+}
+
+#pipPlayerContainer.active {
+display: flex; /* ✅ Use flex when active to enable flexbox layout */
+}
+
+#pipPlayerContainer .pip-header {
+background: rgba(0,0,0,0.9);
+padding: 6px 10px;
+display: flex;
+justify-content: space-between;
+align-items: center;
+cursor: move; /* ✅ Move cursor only in header */
+user-select: none;
+}
+
+/* ✅ Override cursor for non-draggable areas */
+#pipPlayerContainer .pip-close,
+#pipPlayerContainer .pip-resize-handle,
+#pipPlayerContainer .plyr,
+#pipPlayerContainer video {
+cursor: default;
+}
+
+/* ✅ Specific cursor for resize handle */
+#pipPlayerContainer .pip-resize-handle {
+cursor: nwse-resize;
+}
+
+/* ✅ Specific cursor for close button */
+#pipPlayerContainer .pip-close {
+cursor: pointer;
+}
+
+/* ✅ Plyr container should fill remaining space */
+#pipPlayerContainer .plyr {
+flex: 1;
+display: flex;
+flex-direction: column;
+min-height: 0;
+overflow: hidden;
+}
+
+#pipPlayerContainer .plyr__video-wrapper {
+flex: 1;
+min-height: 0;
+}
+
+#pipPlayerContainer .pip-title {
+ color: white;
+ font-size: 0.75rem;
+ flex: 1;
+ overflow: hidden;
+ text-overflow: ellipsis;
+ white-space: nowrap;
+ margin-right: 8px;
+}
+
+#pipPlayerContainer .pip-close {
+ background: #000;
+ color: white;
+ border: none;
+ border-radius: 50%;
+ width: 24px;
+ height: 24px;
+ font-size: 16px;
+ line-height: 24px;
+ text-align: center;
+ cursor: pointer;
+ flex-shrink: 0;
+}
+
+#pipPlayerContainer .pip-close:hover {
+ background: red;
+}
+
+#pipPlayerContainer .pip-resize-handle {
+ position: absolute;
+ bottom: 0;
+ right: 0;
+ width: 20px;
+ height: 20px;
+ background: rgba(255,255,255,0.3);
+ cursor: nwse-resize;
+ z-index: 10;
+ border-top-left-radius: 4px;
+}
+
+#pipPlayerContainer .pip-resize-handle:hover {
+ background: rgba(255,255,255,0.5);
+}
+
+/* Resize handle icon (three diagonal lines) */
+#pipPlayerContainer .pip-resize-handle::after {
+ content: '';
+ position: absolute;
+ bottom: 2px;
+ right: 2px;
+ width: 12px;
+ height: 12px;
+ background-image: 
+   linear-gradient(135deg, transparent 40%, rgba(255,255,255,0.8) 40%, rgba(255,255,255,0.8) 45%, transparent 45%),
+   linear-gradient(135deg, transparent 55%, rgba(255,255,255,0.8) 55%, rgba(255,255,255,0.8) 60%, transparent 60%),
+   linear-gradient(135deg, transparent 70%, rgba(255,255,255,0.8) 70%, rgba(255,255,255,0.8) 75%, transparent 75%);
+}
+
+#pipPlayerContainer video {
+width: 100%;
+height: 100%;
+display: block;
+object-fit: contain;
+max-height: 100%;
+}
+
+/* Already handled above - remove these duplicates if present */
+
+/* Ensure permanent progress bar shows in PIP */
+#pipPlayerContainer #permanentProgressBar {
+display: flex;
+}
+
+/* Ensure controls show in PIP */
+#pipPlayerContainer .plyr__controls {
+display: flex !important;
+}
+
+/* Adjust PIP controls for smaller size */
+#pipPlayerContainer .plyr__control {
+min-width: 35px !important;
+min-height: 35px !important;
+}
+
+#pipPlayerContainer .plyr-stop,
+#pipPlayerContainer .plyr-pip {
+min-width: 35px !important;
+min-height: 35px !important;
+font-size: 1rem !important;
+}
+
+/* Ensure controls stay at bottom and don't overflow */
+#pipPlayerContainer .plyr__controls {
+ position: absolute;
+ bottom: 0;
+ left: 0;
+ right: 0;
+ width: 100%;
+ padding: 8px;
+ box-sizing: border-box;
+}
+
+/* Make permanent progress bar fit in PIP */
+#pipPlayerContainer #permanentProgressBar {
+ padding: 2px 8px 4px 8px;
+ min-height: 0;
+}
+
+#pipPlayerContainer .permanent-progress-timestamp {
+ font-size: 0.6rem;
+ bottom: 8px;
+}
+
+#pipPlayerContainer .permanent-progress-bar {
+ height: 2px;
+}
+
+/* Hide PIP on mobile */
+@media (max-width: 768px) {
+ #pipPlayerContainer {
+   display: none !important;
+ }
+}
+
+/* PIP button in Plyr controls */
+.plyr-pip {
+ min-width: 50px !important;
+ min-height: 50px !important;
+ font-size: 1.2rem !important;
+ flex: 0 0 auto;
+}
+
+/* Active state for PIP button */
+.plyr-pip.active {
+ background: #007bff !important;
+ color: white !important;
+}
+
+
+/* =========================================
+RENAME MODAL - ENSURE INPUT FIELD RESPONSIVE
+========================================= */
+#renameInput:focus {
+outline: none;
+border-color: #007bff !important;
+}
+
+/* Mobile: match input field to word selector */
+@media (max-width: 768px) {
+.basket-json-modal-content #renameInput {
+font-size: 0.75rem !important;
+padding: 6px 8px !important;
+}
+}
+
+/* =========================================
+MOVE FILE MODAL - PATH LIST
+========================================= */
+.move-path-item {
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #eee;
+  transition: background 0.2s ease;
+  font-size: 0.85rem;
+  word-break: break-word;
+}
+
+.move-path-item:hover {
+  background: #f5f5f5;
+}
+
+.move-path-item.move-path-selected {
+  background: #e3f2fd;
+  border-left: 4px solid #2196F3;
+  font-weight: bold;
+}
+
+.move-path-item:last-child {
+  border-bottom: none;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .move-path-item {
+      padding: 12px;
+      font-size: 0.9rem;
+  }
+}
+
+#exportToExcelBtn {
+background: #217346;
+color: white;
+}
+
+#exportToExcelBtn:hover {
+background: #1a5c37;
+}
+
+/* =========================================
+MODAL BUTTON DANGER STATE
+========================================= */
+.modal-btn-danger {
+background: #f44336;
+color: white;
+}
+
+.modal-btn-danger:hover {
+background: #d32f2f;
+transform: translateY(-1px);
+}
+
+.modal-btn-danger:disabled {
+opacity: 0.5;
+cursor: not-allowed;
+}
+
+/* =========================================
+HIDE "GO TO FOLDER" BUTTON ON MOBILE
+========================================= */
+@media (max-width: 1024px) {
+#goToFolderBtn {
+  display: none !important;
+}
+}
+
+/* =========================================
+COMPACT TOP BUTTON ROW (MOBILE ONLY)
+========================================= */
+.top-buttons-row {
+display: flex;
+gap: 4px;
+margin: 8px 0;
+width: 100%;
+}
+
+/* Desktop: keep original button styling */
+@media (min-width: 769px) {
+.top-buttons-row {
+  display: block; /* Stack vertically on desktop */
+}
+
+.top-buttons-row button {
+  display: inline-block;
+  width: auto;
+  margin-right: 10px;
+  margin-bottom: 0;
+}
+}
+
+/* Mobile: compact row layout like sort buttons */
+@media (max-width: 768px) {
+.top-buttons-row {
+  display: flex !important;
+  flex-wrap: nowrap;
+  gap: 3px;
+}
+
+.top-buttons-row button {
+  flex: 1;
+  font-size: 0.65rem !important;
+  padding: 6px 2px !important;
+  margin: 0 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Make auto-track label more compact */
+.auto-track-label {
+  font-size: 0.75rem !important;
+  margin: 4px 0 !important;
+}
+}
+
+/* ✅ Landscape mobile: show buttons (override landscape-hide rule) */
+@media (max-width: 1024px) and (orientation: landscape) {
+.top-buttons-row {
+  display: flex !important;
+}
+
+.top-buttons-row button {
+  display: block !important;
+}
+
+.auto-track-label {
+  display: block !important;
+}
+}

@@ -1,0 +1,775 @@
+
+/* =========================================
+HIDE PLAYER TOGGLE BUTTON - DESKTOP ONLY
+========================================= */
+/* Default: hidden on all devices */
+#toggleVideoPlayerBtn {
+display: none !important;
+visibility: hidden !important;
+}
+
+/* Show only on desktop */
+@media (min-width: 769px) {
+#toggleVideoPlayerBtn {
+  display: inline-block !important;
+  visibility: visible !important;
+}
+}
+
+/* Force hide on mobile (extra insurance) */
+@media (max-width: 768px) {
+#toggleVideoPlayerBtn {
+  display: none !important;
+  visibility: hidden !important;
+}
+}
+
+/* =========================================
+MOBILE VIDEO PLAYER HEIGHT FIX
+========================================= */
+@media (max-width: 768px) {
+/* Mobile inline video player - normal state */
+#inlineVideoContainer:not(.mini-player) {
+margin-left: 0;
+margin-right: 0;
+width: 100%;
+max-width: 100vw;
+}
+
+#inlineVideoContainer:not(.mini-player) video {
+width: 100%;
+height: auto;
+max-height: 50vh;
+}
+
+#inlineVideoContainer:not(.mini-player) .plyr {
+width: 100%;
+height: auto;
+}
+
+#inlineVideoContainer:not(.mini-player) .plyr__video-wrapper {
+height: auto;
+}
+}
+
+/* =========================================
+DESKTOP - Don't let video get too tall
+========================================= */
+@media (min-width: 769px) {
+#desktopVideoColumn #inlineVideoContainer:not(.mini-player) video {
+  width: 100%;
+  height: auto;
+}
+}
+
+/* =========================================
+DESKTOP LAYOUT - NEW APPROACH
+========================================= */
+
+@media (min-width: 769px) {
+/* Remove body max-width on desktop */
+body {
+max-width: none !important;
+margin: 0;
+padding: 10px;
+}
+
+/* Hide the mobile elements wrapper on desktop */
+#mobileElements {
+display: none !important;
+}
+
+/* Show desktop sections - basket always visible */
+#desktopTopSection {
+display: grid;
+grid-template-columns: 500fr 1800fr 500fr;
+gap: 20px;
+margin: 20px 0;
+width: 100%;
+}
+
+/* Ensure basket column is always visible */
+#desktopBasketColumn {
+display: flex !important;
+}
+/* Left Column: Lists - extend to bottom of viewport */
+#desktopLeftColumn {
+display: flex;
+flex-direction: column;
+gap: 10px;
+overflow-y: auto;
+max-height: calc(100vh - 80px); /* Just header + minimal margins */
+min-height: calc(100vh - 80px);
+}
+
+#desktopLeftColumn #playlist {
+  background-color: #d6ecff;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+#desktopLeftColumn .search-wrapper {
+  width: 100%;
+}
+
+/* Middle Column: Video Player + Controls stacked vertically */
+#desktopVideoColumn {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 30px;
+}
+
+#desktopVideoColumn #inlineVideoContainer {
+  width: 100%;
+  order: 1;
+}
+
+/* Controls directly below video, matching its width */
+#desktopVideoColumn #desktopControlsSection {
+width: 100%;
+display: grid;
+grid-template-columns: 1fr 1fr;
+gap: 20px;
+margin: 0;
+order: 2;
+}
+
+/* Video player hidden state - desktop only */
+@media (min-width: 769px) {
+body.video-player-hidden #desktopTopSection {
+grid-template-columns: 100fr 0fr 25fr !important;
+}
+
+body.video-player-hidden #desktopVideoColumn {
+  display: none !important;
+}
+
+body.video-player-hidden #desktopLeftColumn {
+  max-height: none;
+}
+
+body.video-player-hidden #desktopControlsSection {
+position: static;
+width: 100%;
+background: white;
+padding: 20px;
+border: 1px solid #ccc;
+border-radius: 8px;
+box-shadow: none;
+display: flex;
+flex-direction: column;
+gap: 15px;
+margin-top: 20px;
+}
+
+/* Append controls section to basket column when player hidden */
+body.video-player-hidden #desktopBasketColumn {
+display: flex;
+flex-direction: column;
+gap: 0;
+}
+
+body.video-player-hidden #desktopBasketColumn #basketList {
+flex-shrink: 0;
+max-height: 50vh;
+overflow-y: auto;
+margin-bottom: 0;
+}
+
+body.video-player-hidden #desktopControlsSection {
+flex-shrink: 0;
+order: 2; /* Ensure it comes after basket tools and list */
+}
+
+body.video-player-hidden #desktopTagDropdowns,
+body.video-player-hidden #desktopOtherControls {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Ensure all filter controls display properly in floating panel */
+body.video-player-hidden .randomRow,
+body.video-player-hidden .sizeRow,
+body.video-player-hidden .minRow,
+body.video-player-hidden .scoreFilterRow,
+body.video-player-hidden .orientationRow,
+body.video-player-hidden .mimeTypeRow,
+body.video-player-hidden .mp4OnlyRow,
+body.video-player-hidden .duplicatesRow {
+display: flex !important;
+width: 100%;
+}
+
+body.video-player-hidden #desktopOtherControls select {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+body.video-player-hidden #desktopOtherControls .sizeRow select,
+body.video-player-hidden #desktopOtherControls .minRow select,
+body.video-player-hidden #desktopOtherControls .randomRow select {
+  width: 80px !important;
+  flex: 0 0 80px !important;
+}
+
+body.video-player-hidden #orientationFilter,
+body.video-player-hidden #mimeTypeFilter,
+body.video-player-hidden #excludeTagSelect {
+  width: 100% !important;
+}
+
+body.video-player-hidden #desktopOtherControls section {
+  width: 100%;
+}
+
+body.video-player-hidden #desktopOtherControls section button {
+width: auto !important;
+max-width: calc(100% - 20px) !important;
+margin-bottom: 4px;
+margin-right: 10px;
+padding: 4px 8px !important;
+font-size: 0.65rem !important;
+box-sizing: border-box !important;
+white-space: nowrap !important;
+overflow: hidden !important;
+text-overflow: ellipsis !important;
+display: inline-block !important;
+}
+
+/* Reduce padding on controls section to give more room */
+body.video-player-hidden #desktopControlsSection {
+gap: 10px;
+padding: 12px !important;
+}
+
+/* Make orientation row more compact */
+body.video-player-hidden .orientationRow {
+display: flex !important;
+align-items: center;
+gap: 6px;
+width: 100%;
+}
+
+body.video-player-hidden .orientationRow label {
+font-size: 0.7rem !important;
+min-width: 60px !important;
+max-width: 60px !important;
+flex-shrink: 0;
+}
+
+/* Make orientation filter more compact - force narrow width */
+body.video-player-hidden .orientationRow #orientationFilter,
+body.video-player-hidden #desktopOtherControls #orientationFilter,
+#desktopBasketColumn #orientationFilter {
+padding: 4px !important;
+font-size: 0.75rem !important;
+width: 120px !important;
+min-width: 100px !important;
+max-width: 120px !important;
+flex: 0 0 120px !important;
+box-sizing: border-box !important;
+}
+
+/* Make MIME type filter more compact */
+body.video-player-hidden #mimeTypeFilter {
+padding: 6px !important;
+font-size: 0.8rem !important;
+min-height: 40px !important;
+width: calc(100% - 10px) !important;
+max-width: 100% !important;
+box-sizing: border-box !important;
+}
+
+/* Make exclude tags dropdown more compact */
+body.video-player-hidden #excludeTagSelect {
+padding: 6px !important;
+font-size: 0.8rem !important;
+width: calc(100% - 10px) !important;
+max-width: 100% !important;
+box-sizing: border-box !important;
+}
+
+/* Tighter spacing for control rows */
+body.video-player-hidden .randomRow,
+body.video-player-hidden .sizeRow,
+body.video-player-hidden .minRow,
+body.video-player-hidden .orientationRow,
+body.video-player-hidden .mimeTypeRow,
+body.video-player-hidden .mp4OnlyRow,
+body.video-player-hidden .duplicatesRow {
+margin-bottom: 6px !important;
+}
+
+/* Make labels smaller */
+body.video-player-hidden .randomRow label,
+body.video-player-hidden .sizeRow label,
+body.video-player-hidden .minRow label,
+body.video-player-hidden .orientationRow label,
+body.video-player-hidden .mimeTypeRow label {
+font-size: 0.75rem !important;
+min-width: 60px !important;
+}
+
+/* Tighter gaps for control sections */
+body.video-player-hidden #desktopControlsSection {
+gap: 10px;
+padding: 15px;
+}
+
+body.video-player-hidden #desktopTagDropdowns,
+body.video-player-hidden #desktopOtherControls {
+gap: 6px;
+}
+
+/* Make section heading less prominent */
+body.video-player-hidden section {
+margin: 0;
+}
+
+/* Compact file input labels */
+body.video-player-hidden section label {
+font-size: 0.75rem !important;
+display: block;
+margin-bottom: 2px;
+}
+
+body.video-player-hidden section input[type="file"] {
+font-size: 0.7rem !important;
+padding: 4px !important;
+}
+
+/* Make br tags smaller spacing */
+body.video-player-hidden br {
+display: none;
+}
+
+/* Add small gaps instead of br tags */
+body.video-player-hidden .randomRow,
+body.video-player-hidden .sizeRow:first-of-type,
+body.video-player-hidden .minRow:first-of-type,
+body.video-player-hidden .orientationRow,
+body.video-player-hidden section {
+margin-top: 8px;
+}
+}
+
+/* Basket column - extend to bottom of viewport */
+#desktopBasketColumn {
+display: flex;
+flex-direction: column;
+max-height: calc(100vh - 80px); /* Just header + minimal margins */
+min-height: calc(100vh - 80px);
+}
+
+.desktop-basket-content {
+display: flex;
+flex-direction: column;
+height: 100%;
+width: 100%;
+}
+
+.desktop-basket-content .basket-tools {
+flex-shrink: 0;
+}
+
+.desktop-basket-content #basketList {
+flex-grow: 1;
+overflow-y: auto;
+}
+
+/* Hide mobile basket panel */
+#basketPanel {
+  display: none !important;
+}
+
+/* Tag dropdowns column */
+#desktopTagDropdowns {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Other controls column */
+#desktopOtherControls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#desktopOtherControls select {
+  width: 200px;
+}
+
+#desktopOtherControls button {
+  width: auto;
+  padding: 10px 20px;
+}
+
+/* Desktop mini-player */
+body:not(.fullscreen-active) #inlineVideoContainer.mini-player {
+  position: fixed !important;
+  left: 10px;
+  bottom: 90px;
+  width: 300px;
+  height: auto;
+  max-height: 400px;
+  z-index: 2000;
+}
+}
+
+/* Mobile: hide desktop sections */
+@media (max-width: 768px) {
+#desktopTopSection,
+#desktopControlsSection {
+  display: none !important;
+}
+
+#mobileElements {
+  display: block;
+}
+}
+
+/* History panel mobile breakpoint - 768px */
+@media (max-width: 768px) {
+#historyPanel {
+width: 49%;
+left: -49%;
+max-width: none;
+}
+
+#historyList li {
+font-size: 0.75rem !important;
+line-height: 1.3;
+word-break: break-all;
+overflow-wrap: break-word;
+white-space: normal;
+}
+
+.history-btn-group {
+display: flex !important;
+}
+}
+
+/* =========================================
+VERSION CORNER - ALWAYS VISIBLE ON DESKTOP
+========================================= */
+#versionCorner {
+display: block !important;
+position: relative;
+z-index: 1000;
+background: white;
+margin-top: 40px;
+padding: 10px;
+}
+
+/* =========================================
+CONTEXT MENU - COMPACT SIZE
+========================================= */
+.context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10001;
+  min-width: 120px;
+  max-width: 200px;
+  padding: 2px 0;
+}
+
+.context-menu-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.7rem;
+  color: #333;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.context-menu-item:hover {
+  background: #f0f0f0;
+}
+
+.context-menu-item:active {
+  background: #e0e0e0;
+}
+
+.context-menu-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Mobile: slightly larger touch targets but still compact */
+@media (max-width: 768px) {
+  .context-menu-item {
+      padding: 8px 12px;
+      font-size: 0.75rem;
+  }
+}
+
+/* =========================================
+COMPACT BUTTON GROUP - INLINE SQUARES
+========================================= */
+.compact-btn-group {
+display: inline-flex;
+gap: 2px;
+align-items: center;
+margin-left: 6px;
+vertical-align: middle;
+}
+
+/* Mobile: larger gap for easier touch targets */
+@media (max-width: 1024px) {
+.compact-btn-group {
+  gap: 15px;
+}
+}
+
+.compact-btn {
+ background: #007bff;
+ color: white;
+ border: none;
+ padding: 0;
+ font-size: 0.65rem;
+ border-radius: 2px;
+ cursor: pointer;
+ transition: background 0.15s ease;
+ white-space: nowrap;
+ width: 20px;
+ height: 20px;
+ min-width: 20px;
+ min-height: 20px;
+ max-width: 20px;
+ max-height: 20px;
+ line-height: 20px;
+ text-align: center;
+ flex-shrink: 0;
+}
+
+.compact-btn:hover {
+  background: #0056b3;
+}
+
+.compact-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.compact-btn-more {
+  background: #6c757d;
+  font-weight: bold;
+  padding: 2px 8px;
+}
+
+.compact-btn-more:hover {
+  background: #545b62;
+}
+
+/* Basket context - align with existing basket styles */
+#basketList .compact-btn-group {
+  width: 100%;
+}
+
+#basketList .compact-btn {
+  flex: 1;
+  text-align: center;
+}
+
+/* Mobile: maintain compact size */
+@media (max-width: 768px) {
+  .compact-btn {
+      padding: 3px 8px;
+      font-size: 0.7rem;
+      min-height: 20px;
+  }
+}
+
+/* =========================================
+AUTH & REFRESH BUTTONS - MATCH EXCEL ONLINE STYLE
+========================================= */
+#loginBtn,
+#refreshAllAccountsBtn,
+#excelOnlineConnectBtn,
+#refreshScoresBtn {
+background: #555;
+color: white;
+border: none;
+padding: 10px 16px;
+border-radius: 4px;
+cursor: pointer;
+font-size: 0.9rem;
+transition: background 0.2s ease;
+}
+
+#loginBtn:hover,
+#refreshAllAccountsBtn:hover,
+#excelOnlineConnectBtn:hover,
+#refreshScoresBtn:hover {
+background: #333;
+}
+
+/* ✅ Refresh scores button - match Excel green when ready */
+#refreshScoresBtn {
+ background: #28a745;
+}
+
+#refreshScoresBtn:hover {
+ background: #218838;
+}
+
+#refreshScoresBtn:disabled {
+ background: #6c757d;
+ cursor: not-allowed;
+}
+
+/* Ensure buttons are inline on desktop */
+@media (min-width: 769px) {
+#loginBtn,
+#refreshAllAccountsBtn,
+#excelOnlineConnectBtn,
+#refreshScoresBtn {
+width: auto;
+margin-right: 10px;
+margin-bottom: 0;
+}
+}
+
+/* =========================================
+RENAME MODAL - RED X BUTTON
+========================================= */
+.bracket-btn-red {
+background: #f44336 !important;
+}
+
+.bracket-btn-red:hover {
+background: #d32f2f !important;
+}
+
+.bracket-btn-red:active {
+transform: scale(0.95);
+}
+
+.bracket-btn-search {
+background: #17a2b8 !important;
+}
+
+.bracket-btn-search:hover {
+background: #138496 !important;
+}
+
+.bracket-btn-search:active {
+transform: scale(0.95);
+}
+
+/* Rename action buttons responsive layout */
+.rename-action-buttons {
+display: flex;
+gap: 8px;
+flex-wrap: wrap;
+}
+
+/* Desktop: wider buttons with proper sizing */
+@media (min-width: 769px) {
+.rename-action-buttons {
+  flex-wrap: nowrap;
+}
+
+.rename-action-buttons #addToSearchBtn {
+  flex: 1;
+  min-width: 100px;
+}
+
+.rename-action-buttons #addBracketsBtn,
+.rename-action-buttons #removeWordsBtn {
+  flex: 1;
+}
+
+.rename-action-buttons #prevWordEdgeBtn,
+.rename-action-buttons #nextWordEdgeBtn {
+  flex: 0 0 40px;
+}
+}
+
+/* Mobile: all buttons same row, Add to Search first and larger */
+@media (max-width: 768px) {
+.rename-action-buttons {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.rename-action-buttons #addToSearchBtn {
+  flex: 0 0 auto;
+  min-width: 50px;
+  padding: 8px 10px !important;
+  font-size: 0.8rem !important;
+  order: -1; /* Ensure it's first */
+}
+
+.rename-action-buttons #addBracketsBtn,
+.rename-action-buttons #removeWordsBtn {
+  flex: 1;
+  min-width: 40px;
+}
+
+.rename-action-buttons #prevWordEdgeBtn,
+.rename-action-buttons #nextWordEdgeBtn {
+  flex: 0 0 36px;
+  min-width: 36px;
+}
+
+.rename-action-buttons .bracket-btn {
+  padding: 8px 6px !important;
+  font-size: 0.75rem !important;
+  min-height: 36px !important;
+  white-space: nowrap;
+}
+}
+
+/* Mobile: ensure same size as bracket button */
+@media (max-width: 768px) {
+.bracket-btn-red {
+    min-width: 36px;
+    max-width: 36px;
+    width: 36px;
+    height: 36px;
+}
+}
+
+/* =========================================
+RENAME MODAL - TAG PILLS
+========================================= */
+.rename-tag-pill {
+background: #007bff;
+color: white;
+padding: 6px 12px;
+border-radius: 12px;
+font-size: 0.75rem;
+cursor: pointer;
+transition: all 0.2s ease;
+user-select: none;
+-webkit-user-select: none;
+display: inline-block;
+}
+
+.rename-tag-pill:hover {
+background: #0056b3;
+transform: translateY(-1px);
+}
+
+.rename-tag-pill:active {
+transform: translateY(0);
+}
+
+/* Mobile: larger touch targets */
+@media (max-width: 768px) {
+.rename-tag-pill {
+    font-size: 0.8rem;
+    padding: 8px 14px;
+}
+}

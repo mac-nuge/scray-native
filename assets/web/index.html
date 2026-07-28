@@ -1,0 +1,494 @@
+<html><head>
+  <meta charset="UTF-8">
+  <title>Scray Picker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://alcdn.msauth.net/browser/2.38.1/js/msal-browser.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+
+<!-- Excel Online uses existing MSAL authentication -->
+
+  <script>
+  const cacheBustVer = Date.now();
+  // Load common styles first, then index-specific overrides
+  document.write(`<link rel="stylesheet" href="style.css?v=${cacheBustVer}">`);
+  document.write(`<link rel="stylesheet" href="style-index.css?v=${cacheBustVer}">`);
+  
+  const localScripts = [
+    "keyboard-config.js",
+    "db.js",
+    "context-menu.js",
+    "desktop-layout.js",
+    "onedrive.js",
+    "auth.js",
+    "excel-sheets.js",
+    "file-operations.js",
+    "randomiser.js",
+    "ui.js",
+    "basket.js",
+    "basket-index.js",
+    "history.js",
+    "random-panel.js",
+    "render.js",
+    "player.js"
+  ];
+  localScripts.forEach(src => {
+    document.write(`<script src="${src}?v=${cacheBustVer}"><\/script>`);
+  });
+  </script>
+
+  <script>
+    async function setAppVersionFromFile() {
+      try {
+        const res = await fetch('VERSION');
+        if (!res.ok) throw new Error(`Failed to load VERSION: ${res.status}`);
+        const versionText = (await res.text()).trim();
+        document.title = `Scray Picker (${versionText})`;
+        const h1 = document.querySelector('h1');
+        if (h1) h1.textContent = `Scray Picker (${versionText})`;
+        document.getElementById('appVersion').textContent = `v${versionText}`;
+        document.getElementById('lockOverlayVersion').textContent = `v${versionText}`;
+        const versionLower = versionText.toLowerCase();
+
+        // Color the lock screen based on which environment this is
+        const lockOverlayEl = document.getElementById('lockOverlay');
+        if (lockOverlayEl) {
+          if (versionLower.includes('staging')) {
+            lockOverlayEl.style.background = '#7B1472'; // pink
+          } else if (versionLower.includes('uat')) {
+            lockOverlayEl.style.background = '#66420F'; // mustard
+          } else {
+            lockOverlayEl.style.background = '#111'; // black (main/default)
+          }
+        }
+        if (versionLower.includes('staging') || versionLower.includes('uat')) {
+          const banner = document.createElement('div');
+          banner.textContent = versionLower.includes('staging') ? 'STAGING ENVIRONMENT' : 'UAT ENVIRONMENT';
+          banner.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%;
+            background: ${versionLower.includes('staging') ? '#f4e1f5' : '#f7e2a6'};
+            color: white; font-weight: bold; text-align: left;
+            padding: 8px; font-size: 1.2rem; z-index: -2000;
+          `;
+          document.body.appendChild(banner);
+          document.body.style.paddingTop = '50px';
+        }
+      } catch (err) {
+        console.error('Error setting app version:', err);
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      setAppVersionFromFile();
+      const changelogLink = document.getElementById('changelogLink');
+      const overlay = document.getElementById('changelogOverlay');
+      const closeBtn = document.getElementById('changelogCloseBtn');
+      const changelogContent = document.getElementById('changelogContent');
+
+      changelogLink.addEventListener('click', async (e) => {
+        e.preventDefault();
+        changelogContent.textContent = 'Loading...';
+        try {
+          const res = await fetch('CHANGELOG.md');
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const mdText = await res.text();
+          marked.setOptions({ breaks: true });
+          changelogContent.innerHTML = marked.parse(mdText);
+        } catch (err) {
+          changelogContent.textContent = `Failed to load changelog: ${err.message}`;
+          console.error(err);
+        }
+        overlay.style.display = 'flex';
+      });
+
+      closeBtn.addEventListener('click', () => { overlay.style.display = 'none'; });
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.style.display = 'none';
+      });
+    });
+  </script>
+</head>
+
+<body>
+
+<div id="lockOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #111; color: white; display: flex; align-items: center; justify-content: center; flex-direction: column; z-index: 99999;">
+<p id="lockOverlayVersion" style="font-size: 0.7rem; color: #888; margin-bottom: 10px; transform: translateX(-40px);"></p>
+<input id="lockPassword" type="password" placeholder="Password" style="padding: 10px; font-size: 1.2rem; border-radius: 5px; border: none; text-align: center;">
+<p id="lockError" style="color:red; display:none; margin-top: 10px;">Incorrect</p>
+</div>
+
+<script>
+(function(){
+  const CORRECT_PASSWORD = "Michael1";
+  const inputEl = document.getElementById("lockPassword");
+  const overlayEl = document.getElementById("lockOverlay");
+  const errorEl = document.getElementById("lockError");
+  const versionTapEl = document.getElementById("lockOverlayVersion");
+  window.addEventListener('load', () => { inputEl.focus(); });
+
+  function unlockApp() {
+    overlayEl.style.display = "none";
+    inputEl.blur(); // dismiss keyboard so it can't shift the layout further
+
+    // Force the page open with the console (and account pills, which
+    // sit just above it) at the top of the screen, instead of wherever
+    // late-loading content (account pills, tag dropdown population,
+    // docked-player spacer) leaves the scroll position. Keep
+    // re-asserting for a few seconds since those async loads can keep
+    // shifting #topSpacer's height after unlock.
+    const scrollToConsole = () => {
+      const consoleEl = document.getElementById("inlineConsole");
+      if (consoleEl) {
+        // Pull back up by roughly the console's own height (plus a
+        // small extra nudge) so we don't scroll past it — leaves the
+        // buttons/pills above it visible too.
+        const SCROLL_EXTRA_NUDGE_PX = -40; // ⚙️ increase to scroll down more, decrease (or go negative) to scroll up more
+        const y = consoleEl.getBoundingClientRect().top + window.pageYOffset - consoleEl.offsetHeight + SCROLL_EXTRA_NUDGE_PX;
+        window.scrollTo(0, Math.max(0, y));
+      } else {
+        window.scrollTo(0, 0);
+      }
+    };
+    scrollToConsole();
+    requestAnimationFrame(scrollToConsole);
+    [50, 150, 300, 600, 1000, 2000, 3000].forEach(delay => {
+      setTimeout(scrollToConsole, delay);
+    });
+  }
+
+  inputEl.addEventListener("input", function(){
+    if(inputEl.value === CORRECT_PASSWORD){
+      unlockApp();
+    }
+    else { errorEl.style.display = "none"; }
+  });
+  inputEl.addEventListener("keyup", function(){
+    if(inputEl.value.length >= CORRECT_PASSWORD.length && inputEl.value !== CORRECT_PASSWORD){
+      errorEl.style.display = "block";
+    }
+  });
+
+  // Secret backdoor: tap/click 3 times within 1.5s anywhere on the lock
+  // screen (except the password input itself) to unlock
+  let tapCount = 0;
+  let tapResetTimer = null;
+  overlayEl.style.cursor = "pointer";
+  overlayEl.addEventListener("click", function(e){
+    if (e.target === inputEl) return; // don't hijack normal typing/focus clicks
+    tapCount++;
+    clearTimeout(tapResetTimer);
+    if (tapCount >= 3) {
+      tapCount = 0;
+      unlockApp();
+      return;
+    }
+    tapResetTimer = setTimeout(() => { tapCount = 0; }, 1500);
+  });
+})();
+</script>
+
+<div id="cornerButtons">
+<button id="listBtnCorner" class="burger-btn">L</button>
+<button id="quickRandomBtn" class="burger-btn">R</button>
+<button id="jumpSearchBtn" class="burger-btn" title="Jump to Search">F</button>
+<button id="playRandomFilteredBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video">X</button>
+<button id="playRandomWeightedBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video (favours less-watched)">X<sup>n</sup></button>
+<button id="playHistorySequenceBtn" class="burger-btn burger-btn-pink" title="Play Through History">H&lt;</button>
+<button id="playRandomBasketBtn" class="burger-btn burger-btn-pink" title="Play Random from Basket">B<sup>x</sup></button>
+<button id="basketToggleBtn" class="burger-btn">B (<span id="basketCount">0</span>)</button>
+<button id="historyToggleBtn" class="burger-btn">H (<span id="historyCount">0</span>)</button>
+<button id="playNextBasketBtn" class="burger-btn burger-btn-pink" title="Play Next in Basket" style="display:none">B></button>
+<button id="playPreviousBtn" class="burger-btn burger-btn-pink" title="Play Previous in Current List">&lt;</button>
+<button id="playNextBtn" class="burger-btn burger-btn-pink" title="Play Next in Current List">&gt;</button>
+<button id="jumpRandomBtn" class="burger-btn" title="Jump to Random">R^</button>
+<button id="clearBtnCorner" class="burger-btn" title="Clear & Stop">C</button>
+<button id="jumpTagsBtn" class="burger-btn" title="Jump to Tags">T</button>
+
+<button id="playLastHistoryBtn" class="burger-btn burger-btn-pink" title="Play Last Played Video" style="display:none">H^</button>
+<button id="randomTagBtn" class="burger-btn burger-btn-pink" title="Select Random Tag (excludes level 1)" style="display:none">T</button>
+</div>
+
+<div id="floatingTagPillsBar" class="floating-tags"></div>
+
+<div id="basketPanel">
+<div class="basket-tools">
+<button id="basketLoadBtn" title="Pull latest basket from Excel (replaces local basket)">↓</button>
+<button id="basketSaveBtn" title="Push current basket to Excel (overwrites current basket)">↑</button>
+<button id="basketSelectAllBtn">ALL</button>
+<button id="basketRemoveBtn">REM</button>
+<button id="basketMoreBtn">...</button>
+</div>
+
+<input type="file" id="basketImportInput" accept=".json" style="display:none;">
+<ul id="basketList"></ul>
+</div>
+
+<div id="historyPanel">
+<div class="history-tools">
+ <button id="historySelectAllBtn">S.ALL</button>
+ <button id="historyMoreBtn">...</button>
+</div>
+<ul id="historyList"></ul>
+</div>
+
+<div id="randomPlaylistPanel">
+<!-- Random List Section -->
+<div id="panelRandomSection" style="display: none;">
+  <ul id="randomPlaylistPanelList"></ul>
+</div>
+
+<!-- Tagged List Section -->
+<div id="panelTaggedSection" style="display: none;">
+ <div class="panel-section-header">
+   <!-- Search bar at top - COMPACT -->
+  <div class="panel-search-wrapper" style="padding: 3px 6px; position: relative;">
+    <input type="text" id="panelSearchBox" placeholder="Filter" style="width: 100%; padding: 3px 24px 3px 4px; font-size: 0.65rem; border: 1px solid #ddd; border-radius: 3px; box-sizing: border-box; background-color: #ffe4e1; line-height: 1.2;">
+    <span id="panelSearchClearX" class="panel-clear-x" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; font-size: 0.85rem; color: #888; display: none;">×</span>
+  </div>
+   
+ <div id="panelVideoStats" style="font-size: 0.55rem; color: #555; padding: 2px 6px; font-weight: normal;"></div>
+    <div class="panel-sort-buttons" style="display: flex; gap: 4px; padding: 4px 6px;">
+     <button id="panelSortSizeBtn" class="panel-sort-btn" data-sort-state="none">Size</button>
+     <button id="panelSortCreatedBtn" class="panel-sort-btn" data-sort-state="none">Create</button>
+     <button id="panelSortModifiedBtn" class="panel-sort-btn" data-sort-state="none">Mod</button>
+     <button id="panelSortFilenameBtn" class="panel-sort-btn" data-sort-state="none">File</button>
+     <button id="panelSortScoreBtn" class="panel-sort-btn" data-sort-state="none">Score</button>
+   </div>
+  </div>
+  <ul id="panelTaggedList"></ul>
+  <div id="panelPaginationControls" style="display: none; padding: 6px; gap: 6px;">
+    <button class="panelPageSizeBtn" data-size="25">25</button>
+    <button class="panelPageSizeBtn" data-size="50">50</button>
+    <button class="panelPageSizeBtn" data-size="100">100</button>
+    <button class="panelPageSizeBtn" data-size="200">200</button>
+  </div>
+</div>
+</div>
+
+
+<!-- Layout switch removed - browser.html deprecated -->
+
+<div id="topSpacer"></div>
+<h1>Scray Picker</h1>
+
+<!-- ✅ Console FIRST -->
+<div id="inlineConsole"></div>
+<div id="inlineConsoleToolbar">
+<button id="inlineConsoleCopyBtn">copy</button>
+</div>
+
+<!-- ✅ Compact button row -->
+<div class="top-buttons-row">
+<button id="loginBtn">OneDrive</button>
+<button id="refreshAllAccountsBtn">Refresh</button>
+<button id="excelOnlineConnectBtn">📊 Excel</button>
+<button id="refreshScoresBtn" style="display:none;" title="Refresh Excel authentication">🔄</button></div>
+
+<div id="accountLoadButtons" style="margin: 10px 0;"></div>
+<br>
+
+<!-- Desktop sections (empty, will be populated by JS) -->
+<div id="desktopTopSection">
+  <div id="desktopLeftColumn"></div>
+  <div id="desktopVideoColumn"></div>
+  <div id="desktopBasketColumn"></div>
+</div>
+
+<div id="desktopControlsSection">
+  <div id="desktopTagDropdowns"></div>
+  <div id="desktopOtherControls"></div>
+</div>
+
+<!-- Original mobile elements (will be moved on desktop) -->
+<div id="mobileElements">
+  <div class="tag-container" id="includeTagsLevel1Container"></div>
+  <div class="dropdown-row">
+    <select id="tagFilterLevel1Select" multiple=""></select>
+    <button id="btnL1" class="dropdown-btn">L1</button>
+  </div>
+
+  <div class="tag-container" id="includeTagsLevel2Container"></div>
+  <div class="dropdown-row">
+    <select id="tagFilterLevel2Select" multiple=""></select>
+    <button id="btnL2" class="dropdown-btn">L2</button>
+  </div>
+
+  <div class="tag-container" id="includeTagsLevel3Container"></div>
+  <div class="dropdown-row">
+    <select id="tagFilterLevel3Select" multiple=""></select>
+    <button id="btnL3" class="dropdown-btn">L3</button>
+  </div>
+
+  <div class="tag-container" id="includeTagsAllContainer"></div>
+  <div class="dropdown-row">
+    <select id="tagFilterAllSelect" multiple=""></select>
+    <button id="btnAT" class="dropdown-btn">AT</button>
+  </div>
+
+  <br><br>
+
+  <button id="generateRandomByTagsBtn" style="display:none;">Random</button>
+  <button id="listAllByTagsBtn" style="display:none;">List</button>
+  <button id="clearFiltersBtn" style="display:none;">Clear</button>
+  
+  <br><br>
+
+ <ul id="playlist" style="margin-top: 10px;"></ul>
+
+<div id="searchFilterRow" style="display: flex; gap: 8px; align-items: center;">
+  <div class="search-wrapper" style="flex: 1;">
+    <input type="text" id="filenameSearchBox" placeholder="Filter" style="width:100%; padding:6px;">
+    <span id="clearSearchX" class="clear-x">×</span>
+  </div>
+  <button id="addFilteredToBasketBtn" class="add-filtered-basket-btn" style="display: none;">+B</button>
+</div>
+
+ <div class="sort-buttons-container">
+<button id="sortSizeBtn" class="sort-btn" title="Toggle sort by file size">Size</button>
+<button id="sortCreatedBtn" class="sort-btn" title="Toggle sort by date created">Create</button>
+<button id="sortModifiedBtn" class="sort-btn" title="Toggle sort by date modified">Mod</button>
+<button id="sortFilenameBtn" class="sort-btn" title="Toggle sort by filename">File</button>
+<button id="sortScoreBtn" class="sort-btn" title="Toggle sort by score">Score</button>
+</div>
+
+ <div id="videoStats" style="margin-top:8px; font-size:0.85rem; color:#555;"></div>
+ <div id="taggedVideosContainer" style="margin-top: 10px;"></div>
+
+  <div id="paginationControls" style="margin-top: 10px; display: none; gap:10px; align-items:center;">
+    <button class="pageSizeBtn" data-size="25">25</button>
+    <button class="pageSizeBtn" data-size="50">50</button>
+    <button class="pageSizeBtn" data-size="100">100</button>
+    <button class="pageSizeBtn" data-size="200">200</button>
+  </div>  
+
+  <div class="randomRow">
+   <button id="toggleVideoPlayerBtn" class="desktop-only-btn">Hide Player</button>
+<label style="margin-left: 10px; font-size: 0.9rem;">
+<br>
+   <label for="randomCount">No. random videos</label>
+   <select id="randomCount"></select>
+ </div>
+
+ <br>
+
+  <div class="tag-container" id="excludeTagsContainer"></div>
+  <select id="excludeTagSelect" multiple="multiple"></select>
+
+  <br>
+
+<!-- ✅ ADD THESE NEW CONTROLS HERE -->
+<!-- Orientation Filter -->
+<div style="margin-top: 8px;" class="orientationRow">
+  <label for="orientationFilter">Orientation</label>
+  <select id="orientationFilter" style="width: 200px; padding: 8px;">
+    <option value="any">Any</option>
+    <option value="L">Landscape</option>
+    <option value="P">Portrait/Square</option>
+  </select>
+</div>
+
+<br>
+
+<!-- MIME Type Filter -->
+<div style="margin-top: 8px;" class="mimeTypeRow">
+  <label for="mimeTypeFilter">File Type</label>
+  <select id="mimeTypeFilter" multiple style="width: 200px; min-height: 60px;">
+    <!-- Populated dynamically -->
+  </select>
+</div>
+
+  <br>
+
+
+<!-- MP4 Only Filter -->
+<div style="margin-top: 8px;" class="mp4OnlyRow">
+ <label>
+   <input type="checkbox" id="filterMp4Only">
+   Show only MP4
+ </label>
+</div>
+
+ <br>
+
+<!-- Show Duplicates Filter -->
+<div style="margin-top: 8px;" class="duplicatesRow">
+<label>
+  <input type="checkbox" id="filterDuplicatesOnly">
+  Show only duplicates
+</label>
+</div>
+
+<br>
+
+<section>
+   <button id="exportCsvBtn">Export CSV</button><br>
+<button id="exportToExcelBtn">📊 Export to Excel</button><br>   <button id="exportYetToUploadMatchesBtn">Yet to Upload Matches</button>
+   <button id="clearYetToUploadBtn">Clear Yet-to-Upload</button>
+   <div style="margin-top: 8px;">
+     <label>Yet to upload list</label>
+     <input type="file" id="manualCsvInput" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+   </div>
+   <div style="margin-top: 8px;">
+     <label>Bulk rename/delete CSV</label>
+     <input type="file" id="bulkOperationsCsvInput" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+   </div>
+ </section>
+
+<div id="bottomSpacer" style="height:0px;"></div>
+
+<div id="versionCorner" style="font-size: 0.85rem; text-align: right; margin-top: 40px; padding: 6px 10px;">
+<span id="appVersion"></span> | <a href="#" id="changelogLink">Change Log</a> | <a href="#" id="clearCacheBtn" style="color: #999;">Clear Database</a> | <a href="https://excel.cloud.microsoft/open/onedrive/?docId=FC889D210229F431%21SD3D6F40D45714290BBFEEBBA760F157C&driveId=FC889D210229F431&wdOrigin=APPHOME-WEB.DIRECT%2CAPPHOME-WEB.JUMPBACKIN-OCDI&wdPreviousSession=5f06762c-3c19-4dc2-8e7c-d6a4ca5b55b6&wdPreviousSessionSrc=AppHomeWeb&ct=1769467854718" target="_blank">Excel db</a>
+</div>
+
+<div id="changelogOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 99999; align-items: center; justify-content: center;">
+  <div style="background: white; width: 90%; height: 90%; border-radius: 8px; overflow: auto; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.3); padding: 20px;">
+    <button id="changelogCloseBtn" style="position: absolute; top: 6px; right: 10px; background: red; color: white; border: none; padding: 4px 8px; cursor: pointer; border-radius: 4px; z-index: 1000;">×</button>
+    <div id="changelogContent">Loading...</div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+const inlineConsole = document.getElementById('inlineConsole');
+const copyBtn = document.getElementById('inlineConsoleCopyBtn');
+if (!inlineConsole) return;
+
+function formatArg(arg) {
+  if (arg instanceof Error) return arg.stack || `${arg.name}: ${arg.message}`;
+  if (typeof arg === 'object') {
+    try { return JSON.stringify(arg, null, 2); } 
+    catch (e) { return String(arg); }
+  }
+  return String(arg);
+}
+
+function appendToInlineConsole(args, type = 'log') {
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  entry.textContent = args.map(formatArg).join(' ');
+  inlineConsole.appendChild(entry);
+  inlineConsole.scrollTop = inlineConsole.scrollHeight;
+}
+
+const origLog = console.log;
+const origWarn = console.warn;
+const origError = console.error;
+
+console.log = (...args) => { origLog.apply(console, args); appendToInlineConsole(args, 'log'); };
+console.warn = (...args) => { origWarn.apply(console, args); appendToInlineConsole(args, 'warn'); };
+console.error = (...args) => { origError.apply(console, args); appendToInlineConsole(args, 'error'); };
+
+copyBtn?.addEventListener('click', (e) => {
+  const text = Array.from(inlineConsole.children).map(div => div.textContent).join('\n');
+  copyToClipboardWithFeedback(text, e);
+});
+});
+</script>
+
+<script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+
+</body></html>

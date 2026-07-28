@@ -23,7 +23,11 @@ public class ScrayWebViewModule: Module {
 
         View(ScrayWebView.self) {
             Prop("source") { (view: ScrayWebView, path: String) in
-                if let url = Bundle.main.url(forResource: "web/" + path, withExtension: nil) {
+                if path.hasPrefix("http") {
+                    if let url = URL(string: path) {
+                        view.webView.load(URLRequest(url: url))
+                    }
+                } else if let url = Bundle.main.url(forResource: "web/" + path, withExtension: nil) {
                     view.webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
                 }
             }

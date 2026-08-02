@@ -10,7 +10,7 @@ class BookmarkStore {
         didAttemptResolve = true
         guard let data = UserDefaults.standard.data(forKey: "scray_folder_bookmark") else { return }
         var stale = false
-        if let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale) {
+        if let url = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale) {
             _ = url.startAccessingSecurityScopedResource() // kept alive for app lifetime
             resolvedRoot = url
         }
@@ -19,7 +19,7 @@ class BookmarkStore {
     func saveBookmark(for folderURL: URL) {
         guard folderURL.startAccessingSecurityScopedResource() else { return }
         defer { folderURL.stopAccessingSecurityScopedResource() }
-        if let bookmark = try? folderURL.bookmarkData(options: .withSecurityScope) {
+        if let bookmark = try? folderURL.bookmarkData() {
             UserDefaults.standard.set(bookmark, forKey: "scray_folder_bookmark")
         }
         didAttemptResolve = false

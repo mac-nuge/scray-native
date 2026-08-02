@@ -1,6 +1,5 @@
 {
   "expo": {
-    "plugins": ["./plugins/withWebAssets.js"],
     "name": "scray-native",
     "slug": "scray-native",
     "version": "1.0.0",
@@ -9,7 +8,12 @@
     "scheme": "scraynative",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoadsInWebContent": true
+        }
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -25,6 +29,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "./plugins/withWebAssets.js",
       "expo-router",
       [
         "expo-splash-screen",

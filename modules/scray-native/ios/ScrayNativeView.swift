@@ -18,11 +18,13 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
 
     required init(appContext: AppContext? = nil) {
         let config = WKWebViewConfiguration()
-        config.setURLSchemeHandler(VideoSchemeHandler(), forURLScheme: "scray-video")
+        let videoHandler = VideoSchemeHandler()
+        config.setURLSchemeHandler(videoHandler, forURLScheme: "scray-video")
         config.userContentController.add(messageProxy, name: "scrayBridge")
         webView = WKWebView(frame: .zero, configuration: config)
         super.init(appContext: appContext)
         messageProxy.target = self
+        videoHandler.webView = webView
         addSubview(webView)
     }
 

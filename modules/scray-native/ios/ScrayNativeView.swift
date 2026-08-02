@@ -37,9 +37,17 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any],
               let id = body["id"] as? String,
-              let action = body["action"] as? String else { return }
+              let action = body["action"] as? String else {
+            DispatchQueue.main.async { [weak self] in
+                self?.webView.evaluateJavaScript("console.error('[Bridge] failed to parse message body');")
+            }
+            return
+        }
 
         let payload = body["payload"]
+        DispatchQueue.main.async { [weak self] in
+            self?.webView.evaluateJavaScript("console.log('[Bridge] received action=<' + '\(action)' + '> length=\(action.count)');")
+        }
 
         switch action {
         case "pickFolder":

@@ -18,6 +18,7 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
 
     required init(appContext: AppContext? = nil) {
         let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
         let videoHandler = VideoSchemeHandler()
         config.setURLSchemeHandler(videoHandler, forURLScheme: "scray-video")
         config.userContentController.add(messageProxy, name: "scrayBridge")

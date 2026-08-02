@@ -46,7 +46,7 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
 
         let payload = body["payload"]
         DispatchQueue.main.async { [weak self] in
-            self?.webView.evaluateJavaScript("console.log('[Bridge] received action=<' + '\(action)' + '> length=\(action.count)');")
+            self?.webView.evaluateJavaScript("console.log('[Bridge build=\(BuildInfo.id)] received action=<' + '\(action)' + '> length=\(action.count)');")
         }
 
         switch action {

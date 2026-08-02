@@ -1,15 +1,28 @@
 import ExpoModulesCore
 import WebKit
 
+// Proxy exists because WKUserContentController needs a handler registered
+// *before* the WKWebView is created (its configuration is copied at init time),
+// but `self` isn't available until after super.init() runs.
+class ScriptMessageProxy: NSObject, WKScriptMessageHandler {
+    weak var target: WKScriptMessageHandler?
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        target?.userContentController(userContentController, didReceive: message)
+    }
+}
+
 class ScrayNativeView: ExpoView, WKScriptMessageHandler {
     let webView: WKWebView
+    let messageProxy = ScriptMessageProxy()
 
     required init(appContext: AppContext? = nil) {
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(VideoSchemeHandler(), forURLScheme: "scray-video")
+        config.userContentController.add(messageProxy, name: "scrayBridge")
         webView = WKWebView(frame: .zero, configuration: config)
         super.init(appContext: appContext)
-        config.userContentController.add(self, name: "scrayBridge")
+        messageProxy.target = self
         addSubview(webView)
     }
 

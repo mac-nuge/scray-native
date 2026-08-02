@@ -869,8 +869,14 @@ if (isLandscapeMobile) {
 // Player feedback overlay
 // ========================
 function showPlayerFeedback(message, position = 'top-left') {
+try {
 let overlay = document.getElementById('plyr-feedback');
 if (!overlay) {
+    const plyrContainer = document.querySelector('.plyr');
+    if (!plyrContainer) {
+        console.error('showPlayerFeedback: .plyr container not found in DOM');
+        return;
+    }
     overlay = document.createElement('div');
     overlay.id = 'plyr-feedback';
     overlay.style.position = 'absolute';
@@ -882,7 +888,7 @@ if (!overlay) {
     overlay.style.fontSize = '0.8rem';
     overlay.style.pointerEvents = 'none';
     overlay.style.transition = 'opacity 0.3s ease';
-    document.querySelector('.plyr').appendChild(overlay);
+    plyrContainer.appendChild(overlay);
 }
 
 // Forced landscape mode only: nudge notifications further right (away
@@ -904,6 +910,9 @@ clearTimeout(overlay._hideTimer);
 overlay._hideTimer = setTimeout(() => {
     overlay.style.opacity = '0';
 }, 500);
+} catch (err) {
+    console.error('showPlayerFeedback failed:', err.message);
+}
 }
 
 // ========================

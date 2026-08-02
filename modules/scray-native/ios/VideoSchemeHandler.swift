@@ -2,6 +2,8 @@ import WebKit
 
 class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
     weak var webView: WKWebView?
+    private var cancelledTasks = Set<ObjectIdentifier>()
+    private let lock = NSLock()
 
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
         guard let url = task.request.url else {
@@ -44,6 +46,19 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
         handle.seek(toFileOffset: UInt64(start))
         let data = handle.readData(ofLength: Int(length))
 
+        // Check whether WebKit cancelled this exact task while we were
+        // reading — responding to an already-stopped task is what was
+        // likely confusing AVFoundation's buffering/metadata state machine.
+        let taskId = ObjectIdentifier(task)
+        lock.lock()
+        let wasCancelled = cancelledTasks.remove(taskId) != nil
+        lock.unlock()
+
+        if wasCancelled {
+            log("SKIPPED: task for bytes \(start)-\(end) was cancelled before response was ready")
+            return
+        }
+
         log("responding \(statusCode), bytes \(start)-\(end) of \(fileSize) total, sent \(data.count) bytes, mime: \(mimeType(for: relativePath))")
 
         var headers = [
@@ -60,6 +75,10 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 
     func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {
+        let taskId = ObjectIdentifier(task)
+        lock.lock()
+        cancelledTasks.insert(taskId)
+        lock.unlock()
         log("task stopped/cancelled by WebKit")
     }
 

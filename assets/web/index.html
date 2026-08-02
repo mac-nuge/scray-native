@@ -482,7 +482,21 @@ console.error = (...args) => { origError.apply(console, args); appendToInlineCon
 
 copyBtn?.addEventListener('click', (e) => {
   const text = Array.from(inlineConsole.children).map(div => div.textContent).join('\n');
-  copyToClipboardWithFeedback(text, e);
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    document.execCommand('copy');
+    copyBtn.textContent = 'Copied!';
+  } catch (err) {
+    copyBtn.textContent = 'Failed';
+  }
+  document.body.removeChild(textarea);
+  setTimeout(() => { copyBtn.textContent = 'copy'; }, 1500);
 });
 });
 </script>

@@ -26,6 +26,14 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
             if let s = parts.first, let sVal = Int64(s) { start = sVal }
             if parts.count > 1, let e = Int64(parts[1]) { end = e }
             statusCode = 206
+        } else {
+            // Some iOS versions don't send a Range header on the first video
+            // request. Cap the response instead of blocking on a full read of
+            // potentially multi-GB files — return an initial chunk as 206 so
+            // AVFoundation knows more is available and requests it separately.
+            let initialChunk: Int64 = 2 * 1024 * 1024 // 2MB
+            end = min(fileSize - 1, initialChunk - 1)
+            statusCode = fileSize > initialChunk ? 206 : 200
         }
 
         let length = end - start + 1

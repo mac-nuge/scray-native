@@ -1,6 +1,7 @@
-// Replaces onedrive.js's folder-scanning role
 async function scanLocalLibrary() {
+  console.log("scanLocalLibrary: starting");
   const relativePaths = await ScrayBridge.listVideoFiles();
+  console.log("scanLocalLibrary: found " + relativePaths.length + " files: " + JSON.stringify(relativePaths));
 
   const videos = relativePaths.map(relPath => {
     const parts = relPath.split('/');
@@ -19,45 +20,34 @@ async function scanLocalLibrary() {
     };
   });
 
-  // Reuses your existing db.js logic unchanged — tags/levels are derived
-  // from `path` exactly as they were from OneDrive folder paths
   await saveVideos(videos, "local", "local", "local");
+  console.log("scanLocalLibrary: saved to IndexedDB");
 
   if (typeof populateTagDropdowns === 'function') {
     await populateTagDropdowns();
   }
 
-  console.log(`Scanned local library: ${videos.length} videos found`);
-}
-
-window.scanLocalLibrary = scanLocalLibrary;
-
-let scrayDebugLines = [];
-
-function debugLog(msg) {
-  scrayDebugLines.push(msg);
-
-  let el = document.getElementById('scrayDebugLog');
-  if (!el) {
-    el = document.createElement('textarea');
-    el.id = 'scrayDebugLog';
-    el.readOnly = true;
-    el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;height:150px;background:black;color:lime;font-size:11px;padding:4px;z-index:99999;border:2px solid lime;';
-    document.body.appendChild(el);
+  // This was the missing piece: populateTagDropdowns only updates the
+  // filter dropdowns, it never refreshes the visible video grid itself.
+  if (typeof filterDisplayedByFilename === 'function') {
+    await filterDisplayedByFilename();
+    console.log("scanLocalLibrary: grid refreshed");
+  } else {
+    console.error("scanLocalLibrary: filterDisplayedByFilename not found — grid won't update");
   }
-  el.value += msg + '\n';
+
+  console.log(`Scanned local library: ${videos.length} videos found`);
 }
 
 window.addEventListener("DOMContentLoaded", () => {
   document.getElementById("pickFolderBtn")?.addEventListener("click", async () => {
-    debugLog("pickFolderBtn clicked");
+    console.log("pickFolderBtn clicked");
     try {
-      debugLog("ScrayBridge exists: " + (typeof window.ScrayBridge));
       const result = await ScrayBridge.pickFolder();
-      debugLog("pickFolder result: " + JSON.stringify(result));
+      console.log("pickFolder result: " + JSON.stringify(result));
       await scanLocalLibrary();
     } catch (err) {
-      debugLog("pickFolder ERROR: " + err.message);
+      console.error("pickFolder ERROR: " + err.message);
     }
   });
   document.getElementById("rescanLibraryBtn")?.addEventListener("click", () => scanLocalLibrary());

@@ -27,5 +27,6 @@ function callNative(action, payload) {
 window.ScrayBridge = {
   pickFolder: () => callNative('pickFolder'),
   listVideoFiles: () => callNative('listVideoFiles'),
-  debugBundle: () => callNative('debugBundle')
+  debugBundle: () => callNative('debugBundle'),
+  getVideoDuration: (relativePath) => callNative('getVideoDuration', relativePath)
 };

@@ -1272,7 +1272,12 @@ const FRAME_STEP_ZONE_DOUBLE_TAP_MS = 300;
 const frameStepHoldSpeedState = { multiplier: 1, lastReleaseTime: 0 };
 
 function stepFrame(direction, multiplier = 1) {
-    if (!window.plyrPlayer || !window.plyrPlayer.duration) return;
+    if (!window.plyrPlayer) return;
+    let duration = window.plyrPlayer.duration;
+    if ((!duration || isNaN(duration) || duration <= 0) && window.currentPlayingVideo?.durationMs) {
+        duration = window.currentPlayingVideo.durationMs / 1000;
+    }
+    if (!duration) return;
 
     if (!window.plyrPlayer.paused) {
         window.plyrPlayer.pause();
@@ -1280,7 +1285,7 @@ function stepFrame(direction, multiplier = 1) {
 
     const newTime = Math.max(
         0,
-        Math.min(window.plyrPlayer.duration, window.plyrPlayer.currentTime + (direction * FRAME_STEP_DURATION * multiplier))
+        Math.min(duration, window.plyrPlayer.currentTime + (direction * FRAME_STEP_DURATION * multiplier))
     );
     window.plyrPlayer.currentTime = newTime;
 
@@ -3440,7 +3445,10 @@ window.renderBookmarkMarkers = renderBookmarkMarkers;
 // Update permanent progress bar
 function updatePermanentProgressBar() {
 const current = window.plyrPlayer.currentTime;
-const duration = window.plyrPlayer.duration;
+let duration = window.plyrPlayer.duration;
+if ((!duration || isNaN(duration) || duration <= 0) && window.currentPlayingVideo?.durationMs) {
+    duration = window.currentPlayingVideo.durationMs / 1000;
+}
 
 if (duration && !isNaN(duration) && duration > 0) {
 const percent = (current / duration) * 100;
@@ -5869,6 +5877,24 @@ window.plyrPlayer.source = {
     sources: [ { src: video.downloadUrl, type: 'video/mp4' } ],
     title: video.filename || ""
 };
+
+// AVFoundation doesn't always self-report duration for locally-streamed
+// files via our custom scheme, so fetch it directly from the real file
+// as a fallback for the UI to use.
+if (video.driveId === "local" && typeof ScrayBridge !== 'undefined') {
+    try {
+        const url = new URL(video.downloadUrl);
+        const relativePath = decodeURIComponent(url.pathname.replace(/^\//, ''));
+        ScrayBridge.getVideoDuration(relativePath).then(seconds => {
+            if (seconds > 0) {
+                video.durationMs = seconds * 1000;
+                console.log(`Native duration for ${video.filename}: ${seconds}s`);
+            }
+        }).catch(err => console.error("getVideoDuration failed:", err.message));
+    } catch (err) {
+        console.error("Could not parse downloadUrl for duration lookup:", err.message);
+    }
+}
 
 //  Setting .source rebuilds Plyr's internal video-wrapper/video
 // elements, which wipes their inline rotation styles immediately -

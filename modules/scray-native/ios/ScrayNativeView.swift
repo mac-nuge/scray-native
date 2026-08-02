@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import WebKit
+import AVFoundation
 
 // Proxy exists because WKUserContentController needs a handler registered
 // *before* the WKWebView is created (its configuration is copied at init time),
@@ -38,6 +39,8 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
               let id = body["id"] as? String,
               let action = body["action"] as? String else { return }
 
+        let payload = body["payload"]
+
         switch action {
         case "pickFolder":
             FolderPickerDelegate.shared.presentPicker { [weak self] result in
@@ -45,6 +48,23 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
             }
         case "listVideoFiles":
             resolve(id: id, result: BookmarkStore.shared.listVideoFiles())
+        case "getVideoDuration":
+            guard let relativePath = payload as? String,
+                  let fileURL = BookmarkStore.shared.resolveFile(forId: relativePath) else {
+                resolve(id: id, result: 0)
+                return
+            }
+            Task {
+                let asset = AVURLAsset(url: fileURL)
+                let seconds: Double
+                if let duration = try? await asset.load(.duration) {
+                    let value = CMTimeGetSeconds(duration)
+                    seconds = value.isFinite ? value : 0
+                } else {
+                    seconds = 0
+                }
+                self.resolve(id: id, result: seconds)
+            }
         case "debugBundle":
             let resourcePath = Bundle.main.resourcePath ?? "nil"
             let rootContents = (try? FileManager.default.contentsOfDirectory(atPath: resourcePath)) ?? []

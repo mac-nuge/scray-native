@@ -1,6 +1,6 @@
 // Replaces onedrive.js's folder-scanning role
 async function scanLocalLibrary() {
-  const relativePaths = await ScrayWebView.listVideoFiles();
+  const relativePaths = await ScrayBridge.listVideoFiles();
 
   const videos = relativePaths.map(relPath => {
     const parts = relPath.split('/');
@@ -33,6 +33,9 @@ async function scanLocalLibrary() {
 window.scanLocalLibrary = scanLocalLibrary;
 
 window.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("pickFolderBtn")?.addEventListener("click", () => ScrayWebView.pickFolder());
+  document.getElementById("pickFolderBtn")?.addEventListener("click", async () => {
+    await ScrayBridge.pickFolder();
+    await scanLocalLibrary();
+  });
   document.getElementById("rescanLibraryBtn")?.addEventListener("click", () => scanLocalLibrary());
 });

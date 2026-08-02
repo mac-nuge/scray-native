@@ -5108,6 +5108,11 @@ overlay.addEventListener('click', (e) => {
 // Refresh before playback
 // ========================
 async function refreshVideoBeforeUse(video) {
+   // Local videos need no refreshing — this function exists purely for
+   // OneDrive's expiring download URLs, which don't apply here.
+   if (video.driveId === "local" || (video.accountKey || "").startsWith("local::")) {
+       return video;
+   }
    try {
        const [accountIdStored] = (video.accountKey || "").split("::");
        let accountInfo = accountsData.find(acc => acc.accountId === accountIdStored);

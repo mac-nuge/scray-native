@@ -2,13 +2,6 @@
 // Index layout-specific basket toggle
 
 function toggleBasket(open = null) {
-// Desktop: basket always visible - no toggle functionality
-if (window.innerWidth >= 769) {
- console.log("Desktop mode - basket always visible");
- return;
-}
-
-// Mobile: existing behavior
 const panel = document.getElementById("basketPanel");
 if (!panel) return;
 const isOpening = open ?? !panel.classList.contains("basket-open");

@@ -1,3 +1,5 @@
+console.log("history.js loaded, version X");
+
 // ===== history.js =====
 let   // (P) play link
 historyVideos = JSON.parse(localStorage.getItem("scray_history") || "[]");

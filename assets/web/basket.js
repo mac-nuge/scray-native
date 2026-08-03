@@ -1,3 +1,5 @@
+console.log("basket.js loaded, version X");
+
 // ===== basket.js =====
 let basketVideos = JSON.parse(localStorage.getItem("scray_basket") || "[]");
 let selectedBasketIds = new Set();
@@ -2008,8 +2010,12 @@ document.getElementById("excelOnlineConnectBtn")?.addEventListener("click", () =
 });
 
 renderBasket();
+});
 
-// Swipe to dismiss (mobile only) - WITH DRAG-AND-DROP EXCEPTION
+// ✅ Swipe-to-dismiss basket (mobile only) - registered in its own
+// DOMContentLoaded listener so it still runs even if an earlier error
+// interrupts the main basket setup callback above
+window.addEventListener("DOMContentLoaded", () => {
 if (window.innerWidth < 769) {
 let touchStartX = 0;
 let touchStartY = 0;

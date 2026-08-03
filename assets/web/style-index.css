@@ -380,11 +380,6 @@ flex-grow: 1;
 overflow-y: auto;
 }
 
-/* Hide mobile basket panel */
-#basketPanel {
-  display: none !important;
-}
-
 /* Tag dropdowns column */
 #desktopTagDropdowns {
   display: flex;

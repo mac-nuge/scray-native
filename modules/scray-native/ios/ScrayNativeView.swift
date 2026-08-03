@@ -71,7 +71,7 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
                 } else {
                     seconds = 0
                 }
-                self.resolve(id: id, result: seconds)
+                self.resolve(id: id, result: ["duration": seconds])
             }
         case "debugBundle":
             let resourcePath = Bundle.main.resourcePath ?? "nil"

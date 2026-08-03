@@ -5885,7 +5885,8 @@ if (video.driveId === "local" && typeof ScrayBridge !== 'undefined') {
     try {
         const url = new URL(video.downloadUrl);
         const relativePath = decodeURIComponent(url.pathname.replace(/^\//, ''));
-        ScrayBridge.getVideoDuration(relativePath).then(seconds => {
+        ScrayBridge.getVideoDuration(relativePath).then(result => {
+            const seconds = result?.duration;
             if (seconds > 0) {
                 video.durationMs = seconds * 1000;
                 console.log(`Native duration for ${video.filename}: ${seconds}s`);

@@ -5,6 +5,40 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
     private var cancelledTasks = Set<ObjectIdentifier>()
     private let lock = NSLock()
 
+    // ✅ PERFORMANCE: WebKit issues MANY range requests while streaming a
+    // local file (not just during scrubbing - normal buffering does this
+    // constantly too). Previously every single request opened a fresh
+    // FileHandle and ran a stat() call via FileManager.attributesOfItem -
+    // needless disk/IO overhead repeated dozens of times per video. Now we
+    // resolve and stat a file once, then reuse the same open FileHandle
+    // for every subsequent range request against that same path.
+    private var openFiles: [String: (handle: FileHandle, size: Int64, url: URL)] = [:]
+    private let fileCacheLock = NSLock()
+
+    private func openFile(forId relativePath: String) -> (handle: FileHandle, size: Int64, url: URL)? {
+        fileCacheLock.lock()
+        if let cached = openFiles[relativePath] {
+            fileCacheLock.unlock()
+            return cached
+        }
+        fileCacheLock.unlock()
+
+        guard let fileURL = BookmarkStore.shared.resolveFile(forId: relativePath) else {
+            return nil
+        }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+              let fileSize = attrs[.size] as? Int64,
+              let handle = try? FileHandle(forReadingFrom: fileURL) else {
+            return nil
+        }
+
+        let entry = (handle: handle, size: fileSize, url: fileURL)
+        fileCacheLock.lock()
+        openFiles[relativePath] = entry
+        fileCacheLock.unlock()
+        return entry
+    }
+
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
         guard let url = task.request.url else {
             log("FAILED: no URL on request")
@@ -13,17 +47,12 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
         let rawPath = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
         let relativePath = rawPath.removingPercentEncoding ?? rawPath
 
-        guard let fileURL = BookmarkStore.shared.resolveFile(forId: relativePath) else {
-            log("FAILED: could not resolve file for '\(relativePath)' — bookmark/folder issue")
+        guard let file = openFile(forId: relativePath) else {
+            log("FAILED: could not resolve/open file for '\(relativePath)' — bookmark/folder issue")
             task.didFailWithError(NSError(domain: "scray", code: 404)); return
         }
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
-              let fileSize = attrs[.size] as? Int64,
-              let handle = try? FileHandle(forReadingFrom: fileURL) else {
-            log("FAILED: could not open file at \(fileURL.path)")
-            task.didFailWithError(NSError(domain: "scray", code: 500)); return
-        }
-        defer { handle.closeFile() }
+        let handle = file.handle
+        let fileSize = file.size
 
         var start: Int64 = 0
         var end: Int64 = fileSize - 1
@@ -41,8 +70,13 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
         }
 
         let length = end - start + 1
+
+        // Reused handles are shared across requests, so guard concurrent
+        // seek+read pairs on the same file handle from racing each other.
+        fileCacheLock.lock()
         handle.seek(toFileOffset: UInt64(start))
         let data = handle.readData(ofLength: Int(length))
+        fileCacheLock.unlock()
 
         // Check whether WebKit cancelled this exact task while we were
         // reading — responding to an already-stopped task is what was
@@ -97,5 +131,14 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
         DispatchQueue.main.async { [weak self] in
             self?.webView?.evaluateJavaScript("console.log('[VideoScheme] \(escaped)');")
         }
+    }
+
+    deinit {
+        fileCacheLock.lock()
+        for (_, entry) in openFiles {
+            entry.handle.closeFile()
+        }
+        openFiles.removeAll()
+        fileCacheLock.unlock()
     }
 }

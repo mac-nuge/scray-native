@@ -593,6 +593,8 @@ let startY = 0;
 let startTime = 0;
 let isHorizontalDrag = false;
 let isDetermined = false;
+let pendingScrubTime = null; // ✅ latest scrub target, applied once per rAF
+let scrubRafScheduled = false;
 
 const showScrubFeedback = (newTime) => {
 showPlayerFeedback(formatDuration(newTime * 1000), 'top-left');
@@ -675,6 +677,13 @@ if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouch
 scrubbing = false;
 isHorizontalDrag = false;
 isDetermined = false;
+
+// ✅ Land on the exact frame on release - fastSeek during the drag is
+// intentionally imprecise for speed, so do one accurate seek now.
+if (pendingScrubTime !== null) {
+    window.plyrPlayer.currentTime = pendingScrubTime;
+    pendingScrubTime = null;
+}
 };
 
 const scrubMove = (e) => {
@@ -789,8 +798,28 @@ const rect = wrapper.getBoundingClientRect();
      let newTime = startTime + (fractionMoved * window.plyrPlayer.duration * zoneMultiplier);
      newTime = Math.max(0, Math.min(newTime, window.plyrPlayer.duration));
      
-     window.plyrPlayer.currentTime = newTime;
-     showScrubFeedback(newTime);
+     // ✅ PERFORMANCE: touchmove can fire 60-120x/sec, far faster than a
+     // precise seek can complete. Setting currentTime on every event queues
+     // up a backlog of seeks - that's what causes the "catch up" lag.
+     // Instead: store only the latest target time, and apply it once per
+     // rendered frame via requestAnimationFrame, using fastSeek (keyframe-
+     // snapped, near-instant) while actively dragging for a real-time feel.
+     pendingScrubTime = newTime;
+     if (!scrubRafScheduled) {
+         scrubRafScheduled = true;
+         requestAnimationFrame(() => {
+             scrubRafScheduled = false;
+             if (pendingScrubTime === null) return;
+             const t = pendingScrubTime;
+             const videoEl = window.plyrPlayer.media;
+             if (videoEl && typeof videoEl.fastSeek === 'function') {
+                 videoEl.fastSeek(t);
+             } else {
+                 window.plyrPlayer.currentTime = t;
+             }
+             showScrubFeedback(t);
+         });
+     }
      };
 
 // Touch events - passive: false to allow conditional preventDefault
@@ -3172,7 +3201,19 @@ if (progressBar) {
 // Desktop: click and drag to seek
 let isDesktopSeeking = false;
 
-const desktopSeek = (e) => {
+let pendingDesktopSeekTime = null;
+let desktopSeekRafScheduled = false;
+
+const applyDesktopVideoSeek = (seekTime, precise) => {
+const videoEl = window.plyrPlayer.media;
+if (!precise && videoEl && typeof videoEl.fastSeek === 'function') {
+videoEl.fastSeek(seekTime);
+} else {
+window.plyrPlayer.currentTime = seekTime;
+}
+};
+
+const desktopSeek = (e, precise = false) => {
 if (!window.plyrPlayer.duration) return;
 
 const rect = progressBar.getBoundingClientRect();
@@ -3193,8 +3234,27 @@ const remaining = window.plyrPlayer.duration - seekTime; // Calculate remaining
 timestamp.textContent = `${formatDuration(seekTime * 1000)} / ${formatDuration(remaining * 1000)}`;
 }
 
-// Then update video position
-window.plyrPlayer.currentTime = seekTime;
+if (precise) {
+// ✅ Used on mousedown/mouseup - a single click or a released drag should
+// always land frame-accurate, not just keyframe-snapped.
+pendingDesktopSeekTime = null;
+applyDesktopVideoSeek(seekTime, true);
+} else {
+// ✅ PERFORMANCE: mousemove can fire faster than a precise seek
+// completes, queueing up seeks and causing the "catch up" lag. Throttle
+// the actual video seek to once per rendered frame, using fastSeek
+// (keyframe-snapped, near-instant) while dragging.
+pendingDesktopSeekTime = seekTime;
+if (!desktopSeekRafScheduled) {
+desktopSeekRafScheduled = true;
+requestAnimationFrame(() => {
+desktopSeekRafScheduled = false;
+if (pendingDesktopSeekTime === null) return;
+applyDesktopVideoSeek(pendingDesktopSeekTime, false);
+pendingDesktopSeekTime = null;
+});
+}
+}
 showPlayerFeedback(`${formatDuration(seekTime * 1000)}`, 'top-left');
 };
 
@@ -3202,7 +3262,7 @@ progressBar.addEventListener('mousedown', (e) => {
 if (!window.plyrPlayer.duration) return;
 armBookmarkMarkers(progressBar);
 isDesktopSeeking = true;
-desktopSeek(e);
+desktopSeek(e, true);
 e.preventDefault();
 console.log('Started desktop seeking');
 });
@@ -3214,6 +3274,7 @@ desktopSeek(e);
 
 progressBar.addEventListener('mouseup', (e) => {
 if (isDesktopSeeking) {
+desktopSeek(e, true);
 console.log(`Seeked to ${formatDuration(window.plyrPlayer.currentTime * 1000)} via progress bar drag`);
 }
 isDesktopSeeking = false;
@@ -3239,6 +3300,9 @@ isSeeking = true;
 e.stopPropagation();
 }, { passive: false });
 
+let pendingMobileSeekTime = null;
+let mobileSeekRafScheduled = false;
+
 progressBar.addEventListener('touchmove', (e) => {
 if (!isSeeking || !window.plyrPlayer.duration) return;
 
@@ -3251,12 +3315,35 @@ const touchX = touch.clientX - rect.left;
 const percent = Math.max(0, Math.min(1, touchX / rect.width));
 const seekTime = percent * window.plyrPlayer.duration;
 
-window.plyrPlayer.currentTime = seekTime;
+// ✅ PERFORMANCE: touchmove can fire faster than a precise seek completes,
+// queueing up seeks and causing the "catch up" lag. Throttle the actual
+// video seek to once per rendered frame, using fastSeek (keyframe-snapped,
+// near-instant) while dragging. touchend below does one final precise seek.
+pendingMobileSeekTime = seekTime;
+if (!mobileSeekRafScheduled) {
+mobileSeekRafScheduled = true;
+requestAnimationFrame(() => {
+mobileSeekRafScheduled = false;
+if (pendingMobileSeekTime === null) return;
+const videoEl = window.plyrPlayer.media;
+if (videoEl && typeof videoEl.fastSeek === 'function') {
+videoEl.fastSeek(pendingMobileSeekTime);
+} else {
+window.plyrPlayer.currentTime = pendingMobileSeekTime;
+}
+pendingMobileSeekTime = null;
+});
+}
 showPlayerFeedback(`${formatDuration(seekTime * 1000)}`, 'top-left');
 }, { passive: false });
 
 progressBar.addEventListener('touchend', (e) => {
 if (isSeeking) {
+    // ✅ Land on the exact frame on release
+    if (pendingMobileSeekTime !== null) {
+        window.plyrPlayer.currentTime = pendingMobileSeekTime;
+        pendingMobileSeekTime = null;
+    }
     console.log(`Seeked to ${formatDuration(window.plyrPlayer.currentTime * 1000)} via progress bar touch`);
 }
 isSeeking = false;
@@ -6276,13 +6363,22 @@ setInterval(ensureVideoInfoExists, 2000);
 // Also check on common events that might trigger DOM changes
 document.addEventListener('DOMContentLoaded', () => {
 // Watch for mutations that might remove the video info element
+// ✅ PERFORMANCE: without debouncing, this callback re-ran synchronously
+// on every single DOM mutation anywhere in the page (e.g. once per row
+// while a large playlist re-renders). Coalesce bursts of mutations into
+// a single check per animation frame instead.
+let mutationCheckScheduled = false;
 const observer = new MutationObserver((mutations) => {
-    // Check if video info was removed
-    const videoInfo = document.getElementById('currentVideoInfo');
-    if (!videoInfo && window.currentPlayingVideo) {
-        console.warn('Video info removed by mutation - restoring');
-        ensureVideoInfoExists();
-    }
+    if (mutationCheckScheduled) return;
+    mutationCheckScheduled = true;
+    requestAnimationFrame(() => {
+        mutationCheckScheduled = false;
+        const videoInfo = document.getElementById('currentVideoInfo');
+        if (!videoInfo && window.currentPlayingVideo) {
+            console.warn('Video info removed by mutation - restoring');
+            ensureVideoInfoExists();
+        }
+    });
 });
 
 // Observe the body for child removals

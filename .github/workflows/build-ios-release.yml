@@ -1,0 +1,48 @@
+name: Build offline release IPA
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - name: Inject build fingerprint
+        run: |
+          mkdir -p modules/scray-native/ios
+          echo "// Auto-generated at build time — do not edit or commit" > modules/scray-native/ios/BuildInfo.swift
+          echo "enum BuildInfo { static let id = \"$(date -u +%Y%m%dT%H%M%SZ)-${{ github.sha }}\" }" >> modules/scray-native/ios/BuildInfo.swift
+      - run: npx expo prebuild --platform ios
+      - name: Discover scheme name
+        id: scheme
+        run: |
+          cd ios
+          WORKSPACE=$(ls -d *.xcworkspace)
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          echo "Detected scheme: $SCHEME"
+          echo "name=$SCHEME" >> $GITHUB_OUTPUT
+      - name: Build unsigned .app (Release)
+        run: |
+          cd ios
+          xcodebuild -workspace *.xcworkspace -scheme "${{ steps.scheme.outputs.name }}" \
+            -configuration Release -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+      - name: Locate built .app
+        run: find ios/build -name "*.app" -maxdepth 6
+      - name: Package as .ipa
+        run: |
+          APP_PATH=$(find ios/build -name "*.app" -maxdepth 6 | head -n 1)
+          echo "Found app at: $APP_PATH"
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r scray-native-release.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scray-native-release-ipa
+          path: scray-native-release.ipa

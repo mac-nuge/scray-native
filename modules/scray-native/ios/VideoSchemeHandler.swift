@@ -12,8 +12,6 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
         }
         let rawPath = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
         let relativePath = rawPath.removingPercentEncoding ?? rawPath
-        let rangeHeader = task.request.value(forHTTPHeaderField: "Range") ?? "none"
-        log("request for '\(relativePath)', Range header: \(rangeHeader)")
 
         guard let fileURL = BookmarkStore.shared.resolveFile(forId: relativePath) else {
             log("FAILED: could not resolve file for '\(relativePath)' — bookmark/folder issue")
@@ -58,8 +56,6 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
             log("SKIPPED: task for bytes \(start)-\(end) was cancelled before response was ready")
             return
         }
-
-        log("responding \(statusCode), bytes \(start)-\(end) of \(fileSize) total, sent \(data.count) bytes, mime: \(mimeType(for: relativePath))")
 
         var headers = [
             "Content-Type": mimeType(for: relativePath),

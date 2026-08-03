@@ -3443,11 +3443,17 @@ if (isTouchDevice && !progressBar.dataset.bookmarkDisarmBound) {
 window.renderBookmarkMarkers = renderBookmarkMarkers;
 
 // Update permanent progress bar
+let _lastLoggedDuration = null;
 function updatePermanentProgressBar() {
 const current = window.plyrPlayer.currentTime;
 let duration = window.plyrPlayer.duration;
+const rawDuration = duration;
 if ((!duration || isNaN(duration) || duration <= 0) && window.currentPlayingVideo?.durationMs) {
     duration = window.currentPlayingVideo.durationMs / 1000;
+}
+if (duration !== _lastLoggedDuration) {
+    _lastLoggedDuration = duration;
+    console.log(`updatePermanentProgressBar: plyr.duration=${rawDuration}, currentPlayingVideo.durationMs=${window.currentPlayingVideo?.durationMs}, resolved duration=${duration}, current=${current}`);
 }
 
 if (duration && !isNaN(duration) && duration > 0) {
@@ -3491,9 +3497,20 @@ if (window.plyrPlayer.fullscreen?.active) {
 }
 }
 
-// Initialize permanent progress bar on ready
+// Initialize permanent progress bar on ready — guarded so redundant
+// 'ready'/'loadedmetadata' firings for the SAME video don't wipe an
+// already-correct progress bar back to 0:00/0:00.
+let _progressBarSetupForVideoId = null;
+let _readyFireCount = 0;
 window.plyrPlayer.on('ready', () => {
-setupPermanentProgressBar();
+_readyFireCount++;
+console.log(`'ready' event fired (count: ${_readyFireCount})`);
+if (window.currentPlayingVideo?.oneDriveId !== _progressBarSetupForVideoId) {
+    _progressBarSetupForVideoId = window.currentPlayingVideo?.oneDriveId;
+    setupPermanentProgressBar();
+} else {
+    console.log('Skipping redundant progress bar rebuild (same video)');
+}
 cleanupPlyrControls();
 console.log('Permanent progress bar ready');
 });
@@ -3513,9 +3530,16 @@ if (timestamp) timestamp.style.opacity = '1';
 window.plyrPlayer.on('timeupdate', updatePermanentProgressBar);
 
 // Recreate on source change (new video loaded)
+let _loadedMetadataFireCount = 0;
 window.plyrPlayer.on('loadedmetadata', () => {
-console.log('New video loaded, setting up permanent progress bar');
-setupPermanentProgressBar(); //  Also calls renderBookmarkMarkers() internally
+_loadedMetadataFireCount++;
+console.log(`'loadedmetadata' event fired (count: ${_loadedMetadataFireCount})`);
+if (window.currentPlayingVideo?.oneDriveId !== _progressBarSetupForVideoId) {
+    _progressBarSetupForVideoId = window.currentPlayingVideo?.oneDriveId;
+    setupPermanentProgressBar(); //  Also calls renderBookmarkMarkers() internally
+} else {
+    console.log('Skipping redundant progress bar rebuild (same video)');
+}
 setTimeout(cleanupPlyrControls, 100); // Delay to ensure Plyr is ready
 
 //  Reapply forced-landscape rotation styles here too - covers the

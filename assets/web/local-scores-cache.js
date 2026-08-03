@@ -18,6 +18,24 @@ function formatFileSize(bytes) {
 }
 window.formatFileSize = formatFileSize;
 
+// Also deleted along with onedrive.js/auth.js in Phase 6.2, never ported —
+// used in 47 places including the progress bar and all seek/frame-step
+// feedback messages. Takes milliseconds, returns "M:SS" or "H:MM:SS".
+function formatDuration(ms) {
+  if (!ms || isNaN(ms) || ms < 0) return "0:00";
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const paddedSeconds = seconds.toString().padStart(2, "0");
+  if (hours > 0) {
+    const paddedMinutes = minutes.toString().padStart(2, "0");
+    return `${hours}:${paddedMinutes}:${paddedSeconds}`;
+  }
+  return `${minutes}:${paddedSeconds}`;
+}
+window.formatDuration = formatDuration;
+
 let cachedVideoScores = new Map();
 let cachedVideoBookmarks = new Map();
 

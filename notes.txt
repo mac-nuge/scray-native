@@ -1,0 +1,3 @@
+npx expo start --dev-client
+
+npx serve assets/web -l 8080

@@ -1894,6 +1894,36 @@ padding: 2px 4px !important;
 transition: opacity 0.15s ease, background 0.15s ease;
 }
 
+/* Small video-title bar pinned to the very top of the FLS player,
+   matching the controls bar's transparency/background exactly. */
+.fls-video-title {
+display: none;
+font-size: 0.65rem;
+color: #fff;
+white-space: nowrap;
+overflow: hidden;
+text-overflow: ellipsis;
+max-width: 80%;
+opacity: 0.5;
+background: rgba(0, 0, 0, 0.5) !important;
+border-radius: 6px;
+padding: 2px 4px !important;
+pointer-events: none;
+transition: opacity 0.15s ease;
+}
+
+body.manual-rotate-landscape .fls-video-title {
+display: block;
+}
+
+/* Hide the title together with the player controls - Plyr toggles
+   .plyr--hide-controls on the player root during playback inactivity,
+   the same signal the frame-step tap zones already key off elsewhere. */
+.plyr--hide-controls .fls-video-title {
+opacity: 0 !important;
+pointer-events: none;
+}
+
 /* ⚙️ Forced landscape: hide the mobile filter bar entirely - it isn't
    inside the fullscreen element, so it can otherwise render on top of
    the loading overlay/video depending on stacking context. */

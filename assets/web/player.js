@@ -115,14 +115,24 @@ function getManualRotationTargets() {
     const video = container.querySelector('video, .plyr__video-embed') || (container.tagName === 'VIDEO' ? container : null);
     const controls = container.querySelector('.plyr__controls') || document.querySelector('.plyr__controls');
     const progressBar = document.getElementById('permanentProgressBar');
+    // ✅ Small title bar at the very top of the rotated player, showing the
+    // current video's filename. Created once and reused (persists inside
+    // the fullscreen container between rotation toggles).
+    let title = container.querySelector('.fls-video-title');
+    if (!title) {
+        title = document.createElement('div');
+        title.className = 'fls-video-title';
+        container.appendChild(title);
+    }
     console.log('[rotate] targets found:', {
         container: !!container,
         wrapper: !!wrapper,
         video: !!video,
         controls: !!controls,
-        progressBar: !!progressBar
+        progressBar: !!progressBar,
+        title: !!title
     });
-    return { container, wrapper, video, controls, progressBar };
+    return { container, wrapper, video, controls, progressBar, title };
 }
 
 function setImportantStyles(el, styles) {
@@ -138,7 +148,7 @@ function applyManualRotationStyles() {
         console.warn('[rotate] applyManualRotationStyles: no container, aborting');
         return;
     }
-    const { container, wrapper, video, controls, progressBar } = targets;
+    const { container, wrapper, video, controls, progressBar, title } = targets;
 
     // Use actual pixel dimensions rather than vw/vh - more reliable across
     // mobile browser chrome show/hide during fullscreen transitions
@@ -219,6 +229,20 @@ function applyManualRotationStyles() {
         'align-items': 'center',
         'z-index': '2147483647'
     });
+
+    // Video title, pinned to the very top of the rotated player (opposite
+    // edge from the controls bar below), showing the current filename.
+    if (title) {
+        title.textContent = window.currentPlayingVideo?.filename || '';
+        setImportantStyles(title, {
+            position: 'absolute',
+            top: 'calc(5% + 2px)',
+            left: '50%',
+            right: 'auto',
+            transform: 'translateX(-50%)',
+            'z-index': '2147483647'
+        });
+    }
     // The progress bar goes BELOW the controls, i.e. closer to the
     // container's own local edge - so its "bottom" offset must be SMALLER
     // than the controls' bottom offset, not larger. Sit it in the gap
@@ -255,7 +279,7 @@ function applyManualRotationStyles() {
 function removeManualRotationStyles() {
     const targets = getManualRotationTargets();
     if (!targets) return;
-    [targets.container, targets.wrapper, targets.video, targets.controls, targets.progressBar].forEach(el => {
+    [targets.container, targets.wrapper, targets.video, targets.controls, targets.progressBar, targets.title].forEach(el => {
         if (!el) return;
         MANUAL_ROTATE_PROPS.forEach(prop => el.style.removeProperty(prop));
         el.style.removeProperty('z-index');
@@ -5923,6 +5947,13 @@ console.log('Right-click context menu enabled for video info');
 }
 
 computeBottomDock(); // Info bar height may have changed - recompute dock
+
+// Keep the FLS title bar in sync if already active, e.g. when switching
+// videos via next/random while still in fullscreen.
+if (typeof manualRotationActive !== 'undefined' && manualRotationActive) {
+    const flsTitle = document.querySelector('.fls-video-title');
+    if (flsTitle) flsTitle.textContent = video.filename || '';
+}
 
 }; // This closes the rebuildVideoInfoDisplay function
 

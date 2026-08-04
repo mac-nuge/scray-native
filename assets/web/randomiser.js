@@ -795,8 +795,49 @@ editBtn.title = 'Edit search';
 editBtn.addEventListener('click', (ev) => {
     ev.stopPropagation();
     popup.remove();
-    // Reuses the same "jump to search" logic as the F corner button
-    document.getElementById('jumpSearchBtn')?.click();
+
+    // ✅ Custom focus logic (NOT the jumpSearchBtn path) - deliberately
+    // avoids calling .select(), which would highlight all existing text
+    // and cause the next keystroke to wipe it out instead of appending.
+    // Places the cursor at the end of the existing text instead, so
+    // typing continues/adds onto the current search term.
+    const isLandscape = window.matchMedia('(orientation: landscape)').matches;
+    const isMobile = window.innerWidth <= 1024;
+
+    if (isLandscape && isMobile) {
+        const panelSearchBox = document.getElementById("panelSearchBox");
+        if (panelSearchBox) {
+            panelSearchBox.focus();
+            panelSearchBox.click();
+            setTimeout(() => {
+                const len = panelSearchBox.value.length;
+                panelSearchBox.setSelectionRange(len, len);
+            }, 50);
+        }
+        if (typeof window.toggleRandomPlaylistPanel === 'function') {
+            const panel = document.getElementById("randomPlaylistPanel");
+            if (panel && !panel.classList.contains("random-panel-open")) {
+                window.toggleRandomPlaylistPanel(true);
+            }
+        }
+        if (typeof filterDisplayedByFilename === 'function') {
+            window.skipSearchScroll = true;
+            filterDisplayedByFilename();
+        }
+    } else {
+        const searchBox = document.getElementById("filenameSearchBox");
+        if (searchBox) {
+            const isMobilePortrait = window.innerWidth <= 768 && window.matchMedia('(orientation: portrait)').matches;
+            if (!isMobilePortrait && typeof scrollToSearchBox === 'function') {
+                scrollToSearchBox(searchBox);
+            }
+            searchBox.focus({ preventScroll: true });
+            setTimeout(() => {
+                const len = searchBox.value.length;
+                searchBox.setSelectionRange(len, len);
+            }, 50);
+        }
+    }
 });
 
 const clearBtn = document.createElement('button');

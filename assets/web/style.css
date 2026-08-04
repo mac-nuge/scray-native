@@ -261,7 +261,7 @@ align-items: center;
    active, so it's clear the search box is still focused/typing */
 body.keyboard-active .floating-tag-search::after {
 content: '|';
-margin-left: 2px;
+margin-left: -1px; /* ⚙️ tune this to nudge the fake cursor closer/further from the text */
 animation: searchPillCursorBlink 1s step-end infinite;
 }
 

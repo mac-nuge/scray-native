@@ -1,43 +1,67 @@
 /**
 * IndexedDB setup for Scray Picker
-* Uses `oneDriveId` as primary key to avoid duplicates if files are renamed/moved in OneDrive
+*
+* Two-store architecture:
+* - videoSource: everything derivable from the video file / a rescan or
+*   future Excel-videos-tab import. Freely overwritten every scan/import -
+*   never hand-edited.
+* - videoMeta: everything you create yourself (score, notes, bookmarks) or
+*   that's event-driven (view_count, last_played, first_seen, f_tally).
+*   Only ever written by explicit app actions - never silently overwritten
+*   by a rescan.
+*
+* Both stores share the same key (kept as "oneDriveId" for compatibility
+* with the rest of the app, even though for local files it now just holds
+* a stable local file identifier rather than a real OneDrive ID).
+*
+* getAllVideos() joins both stores into the same flat shape the rest of
+* the app already expects.
 */
 const DB_NAME = "scray_picker";
-const DB_VERSION = 8; // bumped to 8 to add bitrate field
-const STORE_NAME = "videos";
+const DB_VERSION = 9; // bumped to 9: split into videoSource + videoMeta stores
+const STORE_NAME = "videoSource";
+const META_STORE_NAME = "videoMeta";
 
-/**
-* Open IndexedDB connection
-* - On upgrade, recreate store with oneDriveId as keyPath
-*/
+// Fields that belong to you, not the file. updateVideoInDB() in
+// file-operations.js auto-routes any of these to videoMeta so existing
+// callers (saveBookmarks, etc.) keep working without changes.
+const META_FIELDS = new Set([
+  "user_score", "notes", "bookmarks", "view_count",
+  "last_played", "first_seen", "f_tally"
+]);
+window.VIDEO_META_FIELDS = META_FIELDS;
+
 function openDB() {
-   return new Promise((resolve, reject) => {
-       const request = indexedDB.open(DB_NAME, DB_VERSION);
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-       request.onupgradeneeded = (event) => {
-           const db = event.target.result;
-           // Remove old store if exists
-           if (db.objectStoreNames.contains(STORE_NAME)) db.deleteObjectStore(STORE_NAME);
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
 
-// ✅ oneDriveId is the stable Graph item ID, so use as key
-       const store = db.createObjectStore(STORE_NAME, { keyPath: "oneDriveId" });
-      store.createIndex("path", "path");
-      store.createIndex("filename", "filename");
-      store.createIndex("webUrl", "webUrl");
-      store.createIndex("accountKey", "accountKey");
-      store.createIndex("tags", "tags", { multiEntry: true });
-      // Add indexes for new fields
-      store.createIndex("mimeType", "mimeType");
-      store.createIndex("orientation", "orientation");
-      store.createIndex("createdDateTime", "createdDateTime");
-      store.createIndex("lastModifiedDateTime", "lastModifiedDateTime");
-      store.createIndex("bitrate", "bitrate");
-      // We don't need indexes for level_x unless you want to filter on them in IndexedDB queries
-      };
+      if (db.objectStoreNames.contains(STORE_NAME)) db.deleteObjectStore(STORE_NAME);
+      if (db.objectStoreNames.contains(META_STORE_NAME)) db.deleteObjectStore(META_STORE_NAME);
 
-       request.onsuccess = e => resolve(e.target.result);
-       request.onerror = e => reject(e.target.error);
-   });
+      const sourceStore = db.createObjectStore(STORE_NAME, { keyPath: "oneDriveId" });
+      sourceStore.createIndex("path", "path");
+      sourceStore.createIndex("filename", "filename");
+      sourceStore.createIndex("webUrl", "webUrl");
+      sourceStore.createIndex("accountKey", "accountKey");
+      sourceStore.createIndex("tags", "tags", { multiEntry: true });
+      sourceStore.createIndex("mimeType", "mimeType");
+      sourceStore.createIndex("orientation", "orientation");
+      sourceStore.createIndex("createdDateTime", "createdDateTime");
+      sourceStore.createIndex("lastModifiedDateTime", "lastModifiedDateTime");
+      sourceStore.createIndex("bitrate", "bitrate");
+      sourceStore.createIndex("fingerprint", "fingerprint");
+
+      const metaStore = db.createObjectStore(META_STORE_NAME, { keyPath: "oneDriveId" });
+      metaStore.createIndex("user_score", "user_score");
+      metaStore.createIndex("last_played", "last_played");
+    };
+
+    request.onsuccess = e => resolve(e.target.result);
+    request.onerror = e => reject(e.target.error);
+  });
 }
 
 /** Convert folder path into tags array */
@@ -52,88 +76,65 @@ function generateTagsFromPath(pathString) {
 /**
 * Extract tags from square brackets in filename
 * Example: "video[tag1][tag2].mp4" → ["tag1", "tag2"]
-* Spaces in tags are converted to hyphens
 */
 function generateTagsFromFilename(filename) {
   if (!filename) return [];
-  
   const bracketRegex = /\[([^\]]+)\]/g;
   const tags = [];
   let match;
-  
   while ((match = bracketRegex.exec(filename)) !== null) {
       const tag = match[1].trim().replace(/\s+/g, "-").toLowerCase();
-      if (tag.length > 0) {
-          tags.push(tag);
-      }
+      if (tag.length > 0) tags.push(tag);
   }
-  
   return tags;
 }
 
-/**
-* Extract tags from square brackets in filename
-* Example: "video[tag1][tag2].mp4" → ["tag1", "tag2"]
-* Spaces in tags are converted to hyphens
-*/
-function generateTagsFromFilename(filename) {
-  if (!filename) return [];
-  
-  const bracketRegex = /\[([^\]]+)\]/g;
-  const tags = [];
-  let match;
-  
-  while ((match = bracketRegex.exec(filename)) !== null) {
-      const tag = match[1].trim().replace(/\s+/g, "-").toLowerCase();
-      if (tag.length > 0) {
-          tags.push(tag);
-      }
-  }
-  
-  return tags;
-}
-
-/**
-* Extract folder levels from path into separate fields level_1...level_5
-* - level_1..level_4 = respective folder names
-* - level_5 = fifth folder and all deeper folders joined with "_"
-*/
+/** Extract folder levels from path into level_1...level_5 */
 function generateLevelFieldsFromPath(pathString) {
    const levels = {};
    if (!pathString) return levels;
-
    const folders = pathString
        .split("/")
        .filter(Boolean)
        .map(folder => folder.trim().replace(/\s+/g, "-").toLowerCase());
-
    folders.forEach((folderName, idx) => {
        const levelNum = idx + 1;
        if (levelNum <= 4) {
            levels[`level_${levelNum}`] = folderName;
        } else if (levelNum === 5) {
-           const merged = folders.slice(idx).join("_");
-           levels[`level_${levelNum}`] = merged;
+           levels[`level_${levelNum}`] = folders.slice(idx).join("_");
        }
    });
-
    return levels;
 }
 
 /**
-* Save videos into IndexedDB with tags + level_x fields
-* @param {Array} videos - list of video objects from Graph API
-* @param {string} username - OneDrive account username
-* @param {string} accountId - MSAL homeAccountId
-* @param {string} driveId - OneDrive drive ID
+* Build a fingerprint string for cross-referencing a local video against
+* Excel Videos-tab rows (joined with raw_data for width/height/duration).
+* Not a storage key - used as a corroboration signal with tolerance bands
+* at match time, not exact equality.
+*/
+function buildVideoFingerprint({ filename, width, height, durationMs, bitrate }) {
+  const w = width ?? "?";
+  const h = height ?? "?";
+  const d = durationMs != null ? Math.round(durationMs / 1000) : "?";
+  const b = bitrate != null ? Math.round(bitrate / 1000) : "?";
+  return `${filename}|${w}x${h}|${d}s|${b}kbps`;
+}
+window.buildVideoFingerprint = buildVideoFingerprint;
+
+/**
+* Save videos into videoSource (native/derivable fields only). Called by
+* scanLocalLibrary(). Also ensures a default videoMeta row exists for
+* each video, stamping first_seen the first time it's ever scanned.
 */
 async function saveVideos(videos, username, accountId, driveId) {
    const db = await openDB();
-   const tx = db.transaction(STORE_NAME, "readwrite");
-   const store = tx.objectStore(STORE_NAME);
+   const tx = db.transaction([STORE_NAME, META_STORE_NAME], "readwrite");
+   const sourceStore = tx.objectStore(STORE_NAME);
+   const metaStore = tx.objectStore(META_STORE_NAME);
 
-   videos.forEach(video => {
-       // Extract or heal IDs from video or webUrl
+   for (const video of videos) {
        let vidId = video.idFromAPI ?? video.oneDriveId ?? null;
        let drvId = driveId;
        if ((!vidId || !drvId) && video.webUrl) {
@@ -146,64 +147,139 @@ async function saveVideos(videos, username, accountId, driveId) {
            } catch {}
        }
 
-// Prepare tags + level_x fields
     const pathTags = generateTagsFromPath(video.path);
     const filenameBracketTags = generateTagsFromFilename(video.name || video.filename);
-    const tagsArray = [...new Set([...pathTags, ...filenameBracketTags])]; // Merge and deduplicate (path tags have priority)
+    const tagsArray = [...new Set([...pathTags, ...filenameBracketTags])];
     const levelFields = generateLevelFieldsFromPath(video.path);
-    
-    // ✅ Store bracket tags as level_5 (join multiple bracket tags with semicolon)
-    // If level_5 already has folder data, append bracket tags; otherwise just use bracket tags
+
     if (filenameBracketTags.length > 0) {
-        if (levelFields.level_5) {
-            // Append to existing level_5 folder data
-            levelFields.level_5 = levelFields.level_5 + ';' + filenameBracketTags.join(';');
-        } else {
-            // No level_5 folder data, just use bracket tags
-            levelFields.level_5 = filenameBracketTags.join(';');
-        }
+        levelFields.level_5 = levelFields.level_5
+            ? levelFields.level_5 + ';' + filenameBracketTags.join(';')
+            : filenameBracketTags.join(';');
     }
-    
-// Store full record
-store.put({
-   oneDriveId: vidId,
-   driveId: drvId,
-   accountKey: `${accountId}::${drvId}`,
-   accountName: username,
-   path: video.path,
-   webUrl: video.webUrl,
-   filename: video.name || video.filename,
-   downloadUrl: video.downloadUrl,
-   sizeBytes: video.sizeBytes,
-   durationMs: video.durationMs ?? null,
-   createdDateTime: video.createdDateTime ?? null,
-   lastModifiedDateTime: video.lastModifiedDateTime ?? null,
-   mimeType: video.mimeType ?? null,
-   width: video.width ?? null,
-   height: video.height ?? null,
-   orientation: video.orientation ?? null,
-   bitrate: video.bitrate ?? null,
-   tags: tagsArray,
-   bracketTags: filenameBracketTags, // Also store as separate array for easy access
-   bookmarks: video.bookmarks || [], 
-   ...levelFields // merges level_1..level_5 into separate fields (now includes level_4 bracket tags)
-});
-   });
+
+    const filename = video.name || video.filename;
+    const fingerprint = buildVideoFingerprint({
+        filename, width: video.width, height: video.height,
+        durationMs: video.durationMs, bitrate: video.bitrate
+    });
+
+    sourceStore.put({
+       oneDriveId: vidId,
+       driveId: drvId,
+       accountKey: `${accountId}::${drvId}`,
+       accountName: username,
+       path: video.path,
+       webUrl: video.webUrl,
+       filename,
+       downloadUrl: video.downloadUrl,
+       sizeBytes: video.sizeBytes,
+       durationMs: video.durationMs ?? null,
+       createdDateTime: video.createdDateTime ?? null,
+       lastModifiedDateTime: video.lastModifiedDateTime ?? null,
+       mimeType: video.mimeType ?? null,
+       width: video.width ?? null,
+       height: video.height ?? null,
+       orientation: video.orientation ?? null,
+       bitrate: video.bitrate ?? null,
+       tags: tagsArray,
+       bracketTags: filenameBracketTags,
+       fingerprint,
+       lastScanned: new Date().toISOString(),
+       ...levelFields
+    });
+
+    const existingMeta = await new Promise((resolve, reject) => {
+        const req = metaStore.get(vidId);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+    if (!existingMeta) {
+        metaStore.put({
+            oneDriveId: vidId,
+            user_score: null,
+            notes: null,
+            bookmarks: [],
+            view_count: 0,
+            last_played: null,
+            first_seen: new Date().toISOString(),
+            f_tally: 0,
+            updatedAt: new Date().toISOString(),
+            updatedBy: "scan"
+        });
+    }
+   }
 
    return tx.complete;
 }
 
-/** Get all saved videos */
+/**
+* Write to videoMeta only. Stamps updatedAt/updatedBy so a future
+* merge-conflict UI can show provenance before overwriting anything.
+*/
+async function saveVideoMeta(oneDriveId, metaUpdates, updatedBy = "app") {
+  const db = await openDB();
+  const tx = db.transaction(META_STORE_NAME, "readwrite");
+  const store = tx.objectStore(META_STORE_NAME);
+
+  const existing = await new Promise((resolve, reject) => {
+    const req = store.get(oneDriveId);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+
+  store.put({
+    ...(existing || {
+      oneDriveId, user_score: null, notes: null, bookmarks: [],
+      view_count: 0, last_played: null, first_seen: new Date().toISOString(), f_tally: 0
+    }),
+    ...metaUpdates,
+    oneDriveId,
+    updatedAt: new Date().toISOString(),
+    updatedBy
+  });
+
+  return tx.complete;
+}
+window.saveVideoMeta = saveVideoMeta;
+
+/** Get all rows from videoMeta directly (rarely needed - prefer getAllVideos()) */
+async function getAllVideoMeta() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(META_STORE_NAME, "readonly");
+    const request = tx.objectStore(META_STORE_NAME).getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+window.getAllVideoMeta = getAllVideoMeta;
+
+/** Get all videos, merged from videoSource + videoMeta into the flat shape the rest of the app expects */
 async function getAllVideos() {
    const db = await openDB();
-   return new Promise((resolve, reject) => {
+   const [sourceRows, metaRows] = await Promise.all([
+     new Promise((resolve, reject) => {
        const tx = db.transaction(STORE_NAME, "readonly");
-       const store = tx.objectStore(STORE_NAME);
-       const request = store.getAll();
-       request.onsuccess = () => resolve(request.result || []);
-       request.onerror = () => reject(request.error);
-   });
+       const req = tx.objectStore(STORE_NAME).getAll();
+       req.onsuccess = () => resolve(req.result || []);
+       req.onerror = () => reject(req.error);
+     }),
+     new Promise((resolve, reject) => {
+       const tx = db.transaction(META_STORE_NAME, "readonly");
+       const req = tx.objectStore(META_STORE_NAME).getAll();
+       req.onsuccess = () => resolve(req.result || []);
+       req.onerror = () => reject(req.error);
+     })
+   ]);
+
+   const metaById = new Map(metaRows.map(m => [m.oneDriveId, m]));
+   return sourceRows.map(source => ({
+     ...source,
+     ...(metaById.get(source.oneDriveId) || {})
+   }));
 }
+window.getAllVideos = getAllVideos;
 
 /** Get all unique tags from saved videos */
 async function getAllTags() {
@@ -212,52 +288,74 @@ async function getAllTags() {
    videos.forEach(rec => Array.isArray(rec.tags) && rec.tags.forEach(t => tagsSet.add(t)));
    return Array.from(tagsSet).sort();
 }
+window.getAllTags = getAllTags;
 
-/** Clear the videos store */
+/** Clear videoSource only - a rescan should never wipe your notes/bookmarks/scores */
 async function clearVideos() {
    const db = await openDB();
    const tx = db.transaction(STORE_NAME, "readwrite");
    tx.objectStore(STORE_NAME).clear();
    return tx.complete;
 }
-
-// Expose globally
-window.getAllVideos = getAllVideos;
-window.getAllTags = getAllTags;
-window.saveVideos = saveVideos; // ✅ points to the correct version
 window.clearVideos = clearVideos;
-window.generateTagsFromFilename = generateTagsFromFilename; // ✅ Export for use in basket refresh and UI
+
+/** Export all merged videos to a CSV string, mirroring your Excel db's column names */
+async function exportVideosToCsv() {
+  const videos = await getAllVideos();
+  const columns = [
+    ["filename", v => v.filename],
+    ["file_size_bytes", v => v.sizeBytes],
+    ["bitrate", v => v.bitrate],
+    ["width", v => v.width],
+    ["height", v => v.height],
+    ["duration_ms", v => v.durationMs],
+    ["path", v => v.path],
+    ["view_count", v => v.view_count],
+    ["user_score", v => v.user_score],
+    ["notes", v => v.notes],
+    ["last_played", v => v.last_played],
+    ["first_seen", v => v.first_seen],
+    ["tags", v => Array.isArray(v.tags) ? v.tags.join(";") : ""],
+    ["f_tally", v => v.f_tally],
+    ["bookmarks", v => JSON.stringify(v.bookmarks || [])]
+  ];
+
+  const csvEscape = val => {
+    const s = val === null || val === undefined ? "" : String(val);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const header = columns.map(([name]) => name).join(",");
+  const rows = videos.map(v => columns.map(([, getter]) => csvEscape(getter(v))).join(","));
+  return [header, ...rows].join("\n");
+}
+window.exportVideosToCsv = exportVideosToCsv;
+
+window.generateTagsFromFilename = generateTagsFromFilename;
 
 async function ingestYetToUploadCSV(file) {
 let filenames = [];
 
 const ext = file.name.split(".").pop().toLowerCase();
 if (ext === "xlsx") {
-    // Read XLSX via SheetJS
     const data = await file.arrayBuffer();
     const workbook = XLSX.read(data, { type: "array" });
-
     const firstSheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[firstSheetName];
-
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-    // Clean first cell of each row
     filenames = rows
         .map(row => {
             let cell = row && row.length > 0 ? String(row[0]).trim() : "";
-            cell = cell.replace(/,+$/, ""); // 🚀 remove trailing commas
+            cell = cell.replace(/,+$/, "");
             return cell;
         })
         .filter(Boolean);
-
     console.log(`Read ${filenames.length} filenames from XLSX`);
 } else {
-    // CSV fallback
     const text = await file.text();
     filenames = text
         .split(/\r?\n/)
-        .map(l => l.trim().replace(/,+$/, "")) // 🚀 remove trailing commas
+        .map(l => l.trim().replace(/,+$/, ""))
         .filter(Boolean);
     console.log(`Read ${filenames.length} filenames from CSV`);
 }
@@ -271,7 +369,6 @@ const db = await openDB();
 const tx = db.transaction(STORE_NAME, "readwrite");
 const store = tx.objectStore(STORE_NAME);
 
-// Delete old yet-to-upload entries
 const all = await new Promise((resolve, reject) => {
     const req = store.getAll();
     req.onsuccess = () => resolve(req.result || []);
@@ -281,7 +378,6 @@ const toDelete = all.filter(v => v.path === "yet-to-upload");
 toDelete.forEach(v => store.delete(v.oneDriveId));
 console.log(`Deleted ${toDelete.length} existing yet-to-upload entries`);
 
-// Insert new cleaned entries
 filenames.forEach((filename, idx) => {
     const vidId = `manual-${Date.now()}-${idx}`;
     store.put({

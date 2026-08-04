@@ -73,6 +73,60 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
                 }
                 self.resolve(id: id, result: ["duration": seconds])
             }
+        case "getVideoMetadata":
+            guard let relativePath = payload as? String,
+                  let fileURL = BookmarkStore.shared.resolveFile(forId: relativePath) else {
+                resolve(id: id, result: [String: Any]())
+                return
+            }
+            Task {
+                let asset = AVURLAsset(url: fileURL)
+
+                var seconds: Double = 0
+                if let duration = try? await asset.load(.duration) {
+                    let value = CMTimeGetSeconds(duration)
+                    seconds = value.isFinite ? value : 0
+                }
+
+                var width: Double?
+                var height: Double?
+                var bitrate: Double?
+                if let track = try? await asset.loadTracks(withMediaType: .video).first {
+                    if let naturalSize = try? await track.load(.naturalSize),
+                       let transform = try? await track.load(.preferredTransform) {
+                        let size = naturalSize.applying(transform)
+                        width = abs(size.width)
+                        height = abs(size.height)
+                    }
+                    if let rate = try? await track.load(.estimatedDataRate) {
+                        bitrate = Double(rate)
+                    }
+                }
+
+                var sizeBytes: Int64?
+                var createdDate: String?
+                var modifiedDate: String?
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path) {
+                    sizeBytes = (attrs[.size] as? NSNumber)?.int64Value
+                    let formatter = ISO8601DateFormatter()
+                    if let created = attrs[.creationDate] as? Date {
+                        createdDate = formatter.string(from: created)
+                    }
+                    if let modified = attrs[.modificationDate] as? Date {
+                        modifiedDate = formatter.string(from: modified)
+                    }
+                }
+
+                var result: [String: Any] = ["duration": seconds]
+                if let width { result["width"] = width }
+                if let height { result["height"] = height }
+                if let bitrate { result["bitrate"] = bitrate }
+                if let sizeBytes { result["sizeBytes"] = sizeBytes }
+                if let createdDate { result["createdDate"] = createdDate }
+                if let modifiedDate { result["modifiedDate"] = modifiedDate }
+
+                self.resolve(id: id, result: result)
+            }
         case "debugBundle":
             let resourcePath = Bundle.main.resourcePath ?? "nil"
             let rootContents = (try? FileManager.default.contentsOfDirectory(atPath: resourcePath)) ?? []

@@ -745,42 +745,53 @@ async function deleteFile(video) {
 * Update video metadata in IndexedDB
 */
 async function updateVideoInDB(oneDriveId, updates) {
-const db = await openDB();
-const tx = db.transaction(STORE_NAME, "readwrite");
-const store = tx.objectStore(STORE_NAME);
-
-// ✅ Properly get existing data
-const existing = await new Promise((resolve, reject) => {
-    const request = store.get(oneDriveId);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-});
-
-if (existing) {
-    // ✅ Merge updates with ALL existing data
-    const updated = { 
-        ...existing,      // Keep all existing fields
-        ...updates,       // Apply updates
-        oneDriveId: oneDriveId  // Ensure ID is preserved
-    };
-    
-    console.log('Updating IndexedDB with merged data:', updated);
-    store.put(updated);
-} else {
-    console.warn(`No existing record found for ${oneDriveId}`);
+// Split updates between videoMeta (your data) and videoSource (file-derived
+// data) so callers don't need to know or care which store a field lives in.
+const metaUpdates = {};
+const sourceUpdates = {};
+for (const [key, value] of Object.entries(updates)) {
+    if (window.VIDEO_META_FIELDS && window.VIDEO_META_FIELDS.has(key)) {
+        metaUpdates[key] = value;
+    } else {
+        sourceUpdates[key] = value;
+    }
 }
 
-// ✅ Properly wait for transaction to complete
-await new Promise((resolve, reject) => {
-    tx.oncomplete = () => {
-        console.log('IndexedDB update transaction completed');
-        resolve();
-    };
-    tx.onerror = () => {
-        console.error('IndexedDB update transaction error:', tx.error);
-        reject(tx.error);
-    };
-});
+if (Object.keys(metaUpdates).length > 0 && typeof saveVideoMeta === 'function') {
+    console.log('Updating videoMeta:', metaUpdates);
+    await saveVideoMeta(oneDriveId, metaUpdates, "app");
+}
+
+if (Object.keys(sourceUpdates).length > 0) {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+
+    const existing = await new Promise((resolve, reject) => {
+        const request = store.get(oneDriveId);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+
+    if (existing) {
+        const updated = { ...existing, ...sourceUpdates, oneDriveId };
+        console.log('Updating videoSource with merged data:', updated);
+        store.put(updated);
+    } else {
+        console.warn(`No existing videoSource record found for ${oneDriveId}`);
+    }
+
+    await new Promise((resolve, reject) => {
+        tx.oncomplete = () => {
+            console.log('IndexedDB update transaction completed');
+            resolve();
+        };
+        tx.onerror = () => {
+            console.error('IndexedDB update transaction error:', tx.error);
+            reject(tx.error);
+        };
+    });
+}
 }
 
 /**

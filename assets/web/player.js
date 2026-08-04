@@ -6196,10 +6196,24 @@ try {
        exitPIPMode();
    }
     if (window.plyrPlayer.stop) window.plyrPlayer.stop();
-    window.plyrPlayer.source = { type: 'video', sources: [] };
     
-// Keep currentPlayingVideo so video info stays visible after stop
-  // window.currentPlayingVideo = null; // REMOVED - keep video info visible
+    // ✅ Plyr rebuilds its internal <video> element from scratch every
+    // time .source is set (see playVideoInline), and the rebuilt element
+    // doesn't keep the id="inlineVideoPlayer" - so window.plyrPlayer.media
+    // (Plyr's own live reference) is used instead of an id lookup, since
+    // that stays correct across rebuilds.
+    const videoEl = window.plyrPlayer.media || document.querySelector('#inlineVideoContainer video');
+    if (videoEl) {
+        while (videoEl.firstChild) {
+            videoEl.removeChild(videoEl.firstChild);
+        }
+        videoEl.removeAttribute('src');
+        videoEl.load();
+    }
+    
+  // ✅ Fully clear currentPlayingVideo - Stop now returns the player all
+  // the way back to its pre-play state, not just paused-at-start.
+  window.currentPlayingVideo = null;
   
   // Clear tracking variables
   currentListContext = null;
@@ -6219,11 +6233,12 @@ try {
         computeBottomDock();
     }
     
-    // Exit fullscreen if active - but NOT when in forced (manual-rotate)
-    // landscape mode, where Stop should only stop playback and the
-    // rotated fullscreen view should stay open
-    const isForcedLandscapeActive = document.body.classList.contains('manual-rotate-landscape');
-    if (window.plyrPlayer.fullscreen?.active && !isForcedLandscapeActive) {
+    // ✅ Exit fullscreen unconditionally, including forced (manual-rotate)
+    // landscape mode - Stop now returns the player to exactly the state
+    // it was in before any video was played, and nothing is fullscreen or
+    // rotated at that point. The existing 'exitfullscreen' handler already
+    // calls resetManualRotation() for us, so FLS cleans itself up here too.
+    if (window.plyrPlayer.fullscreen?.active) {
         window.plyrPlayer.fullscreen.exit();
     }
     
@@ -6231,15 +6246,25 @@ try {
   const loadingOverlay = document.getElementById('plyr-loading-overlay');
   if (loadingOverlay) loadingOverlay.style.display = 'none';
   
-  // Keep video info visible after stopping (don't clear or hide)
-  // Video info stays visible so user can see what they just watched
+  // ✅ Clear the video info bar too - at page load, before anything has
+  // played, this is empty. Stop now matches that state instead of
+  // leaving the last-played video's info visible.
+  const videoInfoEl = document.getElementById('currentVideoInfo');
+  if (videoInfoEl) videoInfoEl.innerHTML = '';
 
-  console.log('Player reset to initial state (video info kept visible)');
+  // ✅ Reset the permanent progress bar back to its pre-play state too -
+  // otherwise it keeps showing the elapsed/remaining time from whatever
+  // was last playing instead of 0:00 / 0:00.
+  const progressFilled = document.querySelector('.permanent-progress-filled');
+  const progressTimestamp = document.querySelector('.permanent-progress-timestamp');
+  if (progressFilled) progressFilled.style.width = '0%';
+  if (progressTimestamp) progressTimestamp.textContent = '0:00 / 0:00';
+
+  console.log('Player fully reset to pre-play state');
 } catch (err) {
     console.warn("Error resetting player:", err);
 }
 }
-
 // Public API
 window.inlineVideoPlayer = {
 play: playVideoInline,

@@ -1,5 +1,8 @@
 # Changelog
 
+## [5.2.6]
+fixed prev next button
+
 ## [5.2.5]
 fixed modal buttons in FLS and MP
 smaller text in modal

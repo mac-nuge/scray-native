@@ -122,6 +122,15 @@ function getManualRotationTargets() {
     if (!title) {
         title = document.createElement('div');
         title.className = 'fls-video-title';
+        title.title = 'View basket';
+        // Tapping the title opens the basket modal - the same one the
+        // (now removed, in FLS) basket quick-action button opened.
+        title.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (typeof showPlayerBasketModal === 'function') {
+                showPlayerBasketModal();
+            }
+        });
         container.appendChild(title);
     }
     console.log('[rotate] targets found:', {

@@ -1882,15 +1882,15 @@ if (jumpSearchBtn) {
    });
  }
 
-// Play Next Basket (B>)
-const playNextBasketBtn = document.getElementById("playNextBasketBtn");
-if (playNextBasketBtn) {
-playNextBasketBtn.addEventListener("click", () => {
-  if (typeof window.playNextInBasket === 'function') {
-    window.playNextInBasket();
-  }
-});
-}
+// // Play Next Basket (B>)
+// const playNextBasketBtn = document.getElementById("playNextBasketBtn");
+// if (playNextBasketBtn) {
+// playNextBasketBtn.addEventListener("click", () => {
+//   if (typeof window.playNextInBasket === 'function') {
+//     window.playNextInBasket();
+//   }
+// });
+// }
 
 // Play Random Basket (B*)
 const playRandomBasketBtn = document.getElementById("playRandomBasketBtn");

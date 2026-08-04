@@ -94,7 +94,7 @@ if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
       label: "P",
       title: "Play video",
       color: "#28a745",
-      onClick: () => inlineVideoPlayer.play(video)
+      onClick: () => inlineVideoPlayer.play(video, 'random', index)
   },
   {
      label: "D",
@@ -329,9 +329,16 @@ videos.forEach((video, index) => {
   const vidId = video.oneDriveId ?? video.idFromAPI ?? null;
   li.dataset.videoId = vidId;
 
+  // ✅ Snapshot the global index NOW, into a local const the onClick
+  // closure below can capture - paginationState.currentEndIndex itself
+  // keeps changing as more chunks load, so reading it lazily inside the
+  // closure (at click time, not render time) was giving stale/wrong
+  // indexes for every row rendered before the most recent chunk.
+  const globalIndex = paginationState.currentEndIndex + index;
+
 // Display name/path
 const nameSpan = document.createElement("span");
-nameSpan.textContent = `${paginationState.currentEndIndex + index + 1}. `;
+nameSpan.textContent = `${globalIndex + 1}. `;
 nameSpan.style.whiteSpace = "normal";
 nameSpan.style.wordBreak = "break-word";
 nameSpan.style.overflowWrap = "break-word";
@@ -390,7 +397,7 @@ li.appendChild(nameSpan);
       label: "P",
       title: "Play video",
       color: "#28a745",
-      onClick: () => inlineVideoPlayer.play(video)
+      onClick: () => inlineVideoPlayer.play(video, 'main', globalIndex)
   },
   {
      label: "D",

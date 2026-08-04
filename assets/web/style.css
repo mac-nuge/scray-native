@@ -1914,6 +1914,8 @@ transition: opacity 0.15s ease;
 
 body.manual-rotate-landscape .fls-video-title {
 display: block;
+pointer-events: auto;
+cursor: pointer;
 }
 
 /* Hide the title together with the player controls - Plyr toggles
@@ -1972,6 +1974,13 @@ background: rgba(255, 255, 255, 0.3) !important;
 .plyr-bookmark-quick {
     display: none !important;
 }
+}
+
+/* FLS (forced/manual-rotate landscape) only: the basket button is
+   redundant now that tapping the video title (top of player) opens
+   the same basket modal - free up the space in the controls row. */
+body.manual-rotate-landscape .plyr-basket-quick {
+display: none !important;
 }
 
 /* Mobile portrait only (and NOT forced/manual-rotate landscape) - hide

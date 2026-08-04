@@ -105,7 +105,7 @@ const buttons = [
       label: "P",
       title: "Play video",
       color: "#28a745",
-      onClick: () => inlineVideoPlayer.play(video)
+      onClick: () => inlineVideoPlayer.play(video, 'random', index)
   },
   {
      label: "D",

@@ -780,7 +780,51 @@ const clearSearchFilter = () => {
     }
 };
 
-// ✅ Show a small compact Edit/Clear popup instead of clearing immediately
+// ✅ Tapping the pill immediately activates Edit (no more E/C choice popup)
+// ✅ Custom focus logic (NOT the jumpSearchBtn path) - deliberately
+// avoids calling .select(), which would highlight all existing text
+// and cause the next keystroke to wipe it out instead of appending.
+// Places the cursor at the end of the existing text instead, so
+// typing continues/adds onto the current search term.
+const isLandscape = window.matchMedia('(orientation: landscape)').matches;
+const isMobile = window.innerWidth <= 1024;
+
+if (isLandscape && isMobile) {
+    const panelSearchBox = document.getElementById("panelSearchBox");
+    if (panelSearchBox) {
+        panelSearchBox.focus();
+        panelSearchBox.click();
+        setTimeout(() => {
+            const len = panelSearchBox.value.length;
+            panelSearchBox.setSelectionRange(len, len);
+        }, 50);
+    }
+    if (typeof window.toggleRandomPlaylistPanel === 'function') {
+        const panel = document.getElementById("randomPlaylistPanel");
+        if (panel && !panel.classList.contains("random-panel-open")) {
+            window.toggleRandomPlaylistPanel(true);
+        }
+    }
+    if (typeof filterDisplayedByFilename === 'function') {
+        window.skipSearchScroll = true;
+        filterDisplayedByFilename();
+    }
+} else {
+    const searchBox = document.getElementById("filenameSearchBox");
+    if (searchBox) {
+        const isMobilePortrait = window.innerWidth <= 768 && window.matchMedia('(orientation: portrait)').matches;
+        if (!isMobilePortrait && typeof scrollToSearchBox === 'function') {
+            scrollToSearchBox(searchBox);
+        }
+        searchBox.focus({ preventScroll: true });
+        setTimeout(() => {
+            const len = searchBox.value.length;
+            searchBox.setSelectionRange(len, len);
+        }, 50);
+    }
+}
+
+// ✅ Show the compact Clear popup (this is the only remaining option)
 const existingPopup = document.getElementById('searchPillPopup');
 if (existingPopup) existingPopup.remove();
 
@@ -788,61 +832,9 @@ const popup = document.createElement('div');
 popup.id = 'searchPillPopup';
 popup.className = 'search-pill-popup';
 
-const editBtn = document.createElement('button');
-editBtn.className = 'search-pill-popup-btn';
-editBtn.textContent = '✏️E';
-editBtn.title = 'Edit search';
-editBtn.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    popup.remove();
-
-    // ✅ Custom focus logic (NOT the jumpSearchBtn path) - deliberately
-    // avoids calling .select(), which would highlight all existing text
-    // and cause the next keystroke to wipe it out instead of appending.
-    // Places the cursor at the end of the existing text instead, so
-    // typing continues/adds onto the current search term.
-    const isLandscape = window.matchMedia('(orientation: landscape)').matches;
-    const isMobile = window.innerWidth <= 1024;
-
-    if (isLandscape && isMobile) {
-        const panelSearchBox = document.getElementById("panelSearchBox");
-        if (panelSearchBox) {
-            panelSearchBox.focus();
-            panelSearchBox.click();
-            setTimeout(() => {
-                const len = panelSearchBox.value.length;
-                panelSearchBox.setSelectionRange(len, len);
-            }, 50);
-        }
-        if (typeof window.toggleRandomPlaylistPanel === 'function') {
-            const panel = document.getElementById("randomPlaylistPanel");
-            if (panel && !panel.classList.contains("random-panel-open")) {
-                window.toggleRandomPlaylistPanel(true);
-            }
-        }
-        if (typeof filterDisplayedByFilename === 'function') {
-            window.skipSearchScroll = true;
-            filterDisplayedByFilename();
-        }
-    } else {
-        const searchBox = document.getElementById("filenameSearchBox");
-        if (searchBox) {
-            const isMobilePortrait = window.innerWidth <= 768 && window.matchMedia('(orientation: portrait)').matches;
-            if (!isMobilePortrait && typeof scrollToSearchBox === 'function') {
-                scrollToSearchBox(searchBox);
-            }
-            searchBox.focus({ preventScroll: true });
-            setTimeout(() => {
-                const len = searchBox.value.length;
-                searchBox.setSelectionRange(len, len);
-            }, 50);
-        }
-    }
-});
-
 const clearBtn = document.createElement('button');
 clearBtn.className = 'search-pill-popup-btn';
-clearBtn.textContent = '🗑️C';
+clearBtn.textContent = '🗑️';
 clearBtn.title = 'Clear search';
 clearBtn.addEventListener('click', (ev) => {
     ev.stopPropagation();
@@ -850,14 +842,24 @@ clearBtn.addEventListener('click', (ev) => {
     clearSearchFilter();
 });
 
-popup.appendChild(editBtn);
 popup.appendChild(clearBtn);
 document.body.appendChild(popup);
 
-// Position just above the pill
-const pillRect = searchPill.getBoundingClientRect();
-popup.style.left = pillRect.left + 'px';
-popup.style.top = (pillRect.top - popup.offsetHeight - 6) + 'px';
+// Anchor just below the pill, and keep it pinned there as the on-screen
+// keyboard opens/closes and shifts the layout/viewport around.
+const repositionPopup = () => {
+    const rect = searchPill.getBoundingClientRect();
+    popup.style.left = rect.left + 'px';
+    popup.style.top = (rect.bottom + 6) + 'px';
+};
+repositionPopup();
+
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', repositionPopup);
+    window.visualViewport.addEventListener('scroll', repositionPopup);
+}
+window.addEventListener('resize', repositionPopup);
+window.addEventListener('scroll', repositionPopup, true);
 
 // Close on outside click / ESC
 const closePopup = (ev) => {
@@ -865,12 +867,24 @@ const closePopup = (ev) => {
     popup.remove();
     document.removeEventListener('click', closePopup);
     document.removeEventListener('keydown', escHandler);
+    if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', repositionPopup);
+        window.visualViewport.removeEventListener('scroll', repositionPopup);
+    }
+    window.removeEventListener('resize', repositionPopup);
+    window.removeEventListener('scroll', repositionPopup, true);
 };
 const escHandler = (ev) => {
     if (ev.key === 'Escape') {
         popup.remove();
         document.removeEventListener('click', closePopup);
         document.removeEventListener('keydown', escHandler);
+        if (window.visualViewport) {
+            window.visualViewport.removeEventListener('resize', repositionPopup);
+            window.visualViewport.removeEventListener('scroll', repositionPopup);
+        }
+        window.removeEventListener('resize', repositionPopup);
+        window.removeEventListener('scroll', repositionPopup, true);
     }
 };
 setTimeout(() => {

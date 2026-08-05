@@ -1885,6 +1885,18 @@ body.portrait-mini .plyr-frame-step-group {
 display: none !important;
 }
 
+/* ⚙️ Hide the three circle buttons (play/pause, frame back, frame forward)
+   in ordinary MP portrait fullscreen. FLS is deliberately EXCLUDED via
+   :not(.manual-rotate-landscape) - the device is still physically portrait
+   during forced landscape, so body.portrait-fullscreen is set then too, and
+   the circles must stay available there.
+   Keyed off body.portrait-fullscreen (set from updatePlayerStateClass in
+   player.js) rather than .plyr--fullscreen, because Plyr runs CSS-only
+   fallback fullscreen here and applies .plyr--fullscreen-fallback instead. */
+body.portrait-fullscreen:not(.manual-rotate-landscape) .plyr-frame-step-group {
+display: none !important;
+}
+
 /* Fade out together with Plyr's own controls fade */
 .plyr--hide-controls .plyr-frame-step-group {
 opacity: 0;
@@ -4118,6 +4130,26 @@ body.fullscreen-active .plyr--fullscreen .plyr__video-embed {
   width: 100vw !important;
   z-index: 999999 !important;
 }
+
+/* ⚙️ MP FULLSCREEN: pin the progress bar a fixed distance off the bottom.
+   Relative nudging was unpredictable here - the wrapper and video are both
+   position:fixed in this state, so the progress bar becomes the first
+   IN-FLOW child of .plyr and sits near the TOP of the container, meaning
+   `bottom` was shifting it relative to the wrong origin.
+   The controls bar is pinned at bottom: 5vh, so anything above that clears
+   it. ⚙️ TUNE `bottom` ONLY - raise the value to lift it further.
+   FLS is excluded: applyManualRotationStyles() sets its own inline
+   `bottom` with !important there, and this must not fight it. */
+body:not(.manual-rotate-landscape) .plyr--fullscreen #permanentProgressBar {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  bottom: 13vh !important;
+  width: 100% !important;
+  box-sizing: border-box;
+  z-index: 999998; /* just under .plyr__controls (999999) */
+}
 }
 
 
@@ -5238,4 +5270,84 @@ width: 100%;
 .auto-track-label {
   display: block !important;
 }
+}
+
+/* =========================================
+MP PORTRAIT FULLSCREEN - PIN THE OVERLAYS TO THE VIEWPORT
+
+Why body.portrait-fullscreen and not .plyr--fullscreen: Plyr is running in
+CSS-only FALLBACK fullscreen here (config: fallback:true, iosNative:false),
+where it applies `plyr--fullscreen-fallback`, NOT `plyr--fullscreen`. Any
+rule keyed off .plyr--fullscreen is inert in this state. body.portrait-
+fullscreen is set from JS in updatePlayerStateClass(), so it's correct in
+both native and fallback fullscreen.
+
+In this state .plyr__video-wrapper and the video are both position:fixed, so
+.plyr's own box collapses - anything positioned ABSOLUTELY against it (the
+clock, the feedback toast, the progress bar) lands somewhere off-screen.
+Pinning them position:fixed against the viewport fixes all three.
+
+FLS is excluded: the device is still physically PORTRAIT during forced
+landscape, so body.portrait-fullscreen is ALSO set then - and
+applyManualRotationStyles() sets its own inline positioning with !important
+which this must not fight.
+========================================= */
+body.portrait-fullscreen:not(.manual-rotate-landscape) #permanentProgressBar {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  /* ⚙️ NOTE: the LIVE value is now written inline from player.js
+     (FULLSCREEN_PROGRESS_BOTTOM_VH). This is only the pre-JS fallback -
+     tweak the JS constant, not this number. */
+  bottom: 10vh !important;
+  width: 100% !important;
+  box-sizing: border-box;
+  z-index: 999998;              /* just under .plyr__controls (999999) */
+}
+
+/* =========================================
+   ⚙️ MP FULLSCREEN VIDEO - fill the full screen WIDTH
+   In the docked (non-fullscreen) sticky player, fitDockedVideoToStack() sets
+   explicit px width/height inline, so a narrow/tall clip is deliberately
+   letterboxed down to fit the dock. Those inline values must NOT survive into
+   fullscreen - releaseDockedVideoFit() (player.js) now clears them - and these
+   rules then guarantee the stretch. Keyed off body.portrait-fullscreen because
+   Plyr's CSS-only fallback fullscreen never applies .plyr--fullscreen.
+   ⚙️ Swap object-fit to `cover` if you'd rather crop top/bottom to force an
+   exact edge-to-edge fill on ultra-tall clips.
+   ========================================= */
+body.portrait-fullscreen:not(.manual-rotate-landscape) .plyr__video-wrapper video,
+body.portrait-fullscreen:not(.manual-rotate-landscape) #inlineVideoContainer video {
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 100vw !important;
+  min-height: 0 !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  object-fit: contain !important;
+  object-position: center !important;
+  margin: 0 !important;
+}
+
+/* Clock - pinned top-right, clear of the notch/status bar */
+body.portrait-fullscreen:not(.manual-rotate-landscape) #plyr-uk-clock {
+  position: fixed !important;
+  top: calc(env(safe-area-inset-top, 0px) + 12px) !important;  /* ⚙️ */
+  right: 12px !important;
+  left: auto !important;
+  bottom: auto !important;
+  z-index: 999999;
+}
+
+/* Feedback toast (Playing/Paused, seek amounts, frame steps) - pinned
+   top-left. Its inline left/right are set per-call in showPlayerFeedback(),
+   so !important is needed to override those. */
+body.portrait-fullscreen:not(.manual-rotate-landscape) #plyr-feedback {
+  position: fixed !important;
+  top: calc(env(safe-area-inset-top, 0px) + 12px) !important;  /* ⚙️ */
+  left: 12px !important;
+  right: auto !important;
+  bottom: auto !important;
+  z-index: 999999;
 }

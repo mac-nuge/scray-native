@@ -371,10 +371,146 @@ function resetManualRotation() {
 window.toggleManualRotation = toggleManualRotation;
 window.toggleScrollLock = toggleScrollLock;
 
+// =========================================
+// ⚙️ FULLSCREEN CONTROL STACK POSITION (ordinary fullscreen, incl. MP)
+// Values are vh measured from the BOTTOM of the screen:
+//   LOWER number  = sits FURTHER DOWN the screen
+//   HIGHER number = sits FURTHER UP the screen
+// Keep PROGRESS larger than CONTROLS (progress bar sits above the buttons).
+// =========================================
+const FULLSCREEN_CONTROLS_BOTTOM_VH = 6;   // was 7
+const FULLSCREEN_PROGRESS_BOTTOM_VH = 4;  // was 13 (keeps the same ~6vh gap)
+
+/**
+ * Position the controls bar + permanent progress bar in ordinary (non-FLS)
+ * fullscreen. Written inline with !important because inline !important is the
+ * only thing that reliably beats the several stylesheet `bottom: Xvh !important`
+ * rules for these elements, AND because Plyr's CSS-only fallback fullscreen
+ * never applies `.plyr--fullscreen` (it uses `plyr--fullscreen-fallback`).
+ */
+function applyFullscreenControlOffsets() {
+    // FLS positions its own controls/progress bar inline via
+    // applyManualRotationStyles() - never fight it here.
+    if (manualRotationActive) return;
+    if (!window.plyrPlayer?.fullscreen?.active) return;
+
+    const controls = document.querySelector('.plyr__controls');
+    if (controls) {
+        controls.style.setProperty('bottom', FULLSCREEN_CONTROLS_BOTTOM_VH + 'vh', 'important');
+    }
+
+    const progressBar = document.getElementById('permanentProgressBar');
+    if (progressBar) {
+        progressBar.style.setProperty('top', 'auto', 'important');
+        progressBar.style.setProperty('bottom', FULLSCREEN_PROGRESS_BOTTOM_VH + 'vh', 'important');
+    }
+
+    console.log(`Fullscreen offsets applied - controls ${FULLSCREEN_CONTROLS_BOTTOM_VH}vh, progress ${FULLSCREEN_PROGRESS_BOTTOM_VH}vh`);
+}
+
+/** Strip the fullscreen-only inline offsets so the docked/inline CSS takes over again */
+function clearFullscreenControlOffsets() {
+    const controls = document.querySelector('.plyr__controls');
+    if (controls) controls.style.removeProperty('bottom');
+
+    const progressBar = document.getElementById('permanentProgressBar');
+    if (progressBar) {
+        progressBar.style.removeProperty('bottom');
+        progressBar.style.removeProperty('top');
+    }
+}
+
 // Mobile portrait: always-on bottom dock (no scroll-triggering needed)
 // Stack order bottom -> up: corner buttons, info bar, video player, filter bar
 // (Defined at top-level IIFE scope so it's accessible from playVideoInline,
 // rebuildVideoInfoDisplay, resetVideoInline, etc. - not just inside createPlayerElement)
+// ⚙️ MP DOCKED PLAYER - MAIN TUNING KNOB. Gap left above the video so its top
+// edge never sits under the browser address bar. Raise for more clearance.
+const MP_VIDEO_TOP_BUFFER = 24;
+// ⚙️ Never shrink the video below this height, however tall the stack gets.
+const MP_VIDEO_MIN_HEIGHT = 140;
+
+/**
+* Fit the docked video inside the space the dock stack actually leaves.
+*
+* The MP portrait stylesheet forces `width: 100% !important; height: auto
+* !important` on the video, so a portrait clip renders ~100vw x (h/w) tall -
+* far more than the space between the dock's bottom offset and the top of the
+* screen. The container overflows UPWARD, off the top of the viewport, which
+* is what crops the video (and pushes the clock/feedback overlays off-screen
+* with it, since they're positioned against .plyr).
+*
+* Rather than capping max-height (which loses to `max-height: 100vh
+* !important` unless applied with important priority, and needs object-fit to
+* avoid squashing), set explicit px width AND height from the video's real
+* aspect ratio. Deterministic, and the flex-centered wrapper letterboxes the
+* sides for us.
+*/
+function fitDockedVideoToStack(infoHeight, baseBottomOffset, gapBetweenStackItems) {
+    // Plyr rebuilds its <video> on every source change and the rebuilt element
+    // loses id="inlineVideoPlayer", so prefer Plyr's own live reference.
+    const videoEl = window.plyrPlayer?.media || document.querySelector('#inlineVideoContainer video');
+    const container = document.getElementById('inlineVideoContainer');
+    if (!videoEl || !container) return;
+
+    // The progress bar is in-flow inside .plyr, so it adds to the container's
+    // height on top of the video. (Controls are absolutely positioned inline,
+    // so they contribute nothing here.)
+    const progressBar = document.getElementById('permanentProgressBar');
+    const progressBarHeight = progressBar ? progressBar.offsetHeight : 0;
+
+    const available = window.innerHeight
+        - baseBottomOffset
+        - infoHeight
+        - gapBetweenStackItems
+        - progressBarHeight
+        - MP_VIDEO_TOP_BUFFER;
+
+    const targetHeight = Math.max(MP_VIDEO_MIN_HEIGHT, Math.round(available));
+
+    // Intrinsic dimensions. videoWidth/Height are 0 until metadata loads, so
+    // fall back to the values stored on the video record - reliable now that
+    // native scanning + the orientation backfill populate width/height.
+    const intrinsicW = videoEl.videoWidth || window.currentPlayingVideo?.width || 0;
+    const intrinsicH = videoEl.videoHeight || window.currentPlayingVideo?.height || 0;
+
+    videoEl.style.setProperty('object-fit', 'contain', 'important');
+    videoEl.dataset.dockFitted = '1';
+
+    if (!intrinsicW || !intrinsicH) {
+        // Aspect unknown - cap height only and let contain letterbox
+        videoEl.style.setProperty('max-height', targetHeight + 'px', 'important');
+        return;
+    }
+
+    const aspect = intrinsicW / intrinsicH;
+    const containerWidth = container.clientWidth || window.innerWidth;
+    const finalWidth = Math.min(containerWidth, Math.round(targetHeight * aspect));
+    const finalHeight = Math.round(finalWidth / aspect);
+
+    videoEl.style.setProperty('width', finalWidth + 'px', 'important');
+    videoEl.style.setProperty('height', finalHeight + 'px', 'important');
+    videoEl.style.setProperty('max-width', '100%', 'important');
+    videoEl.style.setProperty('max-height', targetHeight + 'px', 'important');
+}
+
+function releaseDockedVideoFit() {
+    const videoEl = window.plyrPlayer?.media || document.querySelector('#inlineVideoContainer video');
+    if (!videoEl) return;
+    if (videoEl.dataset.dockFitted !== '1') return;
+    // FLS sets its OWN inline sizing on this same element via
+    // applyManualRotationStyles() - never strip that out from under it.
+    // ✅ Plain (non-FLS) fullscreen is deliberately NOT excluded any more:
+    // the docked px width/height were surviving into MP fullscreen, which is
+    // exactly what kept a narrow/tall clip squeezed to the dock's width
+    // instead of stretching to the full screen width.
+    if (manualRotationActive) return;
+    ['width', 'height', 'max-width', 'max-height', 'object-fit'].forEach(p => {
+        videoEl.style.removeProperty(p);
+    });
+    delete videoEl.dataset.dockFitted;
+}
+
 function computeBottomDock() {
     const container = document.getElementById('inlineVideoContainer');
     if (!container) return;
@@ -409,6 +545,7 @@ function computeBottomDock() {
         if (backdrop) backdrop.classList.remove('active');
         const topSpacer = document.getElementById('topSpacer');
         if (topSpacer) topSpacer.style.height = '';
+        releaseDockedVideoFit(); // landscape / mini / fullscreen size themselves
         return;
     }
 
@@ -427,6 +564,11 @@ function computeBottomDock() {
     const gapBetweenStackItems = 6; // small breathing room between info bar / player / filter bar
 
     const infoHeight = videoInfo ? videoInfo.offsetHeight : 0;
+    // MUST run BEFORE reading container.offsetHeight - fitting the video
+    // shrinks the container, and the dock offsets below are derived from
+    // that height. Measuring first would use the pre-fit (overflowing) value.
+    fitDockedVideoToStack(infoHeight, baseBottomOffset, gapBetweenStackItems);
+
     const playerHeight = container.offsetHeight;
 
     if (videoInfo) {
@@ -923,6 +1065,79 @@ if (isLandscapeMobile) {
 // console.log('Anywhere scrubbing enabled (horizontal drag only)');
 }
 
+
+// ========================
+// Portrait fullscreen: swipe down to exit
+// ========================
+// Standalone, document-level detector. Deliberately NOT folded into
+// enableAnywhereScrubbing's stopScrub: this needs no shared closure state,
+// and being on `document` means it can't be orphaned when Plyr rebuilds its
+// internal video/wrapper elements on a source change.
+
+// ⚙️ Minimum downward distance (px) to count as an exit swipe.
+const PORTRAIT_FS_SWIPE_EXIT_THRESHOLD_PX = 70;
+// ⚙️ Max sideways drift (px) allowed - stops it stealing a scrub gesture.
+const PORTRAIT_FS_SWIPE_MAX_HORIZONTAL_PX = 80;
+
+let portraitSwipeExitInitialized = false;
+
+function setupPortraitFullscreenSwipeExit() {
+    if (portraitSwipeExitInitialized) return;
+    portraitSwipeExitInitialized = true;
+
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+
+    const isPortraitFullscreen = () =>
+        !!window.plyrPlayer?.fullscreen?.active &&
+        !manualRotationActive &&
+        window.matchMedia('(orientation: portrait)').matches;
+
+    document.addEventListener('touchstart', (e) => {
+        tracking = false;
+        if (!isPortraitFullscreen()) return;
+        if (e.touches.length !== 1) return;
+
+        const touch = e.touches[0];
+        const target = touch.target;
+
+        // Don't hijack the seek bar, controls, or frame-step circles
+        if (target?.closest?.('.plyr__controls')) return;
+        if (target?.closest?.('.plyr__progress')) return;
+        if (target?.closest?.('#permanentProgressBar')) return;
+        if (target?.closest?.('.plyr-frame-step-group')) return;
+
+        startX = touch.clientX;
+        startY = touch.clientY;
+        tracking = true;
+    }, { passive: true });
+
+    document.addEventListener('touchend', (e) => {
+        if (!tracking) return;
+        tracking = false;
+
+        // Re-check: something else may have exited fullscreen mid-gesture
+        if (!window.plyrPlayer?.fullscreen?.active) return;
+
+        const touch = e.changedTouches?.[0];
+        if (!touch) return;
+
+        const deltaY = touch.clientY - startY;          // positive = downward
+        const deltaX = Math.abs(touch.clientX - startX);
+
+        if (deltaY > PORTRAIT_FS_SWIPE_EXIT_THRESHOLD_PX &&
+            deltaX < PORTRAIT_FS_SWIPE_MAX_HORIZONTAL_PX) {
+            window.plyrPlayer.fullscreen.exit();
+            showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
+            console.log('Portrait fullscreen exited via swipe down');
+        }
+    }, { passive: true });
+
+    document.addEventListener('touchcancel', () => { tracking = false; }, { passive: true });
+
+    console.log('Portrait fullscreen swipe-to-exit initialized');
+}
 
 // ========================
 // Player feedback overlay
@@ -3607,11 +3822,9 @@ const timeDisplays = controls.querySelectorAll('.plyr__time');
 timeDisplays.forEach(time => time.remove());
 console.log('✅ Removed time displays from controls');
 
-// Lower controls position in fullscreen
-if (window.plyrPlayer.fullscreen?.active) {
-    controls.style.bottom = '7vh';
-    console.log('✅ Lowered controls to 7vh');
-}
+// Position the control stack in fullscreen
+// ⚙️ tweak FULLSCREEN_CONTROLS_BOTTOM_VH / FULLSCREEN_PROGRESS_BOTTOM_VH
+applyFullscreenControlOffsets();
 }
 
 // Initialize permanent progress bar on ready — guarded so redundant
@@ -3675,24 +3888,14 @@ if (manualRotationActive) {
 }
 });
 
-// Update controls position when entering/exiting fullscreen
+// Update controls + progress bar position when entering/exiting fullscreen
 window.plyrPlayer.on('enterfullscreen', () => {
-setTimeout(() => {
-    const controls = document.querySelector('.plyr__controls');
-    if (controls) {
-        controls.style.bottom = '7vh';
-        controls.style.setProperty('bottom', '7vh', 'important');
-        console.log('✅ Lowered controls to 7vh on fullscreen enter');
-    }
-}, 100);
+setTimeout(applyFullscreenControlOffsets, 100);
 });
 
 window.plyrPlayer.on('exitfullscreen', () => {
-const controls = document.querySelector('.plyr__controls');
-if (controls) {
-    controls.style.bottom = '';
-    console.log('✅ Reset controls position on fullscreen exit');
-}
+clearFullscreenControlOffsets();
+console.log('✅ Reset controls + progress bar position on fullscreen exit');
 });
 
 // ========================
@@ -3981,6 +4184,7 @@ if (feedbackMsg) {
 window.plyrPlayer.on('ready', () => {
 setupPlayerKeyboardShortcuts();
 setupFrameStepKeyboardShortcuts(); // N/O frame-step keys (desktop)
+setupPortraitFullscreenSwipeExit(); // swipe down to exit MP fullscreen
 enableAnywhereScrubbing();
 attachStopButton();
 attachPIPButton(); // Add PIP button
@@ -4125,15 +4329,13 @@ if (isMobile && isLandscape) {
 
 updatePlayerStateClass();
 computeBottomDock(); // Undock while fullscreen is active
+// ✅ Guarantee the docked px width/height are gone even if
+// computeBottomDock() early-returned (keyboard + search-pill state),
+// otherwise a narrow video stays squeezed to the dock's width.
+releaseDockedVideoFit();
 
-// Force controls to be raised
-setTimeout(() => {
- const controls = document.querySelector('.plyr__controls');
- if (controls) {
-     controls.style.bottom = '7vh';
-     controls.style.setProperty('bottom', '7vh', 'important');
- }
-}, 100);
+// ⚙️ Position controls + progress bar (FULLSCREEN_*_BOTTOM_VH constants)
+setTimeout(applyFullscreenControlOffsets, 100);
 });
 
 window.plyrPlayer.on('exitfullscreen', () => {
@@ -4558,19 +4760,23 @@ if (isLandscape && isMobile) {
     const bottomThird = (effRect.height / 3) * 2;
     
     if (effTapX < leftThird) {
-        // Left third: same behavior as tapping the rotate button -
-        // enters forced landscape fullscreen (auto-entering real fullscreen
-        // first if needed), instead of plain fullscreen toggle. If already
-        // in forced rotation, this toggles it back off via the same path
-        // the rotate button uses.
-        if (typeof window.toggleManualRotation === 'function') {
+        // Left third toggles fullscreen. Which KIND of fullscreen depends on
+        // the video's own shape:
+        //  - Portrait video: plain Plyr fullscreen. Rotating a portrait frame
+        //    into a landscape box only letterboxes it, so FLS is pointless
+        //    here. FLS is still reachable via the ↻ control button.
+        //  - Landscape video: forced-landscape (FLS), as before - that's the
+        //    whole reason the rotate path exists on a portrait-locked phone.
+        const isPortraitVideo = window.currentVideoOrientation === 'P';
+
+        if (!isPortraitVideo && typeof window.toggleManualRotation === 'function') {
             window.toggleManualRotation();
         } else if (window.plyrPlayer.fullscreen.active) {
             window.plyrPlayer.fullscreen.exit();
-            showPlayerFeedback('Exit Fullscreen', 'top-left');
+            showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
         } else {
             window.plyrPlayer.fullscreen.enter();
-            showPlayerFeedback('Enter Fullscreen', 'top-left');
+            showPlayerFeedback('⛶ Enter Fullscreen', 'top-left');
         }
     } else if (effTapX > rightThird) {
         // Right third: divide into 3 vertical sections (bottom to top: +3s, +10s, +30s)

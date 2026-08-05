@@ -118,8 +118,8 @@ while (pathFragment.firstChild) {
 
 // Score display (if available from Excel)
 const scoreSpan = document.createElement("span");
-if (video.userScore !== undefined && video.userScore !== null) {
-   scoreSpan.textContent = ` [${video.userScore}]`;
+if (video.user_score !== undefined && video.user_score !== null) {
+   scoreSpan.textContent = ` [${video.user_score}]`;
    scoreSpan.style.marginLeft = "4px";
    scoreSpan.style.fontSize = "0.65rem";
    scoreSpan.style.color = "#ff9800";

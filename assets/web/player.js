@@ -5678,10 +5678,10 @@ await window.showRenameModal(video);
 
 videoInfoEl.appendChild(filenameSpan);
 
-// ✅ ADD SCORE DISPLAY (if available from Excel)
+// ✅ ADD SCORE DISPLAY (from videoMeta - populated by Excel/CSV import)
 const scoreSpan = document.createElement('span');
-if (video.userScore !== undefined && video.userScore !== null) {
-scoreSpan.textContent = ` [${video.userScore}]`;
+if (video.user_score !== undefined && video.user_score !== null) {
+scoreSpan.textContent = ` [${video.user_score}]`;
 scoreSpan.style.marginLeft = '4px';
 scoreSpan.style.fontSize = '0.65rem';
 scoreSpan.style.color = '#ff9800';
@@ -5976,7 +5976,10 @@ computeBottomDock(); // Info bar height may have changed - recompute dock
 // videos via next/random while still in fullscreen.
 if (typeof manualRotationActive !== 'undefined' && manualRotationActive) {
     const flsTitle = document.querySelector('.fls-video-title');
-    if (flsTitle) flsTitle.textContent = video.filename || '';
+    if (flsTitle) {
+        const scoreText = (video.user_score !== undefined && video.user_score !== null) ? ` [${video.user_score}]` : '';
+        flsTitle.textContent = (video.filename || '') + scoreText;
+    }
 }
 
 }; // This closes the rebuildVideoInfoDisplay function

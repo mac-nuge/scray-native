@@ -304,6 +304,82 @@ background: #555;
 .floating-tag-excel-disconnected { background-color: #999; color: white; }
 .floating-tag-pill:hover { filter: brightness(0.9); }
 
+/* Score context menu - compact grid */
+.score-context-menu {
+   position: fixed;
+   background: white;
+   border: 2px solid #007bff;
+   border-radius: 8px;
+   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+   z-index: 2147483647;
+   padding: 8px;
+}
+
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+/* Mobile: 3 columns for better fit */
+@media (max-width: 768px) {
+  .score-grid {
+      grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.score-grid-btn {
+   background: #e0e0e0;
+   color: #333;
+   border: 1px solid #ccc;
+   padding: 8px;
+   border-radius: 4px;
+   cursor: pointer;
+   font-size: 0.85rem;
+   font-weight: bold;
+   transition: all 0.15s ease;
+   min-width: 36px;
+   min-height: 36px;
+   text-align: center;
+}
+
+.score-grid-btn:hover {
+   background: #007bff;
+   color: white;
+   border-color: #0056b3;
+   transform: scale(1.05);
+}
+
+.score-grid-btn:active {
+  transform: scale(0.95);
+}
+
+/* Selected state - orange highlight */
+.score-grid-btn.score-selected {
+  background: #ff9800;
+  color: white;
+  border-color: #f57c00;
+  font-weight: bold;
+}
+
+.score-grid-btn.score-selected:hover {
+  background: #f57c00;
+}
+
+/* Mobile: larger touch targets */
+@media (max-width: 768px) {
+   .score-grid {
+       gap: 8px;
+   }
+   
+   .score-grid-btn {
+       padding: 12px;
+       font-size: 1rem;
+       min-width: 44px;
+       min-height: 44px;
+   }
+}
+
 /* =========================================
 SELECT2 ENHANCEMENTS
 ========================================= */

@@ -92,8 +92,8 @@ function sortVideosByScore(videos, mode) {
 if (mode === 'none') return videos;
 
 const sorted = [...videos].sort((a, b) => {
-    const scoreA = a.userScore ?? 0;
-    const scoreB = b.userScore ?? 0;
+    const scoreA = a.user_score ?? 0;
+    const scoreB = b.user_score ?? 0;
     return mode === 'asc' ? scoreA - scoreB : scoreB - scoreA;
 });
 
@@ -1228,14 +1228,6 @@ function populateSizeDropdowns() {
 * 0 = unscored videos
 */
 function showScoreFilterModal() {
- // Check Excel connection first
- if (!window.excelAccessToken) {
-     if (confirm("Score filtering requires Excel Online connection.\n\nConnect now?")) {
-         window.signInToExcelOnline();
-     }
-     return;
- }
- 
  // ✅ FIX: Create full-screen overlay to catch all clicks
  const overlay = document.createElement('div');
  overlay.className = 'score-modal-overlay';
@@ -1602,13 +1594,13 @@ if (mimeTypeFilter.length > 0) {
 videos = videos.filter(v => v.mimeType && mimeTypeFilter.includes(v.mimeType));
 }
 
-// Score filter (filters by userScore already in IndexedDB)
+// Score filter (filters by user_score already in IndexedDB)
 if (selectedScoreFilters.size > 0) {
    console.log(`✅ Applying score filter with selected scores:`, Array.from(selectedScoreFilters).sort());
    
    const beforeCount = videos.length;
    videos = videos.filter(v => {
-       const score = v.userScore ?? 0; // Get score from IndexedDB (0 if unscored)
+       const score = v.user_score ?? 0; // Get score from IndexedDB (0 if unscored)
        return selectedScoreFilters.has(score);
    });
    

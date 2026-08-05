@@ -328,3 +328,118 @@ async function matchExcelMetadataToLocalVideos(excelRows) {
     }
   }
 }
+
+/**
+* Re-import a CSV previously produced by exportVideosToCsv()/downloadVideosCsv().
+* Matches primarily on fingerprint (encodes filename+width+height+duration+
+* bitrate, so it's more precise than filename alone), falling back to
+* filename when no fingerprint match is found. Writes to videoMeta via
+* saveVideoMeta(), merges tags (union) into videoSource - same pattern as
+* the Excel importer, including the post-import bookmark marker refresh.
+*/
+async function importMetadataCsv(file) {
+  const text = await file.text();
+  const workbook = XLSX.read(text, { type: "string" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+  if (!rows.length) {
+    alert("CSV file contained no rows");
+    return;
+  }
+
+  const allVideos = await getAllVideos();
+  const localVideos = allVideos.filter(v => v.driveId === "local");
+  const byFingerprint = new Map(localVideos.map(v => [v.fingerprint, v]));
+  const byFilename = new Map();
+  localVideos.forEach(v => {
+    if (!byFilename.has(v.filename)) byFilename.set(v.filename, []);
+    byFilename.get(v.filename).push(v);
+  });
+
+  let matched = 0, unmatched = 0;
+  const matchedBookmarksById = new Map();
+
+  for (const row of rows) {
+    let video = row.fingerprint ? byFingerprint.get(row.fingerprint) : null;
+
+    if (!video) {
+      const candidates = byFilename.get(row.filename);
+      if (candidates && candidates.length === 1) {
+        video = candidates[0];
+      } else if (candidates && candidates.length > 1) {
+        console.warn(`Ambiguous filename match for "${row.filename}" (${candidates.length} local videos share this name, no fingerprint match) - skipping`);
+      }
+    }
+
+    if (!video) {
+      unmatched++;
+      continue;
+    }
+
+    let bookmarks = [];
+    if (row.bookmarks) {
+      try {
+        bookmarks = JSON.parse(row.bookmarks);
+      } catch (err) {
+        console.warn(`Could not parse bookmarks for "${row.filename}":`, err.message);
+      }
+    }
+    matchedBookmarksById.set(video.oneDriveId, bookmarks);
+
+    const metaUpdates = {
+      view_count: row.view_count ?? 0,
+      user_score: row.user_score ?? null,
+      notes: row.notes ?? null,
+      last_played: row.last_played ?? null,
+      first_seen: row.first_seen ?? null,
+      f_tally: row.f_tally ?? 0,
+      bookmarks
+    };
+    await saveVideoMeta(video.oneDriveId, metaUpdates, "csv-import");
+
+    if (row.tags) {
+      const csvTags = String(row.tags).split(";").map(t => t.trim()).filter(Boolean);
+      const mergedTags = [...new Set([...(video.tags || []), ...csvTags])];
+      await updateVideoInDB(video.oneDriveId, { tags: mergedTags });
+    }
+
+    matched++;
+  }
+
+  console.log(`Metadata CSV import complete: ${matched} matched, ${unmatched} unmatched`);
+  alert(`Metadata CSV import matched ${matched} of ${rows.length} rows (${unmatched} unmatched)`);
+
+  if (typeof refreshAllLists === "function") refreshAllLists();
+
+  if (window.basketVideos && window.basketVideos.length > 0) {
+    let basketChanged = false;
+    window.basketVideos.forEach(v => {
+      const fresh = matchedBookmarksById.get(v.oneDriveId);
+      if (fresh) { v.bookmarks = fresh; basketChanged = true; }
+    });
+    if (basketChanged && typeof window.saveBasket === "function") window.saveBasket();
+    if (basketChanged && typeof window.renderBasket === "function") window.renderBasket();
+  }
+
+  if (window.historyVideos && window.historyVideos.length > 0) {
+    let historyChanged = false;
+    window.historyVideos.forEach(v => {
+      const fresh = matchedBookmarksById.get(v.oneDriveId);
+      if (fresh) { v.bookmarks = fresh; historyChanged = true; }
+    });
+    if (historyChanged && typeof window.saveHistory === "function") window.saveHistory();
+    if (historyChanged && typeof window.renderHistory === "function") window.renderHistory();
+  }
+
+  if (window.currentPlayingVideo) {
+    const fresh = matchedBookmarksById.get(window.currentPlayingVideo.oneDriveId);
+    if (fresh) {
+      window.currentPlayingVideo.bookmarks = fresh;
+    }
+    if (typeof window.renderBookmarkMarkers === "function") {
+      window.renderBookmarkMarkers();
+    }
+  }
+}
+window.importMetadataCsv = importMetadataCsv;

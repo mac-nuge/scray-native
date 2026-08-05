@@ -1951,13 +1951,7 @@ if (playPreviousBtn) {
        exportToExcelBtn.addEventListener("click", window.exportToExcelOnline);
    }
     
-    // Attach Yet to Upload Matches export
-    const exportMatchesBtn = document.getElementById("exportYetToUploadMatchesBtn");
-    if (exportMatchesBtn) {
-    exportMatchesBtn.addEventListener("click", window.exportYetToUploadMatchingDB);
-    }
-
-// ✅ Attach Clear DB link
+    // ✅ Attach Clear DB link
 const clearCacheBtn = document.getElementById("clearCacheBtn");
 if (clearCacheBtn) {
     clearCacheBtn.addEventListener("click", (e) => {
@@ -2018,43 +2012,19 @@ $(document).on('keydown', function (e) {
     }
 });
 
-// CSV Ingestion Input
-const manualCsvInput = document.getElementById("manualCsvInput");
- if (manualCsvInput) {
-     manualCsvInput.addEventListener("change", async (e) => {
-         const file = e.target.files[0];
-         if (!file) return;
-         try {
-             await ingestYetToUploadCSV(file);
-         } catch (err) {
-             console.error("Error ingesting CSV:", err);
-             alert("Failed to ingest CSV. See console for details.");
-         }
-         e.target.value = ""; // Reset so same file can be uploaded again
-     });
- }
-
-// ✅ Bulk Rename/Delete CSV Input
+// ✅ Metadata CSV re-import (repurposed from the old bulk rename/delete input)
  const bulkOpsInput = document.getElementById("bulkOperationsCsvInput");
  if (bulkOpsInput) {
      bulkOpsInput.addEventListener("change", async (e) => {
          const file = e.target.files[0];
          if (!file) return;
          try {
-             await handleBulkOperationsCSV(file);
+             await importMetadataCsv(file);
          } catch (err) {
-             console.error("Error processing bulk operations CSV:", err);
-             alert("Failed to process CSV. See console for details.");
+             console.error("Error importing metadata CSV:", err);
+             alert("Failed to import metadata CSV. See console for details.");
          }
          e.target.value = ""; // Reset so same file can be uploaded again
-     });
- }
-
- // ✅ Clear Yet-to-Upload Button
- const clearYetToUploadBtn = document.getElementById("clearYetToUploadBtn");
- if (clearYetToUploadBtn) {
-     clearYetToUploadBtn.addEventListener("click", async () => {
-         await clearYetToUploadItems();
      });
  }
 });

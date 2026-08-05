@@ -226,6 +226,7 @@ async function matchExcelMetadataToLocalVideos(excelRows) {
   const localVideos = allVideos.filter(v => v.driveId === "local");
 
   let matched = 0, unmatched = 0, lowConfidence = 0;
+  const matchedBookmarksById = new Map(); // oneDriveId -> bookmarks[], used to patch in-memory copies after the loop
 
   for (const video of localVideos) {
     const candidates = excelIndex.get(video.filename);
@@ -284,6 +285,7 @@ async function matchExcelMetadataToLocalVideos(excelRows) {
       await updateVideoInDB(video.oneDriveId, { tags: mergedTags });
     }
 
+    matchedBookmarksById.set(video.oneDriveId, bookmarks);
     matched++;
   }
 
@@ -291,4 +293,38 @@ async function matchExcelMetadataToLocalVideos(excelRows) {
   alert(`Excel import matched ${matched} of ${localVideos.length} local videos\n(${lowConfidence} low-confidence, ${unmatched} unmatched)`);
 
   if (typeof refreshAllLists === "function") refreshAllLists();
+
+  // Patch bookmarks into anything refreshAllLists() won't touch: basket
+  // and history are localStorage snapshots, not re-fetched from
+  // IndexedDB, and the currently-playing video's markers need an
+  // explicit re-render rather than just updated underlying data.
+  if (window.basketVideos && window.basketVideos.length > 0) {
+    let basketChanged = false;
+    window.basketVideos.forEach(v => {
+      const fresh = matchedBookmarksById.get(v.oneDriveId);
+      if (fresh) { v.bookmarks = fresh; basketChanged = true; }
+    });
+    if (basketChanged && typeof window.saveBasket === "function") window.saveBasket();
+    if (basketChanged && typeof window.renderBasket === "function") window.renderBasket();
+  }
+
+  if (window.historyVideos && window.historyVideos.length > 0) {
+    let historyChanged = false;
+    window.historyVideos.forEach(v => {
+      const fresh = matchedBookmarksById.get(v.oneDriveId);
+      if (fresh) { v.bookmarks = fresh; historyChanged = true; }
+    });
+    if (historyChanged && typeof window.saveHistory === "function") window.saveHistory();
+    if (historyChanged && typeof window.renderHistory === "function") window.renderHistory();
+  }
+
+  if (window.currentPlayingVideo) {
+    const fresh = matchedBookmarksById.get(window.currentPlayingVideo.oneDriveId);
+    if (fresh) {
+      window.currentPlayingVideo.bookmarks = fresh;
+    }
+    if (typeof window.renderBookmarkMarkers === "function") {
+      window.renderBookmarkMarkers();
+    }
+  }
 }

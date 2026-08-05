@@ -3658,7 +3658,15 @@ if (window.currentPlayingVideo?.oneDriveId !== _progressBarSetupForVideoId) {
     _progressBarSetupForVideoId = window.currentPlayingVideo?.oneDriveId;
     setupPermanentProgressBar(); //  Also calls renderBookmarkMarkers() internally
 } else {
-    console.log('Skipping redundant progress bar rebuild (same video)');
+    // Full rebuild skipped (same video), but still re-render markers - this
+    // is the fix for markers silently never appearing: 'ready' can fire
+    // before duration is known for scray-video:// sources, so the earlier
+    // setupPermanentProgressBar() call may have run renderBookmarkMarkers()
+    // before duration was available and silently drawn nothing. Redrawing
+    // here (cheap - just clears and rebuilds marker elements) catches the
+    // case where duration is now finally ready.
+    console.log('Skipping redundant progress bar rebuild (same video) - re-rendering bookmark markers only');
+    renderBookmarkMarkers();
 }
 setTimeout(cleanupPlyrControls, 100); // Delay to ensure Plyr is ready
 
@@ -5332,6 +5340,13 @@ console.log("playVideoInline CALLED with video =", video);
 currentListContext = listContext;
 currentVideoIndex = index;
 window.currentPlayingVideo = video; // Store for highlight updates
+
+// TEMP DIAGNOSTIC - remove once bookmark marker issue is resolved
+console.log('[BM DEBUG] in-memory bookmarks for', video.filename, ':', JSON.stringify(video.bookmarks));
+getAllVideos().then(vs => {
+  const dbVideo = vs.find(v => v.oneDriveId === video.oneDriveId);
+  console.log('[BM DEBUG] in-DB bookmarks for', video.filename, ':', JSON.stringify(dbVideo?.bookmarks));
+});
 
 // Remember whether forced (manual-rotate) landscape mode was active
 // before this video starts loading, so we can restore it below - some

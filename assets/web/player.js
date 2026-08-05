@@ -747,6 +747,32 @@ function playPreviousInCurrentList() {
 }
 
 // ========================
+// Swipe-up = play random video (shared trigger)
+// ========================
+// Single entry point for every swipe-up gesture (FLS, landscape, MP).
+// Reuses the corner "X"/"Xn" quick-action button so the FLS-vs-portrait
+// weighting logic stays in one place. The cooldown guards against the
+// same physical swipe firing more than once - stale duplicate touchend
+// listeners used to cause a rapid-fire "dice" run through several videos.
+const SWIPE_RANDOM_COOLDOWN_MS = 1200; // ⚙️ adjust if it feels sticky
+let lastSwipeRandomFireTime = 0;
+
+function triggerSwipeRandomVideo() {
+    const now = Date.now();
+    if (now - lastSwipeRandomFireTime < SWIPE_RANDOM_COOLDOWN_MS) {
+        console.log('Swipe-random ignored (within cooldown)');
+        return;
+    }
+    lastSwipeRandomFireTime = now;
+
+    const randomBtn = document.querySelector('.plyr-random-video');
+    if (!randomBtn) return;
+
+    showPlayerFeedback('🎲 Random Video', 'top-left');
+    randomBtn.click();
+}
+
+// ========================
 // Anywhere Scrubbing helper (MOBILE ONLY, excludes progress bar)
 // ========================
 function enableAnywhereScrubbing() {
@@ -816,15 +842,17 @@ e.preventDefault();
 };
 
 const stopScrub = (e) => {
-// Swipe-to-exit fullscreen: works in both FLS and genuine device
-// landscape, but the "down" direction differs between the two since
-// FLS rotates the video 90° relative to the physical screen.
+// Swipe-to-exit fullscreen (down) / swipe-to-play-random (up): works in
+// both FLS and genuine device landscape, but the "down"/"up" direction
+// differs between the two since FLS rotates the video 90° relative to
+// the physical screen. Portrait (MP) fullscreen has its own swipe-up
+// handler in setupPortraitFullscreenSwipeExit().
 if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouches[0]) {
     const SWIPE_EXIT_THRESHOLD_PX = 60; // ⚙️ adjust sensitivity here
 
     if (manualRotationActive) {
         // FLS: a physical leftward swipe is "down" from the rotated
-        // video's own point of view.
+        // video's own point of view; a physical rightward swipe is "up".
         const endX = e.changedTouches[0].clientX;
         const deltaXPhysical = endX - startX; // negative = swiped left (physical)
         if (deltaXPhysical < -SWIPE_EXIT_THRESHOLD_PX) {
@@ -833,6 +861,11 @@ if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouch
                 window.plyrPlayer.fullscreen.exit();
             }
             showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
+        } else if (deltaXPhysical > SWIPE_EXIT_THRESHOLD_PX) {
+            // Swipe up (FLS) - play a random video, same as tapping the
+            // corner "X"/"Xn" quick-action button. Guarded so one swipe
+            // can only ever produce one video.
+            triggerSwipeRandomVideo();
         }
     } else if (isForcedOrRealLandscapeMobile() && window.plyrPlayer.fullscreen.active) {
         // Genuine device landscape: no rotation involved, so a real
@@ -842,6 +875,19 @@ if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouch
         if (deltaYPhysical > SWIPE_EXIT_THRESHOLD_PX) {
             window.plyrPlayer.fullscreen.exit();
             showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
+        } else if (deltaYPhysical < -SWIPE_EXIT_THRESHOLD_PX) {
+            // Swipe up (landscape) - play a random video.
+            triggerSwipeRandomVideo();
+        }
+    } else if (window.plyrPlayer.fullscreen.active) {
+        // Mobile portrait (MP) fullscreen: a physical upward swipe plays
+        // a random video, mirroring the FLS/landscape "swipe up" gesture.
+        // Stays fullscreen - playVideoInline re-enters if the browser
+        // drops out on the source change.
+        const endY = e.changedTouches[0].clientY;
+        const deltaYPhysical = endY - startY; // negative = swiped up (physical)
+        if (deltaYPhysical < -SWIPE_EXIT_THRESHOLD_PX) {
+            triggerSwipeRandomVideo();
         }
     }
 }
@@ -996,6 +1042,15 @@ const rect = wrapper.getBoundingClientRect();
 
 // Touch events - passive: false to allow conditional preventDefault
 wrapper.addEventListener('touchstart', startScrub, { passive: false });
+// ✅ The touchstart/touchmove listeners live on `wrapper`, which Plyr
+// throws away and rebuilds on every source change - so they clean
+// themselves up. This one is on `window`, which persists, and this
+// function runs again for every new video: without removing the previous
+// closure first, handlers accumulate and ONE swipe fires N times.
+if (window.__anywhereScrubTouchEnd) {
+    window.removeEventListener('touchend', window.__anywhereScrubTouchEnd);
+}
+window.__anywhereScrubTouchEnd = stopScrub;
 window.addEventListener('touchend', stopScrub);
 wrapper.addEventListener('touchmove', scrubMove, { passive: false });
 
@@ -1131,6 +1186,14 @@ function setupPortraitFullscreenSwipeExit() {
             window.plyrPlayer.fullscreen.exit();
             showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
             console.log('Portrait fullscreen exited via swipe down');
+        } else if (deltaY < -PORTRAIT_FS_SWIPE_EXIT_THRESHOLD_PX &&
+            deltaX < PORTRAIT_FS_SWIPE_MAX_HORIZONTAL_PX) {
+            // Swipe up (MP) - play a random video, same as tapping the
+            // corner "X"/"Xn" quick-action button. Stays in fullscreen:
+            // playVideoInline re-enters if the browser drops out on the
+            // source change (see wasPlainFullscreenBeforeLoad).
+            triggerSwipeRandomVideo();
+            console.log('Portrait fullscreen: random video via swipe up');
         }
     }, { passive: true });
 
@@ -5557,6 +5620,13 @@ getAllVideos().then(vs => {
 // and per-video DOM (like the progress bar) gets recreated on load.
 const wasForcedLandscapeBeforeLoad = manualRotationActive;
 
+// ✅ Same idea for plain (non-rotated) fullscreen - i.e. mobile portrait
+// (MP) fullscreen. The browser can drop out of real fullscreen when the
+// source changes; previously only FLS was restored, so a swipe-up random
+// in MP left the player half-out of fullscreen in an odd in-between state.
+const wasPlainFullscreenBeforeLoad =
+    !!window.plyrPlayer?.fullscreen?.active && !manualRotationActive;
+
 // Reset mini-player dismiss flag when new video loads
 miniPlayerManuallyDismissed = false;
 
@@ -6316,6 +6386,15 @@ if (wasForcedLandscapeBeforeLoad) {
         });
         window.plyrPlayer.fullscreen.enter();
     }
+} else if (wasPlainFullscreenBeforeLoad && !window.plyrPlayer.fullscreen?.active) {
+    // ✅ Plain (MP) fullscreen was dropped by the browser on the source
+    // change - go straight back in, no rotation involved. Small delay so
+    // Plyr has finished swapping in the rebuilt <video> element first.
+    setTimeout(() => {
+        if (!window.plyrPlayer.fullscreen?.active) {
+            window.plyrPlayer.fullscreen.enter();
+        }
+    }, 100);
 }
 } catch (playErr) {
  console.error("Playback failed:", playErr);
@@ -6480,6 +6559,24 @@ try {
   const progressTimestamp = document.querySelector('.permanent-progress-timestamp');
   if (progressFilled) progressFilled.style.width = '0%';
   if (progressTimestamp) progressTimestamp.textContent = '0:00 / 0:00';
+
+  // ✅ Strip bookmark markers off the bar. currentPlayingVideo is already
+  // null above, so renderBookmarkMarkers() clears and then draws nothing;
+  // the direct removal first covers the case where it isn't defined yet.
+  document.querySelectorAll('.progress-bookmark-marker').forEach(m => m.remove());
+  if (typeof window.renderBookmarkMarkers === 'function') {
+      window.renderBookmarkMarkers();
+  }
+
+  // ✅ Drop the per-video orientation sizing so the empty player goes back
+  // to its default landscape shape. At page load (pre-play) the container
+  // carries neither class, so removing both - rather than forcing
+  // .video-landscape - is what genuinely matches the pre-play state.
+  window.currentVideoOrientation = 'L';
+  document.body.classList.remove('video-loading-landscape');
+  if (container) {
+      container.classList.remove('video-portrait', 'video-landscape');
+  }
 
   console.log('Player fully reset to pre-play state');
 } catch (err) {

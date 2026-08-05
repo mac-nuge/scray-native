@@ -1677,9 +1677,13 @@ window.showExcelOnlineOptionsModal = showExcelOnlineOptionsModal;
 window.showExportOptionsModal = showExportOptionsModal;
 window.showImportOptionsModal = showImportOptionsModal;
 window.showImportActionModal = showImportActionModal;
-window.showBasketNameModal = showBasketNameModal;
-window.showImportWarningModal = showImportWarningModal;
-window.showImportErrorModal = showImportErrorModal;
+// ✅ These three live in excel-sheets.js, which is NOT loaded in the native build.
+// Assigning them unguarded throws a ReferenceError that kills the rest of this file
+// (swipe-to-close listeners + renderBasket() on DOMContentLoaded). typeof is safe
+// on undeclared identifiers, so this works in both builds.
+if (typeof showBasketNameModal === 'function') window.showBasketNameModal = showBasketNameModal;
+if (typeof showImportWarningModal === 'function') window.showImportWarningModal = showImportWarningModal;
+if (typeof showImportErrorModal === 'function') window.showImportErrorModal = showImportErrorModal;
 window.exportBasketToJSONFile = exportBasketToJSONFile;
 window.exportBasketToClipboard = exportBasketToClipboard;
 window.importBasketFromJSON = importBasketFromJSON;

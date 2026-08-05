@@ -191,22 +191,26 @@
 </script>
 
 <div id="cornerButtons">
-<button id="listBtnCorner" class="burger-btn">L</button>
-<button id="quickRandomBtn" class="burger-btn">R</button>
+<div class="corner-btn-row">
 <button id="jumpSearchBtn" class="burger-btn" title="Jump to Search">F</button>
 <button id="playRandomFilteredBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video">X</button>
-<button id="playRandomWeightedBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video (favours less-watched)">X<sup>n</sup></button>
-<button id="playHistorySequenceBtn" class="burger-btn burger-btn-pink" title="Play Through History">H&lt;</button>
-<button id="playRandomBasketBtn" class="burger-btn burger-btn-pink" title="Play Random from Basket">B<sup>x</sup></button>
-<button id="basketToggleBtn" class="burger-btn" onclick="toggleBasket();">B (<span id="basketCount">0</span>)</button>
-<button id="historyToggleBtn" class="burger-btn">H (<span id="historyCount">0</span>)</button>
-<!-- <button id="playNextBasketBtn" class="burger-btn burger-btn-pink" title="Play Next in Basket" style="display:none">B></button> -->
 <button id="playPreviousBtn" class="burger-btn burger-btn-pink" title="Play Previous in Current List">&lt;</button>
 <button id="playNextBtn" class="burger-btn burger-btn-pink" title="Play Next in Current List">&gt;</button>
-<button id="jumpRandomBtn" class="burger-btn" title="Jump to Random">R^</button>
-<button id="clearBtnCorner" class="burger-btn" title="Clear & Stop">C</button>
-<button id="jumpTagsBtn" class="burger-btn" title="Jump to Tags">T</button>
+<button id="playHistorySequenceBtn" class="burger-btn burger-btn-pink" title="Play Through History">H</button>
+<button id="playRandomBasketBtn" class="burger-btn burger-btn-pink" title="Play Random from Basket">B</button>
+</div>
+<div class="corner-btn-row">
+<button id="basketToggleBtn" class="burger-btn" onclick="toggleBasket();">B (<span id="basketCount">0</span>)</button>
+<button id="historyToggleBtn" class="burger-btn">H (<span id="historyCount">0</span>)</button>
+<button id="quickRandomBtn" class="burger-btn">R</button>
+<button id="clearBtnCorner" class="burger-btn" title="Stop Playback">C</button>
+</div>
 
+<button id="listBtnCorner" class="burger-btn" style="display:none">L</button>
+<button id="playRandomWeightedBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video (favours less-watched)" style="display:none">X<sup>n</sup></button>
+<button id="jumpRandomBtn" class="burger-btn" title="Jump to Random" style="display:none">R^</button>
+<button id="jumpTagsBtn" class="burger-btn" title="Jump to Tags" style="display:none">T</button>
+<!-- <button id="playNextBasketBtn" class="burger-btn burger-btn-pink" title="Play Next in Basket" style="display:none">B></button> -->
 <button id="playLastHistoryBtn" class="burger-btn burger-btn-pink" title="Play Last Played Video" style="display:none">H^</button>
 <button id="randomTagBtn" class="burger-btn burger-btn-pink" title="Select Random Tag (excludes level 1)" style="display:none">T</button>
 </div>

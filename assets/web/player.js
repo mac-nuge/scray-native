@@ -389,7 +389,6 @@ function computeBottomDock() {
     }
 
     const videoInfo = document.getElementById('currentVideoInfo');
-    const cornerButtons = document.getElementById('cornerButtons');
 
     const isMobilePortrait = window.innerWidth <= 768 && window.matchMedia('(orientation: portrait)').matches;
 
@@ -417,15 +416,13 @@ function computeBottomDock() {
     if (videoInfo) videoInfo.classList.add('info-bottom-docked');
     if (backdrop) backdrop.classList.add('active');
 
-    // Read the corner buttons' ACTUAL on-screen position instead of a
-    // hardcoded offset. This means if the corner buttons / pills bar CSS
-    // bottom values ever change, the info bar automatically keeps a
-    // consistent gap above them without needing to update this function.
-    const cornerRect = cornerButtons ? cornerButtons.getBoundingClientRect() : null;
-    const gapAboveCornerButtons = 14; // slightly larger gap so info bar clears the pills/buttons row
-    let runningBottom = cornerRect
-        ? (window.innerHeight - cornerRect.top) + gapAboveCornerButtons
-        : 60; // fallback if corner buttons aren't found for some reason
+    // ⚙️ TWEAK THIS NUMBER to raise/lower the video player + now-playing
+    // info bar as a unit. This is now a fixed, independent offset - it no
+    // longer reads the corner buttons' position, so it won't move when you
+    // adjust the corner buttons separately. Increase to raise the stack
+    // further off the bottom of the screen, decrease to lower it.
+    const baseBottomOffset = 140; // px from the bottom of the screen (up to lift)
+    let runningBottom = baseBottomOffset;
 
     const gapBetweenStackItems = 6; // small breathing room between info bar / player / filter bar
 

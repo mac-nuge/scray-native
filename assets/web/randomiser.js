@@ -959,6 +959,7 @@ excelPill.addEventListener("click", () => {
   }
 });
 excelPill.style.marginLeft = "auto";
+excelPill.style.display = "none"; // ✅ Hidden per request
 container.appendChild(excelPill);
 }
 // Refresh filters & pills
@@ -2238,6 +2239,10 @@ const sortBtn = document.getElementById('sortSizeBtn');
  await populateMimeTypeFilter();
   updateVideoStats();
 
+  // ✅ Auto-show the full list as soon as videos are loaded (same effect as
+  // pressing the old L button) - no button press needed
+  listAllVideos();
+
     document.getElementById("generateRandomByTagsBtn")
      .addEventListener("click", async () => {
          await generateRandomPlaylistByTags();
@@ -2378,10 +2383,15 @@ searchBox.addEventListener("keydown", (e) => {
       });
   }
 
-   // Corner Clear & Stop Button
+   // Corner C Button - now mirrors the player Stop button exactly
 const clearBtnCorner = document.getElementById("clearBtnCorner");
 if (clearBtnCorner) {
-    clearBtnCorner.addEventListener("click", clearAllFilters);
+    clearBtnCorner.addEventListener("click", (e) => {
+        if (window.inlineVideoPlayer) {
+            window.inlineVideoPlayer.reset();
+        }
+        e.currentTarget.blur();
+    });
 }
 
 

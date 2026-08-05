@@ -1597,10 +1597,17 @@ if (duplicatesOnly) {
  });
 }
 
-// ✅ NEW: Orientation filter
+// Orientation filter - falls back to comparing width/height directly, so
+// rows whose stored orientation is still null (scanned before native
+// metadata existed, or mid-backfill) match correctly instead of vanishing.
 const orientationFilter = document.getElementById("orientationFilter")?.value;
 if (orientationFilter && orientationFilter !== "any") {
- videos = videos.filter(v => v.orientation === orientationFilter);
+ videos = videos.filter(v => {
+     const orientation = v.orientation ?? (typeof deriveOrientation === 'function'
+         ? deriveOrientation(v.width, v.height)
+         : null);
+     return orientation === orientationFilter;
+ });
 }
 
 // ✅ NEW: MIME type filter

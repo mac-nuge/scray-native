@@ -20,9 +20,7 @@ async function scanLocalLibrary() {
 
     const width = meta?.width ?? null;
     const height = meta?.height ?? null;
-    const orientation = (width != null && height != null)
-      ? (width >= height ? "L" : "P")
-      : null;
+    const orientation = deriveOrientation(width, height); // see db.js
 
     videos.push({
       idFromAPI: relPath,
@@ -64,7 +62,64 @@ async function scanLocalLibrary() {
   console.log(`Scanned local library: ${videos.length} videos found`);
 }
 
+/**
+* Repair orientation on videos scanned before native width/height existed.
+* The dropdown filters on an exact "L"/"P" match, so a row still holding
+* orientation: null disappears whenever a specific orientation is selected.
+* This fills those gaps in place - no full rescan required.
+* For local files oneDriveId IS the relative path, so it can be passed
+* straight back to getVideoMetadata().
+*/
+async function backfillVideoOrientation() {
+  const videos = await getAllVideos();
+  const needsFix = videos.filter(v => v.driveId === "local" && !v.orientation);
+
+  if (needsFix.length === 0) {
+    console.log("backfillVideoOrientation: nothing to fix");
+    return 0;
+  }
+
+  console.log(`backfillVideoOrientation: repairing ${needsFix.length} video(s)`);
+  let fixed = 0;
+
+  for (const video of needsFix) {
+    let width = video.width;
+    let height = video.height;
+
+    // No stored dimensions at all - ask the native layer for them once
+    if ((width == null || height == null) && typeof ScrayBridge !== "undefined") {
+      try {
+        const meta = await ScrayBridge.getVideoMetadata(video.oneDriveId);
+        width = meta?.width ?? null;
+        height = meta?.height ?? null;
+      } catch (err) {
+        console.warn(`backfillVideoOrientation: metadata failed for ${video.filename}: ${err.message}`);
+      }
+    }
+
+    const orientation = deriveOrientation(width, height);
+    if (!orientation) continue;
+
+    await updateVideoInDB(video.oneDriveId, { width, height, orientation });
+    fixed++;
+  }
+
+  console.log(`backfillVideoOrientation: fixed ${fixed} of ${needsFix.length}`);
+
+  if (fixed > 0) {
+    if (typeof populateTagDropdowns === "function") await populateTagDropdowns();
+    if (typeof filterDisplayedByFilename === "function") await filterDisplayedByFilename();
+  }
+
+  return fixed;
+}
+window.backfillVideoOrientation = backfillVideoOrientation;
+
 window.addEventListener("DOMContentLoaded", () => {
+  // Self-heal any rows predating native width/height so the orientation
+  // dropdown has something to match against
+  backfillVideoOrientation().catch(err => console.warn("Orientation backfill failed:", err));
+
   document.getElementById("pickFolderBtn")?.addEventListener("click", async () => {
     console.log("pickFolderBtn clicked");
     try {

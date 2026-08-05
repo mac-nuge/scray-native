@@ -114,6 +114,17 @@ function generateLevelFieldsFromPath(pathString) {
 * Not a storage key - used as a corroboration signal with tolerance bands
 * at match time, not exact equality.
 */
+/**
+* Derive orientation from dimensions: "L" = landscape/square, "P" = portrait.
+* Centralised here so every write path (scan, import, backfill) produces
+* exactly the same value the orientation dropdown filters against.
+*/
+function deriveOrientation(width, height) {
+  if (width == null || height == null) return null;
+  return width >= height ? "L" : "P";
+}
+window.deriveOrientation = deriveOrientation;
+
 function buildVideoFingerprint({ filename, width, height, durationMs, bitrate }) {
   const w = width ?? "?";
   const h = height ?? "?";
@@ -180,7 +191,7 @@ async function saveVideos(videos, username, accountId, driveId) {
        mimeType: video.mimeType ?? null,
        width: video.width ?? null,
        height: video.height ?? null,
-       orientation: video.orientation ?? null,
+       orientation: video.orientation ?? deriveOrientation(video.width, video.height),
        bitrate: video.bitrate ?? null,
        tags: tagsArray,
        bracketTags: filenameBracketTags,

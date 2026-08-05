@@ -2,6 +2,7 @@
 
 ## [5.2.6]
 fixed prev next button
+fixed orientation and scoring buttons
 
 ## [5.2.5]
 fixed modal buttons in FLS and MP

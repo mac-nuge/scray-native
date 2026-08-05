@@ -39,16 +39,43 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
         return entry
     }
 
+    // ✅ A '%' in a filename passes through two encoders on its way here: the
+    // JS side percent-encodes it ("50%.mp4" is requested as "50%25.mp4"), and
+    // Foundation's `url.path` already decodes it once. Decoding a second time
+    // (as we used to) either mangles the name or returns nil on the now-invalid
+    // escape sequence, so files containing '%' failed to resolve. Build the
+    // candidates in order of correctness instead and use the first that opens.
+    private func candidatePaths(for url: URL) -> [String] {
+        var results: [String] = []
+        func add(_ value: String?) {
+            guard var path = value, !path.isEmpty else { return }
+            if path.hasPrefix("/") { path = String(path.dropFirst()) }
+            guard !path.isEmpty, !results.contains(path) else { return }
+            results.append(path)
+        }
+        let encodedPath = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath
+        add(encodedPath?.removingPercentEncoding)  // decoded exactly once — correct
+        add(url.path)                              // Foundation's own single decode
+        add(encodedPath)                           // raw, if nothing needed decoding
+        return results
+    }
+
+    private func resolvedPath(for url: URL) -> String? {
+        for candidate in candidatePaths(for: url) where openFile(forId: candidate) != nil {
+            return candidate
+        }
+        return nil
+    }
+
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
         guard let url = task.request.url else {
             log("FAILED: no URL on request")
             task.didFailWithError(NSError(domain: "scray", code: 404)); return
         }
-        let rawPath = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
-        let relativePath = rawPath.removingPercentEncoding ?? rawPath
 
-        guard let file = openFile(forId: relativePath) else {
-            log("FAILED: could not resolve/open file for '\(relativePath)' — bookmark/folder issue")
+        guard let relativePath = resolvedPath(for: url),
+              let file = openFile(forId: relativePath) else {
+            log("FAILED: could not resolve/open file for '\(url.path)' — bookmark/folder issue")
             task.didFailWithError(NSError(domain: "scray", code: 404)); return
         }
         let handle = file.handle

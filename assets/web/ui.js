@@ -1942,7 +1942,7 @@ if (playPreviousBtn) {
   // Attach CSV export for full DB
     const exportCsvBtn = document.getElementById("exportCsvBtn");
     if (exportCsvBtn) {
-        exportCsvBtn.addEventListener("click", window.exportIndexedDBToCSV);
+        exportCsvBtn.addEventListener("click", window.downloadVideosCsv);
     }
 
     // Attach Excel Online export

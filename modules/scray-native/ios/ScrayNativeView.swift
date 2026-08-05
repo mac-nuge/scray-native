@@ -127,6 +127,16 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
 
                 self.resolve(id: id, result: result)
             }
+        case "exportCsv":
+            guard let payloadDict = payload as? [String: Any],
+                  let csvText = payloadDict["csv"] as? String,
+                  let filename = payloadDict["filename"] as? String else {
+                resolve(id: id, result: ["success": false])
+                return
+            }
+            CsvExportDelegate.shared.presentExporter(csvText: csvText, filename: filename) { [weak self] result in
+                self?.resolve(id: id, result: result)
+            }
         case "debugBundle":
             let resourcePath = Bundle.main.resourcePath ?? "nil"
             let rootContents = (try? FileManager.default.contentsOfDirectory(atPath: resourcePath)) ?? []

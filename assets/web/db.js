@@ -310,6 +310,7 @@ async function exportVideosToCsv() {
     ["height", v => v.height],
     ["duration_ms", v => v.durationMs],
     ["path", v => v.path],
+    ["fingerprint", v => v.fingerprint],
     ["view_count", v => v.view_count],
     ["user_score", v => v.user_score],
     ["notes", v => v.notes],
@@ -330,6 +331,35 @@ async function exportVideosToCsv() {
   return [header, ...rows].join("\n");
 }
 window.exportVideosToCsv = exportVideosToCsv;
+
+/** Export the metadata CSV via the native "Save to Files" picker */
+async function downloadVideosCsv() {
+  const csvContent = await exportVideosToCsv();
+  const filename = `scray_video_metadata_${new Date().toISOString().slice(0, 10)}.csv`;
+
+  if (window.ScrayBridge && typeof window.ScrayBridge.exportCsv === "function") {
+    const result = await ScrayBridge.exportCsv(csvContent, filename);
+    if (!result || result.success !== true) {
+      if (!result || !result.cancelled) {
+        console.error("CSV export failed or was not saved:", result);
+        alert("CSV export failed - see console.");
+      }
+    }
+    return;
+  }
+
+  // Fallback for non-native contexts (e.g. testing in a regular browser)
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+window.downloadVideosCsv = downloadVideosCsv;
 
 window.generateTagsFromFilename = generateTagsFromFilename;
 

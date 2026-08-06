@@ -5285,6 +5285,77 @@ width: 100%;
 }
 
 /* =========================================
+SECONDARY BUTTON ROW (MOBILE PORTRAIT ONLY)
+Orientation toggle + Export/Import CSV, matched to .top-buttons-row sizing
+========================================= */
+#secondaryButtonsRow {
+display: none;
+}
+
+@media (max-width: 768px) and (orientation: portrait) {
+#secondaryButtonsRow {
+  display: flex !important;
+  flex-wrap: nowrap;
+  gap: 3px;
+  margin: 4px 0 8px 0;
+  width: 100%;
+}
+
+#secondaryButtonsRow button {
+  flex: 1;
+  background: #555;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.65rem !important;
+  padding: 6px 2px !important;
+  margin: 0 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  transition: background 0.2s ease;
+}
+
+#secondaryButtonsRow button:active {
+  transform: scale(0.97);
+}
+
+/* The old dropdown is redundant in portrait - the toggle replaces it */
+.orientationRow {
+  display: none !important;
+}
+}
+
+/* Desktop: show as normal-sized inline buttons */
+@media (min-width: 769px) {
+#secondaryButtonsRow {
+  display: block !important;
+  margin: 8px 0;
+}
+
+#secondaryButtonsRow button {
+  display: inline-block;
+  width: auto;
+  background: #555;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  margin-right: 10px;
+}
+}
+
+@media (orientation: landscape) {
+#secondaryButtonsRow {
+  display: none !important;
+}
+}
+
+/* =========================================
 MP PORTRAIT FULLSCREEN - PIN THE OVERLAYS TO THE VIEWPORT
 
 Why body.portrait-fullscreen and not .plyr--fullscreen: Plyr is running in

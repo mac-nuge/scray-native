@@ -292,6 +292,13 @@
 <input type="file" id="scrayExcelImportInput" accept=".xlsx" style="display:none;">
 </div>
 
+<!-- ✅ Secondary compact row (mobile portrait only) -->
+<div id="secondaryButtonsRow">
+<button id="orientationToggleBtn" title="Cycle orientation filter">Orientation: All</button>
+<button id="mobileExportCsvBtn">Export CSV</button>
+<button id="mobileImportCsvBtn">Import CSV</button>
+</div>
+
 <br>
 
 <!-- Desktop sections (empty, will be populated by JS) -->
@@ -427,7 +434,10 @@
 
 <br>
 
-<section>
+<!-- ✅ Hidden, not deleted: the mobile portrait button row proxies clicks to
+     #exportCsvBtn and #bulkOperationsCsvInput, and the desktop layout code
+     still moves this <section> into #desktopOtherControls. -->
+<section style="display:none;">
    <button id="exportCsvBtn">Export CSV</button><br>
 <button id="exportToExcelBtn">📊 Export to Excel</button>
    <div style="margin-top: 8px;">

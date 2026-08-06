@@ -1817,6 +1817,7 @@ if (addFilteredBtn) {
 // ✅ NEW: Reset orientation filter
 const orientationFilter = document.getElementById("orientationFilter");
 if (orientationFilter) orientationFilter.value = "any";
+if (typeof window.syncOrientationToggleLabel === "function") window.syncOrientationToggleLabel();
 
 // ✅ NEW: Reset MIME type filter
 $('#mimeTypeFilter').val(null).trigger('change');
@@ -2403,6 +2404,46 @@ searchBox.addEventListener("keydown", (e) => {
           filterDisplayedByFilename();
       });
   }
+
+  // ✅ Mobile portrait secondary row: orientation toggle + CSV buttons
+  const ORIENTATION_CYCLE = [
+      { value: "any", label: "Orientation: All" },
+      { value: "L",   label: "Orientation: Landscape" },
+      { value: "P",   label: "Orientation: Portrait" }
+  ];
+
+  window.syncOrientationToggleLabel = function () {
+      const sel = document.getElementById("orientationFilter");
+      const btn = document.getElementById("orientationToggleBtn");
+      if (!sel || !btn) return;
+      const entry = ORIENTATION_CYCLE.find(o => o.value === sel.value) || ORIENTATION_CYCLE[0];
+      btn.textContent = entry.label;
+      btn.style.background = entry.value === "any" ? "#555" : "#007bff";
+  };
+
+  const orientationToggleBtn = document.getElementById("orientationToggleBtn");
+  if (orientationToggleBtn) {
+      orientationToggleBtn.addEventListener("click", () => {
+          const sel = document.getElementById("orientationFilter");
+          if (!sel) return;
+          const idx = ORIENTATION_CYCLE.findIndex(o => o.value === sel.value);
+          const next = ORIENTATION_CYCLE[(idx + 1) % ORIENTATION_CYCLE.length];
+          sel.value = next.value;
+          // Reuse the existing change handler so filtering behaviour is identical
+          sel.dispatchEvent(new Event("change", { bubbles: true }));
+          window.syncOrientationToggleLabel();
+      });
+      window.syncOrientationToggleLabel();
+  }
+
+  // Proxy to the existing controls in <section> so behaviour stays in one place
+  document.getElementById("mobileExportCsvBtn")?.addEventListener("click", () => {
+      document.getElementById("exportCsvBtn")?.click();
+  });
+
+  document.getElementById("mobileImportCsvBtn")?.addEventListener("click", () => {
+      document.getElementById("bulkOperationsCsvInput")?.click();
+  });
 
    // Corner C Button - now mirrors the player Stop button exactly
 const clearBtnCorner = document.getElementById("clearBtnCorner");

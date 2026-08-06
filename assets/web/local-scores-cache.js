@@ -47,21 +47,77 @@ async function getCachedVideoBookmarks() {
     return cachedVideoBookmarks;
 }
 
-// No-op persistence until Phase 7 wires up real local storage
+// ✅ Local persistence: the same update shape excel-sheets.js uses, but
+// written to videoMeta instead of Graph. Without this, view_count,
+// last_played and f_tally were never recorded anywhere.
 async function queueExcelUpdate(video, updates) {
+    const metaUpdates = {};
+
     if (updates.user_score !== undefined) {
         cachedVideoScores.set(video.oneDriveId, updates.user_score);
         video.userScore = updates.user_score;
+        metaUpdates.user_score = updates.user_score;
     }
+
     if (updates.bookmarks !== undefined) {
-        cachedVideoBookmarks.set(video.oneDriveId, JSON.parse(updates.bookmarks));
+        const parsed = typeof updates.bookmarks === "string"
+            ? JSON.parse(updates.bookmarks)
+            : updates.bookmarks;
+        cachedVideoBookmarks.set(video.oneDriveId, parsed);
+        metaUpdates.bookmarks = parsed;
+    }
+
+    if (updates.notes !== undefined) {
+        metaUpdates.notes = updates.notes;
+        video.notes = updates.notes;
+    }
+
+    // Counters need the current value first - read/modify/write
+    if (updates.increment_views || updates.increment_f_tally) {
+        let current = null;
+        try {
+            const db = await openDB();
+            const tx = db.transaction(META_STORE_NAME, "readonly");
+            current = await new Promise((resolve, reject) => {
+                const req = tx.objectStore(META_STORE_NAME).get(video.oneDriveId);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        } catch (err) {
+            console.warn("Could not read current counters:", err);
+        }
+
+        if (updates.increment_views) {
+            const next = (parseInt(current?.view_count) || 0) + 1;
+            metaUpdates.view_count = next;
+            video.view_count = next;
+        }
+        if (updates.increment_f_tally) {
+            const next = (parseInt(current?.f_tally) || 0) + 1;
+            metaUpdates.f_tally = next;
+            video.f_tally = next;
+        }
+    }
+
+    if (updates.played_now) {
+        const now = new Date().toISOString();
+        metaUpdates.last_played = now;
+        video.last_played = now;
+    }
+
+    if (Object.keys(metaUpdates).length && typeof saveVideoMeta === "function") {
+        await saveVideoMeta(video.oneDriveId, metaUpdates, "app");
     }
 }
 
 window.getCachedVideoScores = getCachedVideoScores;
 window.getCachedVideoBookmarks = getCachedVideoBookmarks;
 window.queueExcelUpdate = queueExcelUpdate;
-window.isAutoTrackEnabled = () => false;
+// ✅ Tracking now persists locally, so it's safe to enable
+window.isAutoTrackEnabled = () => {
+    const stored = localStorage.getItem("autoTrackEnabled");
+    return stored === null ? true : stored === "true";
+};
 
 // =========================================
 // LOCAL SCORING (replaces the Excel-backed path from excel-sheets.js)

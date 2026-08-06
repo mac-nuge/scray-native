@@ -2656,7 +2656,7 @@ async function showFTallyConfirmModal(video, event) {
            confirmBtn.textContent = 'Saving...';
            
            try {
-              await updateVideoInExcel(video, { increment_f_tally: true });
+              await window.queueExcelUpdate(video, { increment_f_tally: true });
                
                // Show success
                confirmBtn.textContent = '✅ Success';

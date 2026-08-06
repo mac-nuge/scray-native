@@ -13,7 +13,7 @@ class ScriptMessageProxy: NSObject, WKScriptMessageHandler {
     }
 }
 
-class ScrayNativeView: ExpoView, WKScriptMessageHandler {
+class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
     let webView: WKWebView
     let messageProxy = ScriptMessageProxy()
 
@@ -27,6 +27,9 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
         super.init(appContext: appContext)
         messageProxy.target = self
         videoHandler.webView = webView
+        // ✅ Without a UI delegate, WKWebView silently ignores alert()/confirm()
+        // and confirm() returns false
+        webView.uiDelegate = self
         addSubview(webView)
     }
 
@@ -178,7 +181,44 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
         }
     }
 
-    private func resolve(id: String, result: Any) {
+    // MARK: - WKUIDelegate (JS dialogs)
+
+    private func topViewController() -> UIViewController? {
+        var top = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.windows.first(where: { $0.isKeyWindow })?.rootViewController
+        while let presented = top?.presentedViewController { top = presented }
+        return top
+    }
+
+    func webView(_ webView: WKWebView,
+                 runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping () -> Void) {
+        guard let top = topViewController() else { completionHandler(); return }
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
+        top.present(alert, animated: true)
+    }
+
+    func webView(_ webView: WKWebView,
+                 runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping (Bool) -> Void) {
+        guard let top = topViewController() else { completionHandler(false); return }
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(false) })
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(true) })
+        top.present(alert, animated: true)
+    }
+
+    private func resolve(id: String, result: Any) {guard let root = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first?.windows.first(where: { $0.isKeyWindow })?.rootViewController else {
+                completion(["success": false])
+                return
+            }
+            let picker = UIDocumentPickerViewController(forExporting: [tempURL])
         guard let data = try? JSONSerialization.data(withJSONObject: result, options: []),
               let json = String(data: data, encoding: .utf8) else {
             reject(id: id, error: "Failed to serialize result")

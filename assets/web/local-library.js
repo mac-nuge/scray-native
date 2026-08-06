@@ -85,19 +85,52 @@ async function renderFolderPills() {
     pill.className = "account-pill";
     pill.dataset.username = folder.name;
 
+    const labelText = `${folder.name} (${count})`;
+
     const loadBtn = document.createElement("button");
     loadBtn.className = "account-load-btn";
-    loadBtn.textContent = `${folder.name} (${count})`;
-    loadBtn.title = folder.name === activeName
-      ? "Active folder - tap to refresh"
-      : "Tap to refresh (will re-scan the currently linked folder)";
+    loadBtn.textContent = labelText;
+    loadBtn.title = "Tap to refresh this folder";
+    // ✅ Every added folder stays "loaded". No greying out - the active
+    // folder is an internal scan target, not a display state.
 
-    if (folder.name !== activeName) {
-      loadBtn.classList.add("loading"); // greys out non-active folders
-    }
+    const disarmRefresh = () => {
+      if (pill.dataset.refreshState !== 'confirming') return;
+      pill.dataset.refreshState = 'initial';
+      loadBtn.textContent = labelText;
+      loadBtn.style.background = '';
+      if (pill._refreshTimeout) { clearTimeout(pill._refreshTimeout); pill._refreshTimeout = null; }
+      if (pill._refreshOutsideHandler) {
+        document.removeEventListener('click', pill._refreshOutsideHandler, true);
+        pill._refreshOutsideHandler = null;
+      }
+    };
 
-    loadBtn.addEventListener("click", async () => {
-      const original = loadBtn.textContent;
+    loadBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+
+      // Don't compete with the remove-confirm state
+      if (pill.dataset.removeState === 'confirming') return;
+
+      // First tap arms, second tap commits
+      if (pill.dataset.refreshState !== 'confirming') {
+        pill.dataset.refreshState = 'confirming';
+        loadBtn.textContent = 'Refresh?';
+        loadBtn.style.background = '#007bff';
+
+        // Tapping anywhere else cancels. Capture phase so it fires before
+        // other handlers; the stopPropagation above keeps our own tap out.
+        pill._refreshOutsideHandler = (ev) => {
+          if (!pill.contains(ev.target)) disarmRefresh();
+        };
+        document.addEventListener('click', pill._refreshOutsideHandler, true);
+
+        pill._refreshTimeout = setTimeout(disarmRefresh, 5000);
+        return;
+      }
+
+      // Confirmed
+      disarmRefresh();
       loadBtn.textContent = "Scanning...";
       loadBtn.disabled = true;
       try {
@@ -105,7 +138,7 @@ async function renderFolderPills() {
       } catch (err) {
         console.error("Rescan failed:", err);
         alert(`Refresh failed: ${err.message}`);
-        loadBtn.textContent = original;
+        loadBtn.textContent = labelText;
       } finally {
         loadBtn.disabled = false;
       }
@@ -132,16 +165,79 @@ window.renderFolderPills = renderFolderPills;
 * Removes a folder's videos from IndexedDB only. Files on disk are untouched.
 */
 async function removeLocalFolder(folderName) {
+  const pill = document.querySelector(`.account-pill[data-username="${folderName}"]`);
+  if (!pill) return;
+
+  const state = pill.dataset.removeState || 'initial';
+
+  // ✅ First tap arms it, second tap commits. confirm() is unreliable inside
+  // WKWebView, which is why the old dialog-based version silently did nothing.
+  if (state === 'initial') {
+    pill.dataset.removeState = 'confirming';
+    pill.style.backgroundColor = '#999';
+    pill.style.cursor = 'pointer';
+    pill.title = 'Tap the pill again to confirm - files on disk are NOT deleted';
+
+    const loadBtn = pill.querySelector('.account-load-btn');
+    const removeBtn = pill.querySelector('.account-remove-cross');
+
+    if (loadBtn) {
+      loadBtn.textContent = 'Confirm remove?';
+      loadBtn.disabled = true;
+      loadBtn.style.background = '#999';
+      loadBtn.style.color = 'white';
+      loadBtn.style.cursor = 'pointer';
+      loadBtn.style.pointerEvents = 'none'; // let the tap reach the pill
+    }
+    if (removeBtn) removeBtn.style.display = 'none';
+
+    pill._confirmClickHandler = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      removeLocalFolder(folderName);
+    };
+    pill.addEventListener('click', pill._confirmClickHandler);
+
+    // Disarm after 5s
+    pill._resetTimeout = setTimeout(() => {
+      if (pill && pill.dataset.removeState === 'confirming') {
+        pill.dataset.removeState = 'initial';
+        pill.style.backgroundColor = '';
+        pill.style.cursor = '';
+        pill.title = '';
+        if (loadBtn) {
+          loadBtn.disabled = false;
+          loadBtn.style.background = '';
+          loadBtn.style.color = '';
+          loadBtn.style.cursor = '';
+          loadBtn.style.pointerEvents = '';
+        }
+        if (removeBtn) removeBtn.style.display = '';
+        if (pill._confirmClickHandler) {
+          pill.removeEventListener('click', pill._confirmClickHandler);
+          pill._confirmClickHandler = null;
+        }
+        renderFolderPills().catch(() => {});
+      }
+    }, 5000);
+
+    return;
+  }
+
+  // Second tap - commit
+  if (pill._resetTimeout) clearTimeout(pill._resetTimeout);
+  if (pill._confirmClickHandler) {
+    pill.removeEventListener('click', pill._confirmClickHandler);
+    pill._confirmClickHandler = null;
+  }
+
+  const confirmBtn = pill.querySelector('.account-load-btn');
+  if (confirmBtn) confirmBtn.textContent = 'Removing...';
+
   const allVideos = await getAllVideos();
   const doomed = allVideos.filter(
     v => v.driveId === "local" && v.accountName === folderName
   );
-
-  const ok = confirm(
-    `Remove "${folderName}" (${doomed.length} videos) from the database?\n\n` +
-    `Files on your device are NOT deleted - this only clears them from Scray.`
-  );
-  if (!ok) return;
 
   for (const v of doomed) {
     try {
@@ -419,9 +515,14 @@ function joinVideosWithRawData(videoRows, rawDataRows) {
   rawDataRows.forEach(r => { if (r.id) rawById.set(r.id, r); });
 
   return videoRows.map(v => {
-    const raw = v.oneDriveId ? rawById.get(v.oneDriveId) : null;
+    // ✅ The Videos sheet header is "id", not "oneDriveId" - this join was
+    // always missing, so width/height/duration_ms never came through.
+    // Older exports used "oneDriveId", so accept either.
+    const rowId = v.id ?? v.oneDriveId ?? null;
+    const raw = rowId ? rawById.get(rowId) : null;
     return {
       ...v,
+      id: rowId,
       width: raw?.width ?? null,
       height: raw?.height ?? null,
       duration_ms: raw?.duration_ms ?? null,

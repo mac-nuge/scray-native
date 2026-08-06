@@ -19,9 +19,12 @@ class CsvExportDelegate: NSObject, UIDocumentPickerDelegate {
         self.tempFileURL = tempURL
 
         DispatchQueue.main.async {
-            guard let root = UIApplication.shared.connectedScenes
+            var root = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
-                .first?.windows.first(where: { $0.isKeyWindow })?.rootViewController else {
+                .first?.windows.first(where: { $0.isKeyWindow })?.rootViewController
+            // Walk to the topmost presented VC or present() is a no-op
+            while let presented = root?.presentedViewController { root = presented }
+            guard let root else {
                 completion(["success": false])
                 return
             }

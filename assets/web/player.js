@@ -530,7 +530,10 @@ function computeBottomDock() {
 
     const shouldDock = isMobilePortrait &&
         !window.plyrPlayer?.fullscreen?.active &&
-        !container.classList.contains('mini-player');
+        !container.classList.contains('mini-player') &&
+        // ✅ Nothing loaded - the player is display:none, so its
+        // offsetHeight is 0 and docking it would just reserve empty space.
+        !document.body.classList.contains('player-idle');
 
     const backdrop = document.getElementById('bottomDockBackdrop');
 
@@ -4401,7 +4404,15 @@ releaseDockedVideoFit();
 setTimeout(applyFullscreenControlOffsets, 100);
 });
 
-window.plyrPlayer.on('exitfullscreen', () => {
+// The real exitfullscreen work, split out so it can be skipped during a
+// reload and replayed later if the re-entry never happened.
+//
+// ⚠️ The mask helpers that pair with this (beginFullscreenReload /
+// endFullscreenReload) deliberately live at TOP LEVEL, just above
+// playVideoInline - NOT here. Everything in this block is scoped inside
+// createPlayerElement(), so anything declared here is invisible to
+// playVideoInline, which is exactly where those helpers get called from.
+function handleExitFullscreenCleanup() {
  document.body.classList.remove('fullscreen-active');
     // ADD THIS: Remove rotation class
 document.body.classList.remove('rotate-portrait-video');
@@ -4424,6 +4435,21 @@ resetManualRotation(); // Reset manual landscape rotation on exit
          console.log('Scrolled to video player after exiting fullscreen');
      }
  }
+}
+
+// ✅ Exposed so the top-level mask helpers can replay this teardown if
+// fullscreen never comes back after a reload.
+window.handleExitFullscreenCleanup = handleExitFullscreenCleanup;
+
+window.plyrPlayer.on('exitfullscreen', () => {
+    if (window.fullscreenReloadActive) {
+        // Transient exit caused by the source swap - we're going straight
+        // back in, so leave the layout exactly as it is.
+        window.fullscreenExitCleanupDeferred = true;
+        console.log('Suppressed fullscreen teardown (source reload in progress)');
+        return;
+    }
+    handleExitFullscreenCleanup();
 });
 
 // Add flag to prevent rapid toggling
@@ -5599,6 +5625,80 @@ async function refreshVideoBeforeUse(video) {
 window.refreshVideoBeforeUse = refreshVideoBeforeUse;
 
 // ========================
+// Fullscreen reload masking
+// ========================
+// Setting .source makes the browser drop out of real fullscreen, and we
+// re-enter straight after - correct, but the round trip was VISIBLE: the
+// exitfullscreen handler tore the whole fullscreen layout down (body
+// classes, overflow, re-docking, scroll) and rebuilt it a moment later.
+// During a known reload we (a) skip that teardown and (b) drop an opaque
+// mask over the top, so the user just sees the old frame, then the new one.
+//
+// Declared at top level (and hung off window) on purpose: the exitfullscreen
+// handler lives inside createPlayerElement(), but these are called from
+// playVideoInline, which is out here. Scoping them next to the handler
+// makes playVideoInline throw a ReferenceError the moment you swipe up.
+window.fullscreenReloadActive = false;
+window.fullscreenExitCleanupDeferred = false;
+let fullscreenReloadSafetyTimer = null;
+
+// ⚙️ Hard ceiling (ms). If a load stalls or errors, the mask lifts anyway
+// rather than leaving a black screen forever.
+const FULLSCREEN_RELOAD_MAX_MS = 5000;
+
+function beginFullscreenReload() {
+    window.fullscreenReloadActive = true;
+    window.fullscreenExitCleanupDeferred = false;
+
+    if (!document.getElementById('fullscreenReloadMask')) {
+        const mask = document.createElement('div');
+        mask.id = 'fullscreenReloadMask';
+        // ⚙️ z-index sits just below the loading overlay (99998) so that
+        // still shows through if the load takes a noticeable moment.
+        mask.style.cssText = `
+            position: fixed;
+            inset: 0;
+            background: #000;
+            z-index: 99990;
+            pointer-events: none;
+        `;
+        // Append inside the fullscreen element where there is one - in real
+        // fullscreen, nothing outside that subtree renders at all.
+        const host = document.fullscreenElement
+            || document.webkitFullscreenElement
+            || document.querySelector('#inlineVideoContainer .plyr')
+            || document.querySelector('.plyr')
+            || document.body;
+        host.appendChild(mask);
+    }
+
+    clearTimeout(fullscreenReloadSafetyTimer);
+    fullscreenReloadSafetyTimer = setTimeout(endFullscreenReload, FULLSCREEN_RELOAD_MAX_MS);
+}
+
+function endFullscreenReload() {
+    clearTimeout(fullscreenReloadSafetyTimer);
+    fullscreenReloadSafetyTimer = null;
+    window.fullscreenReloadActive = false;
+
+    document.getElementById('fullscreenReloadMask')?.remove();
+
+    // If fullscreen genuinely didn't come back (load failed, user bailed),
+    // run the teardown we skipped - otherwise the page is stuck in a
+    // fullscreen layout with no fullscreen.
+    if (window.fullscreenExitCleanupDeferred &&
+        !window.plyrPlayer?.fullscreen?.active &&
+        typeof window.handleExitFullscreenCleanup === 'function') {
+        console.log('Fullscreen not restored after reload - running deferred cleanup');
+        window.handleExitFullscreenCleanup();
+    }
+    window.fullscreenExitCleanupDeferred = false;
+}
+
+window.beginFullscreenReload = beginFullscreenReload;
+window.endFullscreenReload = endFullscreenReload;
+
+// ========================
 // Play video inline
 // ========================
 async function playVideoInline(video, listContext = null, index = null) {
@@ -5626,6 +5726,17 @@ const wasForcedLandscapeBeforeLoad = manualRotationActive;
 // in MP left the player half-out of fullscreen in an odd in-between state.
 const wasPlainFullscreenBeforeLoad =
     !!window.plyrPlayer?.fullscreen?.active && !manualRotationActive;
+
+// ✅ Mask the exit/re-enter round trip so it isn't visible as a series of
+// steps - the screen holds still until the new video is up.
+if (wasForcedLandscapeBeforeLoad || wasPlainFullscreenBeforeLoad) {
+    window.beginFullscreenReload?.();
+}
+
+// ✅ Un-hide the player - do this first, before the scroll-into-view and
+// loading overlay below, since both measure an element that's currently
+// display:none and would otherwise get zeroes.
+setPlayerIdle(false);
 
 // Reset mini-player dismiss flag when new video loads
 miniPlayerManuallyDismissed = false;
@@ -6396,8 +6507,16 @@ if (wasForcedLandscapeBeforeLoad) {
         }
     }, 100);
 }
+
+// ✅ New video is playing and fullscreen has been restored - drop the mask.
+// ⚙️ Bump this delay if a sliver of the transition still shows through.
+if (window.fullscreenReloadActive) {
+    setTimeout(() => window.endFullscreenReload?.(), 350);
+}   
 } catch (playErr) {
  console.error("Playback failed:", playErr);
+ // ✅ Never leave the reload mask up after a failed load.
+ if (window.fullscreenReloadActive) window.endFullscreenReload?.();
  
  // Check if this is a benign interruption error (user skipped video, etc)
  const errorMsg = playErr.message || '';
@@ -6481,6 +6600,37 @@ items.forEach((li, idx) => {
     else li.appendChild(playBtn);
 });
 }
+
+// ========================
+// Idle player visibility
+// ========================
+// The player only earns screen space when it actually has a video. This
+// toggles body.player-idle (see the CSS rule) and, on the way in, tears
+// down any docking state so nothing is left half-positioned behind the
+// hidden element.
+function setPlayerIdle(isIdle) {
+    document.body.classList.toggle('player-idle', !!isIdle);
+
+    if (isIdle) {
+        const container = document.getElementById('inlineVideoContainer');
+        if (container) {
+            container.classList.remove('bottom-docked');
+            container.style.bottom = '';
+        }
+        const videoInfo = document.getElementById('currentVideoInfo');
+        if (videoInfo) {
+            videoInfo.classList.remove('info-bottom-docked');
+            videoInfo.style.bottom = '';
+        }
+        document.body.style.paddingBottom = '';
+        document.getElementById('bottomDockBackdrop')?.classList.remove('active');
+    }
+
+    if (typeof computeBottomDock === 'function') computeBottomDock();
+    if (typeof updatePlayerStateClass === 'function') updatePlayerStateClass();
+    console.log(isIdle ? 'Player hidden (idle)' : 'Player shown (video loading)');
+}
+window.setPlayerIdle = setPlayerIdle;
 
 // ========================
 // Reset player to initial blank state
@@ -6578,6 +6728,11 @@ try {
       container.classList.remove('video-portrait', 'video-landscape');
   }
 
+  // ✅ Nothing is loaded any more - hide the player outright rather than
+  // leaving an empty frame sitting there. Both the player Stop button and
+  // the corner C button route through here, so both hide it.
+  setPlayerIdle(true);
+
   console.log('Player fully reset to pre-play state');
 } catch (err) {
     console.warn("Error resetting player:", err);
@@ -6603,6 +6758,9 @@ window.playPreviousInCurrentList = playPreviousInCurrentList;
 document.addEventListener("DOMContentLoaded", () => {
 createPlayerElement();
 attachBasketPlayButtons();
+
+// ✅ Nothing has played yet - start hidden. playVideoInline un-hides.
+setPlayerIdle(true);
 
 // Create the bottom-dock backdrop once, appended to body so it's
 // always above the page but its z-index keeps it below pills/corner buttons

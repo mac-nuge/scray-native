@@ -4163,6 +4163,18 @@ corner buttons -> info bar -> video player -> filter bar -> normal page
    page underneath (which isn't interactable there anyway) never bleeds
    through the small gaps between the info bar / corner buttons / pills.
    Sits above the page, below the floating pills (2600) and corner buttons. */
+/* =========================================
+IDLE PLAYER - hide the whole thing when nothing is loaded
+=========================================
+Applied via body.player-idle (set by setPlayerIdle()). Covers page load,
+Stop, and the corner C button. Uses display:none rather than opacity so
+the player takes up no layout space at all and the dock math skips it. */
+body.player-idle #inlineVideoContainer,
+body.player-idle #currentVideoInfo,
+body.player-idle #bottomDockBackdrop {
+    display: none !important;
+}
+
 #bottomDockBackdrop {
     display: none;
     position: fixed;

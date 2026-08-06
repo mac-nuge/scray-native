@@ -30,5 +30,8 @@ window.ScrayBridge = {
   debugBundle: () => callNative('debugBundle'),
   getVideoDuration: (relativePath) => callNative('getVideoDuration', relativePath),
   getVideoMetadata: (relativePath) => callNative('getVideoMetadata', relativePath),
-  exportCsv: (csvText, filename) => callNative('exportCsv', { csv: csvText, filename })
+  exportCsv: (csvText, filename) => callNative('exportCsv', { csv: csvText, filename }),
+  // ✅ Filesystem writes inside the security-scoped folder
+  renameFile: (relativePath, newName) => callNative('renameFile', { path: relativePath, newName }),
+  deleteFile: (relativePath) => callNative('deleteFile', { path: relativePath })
 };

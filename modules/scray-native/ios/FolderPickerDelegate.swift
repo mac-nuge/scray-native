@@ -26,7 +26,12 @@ class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
             return
         }
         BookmarkStore.shared.saveBookmark(for: folderURL)
-        completion?(["success": true])
+        // name/path feed the folder pill in the web layer
+        completion?([
+            "success": true,
+            "name": folderURL.lastPathComponent,
+            "path": folderURL.path
+        ])
         completion = nil
     }
 

@@ -802,7 +802,31 @@ async function healBasketItemIds(video, accountInfo) {
 */
 async function refreshSingleVideoComprehensive(video) {
    console.log(`Starting comprehensive refresh for: ${video.filename}`);
-   
+
+   // ✅ Local files have no expiring URLs and no account to re-auth against.
+   // Re-read fresh metadata from disk instead of hitting Graph.
+   if (video.driveId === "local" || (video.accountKey || "").startsWith("local::")) {
+       try {
+           const meta = await ScrayBridge.getVideoMetadata(video.oneDriveId);
+           if (meta) {
+               const updates = {
+                   sizeBytes: meta.sizeBytes ?? video.sizeBytes,
+                   durationMs: meta.duration != null ? Math.round(meta.duration * 1000) : video.durationMs,
+                   width: meta.width ?? video.width,
+                   height: meta.height ?? video.height,
+                   bitrate: meta.bitrate ?? video.bitrate,
+                   lastModifiedDateTime: meta.modifiedDate ?? video.lastModifiedDateTime
+               };
+               updates.orientation = deriveOrientation(updates.width, updates.height) || video.orientation;
+               await updateVideoInDB(video.oneDriveId, updates);
+               Object.assign(video, updates);
+           }
+       } catch (err) {
+           console.warn(`Local metadata refresh failed for ${video.filename}: ${err.message}`);
+       }
+       return video;
+   }
+
    const [accountIdStored] = (video.accountKey || "").split("::");
    let accountInfo = accountsData.find(acc => acc.accountId === accountIdStored);
 

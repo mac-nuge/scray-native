@@ -588,7 +588,9 @@ async function showDeleteModal(video) {
     modal.innerHTML = `
    <div class="basket-json-modal-content">
            <h3>Delete File</h3>
-           <p class="file-operation-warning">This will move the file to the OneDrive Recycle bin</p>
+           ${(video.driveId === "local" || (video.accountKey || "").startsWith("local::"))
+               ? '<p class="file-operation-warning">This permanently deletes the file from your device. There is no recycle bin.</p>'
+               : '<p class="file-operation-warning">This will move the file to the OneDrive Recycle bin</p>'}
            <p class="file-operation-path">${video.path || ''}</p>
            <p class="file-operation-filename"><strong>${video.filename || ''}</strong></p>
            <div class="file-operation-buttons">
@@ -634,7 +636,143 @@ async function showDeleteModal(video) {
 /**
 * Rename a file in OneDrive via Graph API
 */
+// =========================================
+// LOCAL FILE OPERATIONS
+// For local rows, oneDriveId IS the relative path - so a rename changes the
+// primary key and the row has to be migrated rather than patched in place.
+// =========================================
+function isLocalVideo(video) {
+   return video?.driveId === "local" || (video?.accountKey || "").startsWith("local::");
+}
+window.isLocalVideo = isLocalVideo;
+
+/**
+* Move a videoSource + videoMeta row from one key to another.
+*/
+async function migrateLocalVideoKey(oldId, newId, newFilename, newDownloadUrl) {
+   const db = await openDB();
+   const tx = db.transaction([STORE_NAME, META_STORE_NAME], "readwrite");
+   const sourceStore = tx.objectStore(STORE_NAME);
+   const metaStore = tx.objectStore(META_STORE_NAME);
+
+   const getOne = (store, key) => new Promise((resolve, reject) => {
+       const req = store.get(key);
+       req.onsuccess = () => resolve(req.result);
+       req.onerror = () => reject(req.error);
+   });
+
+   const row = await getOne(sourceStore, oldId);
+   if (row) {
+       const parts = newId.split('/');
+       const newPath = parts.slice(0, -1).join('/');
+
+       const bracketTags = typeof generateTagsFromFilename === "function"
+           ? generateTagsFromFilename(newFilename)
+           : (row.bracketTags || []);
+       const pathTags = typeof generateTagsFromPath === "function"
+           ? generateTagsFromPath(newPath)
+           : [];
+
+       sourceStore.delete(oldId);
+       sourceStore.put({
+           ...row,
+           oneDriveId: newId,
+           filename: newFilename,
+           path: newPath,
+           downloadUrl: newDownloadUrl,
+           bracketTags,
+           tags: [...new Set([...pathTags, ...bracketTags])]
+       });
+   }
+
+   const metaRow = await getOne(metaStore, oldId);
+   if (metaRow) {
+       metaStore.delete(oldId);
+       metaStore.put({ ...metaRow, oneDriveId: newId });
+   }
+
+   return tx.complete;
+}
+
+/**
+* Re-key an item across basket / history / filtered arrays.
+*/
+function rekeyVideoInMemory(oldId, newId, updates) {
+   const apply = (arr) => {
+       if (!arr) return false;
+       let changed = false;
+       arr.forEach(v => {
+           if (v.oneDriveId === oldId) {
+               Object.assign(v, updates, { oneDriveId: newId });
+               changed = true;
+           }
+       });
+       return changed;
+   };
+
+   if (apply(window.basketVideos) && typeof window.saveBasket === "function") window.saveBasket();
+   if (apply(window.historyVideos) && typeof window.saveHistory === "function") window.saveHistory();
+   apply(window.filteredVideosGlobal);
+
+   if (window.selectedBasketIds?.has(oldId)) {
+       window.selectedBasketIds.delete(oldId);
+       window.selectedBasketIds.add(newId);
+   }
+}
+
+async function renameLocalFile(video, newName) {
+   const oldRelPath = video.oneDriveId;
+   if (!oldRelPath) throw new Error("Missing file path - cannot rename");
+
+   const result = await ScrayBridge.renameFile(oldRelPath, newName);
+
+   // Trust the native layer's returned path if it gives one
+   const parts = oldRelPath.split('/');
+   parts[parts.length - 1] = newName;
+   const newRelPath = (typeof result === "string" ? result : result?.path) || parts.join('/');
+
+   const newDownloadUrl = `scray-video://local/${newRelPath.split('/').map(encodeURIComponent).join('/')}`;
+
+   await migrateLocalVideoKey(oldRelPath, newRelPath, newName, newDownloadUrl);
+   rekeyVideoInMemory(oldRelPath, newRelPath, {
+       filename: newName,
+       downloadUrl: newDownloadUrl
+   });
+
+   // Mutate the caller's object so downstream code uses the new key
+   video.oneDriveId = newRelPath;
+   video.filename = newName;
+   video.downloadUrl = newDownloadUrl;
+
+   console.log(`Local rename: ${oldRelPath} -> ${newRelPath}`);
+   refreshAllLists();
+}
+
+async function deleteLocalFile(video) {
+   const relPath = video.oneDriveId;
+   if (!relPath) throw new Error("Missing file path - cannot delete");
+
+   // Stop playback first - deleting a file the WebView is streaming stalls it
+   if (window.currentPlayingVideo?.oneDriveId === relPath && window.inlineVideoPlayer) {
+       try { window.inlineVideoPlayer.stop(); } catch {}
+   }
+
+   await ScrayBridge.deleteFile(relPath);
+
+   await deleteVideoFromDB(relPath);
+   removeVideoFromMemory(relPath);
+
+   console.log(`Local delete: ${relPath}`);
+   refreshAllLists();
+   if (typeof renderFolderPills === "function") renderFolderPills();
+}
+
 async function renameFile(video, newName) {
+   // ✅ Local files bypass Graph entirely
+   if (isLocalVideo(video)) {
+       return renameLocalFile(video, newName);
+   }
+
    // Get account info and refresh token
    const [accountIdStored] = (video.accountKey || "").split("::");
    let accountInfo = accountsData.find(acc => acc.accountId === accountIdStored);
@@ -693,6 +831,11 @@ async function renameFile(video, newName) {
 * Delete a file from OneDrive via Graph API
 */
 async function deleteFile(video) {
+   // ✅ Local files bypass Graph entirely
+   if (isLocalVideo(video)) {
+       return deleteLocalFile(video);
+   }
+
    // Get account info and refresh token
    const [accountIdStored] = (video.accountKey || "").split("::");
    let accountInfo = accountsData.find(acc => acc.accountId === accountIdStored);

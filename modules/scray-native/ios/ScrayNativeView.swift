@@ -137,6 +137,33 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler {
             CsvExportDelegate.shared.presentExporter(csvText: csvText, filename: filename) { [weak self] result in
                 self?.resolve(id: id, result: result)
             }
+        case "renameFile":
+            guard let payloadDict = payload as? [String: Any],
+                  let relativePath = payloadDict["path"] as? String,
+                  let newName = payloadDict["newName"] as? String,
+                  !newName.isEmpty,
+                  !newName.contains("/") else {
+                reject(id: id, error: "Invalid rename payload")
+                return
+            }
+            do {
+                let newPath = try BookmarkStore.shared.renameFile(relativePath: relativePath, newName: newName)
+                resolve(id: id, result: ["success": true, "path": newPath])
+            } catch {
+                reject(id: id, error: error.localizedDescription)
+            }
+        case "deleteFile":
+            guard let payloadDict = payload as? [String: Any],
+                  let relativePath = payloadDict["path"] as? String else {
+                reject(id: id, error: "Invalid delete payload")
+                return
+            }
+            do {
+                try BookmarkStore.shared.deleteFile(relativePath: relativePath)
+                resolve(id: id, result: ["success": true, "deleted": true])
+            } catch {
+                reject(id: id, error: error.localizedDescription)
+            }
         case "debugBundle":
             let resourcePath = Bundle.main.resourcePath ?? "nil"
             let rootContents = (try? FileManager.default.contentsOfDirectory(atPath: resourcePath)) ?? []

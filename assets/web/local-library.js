@@ -1,5 +1,175 @@
-async function scanLocalLibrary() {
-  console.log("scanLocalLibrary: starting");
+// =========================================
+// LOCAL FOLDER REGISTRY + PILLS
+// Videos are attributed to a folder via accountName, so accountKey stays
+// "local::local" and every existing `driveId === "local"` check keeps working.
+// =========================================
+const LOCAL_FOLDERS_KEY = "scrayLocalFolders";
+
+function getLocalFolders() {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_FOLDERS_KEY)) || [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalFolders(folders) {
+  localStorage.setItem(LOCAL_FOLDERS_KEY, JSON.stringify(folders));
+}
+
+function registerLocalFolder(name) {
+  const folders = getLocalFolders();
+  if (!folders.some(f => f.name === name)) {
+    folders.push({ name, addedAt: new Date().toISOString() });
+    saveLocalFolders(folders);
+  }
+  localStorage.setItem("scrayActiveFolder", name);
+  return name;
+}
+
+function getActiveFolderName() {
+  return localStorage.getItem("scrayActiveFolder")
+      || getLocalFolders()[0]?.name
+      || "Video Folder";
+}
+
+/**
+* pickFolder's return shape is decided by the native layer, so accept
+* whatever it hands back and dig out something human-readable.
+*/
+function resolveFolderName(result) {
+  const lastComponent = (p) => {
+    if (!p) return null;
+    const parts = String(p).split("/").filter(Boolean);
+    let name = parts[parts.length - 1] || null;
+    if (name) { try { name = decodeURIComponent(name); } catch {} }
+    return name;
+  };
+
+  if (!result) return "Video Folder";
+  if (typeof result === "string") return lastComponent(result) || result;
+
+  return result.name
+      || result.folderName
+      || result.displayName
+      || lastComponent(result.path)
+      || lastComponent(result.url)
+      || "Video Folder";
+}
+window.resolveFolderName = resolveFolderName;
+
+async function renderFolderPills() {
+  const container = document.getElementById("accountLoadButtons");
+  if (!container) return;
+
+  const folders = getLocalFolders();
+  container.innerHTML = "";
+
+  if (!folders.length) return;
+
+  let allVideos = [];
+  try {
+    allVideos = await getAllVideos();
+  } catch (err) {
+    console.warn("renderFolderPills: could not read DB", err);
+  }
+
+  const activeName = getActiveFolderName();
+
+  folders.forEach(folder => {
+    const count = allVideos.filter(
+      v => v.driveId === "local" && v.accountName === folder.name
+    ).length;
+
+    const pill = document.createElement("div");
+    pill.className = "account-pill";
+    pill.dataset.username = folder.name;
+
+    const loadBtn = document.createElement("button");
+    loadBtn.className = "account-load-btn";
+    loadBtn.textContent = `${folder.name} (${count})`;
+    loadBtn.title = folder.name === activeName
+      ? "Active folder - tap to refresh"
+      : "Tap to refresh (will re-scan the currently linked folder)";
+
+    if (folder.name !== activeName) {
+      loadBtn.classList.add("loading"); // greys out non-active folders
+    }
+
+    loadBtn.addEventListener("click", async () => {
+      const original = loadBtn.textContent;
+      loadBtn.textContent = "Scanning...";
+      loadBtn.disabled = true;
+      try {
+        await scanLocalLibrary(folder.name);
+      } catch (err) {
+        console.error("Rescan failed:", err);
+        alert(`Refresh failed: ${err.message}`);
+        loadBtn.textContent = original;
+      } finally {
+        loadBtn.disabled = false;
+      }
+    });
+
+    const removeBtn = document.createElement("span");
+    removeBtn.className = "account-remove-cross";
+    removeBtn.innerHTML = "&times;";
+    removeBtn.title = "Remove these videos from the database";
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      removeLocalFolder(folder.name);
+    });
+
+    pill.appendChild(loadBtn);
+    pill.appendChild(removeBtn);
+    container.appendChild(pill);
+  });
+}
+window.renderFolderPills = renderFolderPills;
+
+/**
+* Removes a folder's videos from IndexedDB only. Files on disk are untouched.
+*/
+async function removeLocalFolder(folderName) {
+  const allVideos = await getAllVideos();
+  const doomed = allVideos.filter(
+    v => v.driveId === "local" && v.accountName === folderName
+  );
+
+  const ok = confirm(
+    `Remove "${folderName}" (${doomed.length} videos) from the database?\n\n` +
+    `Files on your device are NOT deleted - this only clears them from Scray.`
+  );
+  if (!ok) return;
+
+  for (const v of doomed) {
+    try {
+      await deleteVideoFromDB(v.oneDriveId);
+      if (typeof removeVideoFromMemory === "function") {
+        removeVideoFromMemory(v.oneDriveId);
+      }
+    } catch (err) {
+      console.warn(`Failed to remove ${v.filename}:`, err);
+    }
+  }
+
+  saveLocalFolders(getLocalFolders().filter(f => f.name !== folderName));
+  if (getActiveFolderName() === folderName) {
+    localStorage.removeItem("scrayActiveFolder");
+  }
+
+  console.log(`Removed folder "${folderName}": ${doomed.length} videos cleared`);
+
+  if (typeof populateTagDropdowns === "function") await populateTagDropdowns();
+  if (typeof refreshAllLists === "function") refreshAllLists();
+  await renderFolderPills();
+}
+window.removeLocalFolder = removeLocalFolder;
+
+async function scanLocalLibrary(folderNameOverride) {
+  const folderName = folderNameOverride || getActiveFolderName();
+  console.log(`scanLocalLibrary: starting for "${folderName}"`);
   const relativePaths = await ScrayBridge.listVideoFiles();
   console.log("scanLocalLibrary: found " + relativePaths.length + " files: " + JSON.stringify(relativePaths));
 
@@ -43,8 +213,13 @@ async function scanLocalLibrary() {
     }
   }
 
-  await saveVideos(videos, "local", "local", "local");
-  console.log("scanLocalLibrary: saved to IndexedDB");
+  // folderName lands in accountName; accountId stays "local" so accountKey
+  // remains "local::local" for the existing local-video guards
+  await saveVideos(videos, folderName, "local", "local");
+  registerLocalFolder(folderName);
+  console.log(`scanLocalLibrary: saved ${videos.length} videos under "${folderName}"`);
+
+  if (typeof renderFolderPills === "function") await renderFolderPills();
 
   if (typeof populateTagDropdowns === 'function') {
     await populateTagDropdowns();
@@ -120,17 +295,44 @@ window.addEventListener("DOMContentLoaded", () => {
   // dropdown has something to match against
   backfillVideoOrientation().catch(err => console.warn("Orientation backfill failed:", err));
 
+  // Paint any previously added folders on load
+  renderFolderPills().catch(err => console.warn("Folder pill render failed:", err));
+
   document.getElementById("pickFolderBtn")?.addEventListener("click", async () => {
     console.log("pickFolderBtn clicked");
+    const btn = document.getElementById("pickFolderBtn");
+    const originalText = btn ? btn.textContent : null;
     try {
       const result = await ScrayBridge.pickFolder();
       console.log("pickFolder result: " + JSON.stringify(result));
-      await scanLocalLibrary();
+
+      const folderName = resolveFolderName(result);
+      registerLocalFolder(folderName);
+      await renderFolderPills();
+
+      if (btn) { btn.textContent = "Scanning..."; btn.disabled = true; }
+      await scanLocalLibrary(folderName);
     } catch (err) {
       console.error("pickFolder ERROR: " + err.message);
+    } finally {
+      if (btn) { btn.textContent = originalText; btn.disabled = false; }
     }
   });
-  document.getElementById("rescanLibraryBtn")?.addEventListener("click", () => scanLocalLibrary());
+
+  // ✅ "Refresh" - re-scans the linked folder and updates the pill counts
+  document.getElementById("rescanLibraryBtn")?.addEventListener("click", async () => {
+    const btn = document.getElementById("rescanLibraryBtn");
+    const originalText = btn ? btn.textContent : null;
+    if (btn) { btn.textContent = "Refreshing..."; btn.disabled = true; }
+    try {
+      await scanLocalLibrary();
+    } catch (err) {
+      console.error("Refresh failed:", err);
+      alert(`Refresh failed: ${err.message}`);
+    } finally {
+      if (btn) { btn.textContent = originalText; btn.disabled = false; }
+    }
+  });
 });
 
 /**

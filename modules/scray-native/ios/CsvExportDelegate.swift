@@ -24,10 +24,14 @@ class CsvExportDelegate: NSObject, UIDocumentPickerDelegate {
                 .first?.windows.first(where: { $0.isKeyWindow })?.rootViewController
             // Walk to the topmost presented VC or present() is a no-op
             while let presented = root?.presentedViewController { root = presented }
+
             guard let root else {
-                completion(["success": false])
+                self.cleanupTempFile()
+                completion(["success": false, "error": "No view controller to present from"])
+                self.completion = nil
                 return
             }
+
             let picker = UIDocumentPickerViewController(forExporting: [tempURL])
             picker.delegate = self
             root.present(picker, animated: true)

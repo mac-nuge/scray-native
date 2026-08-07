@@ -212,13 +212,7 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
         top.present(alert, animated: true)
     }
 
-    private func resolve(id: String, result: Any) {guard let root = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .first?.windows.first(where: { $0.isKeyWindow })?.rootViewController else {
-                completion(["success": false])
-                return
-            }
-            let picker = UIDocumentPickerViewController(forExporting: [tempURL])
+    private func resolve(id: String, result: Any) {
         guard let data = try? JSONSerialization.data(withJSONObject: result, options: []),
               let json = String(data: data, encoding: .utf8) else {
             reject(id: id, error: "Failed to serialize result")

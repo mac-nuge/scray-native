@@ -887,7 +887,7 @@ async function deleteFile(video) {
 /**
 * Update video metadata in IndexedDB
 */
-async function updateVideoInDB(oneDriveId, updates) {
+async function updateVideoInDB(oneDriveId, updates, opts = {}) {
 // Split updates between videoMeta (your data) and videoSource (file-derived
 // data) so callers don't need to know or care which store a field lives in.
 const metaUpdates = {};
@@ -935,17 +935,47 @@ if (Object.keys(sourceUpdates).length > 0) {
         };
     });
 }
+
+// saveVideoMeta (db.js) already enqueued the videoMeta half of `updates`.
+// Enqueue only the videoSource-side fields this function is responsible for.
+if (!opts.fromSync && typeof window.scrayEnqueueOp === "function") {
+    const remaining = {};
+    for (const [k, v] of Object.entries(updates)) {
+        const isMeta = window.VIDEO_META_FIELDS && window.VIDEO_META_FIELDS.has(k);
+        if (!isMeta) remaining[k] = v;
+    }
+    if (Object.keys(remaining).length) {
+        await window.scrayEnqueueOp(oneDriveId, remaining);
+    }
+}
 }
 
 /**
 * Delete video from IndexedDB
 */
-async function deleteVideoFromDB(oneDriveId) {
+async function deleteVideoFromDB(oneDriveId, opts = {}) {
    const db = await openDB();
    const tx = db.transaction(STORE_NAME, "readwrite");
    const store = tx.objectStore(STORE_NAME);
-   await store.delete(oneDriveId);
-   await tx.complete;
+   store.delete(oneDriveId);
+   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+
+   // Soft-delete on the server. A hard delete would make the row look "new"
+   // to any device that hasn't pulled yet, and it would come straight back.
+   if (!opts.fromSync && typeof window.scrayEnqueueOp === "function") {
+       try {
+           const outboxDb = await openDB();
+           const otx = outboxDb.transaction("outbox", "readwrite");
+           otx.objectStore("outbox").add({
+               oneDriveId,
+               op: { id: oneDriveId, device: window.SCRAY_SYNC.DEVICE_ID, delete: true },
+               at: new Date().toISOString()
+           });
+           await new Promise((res, rej) => { otx.oncomplete = res; otx.onerror = () => rej(otx.error); });
+       } catch (err) {
+           console.warn("[sync] could not queue delete:", err);
+       }
+   }
 }
 
 /**

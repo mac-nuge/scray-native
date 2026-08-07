@@ -309,6 +309,7 @@ window.scrayDrainQuietly = drainQuietly;
 
 console.log(`[sync] ready — device ${window.SCRAY_SYNC.DEVICE_ID}`);
 
+// REMOVE EVENTUALLY: this is just a temporary self-test to verify the API key and endpoint are working. It will be removed once verified.
 // TEMPORARY Stage 1 self-test — delete this block once verified.
 // Native has no console input, so the checks run themselves and print
 // to the inline console panel at the bottom of the screen.
@@ -329,3 +330,109 @@ setTimeout(async () => {
     console.error("SELF-TEST FAILED:", err.message);
   }
 }, 2000);
+
+
+// // TEMPORARY Stage 2 self-test — delete once verified.
+// // Self-contained: creates a synthetic video row, tests against it, cleans up.
+// setTimeout(async () => {
+//   const TEST_ID = "__scray_selftest__";
+//   // db.js declares these as top-level `const`, which is NOT a window
+//   // property. Plain <script> tags share global scope so the bare names
+//   // resolve, but fall back to the literals so this test can't break on
+//   // a load-order or bundling change.
+//   const SRC = (typeof STORE_NAME !== "undefined") ? STORE_NAME : "videoSource";
+//   const MET = (typeof META_STORE_NAME !== "undefined") ? META_STORE_NAME : "videoMeta";
+//   const log = (...a) => console.log("[S2]", ...a);
+//   const bad = (...a) => console.error("[S2] \u2717", ...a);
+//   const ok = (c) => c ? "\u2713" : "\u2717";
+
+//   try {
+//     log("=== STAGE 2 SELF-TEST ===");
+
+//     // --- setup: synthetic videoSource row (no scan needed) -----------
+//     {
+//       const db = await openDB();
+//       const tx = db.transaction(SRC, "readwrite");
+//       tx.objectStore(SRC).put({
+//         oneDriveId: TEST_ID,
+//         filename: "__selftest__.mp4",
+//         path: "selftest",
+//         sizeBytes: 1234,
+//         tags: ["selftest"]
+//       });
+//       await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = () => j(tx.error); });
+//     }
+//     await saveVideoMeta(TEST_ID, { user_score: null, view_count: 0 }, "scan");
+//     log("setup: synthetic row created");
+
+//     // --- 1. local write queues an op ---------------------------------
+//     const before = (await scrayGetOutbox()).length;
+//     await updateVideoInDB(TEST_ID, { user_score: 4 });
+//     const after = await scrayGetOutbox();
+//     log("1. outbox", before, "\u2192", after.length, ok(after.length > before));
+
+//     // --- 2. op shape: user_score belongs in `set` ---------------------
+//     const op = after[after.length - 1]?.op;
+//     log("2. op:", JSON.stringify(op));
+//     log("   set.user_score =", op?.set?.user_score, ok(op?.set?.user_score === 4));
+
+//     // --- 3. push drains the outbox ------------------------------------
+//     const pushed = await scrayPushOutbox();
+//     const emptied = (await scrayGetOutbox()).length;
+//     log("3. pushed", pushed.pushed, "| conflicts", pushed.conflicts.length,
+//         "| outbox", emptied, ok(emptied === 0));
+
+//     // --- 4. pull must NOT re-queue (the ping-pong guard) --------------
+//     const pulled = await scrayPullDeltas(window.scrayApplyPulledRow);
+//     const bounced = (await scrayGetOutbox()).length;
+//     log("4. pulled", pulled.pulled, "| outbox after pull", bounced, ok(bounced === 0));
+//     if (bounced) bad("PULLED CHANGES ARE RE-QUEUEING \u2014 see 2.2");
+
+//     // --- 5. counters route through `max`, not `add` -------------------
+//     await queueExcelUpdate({ oneDriveId: TEST_ID }, { increment_views: true });
+//     const cop = (await scrayGetOutbox()).slice(-1)[0]?.op;
+//     log("5. max:", JSON.stringify(cop?.max), "| add:", JSON.stringify(cop?.add));
+//     log("   ", ok(cop?.max?.view_count !== undefined && cop?.add === undefined));
+//     await scrayPushOutbox();
+
+//     // --- 6. server keeps the HIGHER value -----------------------------
+//     const now = (await scrayApiCall("get", { params: { id: TEST_ID } })).video?.view_count;
+//     await scrayApiCall("push", { method: "POST",
+//       body: { ops: [{ id: TEST_ID, device: "s2-test", max: { view_count: 0 } }] } });
+//     const still = (await scrayApiCall("get", { params: { id: TEST_ID } })).video?.view_count;
+//     log("6. view_count", now, "\u2192 after pushing 0:", still,
+//         ok(Number(still) === Number(now)));
+
+//     // --- cleanup: local stores + server tombstone ---------------------
+//     {
+//       const db = await openDB();
+//       const tx = db.transaction([SRC, MET], "readwrite");
+//       tx.objectStore(SRC).delete(TEST_ID);
+//       tx.objectStore(MET).delete(TEST_ID);
+//       await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = () => j(tx.error); });
+//     }
+//     await scrayApiCall("push", { method: "POST",
+//       body: { ops: [{ id: TEST_ID, device: "s2-test", delete: true }] } });
+//     const leftover = (await scrayGetOutbox()).length;
+//     log("cleanup done | outbox", leftover, ok(leftover === 0));
+//     log("=== STAGE 2 SELF-TEST DONE ===");
+//   } catch (err) {
+//     bad(err.message, err.stack);
+//   }
+// }, 3000);
+
+
+// // DIAGNOSTIC — which Stage 2 edits actually landed?
+// setTimeout(async () => {
+//   const d = (...a) => console.log("[DIAG]", ...a);
+//   const db = await openDB();
+//   d("DB version:", db.version, db.version >= 10 ? "✓" : "✗ 2.1 not applied");
+//   d("stores:", Array.from(db.objectStoreNames).join(", "));
+//   d("  outbox exists:", db.objectStoreNames.contains("outbox") ? "✓" : "✗ 2.1 store creation missing");
+//   d("  syncState exists:", db.objectStoreNames.contains("syncState") ? "✓" : "✗");
+//   d("scrayEnqueueOp:", typeof window.scrayEnqueueOp, typeof window.scrayEnqueueOp === "function" ? "✓" : "✗ scray-sync.js issue");
+//   d("scrayApplyPulledRow:", typeof window.scrayApplyPulledRow, typeof window.scrayApplyPulledRow === "function" ? "✓" : "✗ 2.5 not appended to db.js");
+//   d("saveVideoMeta enqueues:", /scrayEnqueueOp/.test(saveVideoMeta.toString()) ? "✓" : "✗ 2.2 not applied");
+//   d("updateVideoInDB enqueues:", /scrayEnqueueOp/.test(updateVideoInDB.toString()) ? "✓" : "✗ 2.3 not applied");
+//   d("deleteVideoFromDB tombstones:", /scrayEnqueueOp/.test(deleteVideoFromDB.toString()) ? "✓" : "✗ 2.4 not applied");
+// }, 2500);

@@ -18,7 +18,9 @@
 * the app already expects.
 */
 const DB_NAME = "scray_picker";
-const DB_VERSION = 9; // bumped to 9: split into videoSource + videoMeta stores
+const DB_VERSION = 10; // bumped to 10: added outbox + syncState for SQLite sync.
+                       // Intentional full wipe - re-import from the Excel
+                       // backup via migrate.py after this ships (see Stage 5).
 const STORE_NAME = "videoSource";
 const META_STORE_NAME = "videoMeta";
 
@@ -40,6 +42,13 @@ function openDB() {
 
       if (db.objectStoreNames.contains(STORE_NAME)) db.deleteObjectStore(STORE_NAME);
       if (db.objectStoreNames.contains(META_STORE_NAME)) db.deleteObjectStore(META_STORE_NAME);
+      if (db.objectStoreNames.contains("outbox")) db.deleteObjectStore("outbox");
+      if (db.objectStoreNames.contains("syncState")) db.deleteObjectStore("syncState");
+
+      const outboxStore = db.createObjectStore("outbox", { keyPath: "id", autoIncrement: true });
+      outboxStore.createIndex("oneDriveId", "oneDriveId");
+      outboxStore.createIndex("at", "at");
+      db.createObjectStore("syncState", { keyPath: "key" });
 
       const sourceStore = db.createObjectStore(STORE_NAME, { keyPath: "oneDriveId" });
       sourceStore.createIndex("path", "path");
@@ -250,7 +259,14 @@ async function saveVideoMeta(oneDriveId, metaUpdates, updatedBy = "app") {
     updatedBy
   });
 
-  return tx.complete;
+  await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+
+  // Local write is committed; now queue it for the server. A "scan" is
+  // derived data, not a user action, so it never generates an op.
+  if (updatedBy !== "scan" && updatedBy !== "sync" && typeof window.scrayEnqueueOp === "function") {
+    await window.scrayEnqueueOp(oneDriveId, metaUpdates);
+  }
+  return;
 }
 window.saveVideoMeta = saveVideoMeta;
 
@@ -730,3 +746,49 @@ if (typeof populateTagDropdowns === "function") {
 }
 
 window.ingestYetToUploadCSV = ingestYetToUploadCSV;
+
+/**
+ * Apply one pulled server row into the local mirror.
+ *
+ * Passing updatedBy "sync" is load-bearing: saveVideoMeta skips the enqueue
+ * for that value, which is what stops a pulled change bouncing back up.
+ */
+async function scrayApplyPulledRow(appRow, rawRow) {
+  const id = appRow.oneDriveId;
+  if (!id) return;
+
+  if (rawRow.deleted) {
+    const db = await openDB();
+    const tx = db.transaction([STORE_NAME, META_STORE_NAME], "readwrite");
+    tx.objectStore(STORE_NAME).delete(id);
+    tx.objectStore(META_STORE_NAME).delete(id);
+    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+    return;
+  }
+
+  const metaPatch = {};
+  const sourcePatch = {};
+  for (const [k, v] of Object.entries(appRow)) {
+    if (k === "oneDriveId" || k.startsWith("_")) continue;
+    if (META_FIELDS.has(k)) metaPatch[k] = v; else sourcePatch[k] = v;
+  }
+
+  if (Object.keys(sourcePatch).length) {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const existing = await new Promise((res, rej) => {
+      const r = store.get(id); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    // Only ever patch a row that exists locally. Native's library is the
+    // files on this device; the server catalogue is much larger and pulling
+    // rows for videos you don't have would poison the local list.
+    if (existing) store.put({ ...existing, ...sourcePatch, oneDriveId: id });
+    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+  }
+
+  if (Object.keys(metaPatch).length) {
+    await saveVideoMeta(id, metaPatch, "sync");
+  }
+}
+window.scrayApplyPulledRow = scrayApplyPulledRow;

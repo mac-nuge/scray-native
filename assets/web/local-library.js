@@ -470,7 +470,13 @@ window.addEventListener("DOMContentLoaded", () => {
       const joinedRows = joinVideosWithRawData(videoRows, rawDataRows);
       console.log(`Scray Excel import: ${videoRows.length} Videos rows loaded`);
 
-      localStorage.setItem("scrayExcelVideosCache", JSON.stringify(joinedRows));
+      // The union can be large; localStorage has a ~5MB ceiling
+      try {
+        localStorage.setItem("scrayExcelVideosCache", JSON.stringify(joinedRows));
+      } catch (quotaErr) {
+        console.warn("Catalogue too large for localStorage - keeping in memory only:", quotaErr.message);
+        localStorage.removeItem("scrayExcelVideosCache");
+      }
       window.scrayExcelVideoRows = joinedRows;
 
       await matchExcelMetadataToLocalVideos(joinedRows);
@@ -510,26 +516,60 @@ function updateScrayExcelButtonStatus(loaded) {
 }
 
 /** Join Videos-sheet rows onto raw_data rows via oneDriveId/id to pull in width/height/duration_ms */
+/**
+* Build the UNION of Videos + raw_data, keyed on oneDriveId.
+*
+* These are two partially-overlapping catalogues, not a table and its index:
+* on a real workbook, 271 Videos ids had no raw_data twin while raw_data held
+* 6,251 rows against Videos' 1,683. Using either alone loses videos - measured
+* on 422 local files, Videos-only matched 151 and the union matched 270.
+*
+* Both sheets now share the v2 schema, so rows merge field-by-field with the
+* richer value winning.
+*/
 function joinVideosWithRawData(videoRows, rawDataRows) {
-  const rawById = new Map();
-  rawDataRows.forEach(r => { if (r.id) rawById.set(r.id, r); });
+  const union = new Map();
 
-  return videoRows.map(v => {
-    // ✅ The Videos sheet header is "id", not "oneDriveId" - this join was
-    // always missing, so width/height/duration_ms never came through.
-    // Older exports used "oneDriveId", so accept either.
-    const rowId = v.id ?? v.oneDriveId ?? null;
-    const raw = rowId ? rawById.get(rowId) : null;
-    return {
-      ...v,
-      id: rowId,
-      width: raw?.width ?? null,
-      height: raw?.height ?? null,
-      duration_ms: raw?.duration_ms ?? null,
-      file_size_bytes: raw?.size_bytes ?? v.file_size_bytes ?? null,
-      bitrate: raw?.bitrate ?? v.bitrate ?? null
-    };
+  const idOf = (r) => r.oneDriveId ?? r.id ?? null;
+
+  // Legacy raw_data used size_bytes; v2 uses file_size_bytes
+  const normalize = (r) => ({
+    ...r,
+    oneDriveId: idOf(r),
+    file_size_bytes: r.file_size_bytes ?? r.size_bytes ?? null,
+    web_url: r.web_url ?? r.webUrl ?? null
   });
+
+  const absorb = (r) => {
+    const row = normalize(r);
+    if (!row.oneDriveId) return;
+    const existing = union.get(row.oneDriveId);
+    if (!existing) {
+      union.set(row.oneDriveId, row);
+      return;
+    }
+    // Merge: a non-empty value beats an empty one
+    Object.keys(row).forEach(k => {
+      const val = row[k];
+      if (val !== null && val !== undefined && val !== "" &&
+          (existing[k] === null || existing[k] === undefined || existing[k] === "")) {
+        existing[k] = val;
+      }
+    });
+  };
+
+  rawDataRows.forEach(absorb);
+  videoRows.forEach(absorb);   // Videos wins on user metadata by going last
+
+  const out = [...union.values()];
+  const withSize = out.filter(r => r.file_size_bytes).length;
+  const withDuration = out.filter(r => r.duration_ms).length;
+  console.log(
+    `Catalogue union: ${out.length} videos ` +
+    `(Videos ${videoRows.length}, raw_data ${rawDataRows.length}) - ` +
+    `${withSize} with size, ${withDuration} with duration`
+  );
+  return out;
 }
 
 /** Group joined rows by filename (some filenames have true duplicate catalog entries) */
@@ -579,40 +619,31 @@ function scoreCandidateMatch(candidate, nativeMeta) {
 * piece you mentioned as a later step.
 */
 async function matchExcelMetadataToLocalVideos(excelRows) {
-  const excelIndex = buildExcelVideoIndex(excelRows);
+  const index = buildCatalogIndex(excelRows);
+  const claimed = new Set();
   const allVideos = await getAllVideos();
   const localVideos = allVideos.filter(v => v.driveId === "local");
 
   let matched = 0, unmatched = 0, lowConfidence = 0;
+  const viaStats = {};
+  const failReasons = [];
   const matchedBookmarksById = new Map(); // oneDriveId -> bookmarks[], used to patch in-memory copies after the loop
 
   for (const video of localVideos) {
-    const candidates = excelIndex.get(video.filename);
-    if (!candidates || candidates.length === 0) {
+    // ✅ Tiered: id -> exact size -> size+intrinsics -> filename.
+    // Never tolerance-matches size: on a 6.5k catalogue a 0.1% band
+    // "matches" 150 files that aren't in the catalogue at all.
+    const { row: chosen, via, reason } = matchVideoToCatalog(video, index, claimed);
+
+    if (!chosen) {
       unmatched++;
+      failReasons.push(reason);
       continue;
     }
 
-    let chosen = candidates[0];
-
-    if (candidates.length > 1) {
-      const nativeMeta = {
-        width: video.width,
-        height: video.height,
-        bitrate: video.bitrate,
-        duration: video.durationMs != null ? video.durationMs / 1000 : null,
-        sizeBytes: video.sizeBytes
-      };
-      const scored = candidates
-        .map(c => ({ row: c, score: scoreCandidateMatch(c, nativeMeta) }))
-        .sort((a, b) => b.score - a.score);
-      chosen = scored[0].row;
-
-      if (scored[0].score === 0) {
-        lowConfidence++;
-        console.warn(`Low-confidence Excel match for "${video.filename}" (${candidates.length} candidates, no fingerprint corroboration) - using first entry`);
-      }
-    }
+    claimed.add(chosen);
+    viaStats[via] = (viaStats[via] || 0) + 1;
+    if (via === "filename") lowConfidence++;
 
     let bookmarks = [];
     if (chosen.bookmarks) {
@@ -635,6 +666,17 @@ async function matchExcelMetadataToLocalVideos(excelRows) {
 
     await saveVideoMeta(video.oneDriveId, metaUpdates, "excel-import");
 
+    // ✅ THE POINT OF ALL THIS: attach the stable OneDrive identity to the
+    // local row. Once catalogueId is set, every later match is tier-1 and
+    // renames on either side stop mattering.
+    await updateVideoInDB(video.oneDriveId, {
+      catalogueId: chosen.oneDriveId,
+      web_url: chosen.web_url ?? null,
+      catalogue_path: chosen.path ?? null,
+      catalogue_filename: chosen.filename ?? null,
+      matched_via: via
+    });
+
     // Tags live in videoSource, not videoMeta - merge (union) rather than
     // overwrite, so re-importing never removes a tag you've added since.
     if (chosen.tags) {
@@ -647,8 +689,28 @@ async function matchExcelMetadataToLocalVideos(excelRows) {
     matched++;
   }
 
-  console.log(`Excel match complete: ${matched} matched (${lowConfidence} low-confidence), ${unmatched} unmatched`);
-  alert(`Excel import matched ${matched} of ${localVideos.length} local videos\n(${lowConfidence} low-confidence, ${unmatched} unmatched)`);
+  const viaSummary = Object.entries(viaStats).map(([k, n]) => `${k}: ${n}`).join(", ");
+  console.log(`Excel match complete: ${matched}/${localVideos.length} matched (${viaSummary})`);
+
+  if (failReasons.length) {
+    const buckets = {};
+    failReasons.forEach(r => {
+      const key = r.startsWith("size ") ? "already claimed by another file"
+                : r.startsWith("ambiguous") ? "ambiguous (several rows share the size)"
+                : r;
+      buckets[key] = (buckets[key] || 0) + 1;
+    });
+    console.log("Unmatched breakdown:");
+    Object.entries(buckets)
+      .sort((a, b) => b[1] - a[1])
+      .forEach(([k, n]) => console.log(`  ${n}x  ${k}`));
+  }
+
+  alert(
+    `Excel import matched ${matched} of ${localVideos.length} local videos.\n\n` +
+    `By method - ${viaSummary || "none"}\n` +
+    `Unmatched: ${unmatched} (see console for reasons)`
+  );
 
   if (typeof refreshAllLists === "function") refreshAllLists();
 

@@ -311,20 +311,6 @@ async function clearVideos() {
 window.clearVideos = clearVideos;
 
 /**
-* Export all merged videos to a CSV matching the Picker's Videos sheet schema
-* exactly (A-M), so the result can be fed straight into Picker's Import CSV.
-*
-* Field sources:
-*   id, path, tags        -> imported Scray Data Excel (window.scrayExcelVideoRows)
-*   filename, size, bitrate -> the local file (authoritative)
-*   everything else       -> videoMeta (your own data)
-*
-* Local files are matched to Excel rows on byte size first (exact and highly
-* discriminating), falling back to filename. That ordering means a file you've
-* renamed locally still finds its Excel row - and we can report the mismatch
-* rather than silently exporting a broken pairing.
-*/
-/**
 * Modal folder chooser. Resolves to an array of folder names, or null if
 * cancelled. Videos whose accountName isn't in the registry are grouped under
 * a synthetic "(unassigned)" entry so nothing silently drops out of the export.
@@ -355,11 +341,11 @@ async function chooseFoldersForExport() {
       <div class="basket-json-modal-content">
         <h3>Export which folders?</h3>
         <p style="font-size:0.85rem;color:#666;">
-          Only the selected folders are matched against the Scray Data Excel
+          Only the selected folders are matched against the catalogue
           and written to the CSV.
         </p>
         <div style="margin:12px 0;max-height:50vh;overflow-y:auto;">
-          ${entries.map(([name, n], i) => `
+          ${entries.map(([name, n]) => `
             <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#f9f9f9;border-radius:4px;margin-bottom:6px;cursor:pointer;">
               <input type="checkbox" class="folder-export-cb" value="${name.replace(/"/g, '&quot;')}" checked
                      style="width:auto;margin:0;flex:0 0 auto;">
@@ -403,7 +389,30 @@ async function chooseFoldersForExport() {
 }
 window.chooseFoldersForExport = chooseFoldersForExport;
 
+/**
+* Export local videos as a CSV in the v2 schema (30 columns + no_match),
+* ready for Picker's Import CSV.
+*
+* Field sources:
+*   intrinsics  -> the local file (authoritative)
+*   filename    -> the local file (a native rename is a real rename)
+*   onedrive    -> the catalogue, via the tiered matcher
+*   behaviour   -> videoMeta
+*   app metadata-> videoMeta
+*
+* Rows with no catalogue match are exported with a blank oneDriveId and a
+* no_match reason. Picker skips those on import - they were never uploaded
+* to OneDrive, so there's nothing to reconcile them against.
+*/
 async function exportVideosToCsv(selectedFolders = null) {
+  // VIDEO_SCHEMA is a top-level `const` in excel-sheets.js, which loads
+  // AFTER db.js. A const doesn't become a window property the way a function
+  // declaration does, so grab the explicit export instead of the bare name.
+  const SCHEMA = window.VIDEO_SCHEMA;
+  if (!Array.isArray(SCHEMA)) {
+    throw new Error("VIDEO_SCHEMA not available - check that the schema module in excel-sheets.js loaded");
+  }
+
   let videos = await getAllVideos();
 
   if (Array.isArray(selectedFolders)) {
@@ -418,219 +427,106 @@ async function exportVideosToCsv(selectedFolders = null) {
     console.log(`Folder filter: ${videos.length}/${before} videos in [${selectedFolders.join(", ")}]`);
   }
 
-  // ---- Build the Scray Data Excel lookup ----
-  let excelRows = window.scrayExcelVideoRows;
-  if (!excelRows) {
+  // ---- Catalogue ----
+  let catalogue = window.scrayExcelVideoRows;
+  if (!catalogue) {
     try {
       const cached = localStorage.getItem("scrayExcelVideosCache");
-      if (cached) excelRows = JSON.parse(cached);
+      if (cached) catalogue = JSON.parse(cached);
     } catch (err) {
-      console.warn("Could not read cached Scray Excel data:", err);
+      console.warn("Could not read cached catalogue:", err);
     }
   }
-  excelRows = Array.isArray(excelRows) ? excelRows : [];
-
-  if (!excelRows.length) {
-    console.warn("No Scray Excel data loaded - id, path and tags will be blank. Import Excel first for a complete export.");
+  catalogue = Array.isArray(catalogue) ? catalogue : [];
+  if (!catalogue.length) {
+    console.warn("No catalogue loaded - every row will export unmatched. Import the Excel file first.");
   }
 
-  // Collapses "clip 2.mp4" -> "clip", decodes %20, drops punctuation. Catches
-  // Finder-style duplicate suffixes and URL-encoded names from the catalog.
-  const normalizeName = (name) => String(name || "")
-    .toLowerCase()
-    .replace(/%20/g, " ")
-    .replace(/\.[^.]+$/, "")
-    .replace(/\s+\d{1,2}$/, "")
-    .replace(/[^a-z0-9]+/g, "");
-
-  const bySize = new Map();
-  const byFilename = new Map();
-  const byNormalized = new Map();
-  let sizedRows = 0;
-
-  const push = (map, key, row) => {
-    if (!key) return;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(row);
-  };
-
-  excelRows.forEach(row => {
-    const size = Number(row.file_size_bytes);
-    if (size) { sizedRows++; push(bySize, size, row); }
-    push(byFilename, row.filename, row);
-    push(byNormalized, normalizeName(row.filename), row);
-  });
-
-  console.log(`Excel lookup: ${excelRows.length} rows, ${sizedRows} with a usable size`);
-  if (excelRows.length && sizedRows / excelRows.length < 0.5) {
-    console.warn("Most Excel rows have no file_size_bytes - size matching will be weak. Check the raw_data join.");
-  }
-
-  // ✅ An Excel row can only be claimed once. Two local files must never
-  // export the same id, or Picker's import collapses them into one row.
+  const index = buildCatalogIndex(catalogue);
   const claimed = new Set();
 
-  const narrow = (candidates, video) => {
-    const free = candidates.filter(c => !claimed.has(c));
-    if (!free.length) return null;
-    if (free.length === 1) return free[0];
-
-    const byName = free.filter(c => c.filename === video.filename);
-    if (byName.length === 1) return byName[0];
-
-    const pool = byName.length ? byName : free;
-    if (video.bitrate) {
-      const close = pool.filter(c =>
-        c.bitrate && Math.abs(c.bitrate - video.bitrate) / Math.max(c.bitrate, video.bitrate) <= 0.02
-      );
-      if (close.length) return close[0];
-    }
-    return pool[0];
-  };
-
   const renamed = [];
-  const collisions = [];
-  const stats = { size: 0, filename: 0, normalized: 0 };
+  const viaStats = {};
   let matchedCount = 0;
 
-  // Which local file took which Excel row, so collisions can name the culprit
-  const claimedBy = new Map();
-
-  const findExcelRow = (video) => {
-    let hit = null;
-    let via = null;
-    const blockedBy = [];   // rows that fit but were already taken
-    const triedLabels = [];
-
-    const trySource = (candidates, label) => {
-      if (!candidates || !candidates.length) return;
-      triedLabels.push(label);
-      if (hit) return;
-      const found = narrow(candidates, video);
-      if (found) {
-        hit = found;
-        via = label;
-      } else {
-        candidates.forEach(c => { if (claimed.has(c)) blockedBy.push(c); });
-      }
-    };
-
-    if (video.sizeBytes) trySource(bySize.get(Number(video.sizeBytes)), "size");
-    trySource(byFilename.get(video.filename), "filename");
-    trySource(byNormalized.get(normalizeName(video.filename)), "normalized");
-
-    if (hit) {
-      claimed.add(hit);
-      claimedBy.set(hit, video.filename);
-      matchedCount++;
-      stats[via]++;
-      if (hit.filename && hit.filename !== video.filename) {
-        renamed.push({ local: video.filename, excel: hit.filename, via });
-      }
-      return { row: hit, reason: "" };
-    }
-
-    // ---- Build a human-readable reason ----
-    let reason;
-    if (!excelRows.length) {
-      reason = "no Excel data loaded";
-    } else if (blockedBy.length) {
-      const owner = claimedBy.get(blockedBy[0]) || "another file";
-      reason = `Excel row "${blockedBy[0].filename}" already claimed by "${owner}"`;
-      collisions.push(video.filename);
-    } else {
-      const parts = [];
-      if (!video.sizeBytes) {
-        parts.push("no local size");
-      } else if (!bySize.has(Number(video.sizeBytes))) {
-        parts.push(`size ${video.sizeBytes} not in Excel`);
-      }
-      if (!byFilename.has(video.filename)) parts.push("filename not in Excel");
-      if (!byNormalized.has(normalizeName(video.filename))) parts.push("normalized name not in Excel");
-      reason = parts.length ? parts.join("; ") : "no candidate found";
-    }
-
-    return { row: null, reason };
-  };
-
-  // Resolve once per video so each column getter isn't re-matching
   const resolved = videos.map(v => {
-    const { row, reason } = findExcelRow(v);
+    // A previously-attached catalogueId makes this a tier-1 hit
+    const probe = { ...v, oneDriveId: v.catalogueId || null };
+    const { row, via, reason } = matchVideoToCatalog(probe, index, claimed);
+
+    if (row) {
+      claimed.add(row);
+      matchedCount++;
+      viaStats[via] = (viaStats[via] || 0) + 1;
+      if (row.filename && row.filename !== v.filename) {
+        renamed.push({ local: v.filename, catalogue: row.filename, id: row.oneDriveId });
+      }
+    }
     return { v, x: row, noMatch: reason };
   });
 
   if (renamed.length) {
-    console.warn(`${renamed.length} filename(s) differ from Scray Data Excel:`);
-    renamed.forEach(r => console.warn(`  [${r.via}] local: "${r.local}"  |  excel: "${r.excel}"`));
+    console.warn(`${renamed.length} filename(s) differ from the catalogue:`);
+    renamed.forEach(r => console.warn(`  local: "${r.local}"  |  catalogue: "${r.catalogue}"`));
   }
-  if (collisions.length) {
-    console.warn(`${collisions.length} file(s) had only already-claimed Excel matches - exported with a blank id:`);
-    collisions.forEach(f => console.warn(`  ${f}`));
-  }
-  console.log(
-    `CSV export: ${matchedCount}/${videos.length} matched ` +
-    `(size: ${stats.size}, filename: ${stats.filename}, normalized: ${stats.normalized})`
-  );
+  const viaSummary = Object.entries(viaStats).map(([k, n]) => `${k}: ${n}`).join(", ");
+  console.log(`CSV export: ${matchedCount}/${videos.length} matched (${viaSummary || "none"})`);
 
   window.lastCsvExportReport = {
     total: videos.length,
     matched: matchedCount,
     unmatched: videos.length - matchedCount,
+    exported: videos.length,
+    skipped: 0,
     renamed,
-    collisions,
-    stats
+    viaStats
   };
 
-  // ---- Videos sheet schema, columns A-M, in order ----
-  const columns = [
-    ["id", (v, x) => x?.id ?? ""],
-    ["filename", (v) => v.filename],                       // local file wins
-    ["file_size_bytes", (v) => v.sizeBytes ?? ""],
-    ["bitrate", (v) => v.bitrate != null ? Math.round(v.bitrate) : ""],
-    ["path", (v, x) => x?.path ?? ""],
-    ["view_count", (v) => v.view_count ?? 0],
-    ["user_score", (v) => v.user_score ?? ""],
-    ["notes", (v) => v.notes ?? ""],
-    ["last_played", (v) => v.last_played ?? ""],
-    ["first_seen", (v) => v.first_seen ?? ""],
-    ["tags", (v, x) => {
-        if (x?.tags) return x.tags;
-        return Array.isArray(v.tags) ? v.tags.join(";") : "";
-    }],
-    ["f_tally", (v) => v.f_tally ?? 0],
-    ["bookmarks", (v) => (v.bookmarks && v.bookmarks.length) ? JSON.stringify(v.bookmarks) : ""],
-    // ✅ Column N - blank when matched, otherwise why it didn't
-    ["no_match", (v, x, noMatch) => noMatch || ""]
-  ];
-
+  // ---- Rows ----
   const csvEscape = val => {
     const s = val === null || val === undefined ? "" : String(val);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
 
-  // ✅ Every row exports, matched or not. The no_match column carries the
-  // diagnosis so the misses can be worked through in a spreadsheet.
-  window.lastCsvExportReport.exported = resolved.length;
-  window.lastCsvExportReport.skipped = 0;
+  const buildRow = ({ v, x, noMatch }) => {
+    const rec = {
+      // intrinsic - always the local file
+      file_size_bytes: v.sizeBytes ?? "",
+      duration_ms: v.durationMs ?? "",
+      width: v.width != null ? Math.round(v.width) : "",
+      height: v.height != null ? Math.round(v.height) : "",
+      orientation: v.orientation ?? "",
+      bitrate: v.bitrate != null ? Math.round(v.bitrate) : "",
+      mime_type: v.mimeType ?? (x?.mime_type ?? ""),
+      created_date: v.createdDateTime ?? "",
+      last_modified_date: v.lastModifiedDateTime ?? "",
+      // filename - local wins; a rename here is deliberate
+      filename: v.filename ?? "",
+      // onedrive - catalogue only
+      oneDriveId: x?.oneDriveId ?? "",
+      drive_id: x?.drive_id ?? "",
+      account_key: x?.account_key ?? "",
+      account_name: x?.account_name ?? "",
+      path: x?.path ?? "",
+      web_url: x?.web_url ?? "",
+      tags: x?.tags ?? (Array.isArray(v.tags) ? v.tags.join(";") : ""),
+      bracket_tags: x?.bracket_tags ?? (Array.isArray(v.bracketTags) ? v.bracketTags.join(";") : ""),
+      level_1: x?.level_1 ?? "", level_2: x?.level_2 ?? "", level_3: x?.level_3 ?? "",
+      level_4: x?.level_4 ?? "", level_5: x?.level_5 ?? "",
+      // behaviour + app metadata - native is authoritative
+      view_count: v.view_count ?? 0,
+      last_played: v.last_played ?? "",
+      first_seen: v.first_seen ?? "",
+      user_score: v.user_score ?? "",
+      notes: v.notes ?? "",
+      f_tally: v.f_tally ?? 0,
+      bookmarks: (v.bookmarks && v.bookmarks.length) ? JSON.stringify(v.bookmarks) : ""
+    };
+    return [...SCHEMA.map(c => csvEscape(rec[c])), csvEscape(noMatch || "")];
+  };
 
-  const reasonCounts = new Map();
-  resolved.forEach(({ noMatch }) => {
-    if (!noMatch) return;
-    // Group by shape, not by the specific filename in the message
-    const bucket = noMatch.startsWith("Excel row") ? "already claimed" : noMatch;
-    reasonCounts.set(bucket, (reasonCounts.get(bucket) || 0) + 1);
-  });
-  if (reasonCounts.size) {
-    console.log("Unmatched reasons:");
-    [...reasonCounts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .forEach(([reason, n]) => console.log(`  ${n}x  ${reason}`));
-  }
-
-  const header = columns.map(([name]) => name).join(",");
-  const rows = resolved.map(({ v, x, noMatch }) =>
-    columns.map(([, getter]) => csvEscape(getter(v, x, noMatch))).join(",")
-  );
+  const header = [...SCHEMA, "no_match"].join(",");
+  const rows = resolved.map(buildRow).map(cells => cells.join(","));
   return [header, ...rows].join("\n");
 }
 window.exportVideosToCsv = exportVideosToCsv;
@@ -674,6 +570,10 @@ async function downloadVideosCsv() {
   _csvExportInFlight = true;
   try {
     return await _downloadVideosCsv();
+  } catch (err) {
+    console.error(`CSV export failed: ${err.name}: ${err.message}`);
+    console.error(err.stack || err);
+    alert(`Export failed: ${err.message || err}`);
   } finally {
     _csvExportInFlight = false;
   }

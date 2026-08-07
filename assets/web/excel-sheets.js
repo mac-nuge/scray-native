@@ -7,8 +7,260 @@ const SHEETS = {
 BASKETS: "Baskets",
 VIDEOS: "Videos",
 EXCLUDE: "Exclude",
-CURRENT: "Current Basket"
+CURRENT: "Current Basket",
+RAW: "raw_data"
 };
+
+// =========================================
+// UNIFIED VIDEO SCHEMA (v2) - 30 columns, A..AD
+// Videos and raw_data share this exact shape. Videos holds rows carrying user
+// metadata; raw_data holds the full catalogue. Same columns in both means one
+// parser, and the union of the two is the real catalogue.
+// Grouped: intrinsic | filename | onedrive | behaviour | app metadata
+// =========================================
+const VIDEO_SCHEMA = [
+   // filename (mutable, but it's what you actually read when scanning the sheet)
+   "filename",
+   // intrinsic (never changes for a given encode)
+   "file_size_bytes", "duration_ms", "width", "height", "orientation",
+   "bitrate", "mime_type", "created_date", "last_modified_date",
+   // onedrive
+   "oneDriveId", "drive_id", "account_key", "account_name", "path", "web_url",
+   "tags", "bracket_tags", "level_1", "level_2", "level_3", "level_4", "level_5",
+   // user behaviour
+   "view_count", "last_played", "first_seen",
+   // app-added metadata
+   "user_score", "notes", "f_tally", "bookmarks"
+];
+
+// Name -> zero-based index. Never hardcode a column number again.
+const COL = VIDEO_SCHEMA.reduce((acc, name, i) => { acc[name] = i; return acc; }, {});
+
+/** 1-based column number -> letter. Handles past Z (the old fromCharCode did not). */
+function colLetter(n) {
+   let s = "";
+   while (n > 0) {
+       const r = (n - 1) % 26;
+       s = String.fromCharCode(65 + r) + s;
+       n = Math.floor((n - 1) / 26);
+   }
+   return s;
+}
+
+const VIDEO_LAST_COL = colLetter(VIDEO_SCHEMA.length);           // "AD"
+const VIDEO_RANGE_ALL = `A2:${VIDEO_LAST_COL}100000`;
+const VIDEO_RANGE_HEADER = `A1:${VIDEO_LAST_COL}1`;
+const videoRowRange = (row) => `A${row}:${VIDEO_LAST_COL}${row}`;
+const videoRowsRange = (from, to) => `A${from}:${VIDEO_LAST_COL}${to}`;
+
+window.VIDEO_SCHEMA = VIDEO_SCHEMA;
+window.COL = COL;
+window.colLetter = colLetter;
+window.videoRowRange = videoRowRange;
+
+// -----------------------------------------
+// Row <-> object
+// -----------------------------------------
+const NUMERIC_FIELDS = new Set([
+   "file_size_bytes", "duration_ms", "width", "height", "bitrate",
+   "view_count", "user_score", "f_tally"
+]);
+
+function toNum(v) {
+   if (v === null || v === undefined || v === "") return null;
+   const n = Number(v);
+   return Number.isFinite(n) ? n : null;
+}
+
+/** Sheet row array -> named object. Tolerates short rows and legacy 13-col rows. */
+function rowToVideo(row) {
+   if (!row) return null;
+
+   // Legacy A..M Videos rows start with oneDriveId; v2 rows start with a size.
+   // A non-empty first cell that isn't numeric means we're looking at old data.
+   const first = row[0];
+   const looksLegacy = first !== null && first !== undefined && first !== "" &&
+                       !Number.isFinite(Number(first)) && row.length <= 14;
+   if (looksLegacy) {
+       return {
+           oneDriveId: row[0], filename: row[1],
+           file_size_bytes: toNum(row[2]), bitrate: toNum(row[3]),
+           path: row[4], view_count: toNum(row[5]) || 0,
+           user_score: toNum(row[6]), notes: row[7] || null,
+           last_played: row[8] || null, first_seen: row[9] || null,
+           tags: row[10] || "", f_tally: toNum(row[11]) || 0,
+           bookmarks: row[12] || "",
+           _legacy: true
+       };
+   }
+
+   const out = {};
+   VIDEO_SCHEMA.forEach((name, i) => {
+       const raw = i < row.length ? row[i] : null;
+       out[name] = NUMERIC_FIELDS.has(name) ? toNum(raw) : (raw === undefined ? null : raw);
+   });
+   return out;
+}
+
+/** Named object -> sheet row array of exactly VIDEO_SCHEMA.length cells. */
+function videoToRow(v) {
+   return VIDEO_SCHEMA.map(name => {
+       const val = v[name];
+       if (val === null || val === undefined) return "";
+       if (Array.isArray(val)) return val.join(";");
+       return val;
+   });
+}
+
+/** App-shaped video object (videoSource/Graph) -> schema-shaped object. */
+function appVideoToSchema(v) {
+   return {
+       file_size_bytes: v.sizeBytes ?? v.file_size_bytes ?? null,
+       duration_ms: v.durationMs ?? v.duration_ms ?? null,
+       width: v.width ?? null,
+       height: v.height ?? null,
+       orientation: v.orientation ?? null,
+       bitrate: v.bitrate ?? null,
+       mime_type: v.mimeType ?? v.mime_type ?? null,
+       created_date: v.createdDateTime ?? v.created_date ?? null,
+       last_modified_date: v.lastModifiedDateTime ?? v.last_modified_date ?? null,
+       filename: v.filename ?? null,
+       oneDriveId: v.oneDriveId ?? null,
+       drive_id: v.driveId ?? v.drive_id ?? null,
+       account_key: v.accountKey ?? v.account_key ?? null,
+       account_name: v.accountName ?? v.account_name ?? null,
+       path: v.path ?? null,
+       web_url: v.webUrl ?? v.web_url ?? null,
+       tags: Array.isArray(v.tags) ? v.tags.join(";") : (v.tags ?? ""),
+       bracket_tags: Array.isArray(v.bracketTags) ? v.bracketTags.join(";") : (v.bracket_tags ?? ""),
+       level_1: v.level_1 ?? null, level_2: v.level_2 ?? null, level_3: v.level_3 ?? null,
+       level_4: v.level_4 ?? null, level_5: v.level_5 ?? null,
+       view_count: v.view_count ?? 0,
+       last_played: v.last_played ?? null,
+       first_seen: v.first_seen ?? null,
+       user_score: v.user_score ?? null,
+       notes: v.notes ?? null,
+       f_tally: v.f_tally ?? 0,
+       bookmarks: Array.isArray(v.bookmarks)
+           ? (v.bookmarks.length ? JSON.stringify(v.bookmarks) : "")
+           : (v.bookmarks ?? "")
+   };
+}
+
+window.rowToVideo = rowToVideo;
+window.videoToRow = videoToRow;
+window.appVideoToSchema = appVideoToSchema;
+
+// =========================================
+// TIERED CATALOGUE MATCHER
+// Built from measurements on a 6,522-video catalogue vs 422 local files:
+//   - exact byte size resolves 236 uniquely, 12 ambiguously
+//   - fuzzy size is WORSE THAN USELESS: at 0.1% tolerance it "matches" 150
+//     files whose names appear nowhere in the catalogue. Never tolerance size.
+//   - normalised filename added ZERO matches beyond size. Kept only as a
+//     last resort for rows with no size on either side.
+// =========================================
+
+/** Build a lookup over catalogue rows (schema-shaped objects). */
+function buildCatalogIndex(catalogRows) {
+   const byId = new Map();
+   const bySize = new Map();
+   const byName = new Map();
+   const push = (map, key, row) => {
+       if (key === null || key === undefined || key === "") return;
+       if (!map.has(key)) map.set(key, []);
+       map.get(key).push(row);
+   };
+
+   catalogRows.forEach(row => {
+       if (!row) return;
+       if (row.oneDriveId && !byId.has(row.oneDriveId)) byId.set(row.oneDriveId, row);
+       push(bySize, toNum(row.file_size_bytes), row);
+       push(byName, row.filename, row);
+   });
+
+   return { byId, bySize, byName, size: catalogRows.length };
+}
+
+const within = (a, b, pct) => {
+   a = toNum(a); b = toNum(b);
+   if (a === null || b === null || a === 0 || b === 0) return false;
+   return Math.abs(a - b) / Math.max(a, b) <= pct;
+};
+
+/**
+* Score a candidate against a local video's intrinsics. Used only to break
+* ties between rows that already share an exact byte size.
+*/
+function scoreCandidate(candidate, local) {
+   let score = 0;
+   if (within(candidate.duration_ms, local.durationMs ?? local.duration_ms, 0.02)) score += 3;
+   if (toNum(candidate.width) && toNum(candidate.width) === Math.round(toNum(local.width) || 0) &&
+       toNum(candidate.height) === Math.round(toNum(local.height) || 0)) score += 2;
+   if (within(candidate.bitrate, local.bitrate, 0.02)) score += 1;
+   if (candidate.filename === local.filename) score += 1;
+   return score;
+}
+
+/**
+* Match one local video against the catalogue.
+* @returns {{row: object|null, via: string|null, reason: string}}
+*/
+function matchVideoToCatalog(local, index, claimed) {
+   claimed = claimed || new Set();
+   const free = (arr) => (arr || []).filter(r => !claimed.has(r));
+
+   // Tier 1 - already carries an id
+   if (local.oneDriveId && index.byId.has(local.oneDriveId)) {
+       const row = index.byId.get(local.oneDriveId);
+       if (!claimed.has(row)) return { row, via: "id", reason: "" };
+   }
+
+   // Tier 2/3 - exact byte size
+   const size = toNum(local.sizeBytes ?? local.file_size_bytes);
+   if (size) {
+       const all = index.bySize.get(size) || [];
+       const candidates = free(all);
+       if (candidates.length === 1) {
+           return { row: candidates[0], via: "size", reason: "" };
+       }
+       if (candidates.length > 1) {
+           const scored = candidates
+               .map(c => ({ c, s: scoreCandidate(c, local) }))
+               .sort((a, b) => b.s - a.s);
+           // Require a clear winner, else it's a coin flip
+           if (scored[0].s > 0 && scored[0].s > (scored[1]?.s ?? -1)) {
+               return { row: scored[0].c, via: "size+intrinsics", reason: "" };
+           }
+           return {
+               row: null, via: null,
+               reason: `ambiguous: ${candidates.length} catalogue rows share size ${size}`
+           };
+       }
+       if (all.length) {
+           const owner = all[0].filename || "another file";
+           return {
+               row: null, via: null,
+               reason: `size ${size} matched "${owner}" but it was already claimed`
+           };
+       }
+   }
+
+   // Tier 4 - exact filename, only when size can't decide
+   if (local.filename) {
+       const candidates = free(index.byName.get(local.filename));
+       if (candidates.length === 1 && !size) {
+           return { row: candidates[0], via: "filename", reason: "" };
+       }
+   }
+
+   if (!index.size) return { row: null, via: null, reason: "no catalogue loaded" };
+   if (!size) return { row: null, via: null, reason: "local file has no size" };
+   return { row: null, via: null, reason: "not in catalogue (never uploaded to OneDrive)" };
+}
+
+window.buildCatalogIndex = buildCatalogIndex;
+window.matchVideoToCatalog = matchVideoToCatalog;
 
 let excelAccessToken = null;
 

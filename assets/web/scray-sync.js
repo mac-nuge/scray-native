@@ -309,27 +309,27 @@ window.scrayDrainQuietly = drainQuietly;
 
 console.log(`[sync] ready — device ${window.SCRAY_SYNC.DEVICE_ID}`);
 
-// REMOVE EVENTUALLY: this is just a temporary self-test to verify the API key and endpoint are working. It will be removed once verified.
-// TEMPORARY Stage 1 self-test — delete this block once verified.
-// Native has no console input, so the checks run themselves and print
-// to the inline console panel at the bottom of the screen.
-setTimeout(async () => {
-  console.log("=== STAGE 1 SELF-TEST ===");
-  console.log("1. DEVICE_ID:", window.SCRAY_SYNC.DEVICE_ID);
-  try {
-    const reachable = await scrayIsServerReachable();
-    console.log("2. server reachable:", reachable);
-    if (!reachable) {
-      console.error("   → ping failed. Check API_BASE in scray-config.js, and that the URL is https.");
-      return;
-    }
-    const stats = await scrayApiCall("stats");
-    console.log("3. stats:", JSON.stringify(stats));
-    console.log("=== SELF-TEST PASSED ===");
-  } catch (err) {
-    console.error("SELF-TEST FAILED:", err.message);
-  }
-}, 2000);
+// // REMOVE EVENTUALLY: this is just a temporary self-test to verify the API key and endpoint are working. It will be removed once verified.
+// // TEMPORARY Stage 1 self-test — delete this block once verified.
+// // Native has no console input, so the checks run themselves and print
+// // to the inline console panel at the bottom of the screen.
+// setTimeout(async () => {
+//   console.log("=== STAGE 1 SELF-TEST ===");
+//   console.log("1. DEVICE_ID:", window.SCRAY_SYNC.DEVICE_ID);
+//   try {
+//     const reachable = await scrayIsServerReachable();
+//     console.log("2. server reachable:", reachable);
+//     if (!reachable) {
+//       console.error("   → ping failed. Check API_BASE in scray-config.js, and that the URL is https.");
+//       return;
+//     }
+//     const stats = await scrayApiCall("stats");
+//     console.log("3. stats:", JSON.stringify(stats));
+//     console.log("=== SELF-TEST PASSED ===");
+//   } catch (err) {
+//     console.error("SELF-TEST FAILED:", err.message);
+//   }
+// }, 2000);
 
 
 // // TEMPORARY Stage 2 self-test — delete once verified.

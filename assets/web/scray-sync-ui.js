@@ -150,3 +150,84 @@ document.addEventListener("visibilitychange", async () => {
   if (pending.length && await scrayIsServerReachable()) scraySyncNow({ prompt: true });
   else refreshSyncStatus();
 });
+
+
+// // TEMPORARY Stage 4 self-test — delete once verified.
+// setTimeout(async () => {
+//   const log = (...a) => console.log("[S4]", ...a);
+//   const ok  = (c) => c ? "✓" : "✗";
+//   const TEST_ID = "__scray_s4test__";
+//   const realBase = window.SCRAY_SYNC.API_BASE;
+
+//   try {
+//     log("=== STAGE 4 SELF-TEST ===");
+
+//     // --- 1. UI elements exist -----------------------------------------
+//     const btn  = document.getElementById("syncNowBtn");
+//     const pill = document.getElementById("syncStatus");
+//     log("1. syncNowBtn in DOM:", ok(!!btn), "| syncStatus pill:", ok(!!pill));
+//     if (pill) log("   pill currently reads:", JSON.stringify(pill.textContent));
+
+//     // --- 2. functions wired -------------------------------------------
+//     log("2. scraySyncNow:", ok(typeof window.scraySyncNow === "function"),
+//         "| refreshSyncStatus:", ok(typeof window.refreshSyncStatus === "function"),
+//         "| scrayShowConflicts:", ok(typeof window.scrayShowConflicts === "function"));
+
+//     // --- 3. pill reflects a pending change ----------------------------
+//     const db = await openDB();
+//     const SRC = (typeof STORE_NAME !== "undefined") ? STORE_NAME : "videoSource";
+//     const tx = db.transaction(SRC, "readwrite");
+//     tx.objectStore(SRC).put({ oneDriveId: TEST_ID, filename: "__s4test__.mp4", path: "s4" });
+//     await new Promise((r,j) => { tx.oncomplete = r; tx.onerror = () => j(tx.error); });
+//     await saveVideoMeta(TEST_ID, { user_score: null }, "scan");
+
+//     await updateVideoInDB(TEST_ID, { user_score: 6 });
+//     const pending = (await scrayGetOutbox()).length;
+//     await refreshSyncStatus();
+//     log("3. queued", pending, "| pill now:", JSON.stringify(pill?.textContent),
+//         ok(pending > 0 && /pending/i.test(pill?.textContent || "")));
+
+//     // --- 4. OFFLINE path: fake a dead server --------------------------
+//     window.SCRAY_SYNC.API_BASE = "https://10.255.255.1/nope.php";
+//     const reach = await scrayIsServerReachable();
+//     log("4. simulated-offline reachable:", reach, ok(reach === false));
+//     log("   → calling scraySyncNow() — expect an 'Offline' modal. TAP OK to continue.");
+//     await scraySyncNow();
+//     window.SCRAY_SYNC.API_BASE = realBase;
+//     log("   restored API_BASE | reachable again:", ok(await scrayIsServerReachable()));
+
+//     // --- 5. conflict modal renders ------------------------------------
+//     log("5. showing a FAKE conflict modal — TAP OK to continue.");
+//     await scrayShowConflicts([{
+//       id: TEST_ID, field: "user_score", yours: 6, theirs: 3,
+//       their_device: "fake-device", their_time: new Date().toISOString()
+//     }]);
+//     log("   conflict modal dismissed ✓");
+
+//     // --- 6. real sync, with prompt ------------------------------------
+//     log("6. calling scraySyncNow() for real — expect a 'Sync with server'");
+//     log("   modal listing 1 queued change. TAP 'Sync now'.");
+//     await scraySyncNow();
+//     const left = (await scrayGetOutbox()).length;
+//     await refreshSyncStatus();
+//     log("   outbox after sync:", left, ok(left === 0));
+//     log("   pill now:", JSON.stringify(pill?.textContent),
+//         ok(/synced/i.test(pill?.textContent || "")));
+
+//     // --- cleanup -------------------------------------------------------
+//     const db2 = await openDB();
+//     const MET = (typeof META_STORE_NAME !== "undefined") ? META_STORE_NAME : "videoMeta";
+//     const tx2 = db2.transaction([SRC, MET], "readwrite");
+//     tx2.objectStore(SRC).delete(TEST_ID);
+//     tx2.objectStore(MET).delete(TEST_ID);
+//     await new Promise((r,j) => { tx2.oncomplete = r; tx2.onerror = () => j(tx2.error); });
+//     await scrayApiCall("push", { method: "POST",
+//       body: { ops: [{ id: TEST_ID, device: "s4-test", delete: true }] } });
+//     await refreshSyncStatus();
+//     log("cleanup done");
+//     log("=== STAGE 4 SELF-TEST DONE ===");
+//   } catch (err) {
+//     window.SCRAY_SYNC.API_BASE = realBase;
+//     console.error("[S4] ✗", err.message, err.stack);
+//   }
+// }, 3000);

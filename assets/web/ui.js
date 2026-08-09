@@ -1948,7 +1948,9 @@ if (playPreviousBtn) {
     // Attach Excel Online export
    const exportToExcelBtn = document.getElementById("exportToExcelBtn");
    if (exportToExcelBtn) {
-       exportToExcelBtn.addEventListener("click", window.exportToExcelOnline);
+       // exportToExcelOnline lives in excel-sheets.js, which the native build
+       // never loads - this handler was always undefined. Native has no
+       // OneDrive catalogue to export; that's Picker's job.
    }
     
     // ✅ Attach Clear DB link

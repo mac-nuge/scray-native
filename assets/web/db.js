@@ -24,6 +24,18 @@ const DB_VERSION = 10; // bumped to 10: added outbox + syncState for SQLite sync
 const STORE_NAME = "videoSource";
 const META_STORE_NAME = "videoMeta";
 
+// The 30-column CSV/SQLite column order. Previously read from excel-sheets.js,
+// which the native build never loads - so exportVideosToCsv() threw. Defined
+// here because db.js is loaded and this is the only consumer.
+const VIDEO_SCHEMA = [
+  "filename","file_size_bytes","duration_ms","width","height","orientation",
+  "bitrate","mime_type","created_date","last_modified_date","oneDriveId",
+  "drive_id","account_key","account_name","path","web_url","tags",
+  "bracket_tags","level_1","level_2","level_3","level_4","level_5",
+  "view_count","last_played","first_seen","user_score","notes","f_tally","bookmarks"
+];
+window.VIDEO_SCHEMA = VIDEO_SCHEMA;
+
 // Fields that belong to you, not the file. updateVideoInDB() in
 // file-operations.js auto-routes any of these to videoMeta so existing
 // callers (saveBookmarks, etc.) keep working without changes.
@@ -421,12 +433,11 @@ window.chooseFoldersForExport = chooseFoldersForExport;
 * to OneDrive, so there's nothing to reconcile them against.
 */
 async function exportVideosToCsv(selectedFolders = null) {
-  // VIDEO_SCHEMA is a top-level `const` in excel-sheets.js, which loads
-  // AFTER db.js. A const doesn't become a window property the way a function
-  // declaration does, so grab the explicit export instead of the bare name.
+  // VIDEO_SCHEMA is defined at the top of this file. A top-level `const` isn't
+  // a window property, so use the explicit export rather than the bare name.
   const SCHEMA = window.VIDEO_SCHEMA;
   if (!Array.isArray(SCHEMA)) {
-    throw new Error("VIDEO_SCHEMA not available - check that the schema module in excel-sheets.js loaded");
+    throw new Error("VIDEO_SCHEMA not available - it should be defined at the top of db.js");
   }
 
   let videos = await getAllVideos();

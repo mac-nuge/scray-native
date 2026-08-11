@@ -152,82 +152,139 @@ document.addEventListener("visibilitychange", async () => {
 });
 
 
-// // TEMPORARY Stage 4 self-test — delete once verified.
-// setTimeout(async () => {
-//   const log = (...a) => console.log("[S4]", ...a);
-//   const ok  = (c) => c ? "✓" : "✗";
-//   const TEST_ID = "__scray_s4test__";
-//   const realBase = window.SCRAY_SYNC.API_BASE;
+/**
+ * Pull only the rows for videos actually on this device.
+ *
+ * Two passes, because a key-filtered pull advances the cursor to the newest
+ * seq it saw. A file added later whose server row is OLDER than the cursor
+ * would never arrive — so newly seen keys get a one-off since=0 pull.
+ */
+async function scraySyncLibrary({ quiet = false } = {}) {
+  const locals = await getAllVideos();
+  const keys = [...new Set(
+    locals.map(v => v.videoKey || window.scrayVideoKey(v.filename)).filter(Boolean)
+  )];
+  if (!keys.length) return { pulled: 0, flagged: 0 };
 
-//   try {
-//     log("=== STAGE 4 SELF-TEST ===");
+  const knownState = await window.scrayGetSyncState("knownKeys");
+  const known = new Set(knownState?.keys || []);
+  const fresh = keys.filter(k => !known.has(k));
+  const cursor = await window.scrayGetSyncState("cursor");
 
-//     // --- 1. UI elements exist -----------------------------------------
-//     const btn  = document.getElementById("syncNowBtn");
-//     const pill = document.getElementById("syncStatus");
-//     log("1. syncNowBtn in DOM:", ok(!!btn), "| syncStatus pill:", ok(!!pill));
-//     if (pill) log("   pill currently reads:", JSON.stringify(pill.textContent));
+  let pulled = 0;
 
-//     // --- 2. functions wired -------------------------------------------
-//     log("2. scraySyncNow:", ok(typeof window.scraySyncNow === "function"),
-//         "| refreshSyncStatus:", ok(typeof window.refreshSyncStatus === "function"),
-//         "| scrayShowConflicts:", ok(typeof window.scrayShowConflicts === "function"));
+  if (fresh.length) {
+    pulled += await pullScoped(fresh, 0);
+    if (!quiet) console.log(`[sync] first-time pull for ${fresh.length} new local file(s)`);
+  }
 
-//     // --- 3. pill reflects a pending change ----------------------------
-//     const db = await openDB();
-//     const SRC = (typeof STORE_NAME !== "undefined") ? STORE_NAME : "videoSource";
-//     const tx = db.transaction(SRC, "readwrite");
-//     tx.objectStore(SRC).put({ oneDriveId: TEST_ID, filename: "__s4test__.mp4", path: "s4" });
-//     await new Promise((r,j) => { tx.oncomplete = r; tx.onerror = () => j(tx.error); });
-//     await saveVideoMeta(TEST_ID, { user_score: null }, "scan");
+  const established = keys.filter(k => known.has(k));
+  if (established.length) {
+    pulled += await pullScoped(established, cursor?.seq ?? 0);
+  }
 
-//     await updateVideoInDB(TEST_ID, { user_score: 6 });
-//     const pending = (await scrayGetOutbox()).length;
-//     await refreshSyncStatus();
-//     log("3. queued", pending, "| pill now:", JSON.stringify(pill?.textContent),
-//         ok(pending > 0 && /pending/i.test(pill?.textContent || "")));
+  await window.scraySetSyncState("knownKeys", { keys });
+  const stats = await window.scrayApiCall("stats");
+  await window.scraySetSyncState("cursor", { seq: stats.head, at: new Date().toISOString() });
 
-//     // --- 4. OFFLINE path: fake a dead server --------------------------
-//     window.SCRAY_SYNC.API_BASE = "https://10.255.255.1/nope.php";
-//     const reach = await scrayIsServerReachable();
-//     log("4. simulated-offline reachable:", reach, ok(reach === false));
-//     log("   → calling scraySyncNow() — expect an 'Offline' modal. TAP OK to continue.");
-//     await scraySyncNow();
-//     window.SCRAY_SYNC.API_BASE = realBase;
-//     log("   restored API_BASE | reachable again:", ok(await scrayIsServerReachable()));
+  const flagged = await flagUncatalogued(keys);
+  if (typeof refreshAllLists === "function") refreshAllLists();
+  return { pulled, flagged };
+}
+window.scraySyncLibrary = scraySyncLibrary;
 
-//     // --- 5. conflict modal renders ------------------------------------
-//     log("5. showing a FAKE conflict modal — TAP OK to continue.");
-//     await scrayShowConflicts([{
-//       id: TEST_ID, field: "user_score", yours: 6, theirs: 3,
-//       their_device: "fake-device", their_time: new Date().toISOString()
-//     }]);
-//     log("   conflict modal dismissed ✓");
+async function pullScoped(keys, since) {
+  let total = 0, from = since;
+  for (;;) {
+    const res = await window.scrayApiCall("pull", {
+      method: "POST", body: { since: from, limit: 5000, keys }
+    });
 
-//     // --- 6. real sync, with prompt ------------------------------------
-//     log("6. calling scraySyncNow() for real — expect a 'Sync with server'");
-//     log("   modal listing 1 queued change. TAP 'Sync now'.");
-//     await scraySyncNow();
-//     const left = (await scrayGetOutbox()).length;
-//     await refreshSyncStatus();
-//     log("   outbox after sync:", left, ok(left === 0));
-//     log("   pill now:", JSON.stringify(pill?.textContent),
-//         ok(/synced/i.test(pill?.textContent || "")));
+    const bmByKey = new Map();
+    (res.bookmarks || []).forEach(b => {
+      if (b.deleted) return;
+      if (!bmByKey.has(b.video_key)) bmByKey.set(b.video_key, []);
+      bmByKey.get(b.video_key).push({ time: b.time_ms / 1000, note: b.note || "" });
+    });
+    bmByKey.forEach(list => list.sort((a, b) => a.time - b.time));
 
-//     // --- cleanup -------------------------------------------------------
-//     const db2 = await openDB();
-//     const MET = (typeof META_STORE_NAME !== "undefined") ? META_STORE_NAME : "videoMeta";
-//     const tx2 = db2.transaction([SRC, MET], "readwrite");
-//     tx2.objectStore(SRC).delete(TEST_ID);
-//     tx2.objectStore(MET).delete(TEST_ID);
-//     await new Promise((r,j) => { tx2.oncomplete = r; tx2.onerror = () => j(tx2.error); });
-//     await scrayApiCall("push", { method: "POST",
-//       body: { ops: [{ id: TEST_ID, device: "s4-test", delete: true }] } });
-//     await refreshSyncStatus();
-//     log("cleanup done");
-//     log("=== STAGE 4 SELF-TEST DONE ===");
-//   } catch (err) {
-//     window.SCRAY_SYNC.API_BASE = realBase;
-//     console.error("[S4] ✗", err.message, err.stack);
-//   }
-// }, 3000);
+    for (const row of res.videos) {
+      await window.scrayApplyPulledRow(window.scrayDbRowToApp(row), row, bmByKey);
+      total++;
+    }
+    from = res.seq;
+    if (!res.more) break;
+  }
+  return total;
+}
+
+/**
+ * Anything on this device with no server row is usable but flagged.
+ */
+async function flagUncatalogued(allKeys) {
+  const missing = new Set();
+  for (let i = 0; i < allKeys.length; i += 400) {
+    const res = await window.scrayApiCall("keycheck", {
+      method: "POST", body: { keys: allKeys.slice(i, i + 400) }
+    });
+    (res.missing || []).forEach(k => missing.add(k));
+  }
+
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAME, "readwrite");
+  const store = tx.objectStore(STORE_NAME);
+  const all = await new Promise((res, rej) => {
+    const r = store.getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error);
+  });
+  all.forEach(v => {
+    const k = v.videoKey || window.scrayVideoKey(v.filename);
+    const inCat = !missing.has(k);
+    if (v.inCatalogue !== inCat) store.put({ ...v, inCatalogue: inCat });
+  });
+  await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+
+  if (missing.size) console.log(`[sync] ${missing.size} local video(s) not in the catalogue — flagged`);
+  return missing.size;
+}
+
+// TEMPORARY Stage 4 self-test — comment out once verified.
+setTimeout(async () => {
+  const log = (...a) => console.log("[S4]", ...a);
+  const ok  = (c) => c ? "✓" : "✗";
+  try {
+    log("=== STAGE 4 SELF-TEST ===");
+
+    const db = await openDB();
+    log("1. DB version:", db.version, ok(db.version >= 11));
+    log("   videoKey index:",
+        ok(db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME)
+             .indexNames.contains("videoKey")));
+
+    const locals = await getAllVideos();
+    const keys = [...new Set(locals.map(v => v.videoKey).filter(Boolean))];
+    log("2. local videos:", locals.length, "| distinct keys:", keys.length, ok(keys.length > 0));
+    if (keys.length < locals.length) {
+      log("   ⚠ " + (locals.length - keys.length) + " duplicate/missing key(s) locally");
+    }
+
+    const check = await window.scrayApiCall("keycheck", {
+      method: "POST", body: { keys: keys.slice(0, 400) } });
+    log("3. keycheck — sent", check.sent, "found", check.found, "missing", check.missing.length);
+    if (check.missing.length) log("   missing sample:", check.missing.slice(0, 5));
+
+    const before = (await getAllVideos()).filter(v => v.inCatalogue === false).length;
+    const res = await window.scraySyncLibrary({ quiet: true });
+    const after = (await getAllVideos()).filter(v => v.inCatalogue === false).length;
+    log("4. synced — pulled", res.pulled, "| flagged", res.flagged);
+    log("   local-only before/after:", before, "/", after);
+
+    const metaCount = (await getAllVideoMeta()).length;
+    const srcCount  = (await getAllVideos()).length;
+    log("5. videoMeta:", metaCount, "| videoSource:", srcCount, ok(metaCount <= srcCount + 5));
+    if (metaCount > srcCount + 5) log("   ✗ ORPHAN META ROWS — 4.1 not applied");
+
+    log("=== STAGE 4 SELF-TEST DONE ===");
+  } catch (err) {
+    console.error("[S4] ✗", err.message, err.stack);
+  }
+}, 3000);

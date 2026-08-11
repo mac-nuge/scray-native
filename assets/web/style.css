@@ -5434,3 +5434,11 @@ body.portrait-fullscreen:not(.manual-rotate-landscape) #plyr-feedback {
   bottom: auto !important;
   z-index: 999999;
 }
+
+.not-in-catalogue-badge {
+    margin-left: 4px;
+    font-size: 0.7rem;
+    color: #f39c12;
+    display: inline;
+    cursor: help;
+}

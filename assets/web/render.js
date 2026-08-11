@@ -73,6 +73,17 @@ if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
      li.appendChild(scoreSpan);
  }
 
+// Flag videos on this device that have no row in the SQLite catalogue.
+ // They still play and still score — the scores just stay local, because
+ // Native never auto-creates catalogue rows.
+ if (video.inCatalogue === false) {
+     const notInCatSpan = document.createElement("span");
+     notInCatSpan.className = "not-in-catalogue-badge";
+     notInCatSpan.textContent = "⚠";
+     notInCatSpan.title = "Not in the SQLite catalogue — scores and bookmarks stay on this device";
+     li.appendChild(notInCatSpan);
+ }
+
 // Size + Duration
  const sizeDurSpan = document.createElement("span");
  if (video.path === "yet-to-upload" || (Array.isArray(video.tags) && video.tags.includes("yet-to-upload"))) {
@@ -374,6 +385,15 @@ li.appendChild(nameSpan);
      scoreSpan.style.fontWeight = "bold";
      scoreSpan.style.display = "inline";
      li.appendChild(scoreSpan);
+ }
+
+ // Flag videos on this device that have no row in the SQLite catalogue.
+ if (video.inCatalogue === false) {
+     const notInCatSpan = document.createElement("span");
+     notInCatSpan.className = "not-in-catalogue-badge";
+     notInCatSpan.textContent = "⚠";
+     notInCatSpan.title = "Not in the SQLite catalogue — scores and bookmarks stay on this device";
+     li.appendChild(notInCatSpan);
  }
 
  // Size + Duration display (skip for "yet-to-upload" videos)

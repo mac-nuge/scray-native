@@ -18,9 +18,9 @@
 * the app already expects.
 */
 const DB_NAME = "scray_picker";
-const DB_VERSION = 10; // bumped to 10: added outbox + syncState for SQLite sync.
-                       // Intentional full wipe - re-import from the Excel
-                       // backup via migrate.py after this ships (see Stage 5).
+const DB_VERSION = 11; // v11: videoKey index + inCatalogue flag for filename-key sync.
+                       // Intentional full wipe - rescan the device library after
+                       // this ships; metadata comes back from the server.
 const STORE_NAME = "videoSource";
 const META_STORE_NAME = "videoMeta";
 
@@ -74,6 +74,11 @@ function openDB() {
       sourceStore.createIndex("lastModifiedDateTime", "lastModifiedDateTime");
       sourceStore.createIndex("bitrate", "bitrate");
       sourceStore.createIndex("fingerprint", "fingerprint");
+      // unique:false is deliberate — two local files sharing a normalized name
+      // is exactly the duplicate case to flag, not an exception that should
+      // abort the scan.
+      sourceStore.createIndex("videoKey", "videoKey", { unique: false });
+      sourceStore.createIndex("inCatalogue", "inCatalogue");
 
       const metaStore = db.createObjectStore(META_STORE_NAME, { keyPath: "oneDriveId" });
       metaStore.createIndex("user_score", "user_score");
@@ -216,7 +221,15 @@ async function saveVideos(videos, username, accountId, driveId) {
        bitrate: video.bitrate ?? null,
        tags: tagsArray,
        bracketTags: filenameBracketTags,
-       fingerprint,
+       fingerprint,                                    // legacy — includes filename
+       // Filename-free, so it survives a rename. buildVideoFingerprint above
+       // folds the filename in, which defeats rename detection.
+       fileFingerprint: window.scrayFingerprint({
+           sizeBytes: video.sizeBytes, durationMs: video.durationMs,
+           width: video.width, height: video.height
+       }),
+       videoKey: window.scrayVideoKey(filename),
+       inCatalogue: false,        // set true by the sync when a server row is found
        lastScanned: new Date().toISOString(),
        ...levelFields
     });
@@ -276,7 +289,24 @@ async function saveVideoMeta(oneDriveId, metaUpdates, updatedBy = "app") {
   // Local write is committed; now queue it for the server. A "scan" is
   // derived data, not a user action, so it never generates an op.
   if (updatedBy !== "scan" && updatedBy !== "sync" && typeof window.scrayEnqueueOp === "function") {
-    await window.scrayEnqueueOp(oneDriveId, metaUpdates);
+    // Ops are addressed by video_key — the server has never heard of this
+    // device's local ids.
+    const db2 = await openDB();
+    const row = await new Promise((res) => {
+      const r = db2.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(oneDriveId);
+      r.onsuccess = () => res(r.result); r.onerror = () => res(null);
+    });
+    const key = row?.videoKey || (row?.filename ? window.scrayVideoKey(row.filename) : null);
+
+    if (!key) {
+      console.warn(`[sync] no video_key for ${oneDriveId} — change saved locally only`);
+    } else if (row && row.inCatalogue === false) {
+      // Native NEVER auto-creates catalogue rows. That is what keeps the
+      // catalogue clean; use "Add to catalogue" to promote deliberately.
+      console.log(`[sync] ${key} is not in the catalogue — saved locally, not pushed`);
+    } else {
+      await window.scrayEnqueueOp(key, metaUpdates);
+    }
   }
   return;
 }
@@ -764,12 +794,20 @@ window.ingestYetToUploadCSV = ingestYetToUploadCSV;
  * Passing updatedBy "sync" is load-bearing: saveVideoMeta skips the enqueue
  * for that value, which is what stops a pulled change bouncing back up.
  */
-async function scrayApplyPulledRow(appRow, rawRow) {
-  const id = appRow.oneDriveId;
+async function scrayApplyPulledRow(appRow, rawRow, bookmarksByKey = null) {
+  const key = rawRow.video_key;
+  if (!key) return;
+
+  // Rows are addressed by video_key now, but videoSource is keyed by the local
+  // id, so resolve through the videoKey index first.
+  const db = await openDB();
+  const id = await findLocalIdByKey(db, key);
+  // Not in this device's library — ignore the row ENTIRELY. Previously the
+  // meta branch below was unguarded, so saveVideoMeta created a videoMeta row
+  // for every catalogue entry: thousands of invisible orphans.
   if (!id) return;
 
   if (rawRow.deleted) {
-    const db = await openDB();
     const tx = db.transaction([STORE_NAME, META_STORE_NAME], "readwrite");
     tx.objectStore(STORE_NAME).delete(id);
     tx.objectStore(META_STORE_NAME).delete(id);
@@ -780,21 +818,22 @@ async function scrayApplyPulledRow(appRow, rawRow) {
   const metaPatch = {};
   const sourcePatch = {};
   for (const [k, v] of Object.entries(appRow)) {
-    if (k === "oneDriveId" || k.startsWith("_")) continue;
+    if (k === "oneDriveId" || k === "videoKey" || k.startsWith("_")) continue;
+    // The local file is authoritative about itself. Never let the server
+    // overwrite intrinsics or the filename of a file sitting on this device.
+    if (["filename", "sizeBytes", "durationMs", "width", "height", "bitrate", "path"].includes(k)) continue;
     if (META_FIELDS.has(k)) metaPatch[k] = v; else sourcePatch[k] = v;
   }
 
+  if (bookmarksByKey?.has(key)) metaPatch.bookmarks = bookmarksByKey.get(key);
+
   if (Object.keys(sourcePatch).length) {
-    const db = await openDB();
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
     const existing = await new Promise((res, rej) => {
       const r = store.get(id); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
     });
-    // Only ever patch a row that exists locally. Native's library is the
-    // files on this device; the server catalogue is much larger and pulling
-    // rows for videos you don't have would poison the local list.
-    if (existing) store.put({ ...existing, ...sourcePatch, oneDriveId: id });
+    if (existing) store.put({ ...existing, ...sourcePatch, oneDriveId: id, videoKey: key, inCatalogue: true });
     await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
   }
 
@@ -802,4 +841,16 @@ async function scrayApplyPulledRow(appRow, rawRow) {
     await saveVideoMeta(id, metaPatch, "sync");
   }
 }
+
+/** videoSource is keyed by local id, so look rows up through the videoKey index. */
+async function findLocalIdByKey(db, key) {
+  return new Promise((resolve) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const idx = tx.objectStore(STORE_NAME).index("videoKey");
+    const req = idx.get(key);
+    req.onsuccess = () => resolve(req.result?.oneDriveId || null);
+    req.onerror   = () => resolve(null);
+  });
+}
+window.findLocalIdByKey = findLocalIdByKey;
 window.scrayApplyPulledRow = scrayApplyPulledRow;

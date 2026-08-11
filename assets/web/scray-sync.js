@@ -65,14 +65,17 @@ function dbRowToApp(row) {
   const out = {};
   for (const [k, v] of Object.entries(row)) {
     if (["seq", "updated_at", "updated_by", "deleted"].includes(k)) { out["_" + k] = v; continue; }
-    out[k === "one_drive_id" ? "oneDriveId" : toAppField(k)] = v;
+    if (k === "one_drive_id") { out.oneDriveId = v; continue; }
+    if (k === "video_key")    { out.videoKey   = v; continue; }
+    out[toAppField(k)] = v;
   }
   if (typeof out.tags === "string") out.tags = out.tags ? out.tags.split(";") : [];
   if (typeof out.bracketTags === "string") out.bracketTags = out.bracketTags ? out.bracketTags.split(";") : [];
-  if (typeof out.bookmarks === "string") {
-    try { out.bookmarks = out.bookmarks ? JSON.parse(out.bookmarks) : []; }
-    catch { out.bookmarks = []; }
-  }
+  // Bookmarks used to be a JSON column here. They are rows in the `bookmarks`
+  // table now, delivered as a separate array on the pull response, so there is
+  // nothing to parse off the video row.
+  // Rows with no OneDrive instance still need a stable local object identity.
+  if (!out.oneDriveId && out.videoKey) out.oneDriveId = `key:${out.videoKey}`;
   return out;
 }
 window.scrayDbRowToApp = dbRowToApp;
@@ -108,10 +111,11 @@ function buildOp(oneDriveId, updates, baseSeq, defaults) {
     if (MAX_FIELDS.has(key))     { (op.max ??= {})[key] = value; continue; }
     if (MIN_FIELDS.has(key))     { (op.min ??= {})[key] = value; continue; }
 
+    // Bookmarks have their own endpoint (bookmarks_push) and their own table.
+    // Dropping them here rather than silently routing them into a `set` avoids
+    // writing a bookmarks column that no longer exists.
     if (key === "bookmarks") {
-      op.merge_bookmarks = Array.isArray(value)
-        ? value
-        : (() => { try { return JSON.parse(value || "[]"); } catch { return []; } })();
+      console.warn("[sync] buildOp received bookmarks — use bookmarks_push instead. Ignoring.");
       continue;
     }
 
@@ -267,7 +271,7 @@ async function pullDeltas(applyRow) {
     const json = await apiCall("pull", { params: { since, limit: 5000 } });
     for (const row of json.videos) {
       await applyRow(dbRowToApp(row), row);
-      await scraySetSyncState(`row:${row.one_drive_id}`, { seq: row.seq });
+      await scraySetSyncState(`row:${row.video_key}`, { seq: row.seq });
       pulled++;
     }
     since = json.seq;
@@ -277,6 +281,28 @@ async function pullDeltas(applyRow) {
   return { pulled, seq: since };
 }
 window.scrayPullDeltas = pullDeltas;
+
+/**
+ * Drop the local mirror and the delta cursor, then re-pull from scratch.
+ *
+ * Needed whenever the SERVER's seq counter goes backwards — a rebuilt test
+ * database, or the test/live switch at cutover. A cursor is only meaningful
+ * against the database that issued it.
+ */
+async function scrayResetMirror({ confirm = true } = {}) {
+  if (confirm && !window.confirm(
+        "Delete the local copy and re-download everything from the server?\n\n" +
+        "Any queued unsynced changes will be lost.")) return false;
+
+  await new Promise((res) => {
+    const req = indexedDB.deleteDatabase(DB_NAME);
+    req.onsuccess = req.onerror = req.onblocked = () => res();
+  });
+  console.log("[sync] local mirror cleared — reloading");
+  location.reload();
+  return true;
+}
+window.scrayResetMirror = scrayResetMirror;
 
 // -------------------------------------------------------------
 // Debounced drain for the online case

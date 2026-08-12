@@ -38,12 +38,47 @@ window.formatDuration = formatDuration;
 
 let cachedVideoScores = new Map();
 let cachedVideoBookmarks = new Map();
+let cachesLoaded = false;
 
-async function getCachedVideoScores() {
+/**
+ * Load both caches from videoMeta.
+ *
+ * These Maps used to start empty and were only ever filled by
+ * queueExcelUpdate — i.e. by edits made in this session. Anything the
+ * catalogue sync wrote into videoMeta was invisible to the grid, because the
+ * grid reads these Maps rather than the store.
+ *
+ * Call with force=true after a sync to pick up newly pulled metadata.
+ */
+async function loadCachesFromMeta(force = false) {
+    if (cachesLoaded && !force) return;
+    try {
+        const videos = await getAllVideos();   // merges videoSource + videoMeta
+        cachedVideoScores = new Map();
+        cachedVideoBookmarks = new Map();
+        videos.forEach(v => {
+            if (v.user_score !== undefined && v.user_score !== null) {
+                cachedVideoScores.set(v.oneDriveId, v.user_score);
+            }
+            if (Array.isArray(v.bookmarks) && v.bookmarks.length) {
+                cachedVideoBookmarks.set(v.oneDriveId, v.bookmarks);
+            }
+        });
+        cachesLoaded = true;
+        console.log(`✅ caches loaded from videoMeta — ${cachedVideoScores.size} score(s), ${cachedVideoBookmarks.size} bookmarked video(s)`);
+    } catch (err) {
+        console.error("loadCachesFromMeta failed:", err);
+    }
+}
+window.loadCachesFromMeta = loadCachesFromMeta;
+
+async function getCachedVideoScores(forceRefresh = false) {
+    await loadCachesFromMeta(forceRefresh);
     return cachedVideoScores;
 }
 
-async function getCachedVideoBookmarks() {
+async function getCachedVideoBookmarks(forceRefresh = false) {
+    await loadCachesFromMeta(forceRefresh);
     return cachedVideoBookmarks;
 }
 

@@ -330,8 +330,21 @@ async function scanLocalLibrary(folderNameOverride) {
     console.error("scanLocalLibrary: filterDisplayedByFilename not found — grid won't update");
   }
 
+  // Match against the catalogue now rather than waiting for the next launch.
+  // Non-fatal: the scan itself succeeded, and boot will retry.
+  if (typeof window.scraySyncLibrary === "function") {
+    try {
+      const res = await window.scraySyncLibrary({ quiet: true });
+      console.log(`scanLocalLibrary: synced — ${res.pulled} matched, ${res.flagged} not in catalogue`);
+      if (typeof window.loadCachesFromMeta === 'function') await window.loadCachesFromMeta(true);
+      if (typeof filterDisplayedByFilename === 'function') await filterDisplayedByFilename();
+    } catch (err) {
+      console.warn("scanLocalLibrary: catalogue sync failed, will retry on next launch:", err.message);
+    }
+  }
+
   console.log(`Scanned local library: ${videos.length} videos found`);
-}
+} 
 
 /**
 * Repair orientation on videos scanned before native width/height existed.

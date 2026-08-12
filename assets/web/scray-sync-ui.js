@@ -153,47 +153,56 @@ document.addEventListener("visibilitychange", async () => {
 
 
 /**
- * Pull only the rows for videos actually on this device.
+ * Pull catalogue metadata for videos on this device.
  *
- * Two passes, because a key-filtered pull advances the cursor to the newest
- * seq it saw. A file added later whose server row is OLDER than the cursor
- * would never arrive — so newly seen keys get a one-off since=0 pull.
+ * Two passes, split on the local row's `inCatalogue` flag:
+ *
+ *   never matched (inCatalogue !== true) -> since = 0, full history
+ *   already matched                      -> since = cursor, deltas only
+ *
+ * The split used to be driven by a stored `knownKeys` list, which was a
+ * mistake: it recorded keys that had never actually been received, so they
+ * became delta-only while their metadata sat far BELOW the cursor. The rows
+ * were then permanently unreachable — 256 matched keys returning 0 rows.
+ *
+ * `inCatalogue` can't drift the same way. saveVideos() resets it to false on
+ * every scan, so a rescan always re-asks for full history, and a video added
+ * to the catalogue later is picked up regardless of where the cursor sits.
  */
 async function scraySyncLibrary({ quiet = false } = {}) {
   const locals = await getAllVideos();
-  const keys = [...new Set(
-    locals.map(v => v.videoKey || window.scrayVideoKey(v.filename)).filter(Boolean)
-  )];
-  if (!keys.length) return { pulled: 0, flagged: 0 };
+  if (!locals.length) return { pulled: 0, flagged: 0 };
 
-  const knownState = await window.scrayGetSyncState("knownKeys");
-  const known = new Set(knownState?.keys || []);
-  const fresh = keys.filter(k => !known.has(k));
+  const freshKeys = new Set();
+  const deltaKeys = new Set();
+  for (const v of locals) {
+    const k = v.videoKey || window.scrayVideoKey(v.filename);
+    if (!k) continue;
+    (v.inCatalogue === true ? deltaKeys : freshKeys).add(k);
+  }
+  if (!freshKeys.size && !deltaKeys.size) return { pulled: 0, flagged: 0 };
+
   const cursor = await window.scrayGetSyncState("cursor");
-
   let pulled = 0;
 
-  if (fresh.length) {
-    pulled += await pullScoped(fresh, 0);
-    if (!quiet) console.log(`[sync] first-time pull for ${fresh.length} new local file(s)`);
+  if (freshKeys.size) {
+    pulled += await pullScoped([...freshKeys], 0);
+    if (!quiet) console.log(`[sync] full pull for ${freshKeys.size} unmatched key(s)`);
+  }
+  if (deltaKeys.size) {
+    pulled += await pullScoped([...deltaKeys], cursor?.seq ?? 0);
   }
 
-  const established = keys.filter(k => known.has(k));
-  if (established.length) {
-    pulled += await pullScoped(established, cursor?.seq ?? 0);
-  }
-
-  await window.scraySetSyncState("knownKeys", { keys });
   const stats = await window.scrayApiCall("stats");
   await window.scraySetSyncState("cursor", { seq: stats.head, at: new Date().toISOString() });
 
-  const flagged = await flagUncatalogued(keys);
+  const flagged = await flagUncatalogued([...freshKeys, ...deltaKeys]);
   if (typeof refreshAllLists === "function") refreshAllLists();
   return { pulled, flagged };
 }
 window.scraySyncLibrary = scraySyncLibrary;
 
-async function pullScoped(keys, since) {
+async function pullScoped(keys, since, received = null) {
   let total = 0, from = since;
   for (;;) {
     const res = await window.scrayApiCall("pull", {
@@ -210,6 +219,7 @@ async function pullScoped(keys, since) {
 
     for (const row of res.videos) {
       await window.scrayApplyPulledRow(window.scrayDbRowToApp(row), row, bmByKey);
+      received?.add(row.video_key);
       total++;
     }
     from = res.seq;
@@ -247,44 +257,100 @@ async function flagUncatalogued(allKeys) {
   return missing.size;
 }
 
-// TEMPORARY Stage 4 self-test — comment out once verified.
+/**
+ * Pull the latest catalogue metadata on every app load.
+ *
+ * Deliberately not gated on anything: scores and bookmarks change in Picker
+ * between sessions, and this is the only thing that brings them across.
+ * Delayed slightly so the video grid paints first.
+ */
 setTimeout(async () => {
-  const log = (...a) => console.log("[S4]", ...a);
-  const ok  = (c) => c ? "✓" : "✗";
+  if (typeof window.scraySyncLibrary !== "function") return;
   try {
-    log("=== STAGE 4 SELF-TEST ===");
+    const res = await window.scraySyncLibrary({ quiet: true });
+    console.log(`[sync] ${res.pulled} row(s) applied, ${res.flagged} not in catalogue`);
+    if (res.pulled) {
+      // The grid reads the in-memory caches, not videoMeta, so a pull is
+      // invisible until they are rebuilt.
+      if (typeof window.loadCachesFromMeta === "function") await window.loadCachesFromMeta(true);
+      if (typeof window.refreshAllLists === "function") window.refreshAllLists();
+      if (typeof filterDisplayedByFilename === "function") await filterDisplayedByFilename();
+    }
+  } catch (err) {
+    console.warn("[sync] catalogue sync failed — using local data:", err.message);
+  }
+}, 2000);
 
-    const db = await openDB();
-    log("1. DB version:", db.version, ok(db.version >= 11));
-    log("   videoKey index:",
-        ok(db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME)
-             .indexNames.contains("videoKey")));
 
+// TEMPORARY DIAGNOSTIC — remove after.
+setTimeout(async () => {
+  const L = (...a) => console.log("[DIAG]", ...a);
+  try {
+    L("=== METADATA CHAIN ===");
+
+    // 1. A local row, and its key
     const locals = await getAllVideos();
-    const keys = [...new Set(locals.map(v => v.videoKey).filter(Boolean))];
-    log("2. local videos:", locals.length, "| distinct keys:", keys.length, ok(keys.length > 0));
-    if (keys.length < locals.length) {
-      log("   ⚠ " + (locals.length - keys.length) + " duplicate/missing key(s) locally");
+    L("1. local videos:", locals.length);
+    if (!locals.length) return L("   no local videos — stop");
+    const v = locals[0];
+    L("   sample filename :", v.filename);
+    L("   sample videoKey :", JSON.stringify(v.videoKey));
+    L("   oneDriveId      :", v.oneDriveId);
+    L("   inCatalogue     :", v.inCatalogue);
+    L("   user_score now  :", v.user_score);
+
+    const key = v.videoKey || window.scrayVideoKey(v.filename);
+
+    // 2. Does the index resolve it?
+    const db = await openDB();
+    const foundId = await window.findLocalIdByKey(db, key);
+    L("2. findLocalIdByKey:", foundId ? "✓ " + foundId : "✗ NULL  <- index lookup failing");
+
+    // 3. Does the server have it?
+    const kc = await window.scrayApiCall("keycheck", { method: "POST", body: { keys: [key] } });
+    L("3. keycheck found:", kc.found, "missing:", JSON.stringify(kc.missing));
+
+    // 4. Does a since=0 scoped pull return it, and with what?
+    const pull = await window.scrayApiCall("pull", {
+      method: "POST", body: { since: 0, limit: 10, keys: [key] } });
+    L("4. pull returned:", pull.videos.length, "video(s),", pull.bookmarks.length, "bookmark(s)");
+    if (pull.videos.length) {
+      const raw = pull.videos[0];
+      L("   raw user_score  :", raw.user_score, "| view_count:", raw.view_count, "| seq:", raw.seq);
+      const app = window.scrayDbRowToApp(raw);
+      L("   mapped user_score:", app.user_score);
+      L("   META_FIELDS has user_score:", window.VIDEO_META_FIELDS.has("user_score"));
+    } else {
+      L("   ✗ pull returned nothing for a key keycheck says exists");
     }
 
-    const check = await window.scrayApiCall("keycheck", {
-      method: "POST", body: { keys: keys.slice(0, 400) } });
-    log("3. keycheck — sent", check.sent, "found", check.found, "missing", check.missing.length);
-    if (check.missing.length) log("   missing sample:", check.missing.slice(0, 5));
+    // 5. Cursor / knownKeys state
+    L("5. cursor    :", JSON.stringify(await window.scrayGetSyncState("cursor")));
+    const kk = await window.scrayGetSyncState("knownKeys");
+    L("   knownKeys :", kk ? kk.keys.length + " key(s), includes this one: " + kk.keys.includes(key) : "null");
 
-    const before = (await getAllVideos()).filter(v => v.inCatalogue === false).length;
-    const res = await window.scraySyncLibrary({ quiet: true });
-    const after = (await getAllVideos()).filter(v => v.inCatalogue === false).length;
-    log("4. synced — pulled", res.pulled, "| flagged", res.flagged);
-    log("   local-only before/after:", before, "/", after);
+    // 6. Apply it by hand and see if videoMeta changes
+    if (pull.videos.length) {
+      const before = await getAllVideoMeta();
+      const bm = new Map();
+      (pull.bookmarks || []).filter(b => !b.deleted).forEach(b => {
+        if (!bm.has(b.video_key)) bm.set(b.video_key, []);
+        bm.get(b.video_key).push({ time: b.time_ms / 1000, note: b.note || "" });
+      });
+      await window.scrayApplyPulledRow(window.scrayDbRowToApp(pull.videos[0]), pull.videos[0], bm);
+      const after = (await getAllVideoMeta()).find(m => m.oneDriveId === foundId);
+      L("6. videoMeta rows:", before.length, "->", (await getAllVideoMeta()).length);
+      L("   this row's meta:", after ? JSON.stringify({score: after.user_score, views: after.view_count, bm: (after.bookmarks||[]).length, by: after.updatedBy}) : "✗ NOT FOUND");
+    }
 
-    const metaCount = (await getAllVideoMeta()).length;
-    const srcCount  = (await getAllVideos()).length;
-    log("5. videoMeta:", metaCount, "| videoSource:", srcCount, ok(metaCount <= srcCount + 5));
-    if (metaCount > srcCount + 5) log("   ✗ ORPHAN META ROWS — 4.1 not applied");
+    // 7. Does the merged view show it?
+    const merged = (await getAllVideos()).find(x => x.oneDriveId === foundId);
+    L("7. merged user_score:", merged?.user_score, "| bookmarks:", (merged?.bookmarks || []).length);
 
-    log("=== STAGE 4 SELF-TEST DONE ===");
-  } catch (err) {
-    console.error("[S4] ✗", err.message, err.stack);
-  }
-}, 3000);
+    // 8. Does the cache?
+    const cache = await window.getCachedVideoScores(true);
+    L("8. cache size:", cache.size, "| this video:", cache.get(foundId));
+
+    L("=== END ===");
+  } catch (e) { console.error("[DIAG] ✗", e.message, e.stack); }
+}, 4000);

@@ -255,7 +255,10 @@ async function saveVideos(videos, username, accountId, driveId) {
     }
    }
 
-   return tx.complete;
+   // IDBTransaction has no `.complete` property — this returned undefined and
+   // resolved before the write committed. Callers that immediately read back
+   // (the post-scan sync, for one) were racing the transaction.
+   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
 }
 
 /**
@@ -815,25 +818,42 @@ async function scrayApplyPulledRow(appRow, rawRow, bookmarksByKey = null) {
     return;
   }
 
+  const existing = await new Promise((res, rej) => {
+    const r = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(id);
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+  if (!existing) return;
+
+  // isLocalVideo() routes playback on driveId/accountKey. Those are NOT
+  // META_FIELDS, so they used to land in sourcePatch and get overwritten with
+  // the OneDrive account's values — after which the player stopped treating
+  // the file as local and hung on the load screen.
+  //
+  // The device is authoritative about the physical file in every respect:
+  // where it is, how to play it, how big it is. The server contributes
+  // metadata only. So a local row takes no sourcePatch at all.
+  const isLocal = typeof window.isLocalVideo === "function"
+    ? window.isLocalVideo(existing)
+    : (existing.driveId === "local" || (existing.accountKey || "").startsWith("local::"));
+
   const metaPatch = {};
   const sourcePatch = {};
   for (const [k, v] of Object.entries(appRow)) {
     if (k === "oneDriveId" || k === "videoKey" || k.startsWith("_")) continue;
-    // The local file is authoritative about itself. Never let the server
-    // overwrite intrinsics or the filename of a file sitting on this device.
-    if (["filename", "sizeBytes", "durationMs", "width", "height", "bitrate", "path"].includes(k)) continue;
-    if (META_FIELDS.has(k)) metaPatch[k] = v; else sourcePatch[k] = v;
+    if (META_FIELDS.has(k)) { metaPatch[k] = v; continue; }
+    if (isLocal) continue;                      // device wins, full stop
+    // Non-local rows still keep their own intrinsics and routing fields.
+    if (["filename", "sizeBytes", "durationMs", "width", "height", "bitrate", "path",
+         "driveId", "accountKey", "accountName", "webUrl", "downloadUrl"].includes(k)) continue;
+    sourcePatch[k] = v;
   }
 
   if (bookmarksByKey?.has(key)) metaPatch.bookmarks = bookmarksByKey.get(key);
 
-  if (Object.keys(sourcePatch).length) {
+  // Always stamp the join key and the flag, even when nothing else changes.
+  {
     const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    const existing = await new Promise((res, rej) => {
-      const r = store.get(id); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-    });
-    if (existing) store.put({ ...existing, ...sourcePatch, oneDriveId: id, videoKey: key, inCatalogue: true });
+    tx.objectStore(STORE_NAME).put({ ...existing, ...sourcePatch, oneDriveId: id, videoKey: key, inCatalogue: true });
     await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
   }
 

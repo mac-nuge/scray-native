@@ -355,33 +355,3 @@ setTimeout(async () => {
 //   } catch (e) { console.error("[DIAG] ✗", e.message, e.stack); }
 // }, 4000);
 
-
-// TEMPORARY — remove after. Adds a floating button, top-left.
-(function () {
-  const b = document.createElement("button");
-  b.textContent = "BM TEST";
-  b.style.cssText = "position:fixed;top:8px;left:8px;z-index:2147483647;" +
-                    "padding:6px 10px;background:#e67e22;color:#fff;border:0;border-radius:4px;";
-  b.onclick = async () => {
-    const L = (...a) => console.log("[BM]", ...a);
-    try {
-      const v = window.currentPlayingVideo || (await getAllVideos())[0];
-      const key = v.videoKey || window.scrayVideoKey(v.filename);
-      L("1.", v.filename, "| key:", JSON.stringify(key), "| inCatalogue:", v.inCatalogue);
-      L("2. local:", JSON.stringify(v.bookmarks || []));
-      const before = await window.scrayApiCall("bookmarks_get", { params: { id: key } });
-      L("3. server BEFORE:", JSON.stringify(before.bookmarks));
-      const serverTimes = new Set((before.bookmarks || []).map(x => x.time_ms));
-      const localTimes = new Set((v.bookmarks || []).map(x => Math.round(x.time * 1000)));
-      const body = {
-        video_key: key, device: window.SCRAY_SYNC.DEVICE_ID,
-        upsert: (v.bookmarks || []).map(x => ({ time_ms: Math.round(x.time * 1000), note: x.note || "" })),
-        delete: [...serverTimes].filter(t => !localTimes.has(t)),
-      };
-      L("4. sending:", JSON.stringify(body));
-      const res = await window.scrayApiCall("bookmarks_push", { method: "POST", body });
-      L("5. server AFTER:", JSON.stringify(res.bookmarks), "| head:", res.head);
-    } catch (err) { L("✗ FAILED:", err.message, err.stack); }
-  };
-  document.addEventListener("DOMContentLoaded", () => document.body.appendChild(b));
-})();

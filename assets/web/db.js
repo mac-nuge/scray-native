@@ -289,6 +289,47 @@ async function saveVideoMeta(oneDriveId, metaUpdates, updatedBy = "app") {
 
   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
 
+  // Bookmarks live in their own table with their own endpoint, so they can
+  // never ride the ops queue — buildOp drops them. Every bookmark write in the
+  // app funnels through here, which makes this the one place worth handling
+  // them: quick-add, the modal and deletes are all covered by it.
+  if (updatedBy !== "scan" && updatedBy !== "sync" && metaUpdates.bookmarks !== undefined) {
+    try {
+      const db3 = await openDB();
+      const srcRow = await new Promise((res) => {
+        const r = db3.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(oneDriveId);
+        r.onsuccess = () => res(r.result); r.onerror = () => res(null);
+      });
+      const bmKey = srcRow?.videoKey || (srcRow?.filename ? window.scrayVideoKey(srcRow.filename) : null);
+
+      if (!bmKey) {
+        console.warn(`[bm] no video_key for ${oneDriveId} — bookmarks saved locally only`);
+      } else if (srcRow?.inCatalogue === false) {
+        console.log(`[bm] ${bmKey} not in the catalogue — bookmarks stay on this device`);
+      } else {
+        const local = Array.isArray(metaUpdates.bookmarks) ? metaUpdates.bookmarks : [];
+        const before = await window.scrayApiCall("bookmarks_get", { params: { id: bmKey } });
+        const serverTimes = new Set((before.bookmarks || []).map(b => b.time_ms));
+        const localTimes  = new Set(local.map(b => Math.round(b.time * 1000)));
+        const removed = [...serverTimes].filter(t => !localTimes.has(t));
+
+        await window.scrayApiCall("bookmarks_push", {
+          method: "POST",
+          body: {
+            video_key: bmKey,
+            device: window.SCRAY_SYNC.DEVICE_ID,
+            upsert: local.map(b => ({ time_ms: Math.round(b.time * 1000), note: b.note || "" })),
+            delete: removed,
+          }
+        });
+        console.log(`[bm] pushed ${local.length} bookmark(s)` +
+                    (removed.length ? `, tombstoned ${removed.length}` : "") + ` for ${bmKey}`);
+      }
+    } catch (err) {
+      console.error("[bm] push failed — bookmarks are saved locally:", err.message);
+    }
+  }
+
   // Local write is committed; now queue it for the server. A "scan" is
   // derived data, not a user action, so it never generates an op.
   if (updatedBy !== "scan" && updatedBy !== "sync" && typeof window.scrayEnqueueOp === "function") {
@@ -308,7 +349,10 @@ async function saveVideoMeta(oneDriveId, metaUpdates, updatedBy = "app") {
       // catalogue clean; use "Add to catalogue" to promote deliberately.
       console.log(`[sync] ${key} is not in the catalogue — saved locally, not pushed`);
     } else {
-      await window.scrayEnqueueOp(key, metaUpdates);
+      // Bookmarks were pushed above via their own endpoint — sending them here
+      // just triggers buildOp's warning and does nothing.
+      const { bookmarks, ...opUpdates } = metaUpdates;
+      if (Object.keys(opUpdates).length) await window.scrayEnqueueOp(key, opUpdates);
     }
   }
   return;

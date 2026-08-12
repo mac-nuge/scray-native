@@ -462,3 +462,43 @@ console.log(`[sync] ready — device ${window.SCRAY_SYNC.DEVICE_ID}`);
 //   d("updateVideoInDB enqueues:", /scrayEnqueueOp/.test(updateVideoInDB.toString()) ? "✓" : "✗ 2.3 not applied");
 //   d("deleteVideoFromDB tombstones:", /scrayEnqueueOp/.test(deleteVideoFromDB.toString()) ? "✓" : "✗ 2.4 not applied");
 // }, 2500);
+
+
+/**
+ * Fetch a video's bookmarks from the bookmarks table and apply them locally.
+ *
+ * This is the single read path: modal open, post-save refresh and Refresh Data
+ * all call it, so the UI always shows the table rather than a stale local copy.
+ * Returns the server's array; throws only on a genuine network/API failure.
+ */
+async function scrayBmSync(video) {
+  const key = video.videoKey || window.scrayVideoKey(video.filename);
+  if (!key) throw new Error("no video_key for this file");
+
+  const res = await window.scrayApiCall("bookmarks_get", { params: { id: key } });
+  const bookmarks = (res.bookmarks || [])
+    .map(b => ({ time: b.time_ms / 1000, note: b.note || "" }))
+    .sort((a, b) => a.time - b.time);
+
+  video.bookmarks = bookmarks;
+
+  // "sync" prevents this from being pushed straight back to the server.
+  if (typeof saveVideoMeta === "function") {
+    await saveVideoMeta(video.oneDriveId, { bookmarks }, "sync");
+  } else if (typeof updateVideoInDB === "function") {
+    await updateVideoInDB(video.oneDriveId, { bookmarks });
+  }
+  if (typeof updateVideoInMemory === "function") {
+    updateVideoInMemory(video.oneDriveId, { bookmarks });
+  }
+  if (window.cachedVideoBookmarks) window.cachedVideoBookmarks.set(video.oneDriveId, bookmarks);
+
+  // The player holds its own object reference — patch it or the progress-bar
+  // markers stay stale until the next reload.
+  if (window.currentPlayingVideo?.oneDriveId === video.oneDriveId) {
+    window.currentPlayingVideo.bookmarks = bookmarks;
+    if (typeof window.renderBookmarkMarkers === "function") window.renderBookmarkMarkers();
+  }
+  return bookmarks;
+}
+window.scrayBmSync = scrayBmSync;

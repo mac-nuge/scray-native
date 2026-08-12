@@ -2380,13 +2380,20 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     // THEN fetch latest bookmarks from Excel, BEFORE rendering the editable
     // modal. This prevents a slow in-flight fetch from later overwriting a
     // bookmark the user added while it was still loading.
-    if (window.excelAccessToken && typeof getVideoFromExcel === 'function') {
+    // Read straight from the bookmarks table. The old path was gated on an
+    // Excel token (null in Native) and read a `bookmarks` column that no
+    // longer exists, so the modal never actually refreshed from the server.
+    if (video.inCatalogue !== false) {
         try {
-            if (typeof window.waitForPendingExcelWrite === 'function') {
-                await window.waitForPendingExcelWrite(video.oneDriveId);
-            }
-            
-            const excelData = await getVideoFromExcel(video.oneDriveId);
+            await window.scrayBmSync(video);
+        } catch (err) {
+            console.warn('Could not load bookmarks from the database:', err.message);
+        }
+    }
+
+    if (false) {
+        try {
+            const excelData = { bookmarks: null };
             if (excelData && Array.isArray(excelData.bookmarks)) {
                 video.bookmarks = excelData.bookmarks;
                 
@@ -2627,6 +2634,10 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             
             try {
                 await saveBookmarks(video, bookmarkTooltip);
+                // Re-read so the modal shows exactly what the table now holds,
+                // including anything another device changed in the meantime.
+                await window.scrayBmSync(video);
+                renderContent();
             } catch (err) {
                 if (bookmarkTooltip && typeof window.updateBookmarkConfirmation === 'function') {
                     window.updateBookmarkConfirmation(bookmarkTooltip, '❌ Save failed', '#dc3545');
@@ -2705,9 +2716,12 @@ async function saveBookmarks(video, existingTooltip = null) {
             }
             throw err;
         }
-    } else if (existingTooltip && typeof window.updateBookmarkConfirmation === 'function') {
-        // No Excel connection - just confirm local save
-        window.updateBookmarkConfirmation(existingTooltip, 'Bookmarks saved locally', '#28a745');
+    }
+    // saveVideoMeta() pushed to the bookmarks table on the way through, so by
+    // here the write has already reached the server.
+    if (existingTooltip && typeof window.updateBookmarkConfirmation === 'function') {
+        window.updateBookmarkConfirmation(existingTooltip,
+            `${video.bookmarks.length} bookmark${video.bookmarks.length === 1 ? '' : 's'} saved`, '#28a745');
         window.closeBookmarkConfirmation(existingTooltip);
     }
 }

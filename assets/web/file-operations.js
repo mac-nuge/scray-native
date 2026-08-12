@@ -2658,9 +2658,34 @@ async function saveBookmarks(video, existingTooltip = null) {
             window.renderBookmarkMarkers();
         }
     }
-    if (window.excelAccessToken && typeof queueExcelUpdate === 'function') {
+    // No excelAccessToken gate: local-scores-cache.js pins that to null, so
+    // this block never ran. Bookmarks also can't go through queueExcelUpdate
+    // any more — buildOp drops them, because they live in their own table now.
+    // Bookmarks are pushed by saveVideoMeta() in db.js — the single choke point
+    // every write already passes through. Pushing here too would race: the
+    // second push computes its deletes from a server state the first changed.
+    if (false) {
         try {
-            await queueExcelUpdate(video, { bookmarks: JSON.stringify(video.bookmarks) });
+            const bmKey = video.videoKey || window.scrayVideoKey(video.filename);
+            // Diff against the server so removals become real tombstones. A
+            // union merge could never delete: another device just re-merged
+            // the removed bookmark back on the next sync.
+            const before = await window.scrayApiCall("bookmarks_get", { params: { id: bmKey } });
+            const serverTimes = new Set((before.bookmarks || []).map(b => b.time_ms));
+            const localTimes  = new Set(video.bookmarks.map(b => Math.round(b.time * 1000)));
+
+            await window.scrayApiCall("bookmarks_push", {
+                method: "POST",
+                body: {
+                    video_key: bmKey,
+                    device: window.SCRAY_SYNC.DEVICE_ID,
+                    upsert: video.bookmarks.map(b => ({
+                        time_ms: Math.round(b.time * 1000),
+                        note: b.note || ""
+                    })),
+                    delete: [...serverTimes].filter(t => !localTimes.has(t)),
+                }
+            });
             if (typeof window.clearTopBookmarkNotesCache === 'function') {
                 window.clearTopBookmarkNotesCache();
             }
@@ -2671,7 +2696,7 @@ async function saveBookmarks(video, existingTooltip = null) {
                 window.showBookmarkConfirmation('Bookmarks saved to Excel');
             }
         } catch (err) {
-            console.error('Failed to save bookmarks to Excel:', err);
+            console.error('Failed to save bookmarks to the database:', err);
             if (existingTooltip && typeof window.updateBookmarkConfirmation === 'function') {
                 window.updateBookmarkConfirmation(existingTooltip, '❌ Excel save failed', '#dc3545');
                 window.closeBookmarkConfirmation(existingTooltip);

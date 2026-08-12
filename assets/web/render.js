@@ -188,6 +188,21 @@ if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
    }
 },
 {
+label: "Refresh Data",
+title: "Pull the latest score, bookmarks and counters from the database",
+color: "#17a2b8",
+onClick: async (e) => {
+   e.stopPropagation();
+   try {
+       await window.refreshVideoFromDb(video);
+       if (typeof refreshAllLists === 'function') refreshAllLists();
+   } catch (err) {
+       console.error('DB refresh failed:', err);
+       alert(`Refresh failed: ${err.message}`);
+   }
+}
+},
+{
 label: "Refresh Folder",
 title: "Refresh the folder containing this file",
 color: "#17a2b8",
@@ -498,6 +513,21 @@ li.appendChild(nameSpan);
            await window.showMoveFileModal(video);
        }
    }
+},
+{
+label: "Refresh Data",
+title: "Pull the latest score, bookmarks and counters from the database",
+color: "#17a2b8",
+onClick: async (e) => {
+   e.stopPropagation();
+   try {
+       await window.refreshVideoFromDb(video);
+       if (typeof refreshAllLists === 'function') refreshAllLists();
+   } catch (err) {
+       console.error('DB refresh failed:', err);
+       alert(`Refresh failed: ${err.message}`);
+   }
+}
 },
 {
 label: "Refresh Folder",

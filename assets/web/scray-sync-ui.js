@@ -282,75 +282,106 @@ setTimeout(async () => {
 }, 2000);
 
 
-// TEMPORARY DIAGNOSTIC — remove after.
-setTimeout(async () => {
-  const L = (...a) => console.log("[DIAG]", ...a);
-  try {
-    L("=== METADATA CHAIN ===");
+// // TEMPORARY DIAGNOSTIC — remove after.
+// setTimeout(async () => {
+//   const L = (...a) => console.log("[DIAG]", ...a);
+//   try {
+//     L("=== METADATA CHAIN ===");
 
-    // 1. A local row, and its key
-    const locals = await getAllVideos();
-    L("1. local videos:", locals.length);
-    if (!locals.length) return L("   no local videos — stop");
-    const v = locals[0];
-    L("   sample filename :", v.filename);
-    L("   sample videoKey :", JSON.stringify(v.videoKey));
-    L("   oneDriveId      :", v.oneDriveId);
-    L("   inCatalogue     :", v.inCatalogue);
-    L("   user_score now  :", v.user_score);
+//     // 1. A local row, and its key
+//     const locals = await getAllVideos();
+//     L("1. local videos:", locals.length);
+//     if (!locals.length) return L("   no local videos — stop");
+//     const v = locals[0];
+//     L("   sample filename :", v.filename);
+//     L("   sample videoKey :", JSON.stringify(v.videoKey));
+//     L("   oneDriveId      :", v.oneDriveId);
+//     L("   inCatalogue     :", v.inCatalogue);
+//     L("   user_score now  :", v.user_score);
 
-    const key = v.videoKey || window.scrayVideoKey(v.filename);
+//     const key = v.videoKey || window.scrayVideoKey(v.filename);
 
-    // 2. Does the index resolve it?
-    const db = await openDB();
-    const foundId = await window.findLocalIdByKey(db, key);
-    L("2. findLocalIdByKey:", foundId ? "✓ " + foundId : "✗ NULL  <- index lookup failing");
+//     // 2. Does the index resolve it?
+//     const db = await openDB();
+//     const foundId = await window.findLocalIdByKey(db, key);
+//     L("2. findLocalIdByKey:", foundId ? "✓ " + foundId : "✗ NULL  <- index lookup failing");
 
-    // 3. Does the server have it?
-    const kc = await window.scrayApiCall("keycheck", { method: "POST", body: { keys: [key] } });
-    L("3. keycheck found:", kc.found, "missing:", JSON.stringify(kc.missing));
+//     // 3. Does the server have it?
+//     const kc = await window.scrayApiCall("keycheck", { method: "POST", body: { keys: [key] } });
+//     L("3. keycheck found:", kc.found, "missing:", JSON.stringify(kc.missing));
 
-    // 4. Does a since=0 scoped pull return it, and with what?
-    const pull = await window.scrayApiCall("pull", {
-      method: "POST", body: { since: 0, limit: 10, keys: [key] } });
-    L("4. pull returned:", pull.videos.length, "video(s),", pull.bookmarks.length, "bookmark(s)");
-    if (pull.videos.length) {
-      const raw = pull.videos[0];
-      L("   raw user_score  :", raw.user_score, "| view_count:", raw.view_count, "| seq:", raw.seq);
-      const app = window.scrayDbRowToApp(raw);
-      L("   mapped user_score:", app.user_score);
-      L("   META_FIELDS has user_score:", window.VIDEO_META_FIELDS.has("user_score"));
-    } else {
-      L("   ✗ pull returned nothing for a key keycheck says exists");
-    }
+//     // 4. Does a since=0 scoped pull return it, and with what?
+//     const pull = await window.scrayApiCall("pull", {
+//       method: "POST", body: { since: 0, limit: 10, keys: [key] } });
+//     L("4. pull returned:", pull.videos.length, "video(s),", pull.bookmarks.length, "bookmark(s)");
+//     if (pull.videos.length) {
+//       const raw = pull.videos[0];
+//       L("   raw user_score  :", raw.user_score, "| view_count:", raw.view_count, "| seq:", raw.seq);
+//       const app = window.scrayDbRowToApp(raw);
+//       L("   mapped user_score:", app.user_score);
+//       L("   META_FIELDS has user_score:", window.VIDEO_META_FIELDS.has("user_score"));
+//     } else {
+//       L("   ✗ pull returned nothing for a key keycheck says exists");
+//     }
 
-    // 5. Cursor / knownKeys state
-    L("5. cursor    :", JSON.stringify(await window.scrayGetSyncState("cursor")));
-    const kk = await window.scrayGetSyncState("knownKeys");
-    L("   knownKeys :", kk ? kk.keys.length + " key(s), includes this one: " + kk.keys.includes(key) : "null");
+//     // 5. Cursor / knownKeys state
+//     L("5. cursor    :", JSON.stringify(await window.scrayGetSyncState("cursor")));
+//     const kk = await window.scrayGetSyncState("knownKeys");
+//     L("   knownKeys :", kk ? kk.keys.length + " key(s), includes this one: " + kk.keys.includes(key) : "null");
 
-    // 6. Apply it by hand and see if videoMeta changes
-    if (pull.videos.length) {
-      const before = await getAllVideoMeta();
-      const bm = new Map();
-      (pull.bookmarks || []).filter(b => !b.deleted).forEach(b => {
-        if (!bm.has(b.video_key)) bm.set(b.video_key, []);
-        bm.get(b.video_key).push({ time: b.time_ms / 1000, note: b.note || "" });
-      });
-      await window.scrayApplyPulledRow(window.scrayDbRowToApp(pull.videos[0]), pull.videos[0], bm);
-      const after = (await getAllVideoMeta()).find(m => m.oneDriveId === foundId);
-      L("6. videoMeta rows:", before.length, "->", (await getAllVideoMeta()).length);
-      L("   this row's meta:", after ? JSON.stringify({score: after.user_score, views: after.view_count, bm: (after.bookmarks||[]).length, by: after.updatedBy}) : "✗ NOT FOUND");
-    }
+//     // 6. Apply it by hand and see if videoMeta changes
+//     if (pull.videos.length) {
+//       const before = await getAllVideoMeta();
+//       const bm = new Map();
+//       (pull.bookmarks || []).filter(b => !b.deleted).forEach(b => {
+//         if (!bm.has(b.video_key)) bm.set(b.video_key, []);
+//         bm.get(b.video_key).push({ time: b.time_ms / 1000, note: b.note || "" });
+//       });
+//       await window.scrayApplyPulledRow(window.scrayDbRowToApp(pull.videos[0]), pull.videos[0], bm);
+//       const after = (await getAllVideoMeta()).find(m => m.oneDriveId === foundId);
+//       L("6. videoMeta rows:", before.length, "->", (await getAllVideoMeta()).length);
+//       L("   this row's meta:", after ? JSON.stringify({score: after.user_score, views: after.view_count, bm: (after.bookmarks||[]).length, by: after.updatedBy}) : "✗ NOT FOUND");
+//     }
 
-    // 7. Does the merged view show it?
-    const merged = (await getAllVideos()).find(x => x.oneDriveId === foundId);
-    L("7. merged user_score:", merged?.user_score, "| bookmarks:", (merged?.bookmarks || []).length);
+//     // 7. Does the merged view show it?
+//     const merged = (await getAllVideos()).find(x => x.oneDriveId === foundId);
+//     L("7. merged user_score:", merged?.user_score, "| bookmarks:", (merged?.bookmarks || []).length);
 
-    // 8. Does the cache?
-    const cache = await window.getCachedVideoScores(true);
-    L("8. cache size:", cache.size, "| this video:", cache.get(foundId));
+//     // 8. Does the cache?
+//     const cache = await window.getCachedVideoScores(true);
+//     L("8. cache size:", cache.size, "| this video:", cache.get(foundId));
 
-    L("=== END ===");
-  } catch (e) { console.error("[DIAG] ✗", e.message, e.stack); }
-}, 4000);
+//     L("=== END ===");
+//   } catch (e) { console.error("[DIAG] ✗", e.message, e.stack); }
+// }, 4000);
+
+
+// TEMPORARY — remove after. Adds a floating button, top-left.
+(function () {
+  const b = document.createElement("button");
+  b.textContent = "BM TEST";
+  b.style.cssText = "position:fixed;top:8px;left:8px;z-index:2147483647;" +
+                    "padding:6px 10px;background:#e67e22;color:#fff;border:0;border-radius:4px;";
+  b.onclick = async () => {
+    const L = (...a) => console.log("[BM]", ...a);
+    try {
+      const v = window.currentPlayingVideo || (await getAllVideos())[0];
+      const key = v.videoKey || window.scrayVideoKey(v.filename);
+      L("1.", v.filename, "| key:", JSON.stringify(key), "| inCatalogue:", v.inCatalogue);
+      L("2. local:", JSON.stringify(v.bookmarks || []));
+      const before = await window.scrayApiCall("bookmarks_get", { params: { id: key } });
+      L("3. server BEFORE:", JSON.stringify(before.bookmarks));
+      const serverTimes = new Set((before.bookmarks || []).map(x => x.time_ms));
+      const localTimes = new Set((v.bookmarks || []).map(x => Math.round(x.time * 1000)));
+      const body = {
+        video_key: key, device: window.SCRAY_SYNC.DEVICE_ID,
+        upsert: (v.bookmarks || []).map(x => ({ time_ms: Math.round(x.time * 1000), note: x.note || "" })),
+        delete: [...serverTimes].filter(t => !localTimes.has(t)),
+      };
+      L("4. sending:", JSON.stringify(body));
+      const res = await window.scrayApiCall("bookmarks_push", { method: "POST", body });
+      L("5. server AFTER:", JSON.stringify(res.bookmarks), "| head:", res.head);
+    } catch (err) { L("✗ FAILED:", err.message, err.stack); }
+  };
+  document.addEventListener("DOMContentLoaded", () => document.body.appendChild(b));
+})();

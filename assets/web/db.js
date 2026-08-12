@@ -873,4 +873,48 @@ async function findLocalIdByKey(db, key) {
   });
 }
 window.findLocalIdByKey = findLocalIdByKey;
+
+/**
+ * Pull one video's metadata straight from SQLite, bypassing the delta cursor.
+ *
+ * The cursor exists so routine syncs stay cheap; this is the "I know it
+ * changed elsewhere, fetch it now" path, so it ignores the cursor entirely.
+ */
+async function refreshVideoFromDb(video) {
+  const key = video.videoKey || window.scrayVideoKey(video.filename);
+  if (!key) throw new Error("no video_key for this file");
+
+  const [row, bm] = await Promise.all([
+    window.scrayApiCall("get", { params: { id: key } }),
+    window.scrayApiCall("bookmarks_get", { params: { id: key } }),
+  ]);
+  if (!row.video) throw new Error(`"${video.filename}" is not in the catalogue`);
+
+  const patch = {
+    user_score: row.video.user_score,
+    view_count: row.video.view_count,
+    f_tally: row.video.f_tally,
+    notes: row.video.notes,
+    last_played: row.video.last_played,
+    bookmarks: (bm.bookmarks || []).map(b => ({ time: b.time_ms / 1000, note: b.note || "" })),
+  };
+
+  // "sync" so saveVideoMeta doesn't enqueue this straight back to the server.
+  await saveVideoMeta(video.oneDriveId, patch, "sync");
+  Object.assign(video, patch);
+  video.userScore = patch.user_score;      // basket/history shape
+
+  // The player draws markers from currentPlayingVideo, which is a separate
+  // object reference — patch it or the markers stay stale until reload.
+  if (window.currentPlayingVideo?.oneDriveId === video.oneDriveId) {
+    window.currentPlayingVideo.bookmarks = patch.bookmarks;
+    window.currentPlayingVideo.user_score = patch.user_score;
+    if (typeof window.renderBookmarkMarkers === 'function') window.renderBookmarkMarkers();
+  }
+
+  if (typeof window.loadCachesFromMeta === "function") await window.loadCachesFromMeta(true);
+  console.log(`↻ ${video.filename}: score ${patch.user_score}, ${patch.bookmarks.length} bookmark(s)`);
+  return video;
+}
+window.refreshVideoFromDb = refreshVideoFromDb;
 window.scrayApplyPulledRow = scrayApplyPulledRow;

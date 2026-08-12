@@ -2649,8 +2649,12 @@ function showVideoScoringModal(video, event) {
      // Queue ensures auto-track insert finishes first if it's in flight
      await queueExcelUpdate(video, { user_score: i });
 
-     // ✅ Update all in-memory state after Excel confirms
+     // ✅ Update all in-memory state after the write confirms
      if (cachedVideoScores) cachedVideoScores.set(video.oneDriveId, i);
+     // The list cards render `user_score`; `userScore` is the basket/history
+     // shape. Setting only the latter left the old score on screen until a
+     // manual refresh, because nothing reads it.
+     video.user_score = i;
      video.userScore = i;
 
      const basketIndex = window.basketVideos?.findIndex(v => v.oneDriveId === video.oneDriveId);
@@ -2675,8 +2679,12 @@ function showVideoScoringModal(video, event) {
      }
 
      if (typeof updateVideoInDB === 'function') {
-         updateVideoInDB(video.oneDriveId, { userScore: i }).catch(console.warn);
+         updateVideoInDB(video.oneDriveId, { userScore: i, user_score: i }).catch(console.warn);
      }
+
+     // Re-render the main list. The basket, history and player each get
+     // patched individually above, but nothing was redrawing the grid.
+     if (typeof refreshAllLists === 'function') refreshAllLists();
 
      // ✅ Confirmation only shown after Excel has saved
      const message = document.createElement('div');

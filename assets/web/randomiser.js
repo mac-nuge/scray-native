@@ -848,11 +848,46 @@ document.body.appendChild(popup);
 // Anchor just below the pill, and keep it pinned there as the on-screen
 // keyboard opens/closes and shifts the layout/viewport around.
 const repositionPopup = () => {
-    const rect = searchPill.getBoundingClientRect();
-    popup.style.left = rect.left + 'px';
-    popup.style.top = (rect.bottom + 6) + 'px';
+    // Do NOT use the captured searchPill here. The pills bar rebuilds itself
+    // (container.innerHTML = '') on every filter change, which typing does on
+    // every keystroke - and in the landscape-mobile branch it has already
+    // happened before this popup exists. The captured node is then detached,
+    // and a detached node's getBoundingClientRect() is all zeros, which is
+    // what was parking this thing in the top-left corner.
+    const pill = document.querySelector('.floating-tag-search');
+    if (!pill) { popup.style.display = 'none'; return; }
+
+    const rect = pill.getBoundingClientRect();
+    if (!rect.width && !rect.height) { popup.style.display = 'none'; return; }
+    popup.style.display = 'flex';
+
+    const pRect = popup.getBoundingClientRect();
+    const gap   = 6;
+
+    // Centred on the pill and sitting directly above it. Clamped to the
+    // viewport so a pill near either edge can't push the popup off-screen.
+    let left = rect.left + (rect.width / 2) - (pRect.width / 2);
+    left = Math.max(4, Math.min(left, window.innerWidth - pRect.width - 4));
+
+    // Fall back to below only if there genuinely isn't room above.
+    let top = rect.top - pRect.height - gap;
+    if (top < 4) top = rect.bottom + gap;
+
+    popup.style.left = left + 'px';
+    popup.style.top  = top + 'px';
 };
-repositionPopup();
+
+// The resize/scroll/visualViewport listeners below aren't enough on their
+// own: a pills-bar rebuild fires none of them, and the pill also changes
+// width as the search text grows. Track it per frame instead. The loop
+// stops itself the moment the popup leaves the DOM, so there's nothing
+// to tear down.
+const trackPill = () => {
+    if (!popup.isConnected) return;
+    repositionPopup();
+    requestAnimationFrame(trackPill);
+};
+requestAnimationFrame(trackPill);
 
 if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', repositionPopup);

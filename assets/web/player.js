@@ -3713,11 +3713,51 @@ isDesktopSeeking = false;
 // Mobile: touch to seek
 let isSeeking = false;
 
+// In FLS the player - this bar included - is rotate(90deg), so the bar's
+// long axis runs vertically on screen while getBoundingClientRect still
+// reports an axis-aligned box. Measuring along clientX there reads across
+// the bar's THICKNESS rather than its length, which is why a touch in FLS
+// jumps to a position unrelated to where you touched.
+// rotate(90deg) maps the bar's local +x onto screen +y, so progress runs
+// top-to-bottom. ⚙️ If it comes out mirrored, use (rect.bottom - clientY).
+const progressFractionFromPoint = (clientX, clientY) => {
+    const rect = progressBar.getBoundingClientRect();
+    const raw = manualRotationActive
+        ? (clientY - rect.top) / rect.height
+        : (clientX - rect.left) / rect.width;
+    return Math.max(0, Math.min(1, raw));
+};
+
 progressBar.addEventListener('touchstart', (e) => {
 if (!window.plyrPlayer.duration) return;
 armBookmarkMarkers(progressBar);
 isSeeking = true;
 e.stopPropagation();
+
+// Bookmark markers keep their own tap-to-show / tap-to-jump behaviour -
+// seeking out from under them would make them impossible to use.
+if (e.target?.closest?.('.progress-bookmark-marker')) return;
+
+// Tap-to-jump. Previously touchstart only armed markers, so a tap that
+// produced no touchmove left pendingMobileSeekTime null and touchend did
+// nothing at all. Seek precisely here: a tap is a deliberate destination,
+// not a drag, so it should land on the frame rather than a keyframe.
+const t = e.touches[0];
+if (!t) return;
+const percent = progressFractionFromPoint(t.clientX, t.clientY);
+const seekTime = percent * window.plyrPlayer.duration;
+
+const filled = progressBar.querySelector('.permanent-progress-filled');
+if (filled) filled.style.width = `${percent * 100}%`;
+
+const timestamp = document.querySelector('.permanent-progress-timestamp');
+if (timestamp) {
+    const remaining = window.plyrPlayer.duration - seekTime;
+    timestamp.textContent = `${formatDuration(seekTime * 1000)} / ${formatDuration(remaining * 1000)}`;
+}
+
+window.plyrPlayer.currentTime = seekTime;
+showPlayerFeedback(`${formatDuration(seekTime * 1000)}`, 'top-left');
 }, { passive: false });
 
 let pendingMobileSeekTime = null;
@@ -3730,9 +3770,9 @@ e.preventDefault();
 e.stopPropagation();
 
 const touch = e.touches[0];
-const rect = progressBar.getBoundingClientRect();
-const touchX = touch.clientX - rect.left;
-const percent = Math.max(0, Math.min(1, touchX / rect.width));
+// Axis-aware - see progressFractionFromPoint above. The old
+// touchX / rect.width was measuring across the bar in FLS.
+const percent = progressFractionFromPoint(touch.clientX, touch.clientY);
 const seekTime = percent * window.plyrPlayer.duration;
 
 // ✅ PERFORMANCE: touchmove can fire faster than a precise seek completes,

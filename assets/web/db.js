@@ -978,6 +978,33 @@ async function refreshVideoFromDb(video, { silent = false } = {}) {
 }
 window.refreshVideoFromDb = refreshVideoFromDb;
 
+// Top bookmark notes, for the quick-add pills in the bookmark modal.
+// The excel-sheets.js copy is both unloaded in Native AND still the old
+// implementation (download the whole catalogue, tally notes in JS, requires
+// an Excel token). This is the same one indexed GROUP BY that Picker now
+// uses - no Microsoft auth anywhere in the path.
+let cachedTopBookmarkNotesDb = null;
+
+window.getTopBookmarkNotes = async function (limit = 12, forceRefresh = false) {
+  if (cachedTopBookmarkNotesDb && !forceRefresh && cachedTopBookmarkNotesDb.length >= limit) {
+    return cachedTopBookmarkNotesDb.slice(0, limit);
+  }
+  try {
+    const res = await window.scrayApiCall("top_notes", { params: { limit: Math.max(limit, 30) } });
+    const sorted = (res.notes || []).map(n => n.note);
+    cachedTopBookmarkNotesDb = sorted;
+    console.log(`✅ Compiled ${sorted.length} top bookmark notes from the bookmarks table`);
+    return sorted.slice(0, limit);
+  } catch (err) {
+    console.error('Failed to compute top bookmark notes:', err);
+    return [];
+  }
+};
+
+window.clearTopBookmarkNotesCache = function () {
+  cachedTopBookmarkNotesDb = null;
+};
+
 // showSyncConfirmation lives in excel-sheets.js, which Native deliberately
 // does NOT load - it's the Graph/Excel layer and drags in MSAL. Since every
 // call site is guarded with `typeof === 'function'`, the toast has been
@@ -1000,6 +1027,47 @@ if (typeof window.showSyncConfirmation !== 'function') {
       tooltip.classList.remove('show');
       setTimeout(() => tooltip.remove(), 300);
     }, 2000);
+  };
+}
+
+// Same story as showSyncConfirmation above: these live in excel-sheets.js,
+// which Native doesn't load, so they've been undefined here. That's why the
+// portrait bookmark save shows no feedback at all, and why the FLS one - which
+// uses showRotatedPlayerConfirmation from player.js instead - gets created
+// with persist:true and then never closed.
+if (typeof window.showBookmarkConfirmation !== 'function') {
+  window.showBookmarkConfirmation = function (message, bgColor = '#28a745', persist = false) {
+    const tooltip = document.createElement('div');
+    tooltip.className = 'bookmark-confirmation-tooltip';
+    tooltip.innerHTML = message;
+    tooltip.style.background = bgColor;
+    document.body.appendChild(tooltip);
+    setTimeout(() => tooltip.classList.add('show'), 10);
+    if (!persist) {
+      setTimeout(() => {
+        tooltip.classList.remove('show');
+        setTimeout(() => tooltip.remove(), 300);
+      }, 1300);
+    }
+    return tooltip;
+  };
+}
+
+if (typeof window.updateBookmarkConfirmation !== 'function') {
+  window.updateBookmarkConfirmation = function (tooltip, message, bgColor) {
+    if (!tooltip) return;
+    tooltip.innerHTML = message;
+    tooltip.style.background = bgColor;
+  };
+}
+
+if (typeof window.closeBookmarkConfirmation !== 'function') {
+  window.closeBookmarkConfirmation = function (tooltip, delay = 1300) {
+    if (!tooltip) return;
+    setTimeout(() => {
+      tooltip.classList.remove('show');
+      setTimeout(() => tooltip.remove(), 300);
+    }, delay);
   };
 }
 

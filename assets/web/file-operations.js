@@ -2719,10 +2719,26 @@ async function saveBookmarks(video, existingTooltip = null) {
     }
     // saveVideoMeta() pushed to the bookmarks table on the way through, so by
     // here the write has already reached the server.
-    if (existingTooltip && typeof window.updateBookmarkConfirmation === 'function') {
-        window.updateBookmarkConfirmation(existingTooltip,
-            `${video.bookmarks.length} bookmark${video.bookmarks.length === 1 ? '' : 's'} saved`, '#28a745');
-        window.closeBookmarkConfirmation(existingTooltip);
+    // Two different tooltip implementations reach this point. The FLS one
+    // (showRotatedPlayerConfirmation, in player.js) fades via inline
+    // style.opacity and lives inside the rotated container; the portrait one
+    // fades via a .show class on body. Closing one with the other's helper
+    // leaves it on screen, which is what stranded the FLS "Saving..." message.
+    if (existingTooltip) {
+        const msg = `${video.bookmarks.length} bookmark${video.bookmarks.length === 1 ? '' : 's'} saved`;
+        const isRotated = existingTooltip.classList?.contains('rotated-player-confirmation-tooltip');
+
+        if (isRotated && typeof window.updateRotatedPlayerConfirmation === 'function') {
+            window.updateRotatedPlayerConfirmation(existingTooltip, msg, '#28a745');
+            window.closeRotatedPlayerConfirmation?.(existingTooltip);
+        } else if (typeof window.updateBookmarkConfirmation === 'function') {
+            window.updateBookmarkConfirmation(existingTooltip, msg, '#28a745');
+            window.closeBookmarkConfirmation?.(existingTooltip);
+        }
+
+        // Last-resort reaper. A persist tooltip has nothing else that will
+        // ever remove it, so never let a missing helper strand one on screen.
+        setTimeout(() => existingTooltip.remove(), 4000);
     }
 }
 // Export functions globally

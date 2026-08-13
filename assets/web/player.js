@@ -2357,11 +2357,15 @@ function showPlayerBasketModal() {
     });
     actionRow.appendChild(basketBtn);
 
-    inner.appendChild(actionRow);
-
     const listContainer = document.createElement('div');
     listContainer.style.cssText = `flex: 1 1 auto; min-height: 0; overflow-y: auto; ${NO_AUTOSIZE}`;
     inner.appendChild(listContainer);
+
+    // Buttons at the bottom. The list is flex:1 so it absorbs the slack, and
+    // actionRow keeps flex-shrink:0 so a long list can't squeeze it away.
+    actionRow.style.marginBottom = '0';
+    actionRow.style.marginTop = '6px';
+    inner.appendChild(actionRow);
 
     let currentMode = 'basket';
 

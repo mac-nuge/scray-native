@@ -2044,6 +2044,25 @@ pointer-events: none;
 transition: opacity 0.15s ease;
 }
 
+/* The rotated player is exactly screen-height wide, so any sub-pixel
+   rounding or bounce exposes the page underneath as white slivers down
+   both edges. This is a plain black backdrop sitting just below the player
+   (2147483647) and above everything else - it can't change the player's
+   geometry, so the video doesn't resize or letterbox differently. */
+body.manual-rotate-landscape::before {
+content: '';
+position: fixed;
+inset: 0;
+background: #000;
+z-index: 2147483000;
+pointer-events: none;
+}
+
+body.manual-rotate-landscape,
+body.manual-rotate-landscape html {
+background: #000 !important;
+}
+
 body.manual-rotate-landscape .fls-video-title {
 display: block;
 pointer-events: auto;

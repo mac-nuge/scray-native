@@ -2865,7 +2865,14 @@ SYNC CONFIRMATION TOOLTIP - BOTTOM OF SCREEN, ABOVE EVERYTHING
  z-index: 2147483647; /* Above everything including fullscreen */
  opacity: 0;
  transition: opacity 0.3s ease;
- white-space: nowrap;
+ /* nowrap made a long filename push the box wider than the viewport, and
+    because it's centred with translateX(-50%) the overflow was clipped at
+    both ends — taking the score with it. Wrap and cap the width instead. */
+ white-space: normal;
+ max-width: min(90vw, 480px);
+ text-align: center;
+ line-height: 1.35;
+ overflow-wrap: anywhere;
  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
 

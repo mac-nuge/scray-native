@@ -6215,59 +6215,7 @@ onClick: async (e) => {
    }
 }
 },
-{
-label: "Refresh",
-title: "Refresh",
-color: "#17a2b8",
-disabled: isYetToUpload,
-onClick: async (e) => {
-   e.stopPropagation();
-   try {
-       const refreshedVideo = await refreshSingleVideoComprehensive(video);
-       
-       // Update current playing video
-       window.currentPlayingVideo = refreshedVideo;
-       
-       // Update in basket if present
-       const basketIndex = window.basketVideos?.findIndex(v => v.oneDriveId === video.oneDriveId);
-       if (basketIndex >= 0) {
-           window.basketVideos[basketIndex] = refreshedVideo;
-           window.saveBasket();
-           window.renderBasket();
-       }
-       
-       // Update in history if present
-       const historyItems = window.historyVideos?.filter(v => v.oneDriveId === video.oneDriveId);
-       if (historyItems) {
-           historyItems.forEach(item => {
-               Object.assign(item, refreshedVideo);
-           });
-           window.saveHistory();
-           window.renderHistory();
-       }
-       
-       // Refresh tag dropdowns
-       if (typeof populateTagDropdowns === 'function') {
-           await populateTagDropdowns();
-       }
-       
-       // Rebuild video info display with updated data
-       if (typeof window.rebuildVideoInfoDisplay === 'function') {
-           window.rebuildVideoInfoDisplay(refreshedVideo);
-       }
-       
-       // Refresh all lists
-       if (typeof refreshAllLists === 'function') {
-           refreshAllLists();
-       }
-       
-       console.log(`Refreshed now playing video: ${refreshedVideo.filename}`);
-   } catch (err) {
-       console.error('Failed to refresh video:', err);
-       alert(`Refresh failed: ${err.message}`);
-   }
-}
-},
+
 {
 label: "Open Link",
 title: "Open in OneDrive",

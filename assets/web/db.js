@@ -924,7 +924,7 @@ window.findLocalIdByKey = findLocalIdByKey;
  * The cursor exists so routine syncs stay cheap; this is the "I know it
  * changed elsewhere, fetch it now" path, so it ignores the cursor entirely.
  */
-async function refreshVideoFromDb(video) {
+async function refreshVideoFromDb(video, { silent = false } = {}) {
   const key = video.videoKey || window.scrayVideoKey(video.filename);
   if (!key) throw new Error("no video_key for this file");
 
@@ -958,7 +958,77 @@ async function refreshVideoFromDb(video) {
 
   if (typeof window.loadCachesFromMeta === "function") await window.loadCachesFromMeta(true);
   console.log(`↻ ${video.filename}: score ${patch.user_score}, ${patch.bookmarks.length} bookmark(s)`);
+
+  // The confirmation lives HERE, not at the call sites. This is the single
+  // read path, so every menu that pulls from the DB gets feedback for free
+  // and a new menu can't ship without it. Compound flows (rename, move) pass
+  // { silent: true } so they don't fire a toast mid-sequence.
+  if (!silent && typeof window.showSyncConfirmation === 'function') {
+    const n = patch.bookmarks.length;
+    window.showSyncConfirmation(
+      // Score first and on its own line — it's the thing being confirmed.
+      // The filename is context, so it goes smaller and truncates.
+      `↻ Score: ${patch.user_score ?? '—'}${n ? ` · ${n} bookmark${n === 1 ? '' : 's'}` : ''}` +
+      `<br><span style="font-size:0.6em;opacity:0.85;display:block;` +
+      `overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${video.filename}</span>`,
+      "#17a2b8"
+    );
+  }
   return video;
 }
 window.refreshVideoFromDb = refreshVideoFromDb;
+
+// showSyncConfirmation lives in excel-sheets.js, which Native deliberately
+// does NOT load - it's the Graph/Excel layer and drags in MSAL. Since every
+// call site is guarded with `typeof === 'function'`, the toast has been
+// silently doing nothing in Native all along, for basket sync as well as
+// refresh. Defining it here rather than loading excel-sheets.js keeps Native
+// free of the Microsoft dependency.
+//
+// No inline positioning: the CSS class already sets position/left/bottom/
+// transform, and setting `bottom` inline would beat the mobile media queries
+// that move it clear of the corner buttons.
+if (typeof window.showSyncConfirmation !== 'function') {
+  window.showSyncConfirmation = function (message, bgColor = '#28a745') {
+    const tooltip = document.createElement('div');
+    tooltip.className = 'sync-confirmation-tooltip';
+    tooltip.innerHTML = message;
+    tooltip.style.background = bgColor;
+    document.body.appendChild(tooltip);
+    setTimeout(() => tooltip.classList.add('show'), 10);
+    setTimeout(() => {
+      tooltip.classList.remove('show');
+      setTimeout(() => tooltip.remove(), 300);
+    }, 2000);
+  };
+}
+
+// A DB pull updates the underlying record, so EVERY visible surface showing
+// that video is stale afterwards — not just the list you happened to open the
+// menu in. Each surface is guarded separately so a missing renderer on one
+// doesn't stop the others from updating.
+window.refreshAfterDbPull = async function (video) {
+  try {
+    const bi = window.basketVideos?.findIndex(v => v.oneDriveId === video.oneDriveId);
+    if (bi >= 0) {
+      Object.assign(window.basketVideos[bi], video);
+      window.saveBasket?.();
+      window.renderBasket?.();
+    }
+  } catch (err) { console.warn('basket re-render failed:', err); }
+
+  try {
+    const hits = window.historyVideos?.filter(v => v.oneDriveId === video.oneDriveId) || [];
+    if (hits.length) {
+      hits.forEach(item => Object.assign(item, video));
+      window.saveHistory?.();
+      window.renderHistory?.();
+    }
+  } catch (err) { console.warn('history re-render failed:', err); }
+
+  try {
+    if (typeof window.refreshAllLists === 'function') window.refreshAllLists();
+    if (typeof window.populateTagDropdowns === 'function') await window.populateTagDropdowns();
+  } catch (err) { console.warn('list re-render failed:', err); }
+};
 window.scrayApplyPulledRow = scrayApplyPulledRow;

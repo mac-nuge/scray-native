@@ -187,6 +187,7 @@ if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
        }
    }
 },
+
 {
 label: "Refresh Data",
 title: "Pull the latest score, bookmarks and counters from the database",
@@ -195,63 +196,14 @@ onClick: async (e) => {
    e.stopPropagation();
    try {
        await window.refreshVideoFromDb(video);
-       if (typeof refreshAllLists === 'function') refreshAllLists();
+       await window.refreshAfterDbPull(video);
    } catch (err) {
        console.error('DB refresh failed:', err);
        alert(`Refresh failed: ${err.message}`);
    }
 }
 },
-{
-label: "Refresh Folder",
-title: "Refresh the folder containing this file",
-color: "#17a2b8",
-onClick: async (e) => {
-   e.stopPropagation();
-   if (typeof window.showRefreshFolderConfirmModal === 'function') {
-       const confirmed = await window.showRefreshFolderConfirmModal(video);
-       if (!confirmed) return;
-   }
-   if (typeof window.refreshVideoFolder === 'function') {
-       try {
-           await window.refreshVideoFolder(video);
-       } catch (err) {
-           console.error('Folder refresh failed:', err);
-           alert(`Folder refresh failed: ${err.message}`);
-       }
-   } else {
-       alert('Folder refresh not available');
-   }
-}
-},
-{
-label: "Refresh",
- title: "Refresh",
- color: "#17a2b8",
- disabled: isYetToUpload,
- onClick: async (e) => {
-     e.stopPropagation();
-     try {
-         await refreshSingleVideoComprehensive(video);
-         
-         // Refresh tag dropdowns
-         if (typeof populateTagDropdowns === 'function') {
-             await populateTagDropdowns();
-         }
-         
-         // Re-render list
-         window.skipSearchScroll = true;
-         if (typeof filterDisplayedByFilename === 'function') {
-             await filterDisplayedByFilename();
-         }
-         
-         console.log(`Refreshed main list item: ${video.filename}`);
-     } catch (err) {
-         console.error('Failed to refresh item:', err);
-         alert(`Refresh failed: ${err.message}`);
-     }
- }
-},
+
 {
    label: "Open Link",
    title: "Open in OneDrive",
@@ -514,6 +466,7 @@ li.appendChild(nameSpan);
        }
    }
 },
+
 {
 label: "Refresh Data",
 title: "Pull the latest score, bookmarks and counters from the database",
@@ -522,63 +475,14 @@ onClick: async (e) => {
    e.stopPropagation();
    try {
        await window.refreshVideoFromDb(video);
-       if (typeof refreshAllLists === 'function') refreshAllLists();
+       await window.refreshAfterDbPull(video);
    } catch (err) {
        console.error('DB refresh failed:', err);
        alert(`Refresh failed: ${err.message}`);
    }
 }
 },
-{
-label: "Refresh Folder",
-title: "Refresh the folder containing this file",
-color: "#17a2b8",
-onClick: async (e) => {
-   e.stopPropagation();
-   if (typeof window.showRefreshFolderConfirmModal === 'function') {
-       const confirmed = await window.showRefreshFolderConfirmModal(video);
-       if (!confirmed) return;
-   }
-   if (typeof window.refreshVideoFolder === 'function') {
-       try {
-           await window.refreshVideoFolder(video);
-       } catch (err) {
-           console.error('Folder refresh failed:', err);
-           alert(`Folder refresh failed: ${err.message}`);
-       }
-   } else {
-       alert('Folder refresh not available');
-   }
-}
-},
-{
-label: "Refresh",
- title: "Refresh",
- color: "#17a2b8",
- disabled: isYetToUpload,
- onClick: async (e) => {
-     e.stopPropagation();
-     try {
-         await refreshSingleVideoComprehensive(video);
-         
-         // Refresh tag dropdowns
-         if (typeof populateTagDropdowns === 'function') {
-             await populateTagDropdowns();
-         }
-         
-         // Re-render list
-         window.skipSearchScroll = true;
-         if (typeof filterDisplayedByFilename === 'function') {
-             await filterDisplayedByFilename();
-         }
-         
-         console.log(`Refreshed main list item: ${video.filename}`);
-     } catch (err) {
-         console.error('Failed to refresh item:', err);
-         alert(`Refresh failed: ${err.message}`);
-     }
- }
-},
+
 {
    label: "Open Link",
    title: "Open in OneDrive",

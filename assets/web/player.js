@@ -900,13 +900,24 @@ let scrubRafScheduled = false;
 // Pixels per step - lower = more time travelled per finger movement.
 const JOG_PX_PER_STEP = 8;
 // ⚙️ Speed tiers, picked by which third of the video's HEIGHT the drag
-// starts in. Bottom = finest, top = coarsest. Follows the frame-step hold
-// ladder (8x -> 16x -> 32x).
+// starts in. Two ladders, and they run OPPOSITE ways on purpose:
+//
+//   FLS - bottom is finest (8x), top coarsest (32x)
+//   MP  - bottom is coarsest (64x), top finest (16x)
+//
+// That's deliberate, not an oversight: in FLS your thumb rests low on the
+// screen, so fine control wants to be near it. In portrait the video sits
+// high and the space below it is where the thumb travels furthest.
 const JOG_MULT_BOTTOM = 8;
 const JOG_MULT_MIDDLE = 16;
 const JOG_MULT_TOP    = 32;
-let jogEligible = false;   // touch began on a frame-step zone, in FLS
-let jogActive = false;     // jog has actually engaged (video paused)
+
+const JOG_MP_MULT_BOTTOM = 64;
+const JOG_MP_MULT_MIDDLE = 32;
+const JOG_MP_MULT_TOP    = 16;
+
+let jogEligible = false;   // FLS frame-step zone, or portrait while paused
+let jogActive = false;     // jog has actually engaged
 let jogStartTime = 0;
 let jogMultiplier = JOG_MULT_BOTTOM;
 
@@ -950,7 +961,17 @@ scrubbing = false; // Don't activate yet - wait to determine direction
 // swipe-up-for-random and swipe-to-exit gestures, which also start here.
 // scrubMove commits to it once the drag is confirmed as on-axis.
 // ⚙️ Drop the manualRotationActive check to enable this outside FLS too.
-jogEligible = !!(manualRotationActive && target?.closest?.('.frame-step-tap-zone'));
+// Two ways in:
+//   FLS - the drag started on a left-half frame-step zone
+//   MP  - the video is PAUSED, in which case any scrub jogs. A paused
+//         video is already a "find the exact frame" situation, so
+//         proportional scrubbing isn't what you want there. Playing,
+//         portrait behaves exactly as before.
+// Covers portrait fullscreen and inline alike - neither is landscape.
+const inPortraitMobile = window.innerWidth <= 1024 && !isForcedOrRealLandscapeMobile();
+const pausedJog = inPortraitMobile && !!window.plyrPlayer.paused;
+
+jogEligible = !!((manualRotationActive && target?.closest?.('.frame-step-tap-zone')) || pausedJog);
 jogActive = false;
 jogStartTime = startTime;
 
@@ -960,20 +981,23 @@ jogStartTime = startTime;
 // crossed a strip boundary.
 if (jogEligible) {
     const r = wrapper.getBoundingClientRect();
-    // Same off-axis convention scrubMove uses for its own zone multiplier:
-    // FLS rotates the video 90°, so the video's vertical axis is the
-    // screen's X, and the distance is measured from the video's BOTTOM edge.
+    // FLS rotates the video 90°, so its vertical axis is the screen's X.
+    // Either way the distance is measured from the video's BOTTOM edge, so
+    // frac 0 = bottom and frac 1 = top in both modes.
     const edgeAxisSize = manualRotationActive ? r.width : r.height;
     const distanceFromEdge = manualRotationActive
         ? r.width  - (startX - r.left)
         : r.height - (startY - r.top);
     const frac = edgeAxisSize ? (distanceFromEdge / edgeAxisSize) : 1;
 
-    // ⚙️ frac 0 = bottom of the video, 1 = top. Swap BOTTOM and TOP below
-    // if the strips come out inverted in the hand.
-    jogMultiplier = frac < (1 / 3) ? JOG_MULT_BOTTOM
-                  : frac < (2 / 3) ? JOG_MULT_MIDDLE
-                  : JOG_MULT_TOP;
+    // ⚙️ Swap BOTTOM and TOP within a ladder if that mode feels inverted.
+    const ladder = manualRotationActive
+        ? [JOG_MULT_BOTTOM,    JOG_MULT_MIDDLE,    JOG_MULT_TOP]
+        : [JOG_MP_MULT_BOTTOM, JOG_MP_MULT_MIDDLE, JOG_MP_MULT_TOP];
+
+    jogMultiplier = frac < (1 / 3) ? ladder[0]
+                  : frac < (2 / 3) ? ladder[1]
+                  : ladder[2];
 }
 
 // ✅ MOBILE (ALL orientations): Don't prevent default yet - let scrubMove determine direction
@@ -1134,7 +1158,7 @@ if (!scrubbing) {
 return;
 }
 
-// ---- FLS jog-scrub -------------------------------------------
+// ---- Jog-scrub (FLS zones, or portrait while paused) ----------
 // Same feel as holding a frame-step button at 4x, but the finger drives
 // direction and distance instead of a timer. Position-based rather than
 // incremental: the offset is computed from the TOTAL drag each time, so
@@ -5095,13 +5119,21 @@ if (isLandscape && isMobile) {
        }
     }
 } else {
-    // ✅ PORTRAIT MOBILE: Divide left/right into 3 vertical sections
-    const leftThird = effRect.width / 3;
-    const rightThird = (effRect.width / 3) * 2;
+    // ✅ PORTRAIT MOBILE: four vertical quarters.
+    //   Q1 (0-25%)   fullscreen toggle
+    //   Q2 (25-50%)  play/pause  <- deliberate dead space in the middle,
+    //                               so there's somewhere safe to double-tap
+    //   Q3 (50-75%)  minus seeks (-3 / -10 / -30, bottom to top)
+    //   Q4 (75-100%) plus seeks  (+3 / +10 / +30, bottom to top)
+    // The seek pair used to occupy the middle and right THIRDS; squeezing
+    // them into the right half is what frees Q2 up.
+    const q1 = effRect.width / 4;
+    const q2 = effRect.width / 2;
+    const q3 = (effRect.width / 4) * 3;
     const topThird = effRect.height / 3;
     const bottomThird = (effRect.height / 3) * 2;
     
-    if (effTapX < leftThird) {
+    if (effTapX < q1) {
         // Left third toggles fullscreen. Which KIND of fullscreen depends on
         // the video's own shape:
         //  - Portrait video: plain Plyr fullscreen. Rotating a portrait frame
@@ -5120,8 +5152,19 @@ if (isLandscape && isMobile) {
             window.plyrPlayer.fullscreen.enter();
             showPlayerFeedback('⛶ Enter Fullscreen', 'top-left');
         }
-    } else if (effTapX > rightThird) {
-        // Right third: divide into 3 vertical sections (bottom to top: +3s, +10s, +30s)
+    } else if (effTapX < q2) {
+        // Q2: play/pause. No vertical sub-split - the whole point of this
+        // strip is that it's a large, forgiving target you can hit without
+        // aiming, so slicing it into thirds would defeat it.
+        if (window.plyrPlayer.paused) {
+            window.plyrPlayer.play();
+            showPlayerFeedback('▶ Play', 'top-left');
+        } else {
+            window.plyrPlayer.pause();
+            showPlayerFeedback('⏸ Pause', 'top-left');
+        }
+    } else if (effTapX > q3) {
+        // Q4: plus seeks, 3 vertical sections (bottom to top: +3s, +10s, +30s)
         if (effTapY > bottomThird) {
             // Bottom section: +3s
             window.plyrPlayer.currentTime = Math.min(window.plyrPlayer.duration, window.plyrPlayer.currentTime + 3);
@@ -5136,7 +5179,7 @@ if (isLandscape && isMobile) {
             showPlayerFeedback(`+30s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-right');
         }
     } else {
-        // Middle third: divide into 3 vertical sections (bottom to top: -3s, -10s, -30s)
+        // Q3: minus seeks, 3 vertical sections (bottom to top: -3s, -10s, -30s)
         if (effTapY > bottomThird) {
             // Bottom section: -3s
             window.plyrPlayer.currentTime = Math.max(0, window.plyrPlayer.currentTime - 3);

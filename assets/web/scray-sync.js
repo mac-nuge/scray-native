@@ -100,10 +100,17 @@ function buildOp(oneDriveId, updates, baseSeq, defaults) {
   const op = { id: oneDriveId, device: window.SCRAY_SYNC.DEVICE_ID, base_seq: baseSeq ?? 0 };
 
   for (const [rawKey, value] of Object.entries(updates)) {
-    if (rawKey === "increment_views" || rawKey === "increment_f_tally") {
-      console.warn(`[sync] buildOp received "${rawKey}" - this must be resolved to an absolute value before calling buildOp. Ignoring.`);
-      continue;
-    }
+    // Counters go to the server as a DELTA, not an absolute. api.php's `add`
+    // handler does max(0, current + delta) inside the push transaction, so
+    // it can't lose a play to a stale read the way the old absolute-via-`max`
+    // route did: `max` only accepts a HIGHER value, so a client that read 0
+    // when the server had 10 would send 1 and have it silently discarded.
+    //
+    // The trade-off is idempotency - a replayed op would double-count. That's
+    // acceptable precisely because play counters are never queued for replay:
+    // Picker pushes immediately and Native drops them when offline.
+    if (rawKey === "increment_views")    { (op.add ??= {}).view_count = (op.add?.view_count ?? 0) + 1; continue; }
+    if (rawKey === "increment_f_tally")  { (op.add ??= {}).f_tally    = (op.add?.f_tally    ?? 0) + 1; continue; }
     if (rawKey === "played_now") { (op.max ??= {}).last_played = new Date().toISOString(); continue; }
 
     const key = toDbField(rawKey);

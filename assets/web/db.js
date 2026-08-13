@@ -265,7 +265,10 @@ async function saveVideos(videos, username, accountId, driveId) {
 * Write to videoMeta only. Stamps updatedAt/updatedBy so a future
 * merge-conflict UI can show provenance before overwriting anything.
 */
-async function saveVideoMeta(oneDriveId, metaUpdates, updatedBy = "app") {
+// opUpdates lets a caller send the server something different from what's
+// written locally. Play counters need exactly that: IndexedDB stores the
+// absolute count (for display), while the server gets a +1 delta.
+async function saveVideoMeta(oneDriveId, metaUpdates, updatedBy = "app", opUpdates = null) {
   const db = await openDB();
   const tx = db.transaction(META_STORE_NAME, "readwrite");
   const store = tx.objectStore(META_STORE_NAME);
@@ -351,8 +354,20 @@ async function saveVideoMeta(oneDriveId, metaUpdates, updatedBy = "app") {
     } else {
       // Bookmarks were pushed above via their own endpoint — sending them here
       // just triggers buildOp's warning and does nothing.
-      const { bookmarks, ...opUpdates } = metaUpdates;
-      if (Object.keys(opUpdates).length) await window.scrayEnqueueOp(key, opUpdates);
+      const { bookmarks, ...derivedOpUpdates } = (opUpdates || metaUpdates);
+      const finalOp = opUpdates ? derivedOpUpdates : derivedOpUpdates;
+
+      // Play counters are deliberately NOT queued when offline. A view
+      // recorded on a plane and replayed three days later lands with the
+      // wrong last_played and inflates a count nobody can account for -
+      // better to lose it than to record it misleadingly. The local
+      // IndexedDB write above still happened, so the device's own numbers
+      // stay right.
+      if (updatedBy === "play" && !navigator.onLine) {
+        console.log(`[sync] offline - play counters for ${key} stay on this device`);
+      } else if (Object.keys(finalOp).length) {
+        await window.scrayEnqueueOp(key, finalOp);
+      }
     }
   }
   return;

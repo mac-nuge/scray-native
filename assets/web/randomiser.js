@@ -712,6 +712,143 @@ fillSelect("tagFilterLevel3Select", "includeTagsLevel3Container", level3Set);
 fillSelect("tagFilterAllSelect", "includeTagsAllContainer", allTagsSet);
 
 // Floating pills from global set
+// ---------------------------------------------------------------
+// The clear-search bin. Driven by keyboard state rather than by a tap on
+// the pill, so it appears whenever the pill is actually being edited -
+// including when the search box is focused directly.
+//
+// Idempotent: safe to call on every keyboard/viewport event. It creates
+// the popup once and then leaves it alone.
+// ---------------------------------------------------------------
+function ensureSearchPillPopup() {
+    const pill = document.querySelector('.floating-tag-search');
+    const editing = document.body.classList.contains('keyboard-active') &&
+                    document.body.classList.contains('search-pill-active');
+
+    if (!pill || !editing) { dismissSearchPillPopup(); return; }
+    if (document.getElementById('searchPillPopup')) return;   // already up
+
+    const popup = document.createElement('div');
+    popup.id = 'searchPillPopup';
+    popup.className = 'search-pill-popup';
+
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'search-pill-popup-btn';
+    clearBtn.textContent = '🗑️';
+    clearBtn.title = 'Clear search';
+    // mousedown/touchstart would fire before the button gets its click, and
+    // blurring the search box closes the keyboard, which dismisses this
+    // popup out from under the tap. preventDefault keeps focus put.
+    clearBtn.addEventListener('mousedown', (ev) => ev.preventDefault());
+    clearBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        popup.remove();
+        window.clearSearchPillFilter?.(ev);
+    });
+
+    popup.appendChild(clearBtn);
+    document.body.appendChild(popup);
+
+    const reposition = () => {
+        // Re-query every time. The pills bar rebuilds itself
+        // (container.innerHTML = '') on every keystroke, so any captured
+        // node is detached within a character or two - and a detached
+        // node's getBoundingClientRect() is all zeros, which is what used
+        // to park this in the top-left corner.
+        const live = document.querySelector('.floating-tag-search');
+        if (!live) { popup.style.display = 'none'; return; }
+
+        const rect = live.getBoundingClientRect();
+        if (!rect.width && !rect.height) { popup.style.display = 'none'; return; }
+        popup.style.display = 'flex';
+
+        const pRect = popup.getBoundingClientRect();
+        const gap = 6;
+
+        let left = rect.left + (rect.width / 2) - (pRect.width / 2);
+        left = Math.max(4, Math.min(left, window.innerWidth - pRect.width - 4));
+
+        let top = rect.top - pRect.height - gap;
+        if (top < 4) top = rect.bottom + gap;   // no room above
+
+        popup.style.left = left + 'px';
+        popup.style.top  = top + 'px';
+    };
+
+    // Per-frame rather than event-driven: a pills-bar rebuild fires no
+    // resize or scroll event, and the pill changes width as you type. The
+    // loop ends itself the moment the popup leaves the DOM.
+    const track = () => {
+        if (!popup.isConnected) return;
+        reposition();
+        requestAnimationFrame(track);
+    };
+    requestAnimationFrame(track);
+
+    // No outside-click dismissal any more. Keyboard state owns visibility
+    // now, and an outside-click handler would kill the bin the moment you
+    // tapped back into the search box - which is exactly when you want it.
+    const escHandler = (ev) => {
+        if (ev.key === 'Escape') {
+            popup.remove();
+            document.removeEventListener('keydown', escHandler);
+        }
+    };
+    document.addEventListener('keydown', escHandler);
+}
+
+function dismissSearchPillPopup() {
+    document.getElementById('searchPillPopup')?.remove();
+}
+
+window.ensureSearchPillPopup = ensureSearchPillPopup;
+window.dismissSearchPillPopup = dismissSearchPillPopup;
+
+// Defined out here, NOT inside the pill's click handler. It used to be
+// assigned in there, which meant it didn't exist until you'd tapped the pill
+// once - so on a fresh launch the bin's `window.clearSearchPillFilter?.(ev)`
+// optional-chained into nothing and the tap appeared to do nothing at all.
+// It closes over no local state, so there was never a reason for it to live
+// inside the handler.
+window.clearSearchPillFilter = function (e) {
+    // Dismiss the on-screen keyboard. Necessary explicitly: the bin
+    // preventDefaults its press to avoid losing focus mid-tap, so nothing
+    // else is going to blur the input. Done first so the keyboard starts
+    // animating away immediately rather than after the re-filter.
+    const mainSearchBox  = document.getElementById("filenameSearchBox");
+    const panelSearchBox = document.getElementById("panelSearchBox");
+    mainSearchBox?.blur();
+    panelSearchBox?.blur();
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+
+    // Clear main search box
+    const mainClearX = document.getElementById("clearSearchX");
+    if (mainSearchBox) {
+        mainSearchBox.value = "";
+        if (mainClearX) mainClearX.style.display = "none";
+    }
+
+    // Clear panel search box
+    const panelClearX = document.getElementById("panelSearchClearX");
+    if (panelSearchBox) {
+        panelSearchBox.value = "";
+        if (panelClearX) panelClearX.style.display = "none";
+    }
+
+    // Show "Filter cleared" tooltip
+    if (typeof showButtonFeedback === 'function') {
+        showButtonFeedback("Filter cleared", e);
+    }
+
+    // ✅ Prevent panel from auto-opening
+    window.skipPanelAutoOpen = true;
+
+    // Trigger filter refresh
+    if (typeof filterDisplayedByFilename === 'function') {
+        filterDisplayedByFilename();
+    }
+};
+
 function updateFloatingTagPillsFromCommon() {
 const container = document.getElementById("floatingTagPillsBar");
 if (!container) return;
@@ -745,40 +882,9 @@ if (searchText.length > 0) {
 const searchPill = document.createElement("span");
 searchPill.className = "floating-tag-pill floating-tag-search";
 searchPill.textContent = `🔍 ${searchText}`;
-searchPill.title = "Tap for options";
+searchPill.title = "Tap to edit";
 searchPill.addEventListener("click", (e) => {
 e.stopPropagation();
-
-const clearSearchFilter = () => {
-    // Clear main search box
-    const mainSearchBox = document.getElementById("filenameSearchBox");
-    const mainClearX = document.getElementById("clearSearchX");
-    if (mainSearchBox) {
-        mainSearchBox.value = "";
-        if (mainClearX) mainClearX.style.display = "none";
-    }
-
-    // Clear panel search box
-    const panelSearchBox = document.getElementById("panelSearchBox");
-    const panelClearX = document.getElementById("panelSearchClearX");
-    if (panelSearchBox) {
-        panelSearchBox.value = "";
-        if (panelClearX) panelClearX.style.display = "none";
-    }
-
-    // Show "Filter cleared" tooltip
-    if (typeof showButtonFeedback === 'function') {
-        showButtonFeedback("Filter cleared", e);
-    }
-
-    // ✅ Prevent panel from auto-opening
-    window.skipPanelAutoOpen = true;
-
-    // Trigger filter refresh
-    if (typeof filterDisplayedByFilename === 'function') {
-        filterDisplayedByFilename();
-    }
-};
 
 // ✅ Tapping the pill immediately activates Edit (no more E/C choice popup)
 // ✅ Custom focus logic (NOT the jumpSearchBtn path) - deliberately
@@ -824,110 +930,61 @@ if (isLandscape && isMobile) {
     }
 }
 
-// ✅ Show the compact Clear popup (this is the only remaining option)
-const existingPopup = document.getElementById('searchPillPopup');
-if (existingPopup) existingPopup.remove();
+// The popup itself is created by ensureSearchPillPopup, which the keyboard
+// state handlers also call. Calling it here covers the case where the
+// keyboard was already open before the pill was tapped.
 
-const popup = document.createElement('div');
-popup.id = 'searchPillPopup';
-popup.className = 'search-pill-popup';
 
-const clearBtn = document.createElement('button');
-clearBtn.className = 'search-pill-popup-btn';
-clearBtn.textContent = '🗑️';
-clearBtn.title = 'Clear search';
-clearBtn.addEventListener('click', (ev) => {
+});
+
+// The bin is a CHILD of the pill, not a fixed element positioned against it.
+//
+// The previous approach measured the pill with getBoundingClientRect and set
+// fixed coordinates - but the pills bar is simultaneously being moved by CSS
+// (bottom: var(--keyboard-offset) plus a translateY) while iOS resizes the
+// visual viewport, and the bar rebuilds itself on every keystroke. Any frame
+// that measured mid-move produced a bad number and the bin shot to the top
+// of the screen.
+//
+// As a child, the browser positions it. No measuring, no rAF loop, no
+// viewport maths, and it moves with the pill for free.
+const searchWrap = document.createElement("span");
+searchWrap.className = "floating-tag-search-wrap";
+searchWrap.appendChild(searchPill);
+
+const binBtn = document.createElement("button");
+binBtn.className = "search-pill-bin";
+binBtn.textContent = '🗑️';
+binBtn.title = 'Clear search';
+// preventDefault on the press stops the button stealing focus - otherwise
+// the search box blurs, the keyboard closes, and the CSS hides the bin
+// before the tap resolves.
+//
+// But on iOS, preventDefault on touchstart also cancels the whole
+// synthesized mouse sequence, click included. So the action runs on
+// touchend instead. touchend still fires even though the default was
+// prevented: the touch target is fixed at touchstart and doesn't change
+// if the element is hidden or moved mid-gesture.
+binBtn.addEventListener('mousedown', (ev) => ev.preventDefault());
+binBtn.addEventListener('touchstart', (ev) => ev.preventDefault(), { passive: false });
+
+let binFiring = false;
+const clearFromBin = (ev) => {
+    ev.preventDefault();
     ev.stopPropagation();
-    popup.remove();
-    clearSearchFilter();
-});
-
-popup.appendChild(clearBtn);
-document.body.appendChild(popup);
-
-// Anchor just below the pill, and keep it pinned there as the on-screen
-// keyboard opens/closes and shifts the layout/viewport around.
-const repositionPopup = () => {
-    // Do NOT use the captured searchPill here. The pills bar rebuilds itself
-    // (container.innerHTML = '') on every filter change, which typing does on
-    // every keystroke - and in the landscape-mobile branch it has already
-    // happened before this popup exists. The captured node is then detached,
-    // and a detached node's getBoundingClientRect() is all zeros, which is
-    // what was parking this thing in the top-left corner.
-    const pill = document.querySelector('.floating-tag-search');
-    if (!pill) { popup.style.display = 'none'; return; }
-
-    const rect = pill.getBoundingClientRect();
-    if (!rect.width && !rect.height) { popup.style.display = 'none'; return; }
-    popup.style.display = 'flex';
-
-    const pRect = popup.getBoundingClientRect();
-    const gap   = 6;
-
-    // Centred on the pill and sitting directly above it. Clamped to the
-    // viewport so a pill near either edge can't push the popup off-screen.
-    let left = rect.left + (rect.width / 2) - (pRect.width / 2);
-    left = Math.max(4, Math.min(left, window.innerWidth - pRect.width - 4));
-
-    // Fall back to below only if there genuinely isn't room above.
-    let top = rect.top - pRect.height - gap;
-    if (top < 4) top = rect.bottom + gap;
-
-    popup.style.left = left + 'px';
-    popup.style.top  = top + 'px';
+    // On desktop only click fires; on iOS only touchend. Guard anyway so a
+    // browser that delivers both can't clear twice.
+    if (binFiring) return;
+    binFiring = true;
+    setTimeout(() => { binFiring = false; }, 400);
+    window.clearSearchPillFilter?.(ev);
 };
 
-// The resize/scroll/visualViewport listeners below aren't enough on their
-// own: a pills-bar rebuild fires none of them, and the pill also changes
-// width as the search text grows. Track it per frame instead. The loop
-// stops itself the moment the popup leaves the DOM, so there's nothing
-// to tear down.
-const trackPill = () => {
-    if (!popup.isConnected) return;
-    repositionPopup();
-    requestAnimationFrame(trackPill);
-};
-requestAnimationFrame(trackPill);
+binBtn.addEventListener('touchend', clearFromBin, { passive: false });
+binBtn.addEventListener('click', clearFromBin);
+searchWrap.appendChild(binBtn);
 
-if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', repositionPopup);
-    window.visualViewport.addEventListener('scroll', repositionPopup);
-}
-window.addEventListener('resize', repositionPopup);
-window.addEventListener('scroll', repositionPopup, true);
-
-// Close on outside click / ESC
-const closePopup = (ev) => {
-    if (ev.target === popup || popup.contains(ev.target)) return;
-    popup.remove();
-    document.removeEventListener('click', closePopup);
-    document.removeEventListener('keydown', escHandler);
-    if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', repositionPopup);
-        window.visualViewport.removeEventListener('scroll', repositionPopup);
-    }
-    window.removeEventListener('resize', repositionPopup);
-    window.removeEventListener('scroll', repositionPopup, true);
-};
-const escHandler = (ev) => {
-    if (ev.key === 'Escape') {
-        popup.remove();
-        document.removeEventListener('click', closePopup);
-        document.removeEventListener('keydown', escHandler);
-        if (window.visualViewport) {
-            window.visualViewport.removeEventListener('resize', repositionPopup);
-            window.visualViewport.removeEventListener('scroll', repositionPopup);
-        }
-        window.removeEventListener('resize', repositionPopup);
-        window.removeEventListener('scroll', repositionPopup, true);
-    }
-};
-setTimeout(() => {
-    document.addEventListener('click', closePopup);
-    document.addEventListener('keydown', escHandler);
-}, 0);
-});
-container.appendChild(searchPill);
+container.appendChild(searchWrap);
 }
 
 // Re-check keyboard/search-pill state now that pills have been rebuilt

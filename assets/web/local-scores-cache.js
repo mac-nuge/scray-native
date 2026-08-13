@@ -87,6 +87,8 @@ async function getCachedVideoBookmarks(forceRefresh = false) {
 // last_played and f_tally were never recorded anywhere.
 async function queueExcelUpdate(video, updates) {
     const metaUpdates = {};
+    // What the SERVER gets, when it differs from what's stored locally.
+    const opUpdates = {};
 
     if (updates.user_score !== undefined) {
         cachedVideoScores.set(video.oneDriveId, updates.user_score);
@@ -124,13 +126,15 @@ async function queueExcelUpdate(video, updates) {
 
         if (updates.increment_views) {
             const next = (parseInt(current?.view_count) || 0) + 1;
-            metaUpdates.view_count = next;
+            metaUpdates.view_count = next;   // absolute, for local display
             video.view_count = next;
+            opUpdates.increment_views = true; // delta, for the server
         }
         if (updates.increment_f_tally) {
             const next = (parseInt(current?.f_tally) || 0) + 1;
             metaUpdates.f_tally = next;
             video.f_tally = next;
+            opUpdates.increment_f_tally = true;
         }
     }
 
@@ -138,11 +142,30 @@ async function queueExcelUpdate(video, updates) {
         const now = new Date().toISOString();
         metaUpdates.last_played = now;
         video.last_played = now;
+        // played_now becomes op.max.last_played server-side - idempotent,
+        // and immune to clock skew between devices picking a loser.
+        opUpdates.played_now = true;
     }
 
+    // "play" rather than "app" so saveVideoMeta knows to drop this op when
+    // offline instead of queueing it for a confusing later replay.
+    const isPlayTracking = !!(updates.increment_views || updates.played_now || updates.increment_f_tally);
+
     if (Object.keys(metaUpdates).length && typeof saveVideoMeta === "function") {
-        await saveVideoMeta(video.oneDriveId, metaUpdates, "app");
+        await saveVideoMeta(
+            video.oneDriveId,
+            metaUpdates,
+            isPlayTracking ? "play" : "app",
+            Object.keys(opUpdates).length ? { ...metaUpdatesNonCounter(metaUpdates), ...opUpdates } : null
+        );
     }
+}
+
+// Everything except the absolute counter values, which the server must
+// receive as deltas instead.
+function metaUpdatesNonCounter(m) {
+    const { view_count, f_tally, last_played, ...rest } = m;
+    return rest;
 }
 
 window.getCachedVideoScores = getCachedVideoScores;

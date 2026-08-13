@@ -895,6 +895,21 @@ let isDetermined = false;
 let pendingScrubTime = null; // ✅ latest scrub target, applied once per rAF
 let scrubRafScheduled = false;
 
+// ⚙️ FLS jog-scrub: a drag STARTING on the left-half frame-step zones seeks
+// at frame-step granularity instead of doing a normal proportional scrub.
+// Pixels per step - lower = more time travelled per finger movement.
+const JOG_PX_PER_STEP = 8;
+// ⚙️ Speed tiers, picked by which third of the video's HEIGHT the drag
+// starts in. Bottom = finest, top = coarsest. Follows the frame-step hold
+// ladder (8x -> 16x -> 32x).
+const JOG_MULT_BOTTOM = 8;
+const JOG_MULT_MIDDLE = 16;
+const JOG_MULT_TOP    = 32;
+let jogEligible = false;   // touch began on a frame-step zone, in FLS
+let jogActive = false;     // jog has actually engaged (video paused)
+let jogStartTime = 0;
+let jogMultiplier = JOG_MULT_BOTTOM;
+
 const showScrubFeedback = (newTime) => {
 showPlayerFeedback(formatDuration(newTime * 1000), 'top-left');
 };
@@ -929,6 +944,37 @@ startTime = window.plyrPlayer.currentTime;
 isHorizontalDrag = false;
 isDetermined = false;
 scrubbing = false; // Don't activate yet - wait to determine direction
+
+// A drag beginning on the left-half frame-step zones jogs rather than
+// scrubs. Only flagged here, not engaged: engaging now would swallow the
+// swipe-up-for-random and swipe-to-exit gestures, which also start here.
+// scrubMove commits to it once the drag is confirmed as on-axis.
+// ⚙️ Drop the manualRotationActive check to enable this outside FLS too.
+jogEligible = !!(manualRotationActive && target?.closest?.('.frame-step-tap-zone'));
+jogActive = false;
+jogStartTime = startTime;
+
+// Speed is locked to where the drag STARTS, not where the finger is now.
+// The mapping is position-based, so changing the multiplier mid-drag would
+// re-scale the entire accumulated offset and lurch the video every time you
+// crossed a strip boundary.
+if (jogEligible) {
+    const r = wrapper.getBoundingClientRect();
+    // Same off-axis convention scrubMove uses for its own zone multiplier:
+    // FLS rotates the video 90°, so the video's vertical axis is the
+    // screen's X, and the distance is measured from the video's BOTTOM edge.
+    const edgeAxisSize = manualRotationActive ? r.width : r.height;
+    const distanceFromEdge = manualRotationActive
+        ? r.width  - (startX - r.left)
+        : r.height - (startY - r.top);
+    const frac = edgeAxisSize ? (distanceFromEdge / edgeAxisSize) : 1;
+
+    // ⚙️ frac 0 = bottom of the video, 1 = top. Swap BOTTOM and TOP below
+    // if the strips come out inverted in the hand.
+    jogMultiplier = frac < (1 / 3) ? JOG_MULT_BOTTOM
+                  : frac < (2 / 3) ? JOG_MULT_MIDDLE
+                  : JOG_MULT_TOP;
+}
 
 // ✅ MOBILE (ALL orientations): Don't prevent default yet - let scrubMove determine direction
 const isMobile = window.innerWidth <= 1024;
@@ -1086,6 +1132,55 @@ return;
 // ✅ Execute scrubbing if active
 if (!scrubbing) {
 return;
+}
+
+// ---- FLS jog-scrub -------------------------------------------
+// Same feel as holding a frame-step button at 4x, but the finger drives
+// direction and distance instead of a timer. Position-based rather than
+// incremental: the offset is computed from the TOTAL drag each time, so
+// dragging back lands exactly where you started with no accumulated
+// drift, which per-move stepping would give you.
+if (jogEligible) {
+    if (!jogActive) {
+        jogActive = true;
+        jogStartTime = window.plyrPlayer.currentTime;
+        // Frame-accurate work needs a still frame - matches stepFrame().
+        if (!window.plyrPlayer.paused) window.plyrPlayer.pause();
+    }
+
+    // Same axis convention scrubMove uses below: FLS rotates the video 90°,
+    // so the video's own horizontal axis is the screen's Y.
+    // ⚙️ If back/forward come out reversed, negate this.
+    const jogDelta = manualRotationActive ? (currentY - startY) : (currentX - startX);
+
+    const steps = jogDelta / JOG_PX_PER_STEP;
+    let newTime = jogStartTime + (steps * FRAME_STEP_DURATION * jogMultiplier);
+    newTime = Math.max(0, Math.min(newTime, window.plyrPlayer.duration));
+
+    // Hand off to the existing rAF throttle rather than seeking here -
+    // touchmove fires far faster than a seek completes, and stopScrub
+    // already does one precise seek on release.
+    pendingScrubTime = newTime;
+    if (!scrubRafScheduled) {
+        scrubRafScheduled = true;
+        requestAnimationFrame(() => {
+            scrubRafScheduled = false;
+            if (pendingScrubTime === null) return;
+            const videoEl = window.plyrPlayer.media;
+            if (videoEl && typeof videoEl.fastSeek === 'function') {
+                videoEl.fastSeek(pendingScrubTime);
+            } else {
+                window.plyrPlayer.currentTime = pendingScrubTime;
+            }
+        });
+    }
+
+    const offset = newTime - jogStartTime;
+    showPlayerFeedback(
+        `${offset >= 0 ? '+' : '−'}${Math.abs(offset).toFixed(2)}s (${jogMultiplier}x)  ${formatDuration(newTime * 1000)}`,
+        'top-left'
+    );
+    return;
 }
 
 const rect = wrapper.getBoundingClientRect();
@@ -6026,8 +6121,11 @@ window.addToHistory(video);
 }
 
 // Track view in Excel Online if auto-tracking enabled
+// Guard on the function actually being CALLED. This used to check
+// updateVideoInExcel, which lives in excel-sheets.js and isn't loaded in
+// Native - so the guard was permanently false and no play was ever recorded.
 const autoTrackActive = typeof window.isAutoTrackEnabled === 'function' ? window.isAutoTrackEnabled() : true;
-if (autoTrackActive && typeof window.updateVideoInExcel === 'function') {
+if (autoTrackActive && typeof window.queueExcelUpdate === 'function') {
   window.queueExcelUpdate(video, {
     increment_views: true,
     played_now: true
@@ -6587,10 +6685,50 @@ if (err.message?.includes('HTTP 404') || err.message?.includes('404')) {
  return;
 }
 
+// AVFoundation is the only decoder available to a <video> element on iOS -
+// Safari, WKWebView and native alike. It handles MP4/M4V/MOV (H.264, HEVC,
+// AAC) and nothing else. MKV is refused at the CONTAINER level even when the
+// video inside is plain H.264, and WMV's VC-1 isn't decodable at all.
+//
+// Declaring everything as video/mp4 meant an MKV got as far as the decoder
+// and then died silently - a black screen with no error. An accurate type
+// lets the element reject it up front so we can say something useful.
+const SCRAY_MIME_BY_EXT = {
+    mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime',
+    mkv: 'video/x-matroska', webm: 'video/webm', avi: 'video/x-msvideo',
+    wmv: 'video/x-ms-wmv', flv: 'video/x-flv', ts: 'video/mp2t',
+    '3gp': 'video/3gpp', mpg: 'video/mpeg', mpeg: 'video/mpeg',
+};
+
+function scrayMimeForFile(filename) {
+    const ext = String(filename || '').split('.').pop().toLowerCase();
+    return SCRAY_MIME_BY_EXT[ext] || 'video/mp4';
+}
+
+// WebM is the genuinely uncertain one - Safari's support has been arriving
+// piecemeal, so it's left out of the hard-fail list and allowed to try.
+const SCRAY_UNPLAYABLE_EXT = new Set(['mkv', 'wmv', 'avi', 'flv', 'mpg', 'mpeg']);
+
+function scrayUnplayableReason(filename) {
+    const ext = String(filename || '').split('.').pop().toLowerCase();
+    if (!SCRAY_UNPLAYABLE_EXT.has(ext)) return null;
+    return ext === 'mkv'
+        ? '.mkv can\'t play on iOS — the video inside is usually fine, it just needs remuxing to .mp4'
+        : `.${ext} can't play on iOS — needs converting to .mp4`;
+}
+
+const unplayable = scrayUnplayableReason(video.filename);
+if (unplayable) {
+    console.warn(`[player] ${unplayable}`);
+    window.endFullscreenReload?.();
+    if (typeof showVideoError === 'function') showVideoError(unplayable, video);
+    return;
+}
+
 try {
 window.plyrPlayer.source = {
     type: 'video',
-    sources: [ { src: video.downloadUrl, type: 'video/mp4' } ],
+    sources: [ { src: video.downloadUrl, type: scrayMimeForFile(video.filename) } ],
     title: video.filename || ""
 };
 

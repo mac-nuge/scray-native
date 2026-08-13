@@ -2011,6 +2011,23 @@ pointer-events: auto;
 cursor: pointer;
 }
 
+/* MP fullscreen: same bar, same styling, but display only - pointer-events
+   stays none from the base rule, so it isn't a button here.
+   body.portrait-fullscreen is set during FLS too, hence the :not() - the
+   same guard the frame-step and progress-bar rules already use. FLS keeps
+   positioning itself via inline !important styles in
+   applyManualRotationStyles, and removeManualRotationStyles strips those on
+   exit, so these take over cleanly. */
+body.portrait-fullscreen:not(.manual-rotate-landscape) .fls-video-title {
+display: block;
+position: absolute;
+top: calc(env(safe-area-inset-top, 0px) + 8px);
+left: 50%;
+right: auto;
+transform: translateX(-50%);
+z-index: 2147483647;
+}
+
 /* Hide the title together with the player controls - Plyr toggles
    .plyr--hide-controls on the player root during playback inactivity,
    the same signal the frame-step tap zones already key off elsewhere. */

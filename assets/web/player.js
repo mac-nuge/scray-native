@@ -108,6 +108,100 @@ function getManualRotationFullscreenElement() {
     return null;
 }
 
+// The title bar, shared by FLS and MP. Created lazily inside whatever is
+// currently acting as the player root, with the basket click handler always
+// attached - CSS decides whether it's interactive (FLS) or inert (MP), so it
+// doesn't matter which mode happens to create it first.
+function ensureVideoTitleBar() {
+    const host = getManualRotationFullscreenElement()
+        || document.querySelector('#inlineVideoContainer .plyr')
+        || document.querySelector('.plyr');
+    if (!host) return null;
+
+    let title = host.querySelector('.fls-video-title');
+    if (!title) {
+        // It may already exist but be parented elsewhere after a player
+        // rebuild - move that one rather than ending up with two.
+        const orphan = document.querySelector('.fls-video-title');
+        if (orphan) {
+            title = orphan;
+        } else {
+            title = document.createElement('div');
+            title.className = 'fls-video-title';
+            title.title = 'View basket';
+            // Tapping opens the basket modal. Only reachable in FLS -
+            // pointer-events is none by default and CSS only re-enables it
+            // under body.manual-rotate-landscape.
+            title.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (typeof showPlayerBasketModal === 'function') {
+                    showPlayerBasketModal();
+                }
+            });
+        }
+        host.appendChild(title);
+    }
+    return title;
+}
+
+function syncVideoTitleBar(video) {
+    const v = video || window.currentPlayingVideo;
+    const bar = ensureVideoTitleBar();
+    if (!bar || !v) return;
+    const scoreText = (v.user_score !== undefined && v.user_score !== null) ? ` [${v.user_score}]` : '';
+    bar.textContent = (v.filename || '') + scoreText;
+}
+
+window.ensureVideoTitleBar = ensureVideoTitleBar;
+window.syncVideoTitleBar = syncVideoTitleBar;
+
+// The title bar, shared by FLS and MP. Created lazily inside whatever is
+// currently acting as the player root, with the basket click handler always
+// attached - CSS decides whether it's interactive (FLS) or inert (MP), so it
+// doesn't matter which mode happens to create it first.
+function ensureVideoTitleBar() {
+    const host = getManualRotationFullscreenElement()
+        || document.querySelector('#inlineVideoContainer .plyr')
+        || document.querySelector('.plyr');
+    if (!host) return null;
+
+    let title = host.querySelector('.fls-video-title');
+    if (!title) {
+        // It may already exist but be parented elsewhere after a player
+        // rebuild - move that one rather than ending up with two.
+        const orphan = document.querySelector('.fls-video-title');
+        if (orphan) {
+            title = orphan;
+        } else {
+            title = document.createElement('div');
+            title.className = 'fls-video-title';
+            title.title = 'View basket';
+            // Tapping opens the basket modal. Only reachable in FLS -
+            // pointer-events is none by default and CSS only re-enables it
+            // under body.manual-rotate-landscape.
+            title.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (typeof showPlayerBasketModal === 'function') {
+                    showPlayerBasketModal();
+                }
+            });
+        }
+        host.appendChild(title);
+    }
+    return title;
+}
+
+function syncVideoTitleBar(video) {
+    const v = video || window.currentPlayingVideo;
+    const bar = ensureVideoTitleBar();
+    if (!bar || !v) return;
+    const scoreText = (v.user_score !== undefined && v.user_score !== null) ? ` [${v.user_score}]` : '';
+    bar.textContent = (v.filename || '') + scoreText;
+}
+
+window.ensureVideoTitleBar = ensureVideoTitleBar;
+window.syncVideoTitleBar = syncVideoTitleBar;
+
 function getManualRotationTargets() {
     const container = getManualRotationFullscreenElement();
     if (!container) return null;
@@ -115,24 +209,9 @@ function getManualRotationTargets() {
     const video = container.querySelector('video, .plyr__video-embed') || (container.tagName === 'VIDEO' ? container : null);
     const controls = container.querySelector('.plyr__controls') || document.querySelector('.plyr__controls');
     const progressBar = document.getElementById('permanentProgressBar');
-    // ✅ Small title bar at the very top of the rotated player, showing the
-    // current video's filename. Created once and reused (persists inside
-    // the fullscreen container between rotation toggles).
-    let title = container.querySelector('.fls-video-title');
-    if (!title) {
-        title = document.createElement('div');
-        title.className = 'fls-video-title';
-        title.title = 'View basket';
-        // Tapping the title opens the basket modal - the same one the
-        // (now removed, in FLS) basket quick-action button opened.
-        title.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (typeof showPlayerBasketModal === 'function') {
-                showPlayerBasketModal();
-            }
-        });
-        container.appendChild(title);
-    }
+    // ✅ Small title bar at the very top of the player, showing the current
+    // filename. Shared with MP now - see ensureVideoTitleBar above.
+    const title = ensureVideoTitleBar();
     console.log('[rotate] targets found:', {
         container: !!container,
         wrapper: !!wrapper,
@@ -242,7 +321,9 @@ function applyManualRotationStyles() {
     // Video title, pinned to the very top of the rotated player (opposite
     // edge from the controls bar below), showing the current filename.
     if (title) {
-        title.textContent = window.currentPlayingVideo?.filename || '';
+        // Through the shared sync so a plain re-apply shows the score suffix
+        // too - previously only the video-change path added it.
+        syncVideoTitleBar();
         setImportantStyles(title, {
             position: 'absolute',
             top: 'calc(5% + 2px)',
@@ -772,7 +853,24 @@ function triggerSwipeRandomVideo() {
     if (!randomBtn) return;
 
     showPlayerFeedback('🎲 Random Video', 'top-left');
-    randomBtn.click();
+
+    // Deferred on purpose - this is the whole fix for the swipe-up freeze.
+    //
+    // Every caller is inside a touchend listener, and .click() is synchronous:
+    // it tears down the Plyr instance, discards .plyr__video-wrapper, and
+    // re-runs enableAnywhereScrubbing() - which removes and re-adds the
+    // window 'touchend' listener WHILE that same touchend is still being
+    // dispatched. The handler then resumes against a stale closure holding a
+    // detached wrapper and a player that has been swapped out from under it.
+    //
+    // Tapping the "X" button never hits any of this because nothing is on the
+    // stack behind it. setTimeout(0) gives the swipe the same clean stack.
+    setTimeout(() => {
+        // Re-query rather than reusing randomBtn: the controls may already
+        // have been rebuilt between the swipe and this callback.
+        const btn = document.querySelector('.plyr-random-video');
+        if (btn) btn.click();
+    }, 0);
 }
 
 // ========================
@@ -902,8 +1000,19 @@ isDetermined = false;
 // ✅ Land on the exact frame on release - fastSeek during the drag is
 // intentionally imprecise for speed, so do one accurate seek now.
 if (pendingScrubTime !== null) {
-    window.plyrPlayer.currentTime = pendingScrubTime;
+    // Null it FIRST so an early return or throw can't leave it armed for
+    // the next gesture.
+    const t = pendingScrubTime;
     pendingScrubTime = null;
+    try {
+        // readyState 0 means the element is mid-load with no media - writing
+        // currentTime there is what stalls the iOS media pipeline.
+        if (window.plyrPlayer?.media?.readyState > 0) {
+            window.plyrPlayer.currentTime = t;
+        }
+    } catch (err) {
+        console.warn('final seek skipped (player not ready):', err);
+    }
 }
 };
 
@@ -4304,6 +4413,11 @@ function updatePlayerStateClass() {
     if (stateClass) document.body.classList.add(stateClass);
     window.currentPlayerState = stateClass;
     // console.log('Player state:', stateClass);
+
+    // Entering fullscreen mid-video doesn't re-run rebuildVideoInfoDisplay,
+    // so the bar would sit empty until the next track. This covers every
+    // fullscreen enter/exit and orientation change in one place.
+    if (typeof window.syncVideoTitleBar === 'function') window.syncVideoTitleBar();
 }
 
 window.addEventListener('resize', updatePlayerStateClass);
@@ -5646,6 +5760,42 @@ let fullscreenReloadSafetyTimer = null;
 // rather than leaving a black screen forever.
 const FULLSCREEN_RELOAD_MAX_MS = 5000;
 
+// The loading overlay lives inside .plyr at z-index 99998, which only
+// competes within .plyr's stacking context. That's fine for the FLS mask
+// (also inside .plyr, at 99990, deliberately just underneath). The MP mask
+// is at body level, so it covers the whole .plyr subtree no matter what the
+// overlay's z-index is - the overlay has to come out with it.
+let loadingOverlayHome = null;
+
+function promoteLoadingOverlay() {
+    const ov = document.getElementById('plyr-loading-overlay');
+    if (!ov || loadingOverlayHome) return;          // already promoted
+    loadingOverlayHome = ov.parentElement;
+    // The stylesheet uses position:absolute, which resolves against .plyr.
+    // On body that would resolve against the document, putting top:50%
+    // halfway down the page instead of the viewport.
+    ov.style.position = 'fixed';
+    ov.style.zIndex = '2147483001';                  // one above the mask
+    document.body.appendChild(ov);
+}
+
+function restoreLoadingOverlay() {
+    const ov = document.getElementById('plyr-loading-overlay');
+    if (!ov) { loadingOverlayHome = null; return; }
+    if (!loadingOverlayHome) return;                 // wasn't promoted
+
+    ov.style.removeProperty('position');
+    ov.style.removeProperty('z-index');
+
+    // Plyr rebuilds .plyr on a source change, so the saved parent may be
+    // detached by now - appending to it would lose the overlay entirely.
+    const home = loadingOverlayHome.isConnected
+        ? loadingOverlayHome
+        : (document.querySelector('#inlineVideoContainer .plyr') || document.querySelector('.plyr'));
+    if (home) home.appendChild(ov);
+    loadingOverlayHome = null;
+}
+
 function beginFullscreenReload() {
     window.fullscreenReloadActive = true;
     window.fullscreenExitCleanupDeferred = false;
@@ -5662,13 +5812,33 @@ function beginFullscreenReload() {
             z-index: 99990;
             pointer-events: none;
         `;
-        // Append inside the fullscreen element where there is one - in real
-        // fullscreen, nothing outside that subtree renders at all.
-        const host = document.fullscreenElement
-            || document.webkitFullscreenElement
-            || document.querySelector('#inlineVideoContainer .plyr')
-            || document.querySelector('.plyr')
-            || document.body;
+        // Where this element lives decides whether it can cover anything.
+        //
+        // With a real Fullscreen API element, nothing outside that subtree
+        // renders, so the mask has to go inside it. FLS keeps the old .plyr
+        // host as well - there the rotated container IS the whole screen,
+        // and that path already looks clean.
+        //
+        // MP is the one that was broken. iOS uses NATIVE video fullscreen,
+        // which sets neither document.fullscreenElement nor the webkit one,
+        // so the mask fell through to .plyr - trapped inside .plyr's
+        // stacking context. Everything that flashes during the transient
+        // exit (the list, corner buttons, currentVideoInfo) lives OUTSIDE
+        // .plyr, so no z-index could paint over it. Body level fixes that.
+        const realFsEl = document.fullscreenElement || document.webkitFullscreenElement;
+        let host;
+        if (realFsEl) {
+            host = realFsEl;
+        } else if (manualRotationActive) {
+            host = document.querySelector('#inlineVideoContainer .plyr')
+                || document.querySelector('.plyr')
+                || document.body;
+        } else {
+            host = document.body;
+            mask.style.zIndex = '2147483000';   // root stacking context, above the page
+            // The overlay has to travel with it - see promoteLoadingOverlay.
+            promoteLoadingOverlay();
+        }
         host.appendChild(mask);
     }
 
@@ -5682,6 +5852,7 @@ function endFullscreenReload() {
     window.fullscreenReloadActive = false;
 
     document.getElementById('fullscreenReloadMask')?.remove();
+    restoreLoadingOverlay();
 
     // If fullscreen genuinely didn't come back (load failed, user bailed),
     // run the teardown we skipped - otherwise the page is stuck in a
@@ -5751,7 +5922,14 @@ console.log('Reset H< button - playing from non-history context');
 if (window.innerWidth <= 1024) {
 const container = document.getElementById("inlineVideoContainer");
 if (container) {
-    container.scrollIntoView({ behavior: "smooth", block: "center" });
+    // A smooth scroll is a ~400ms animation that carries on after the
+    // reload mask lifts, so in MP you watch the page slide into place
+    // behind the returning fullscreen. During a reload we're going back
+    // into fullscreen anyway - jump there instantly instead.
+    container.scrollIntoView({
+        behavior: window.fullscreenReloadActive ? "auto" : "smooth",
+        block: "center"
+    });
 }
 }
 
@@ -6304,14 +6482,11 @@ console.log('Right-click context menu enabled for video info');
 
 computeBottomDock(); // Info bar height may have changed - recompute dock
 
-// Keep the FLS title bar in sync if already active, e.g. when switching
-// videos via next/random while still in fullscreen.
-if (typeof manualRotationActive !== 'undefined' && manualRotationActive) {
-    const flsTitle = document.querySelector('.fls-video-title');
-    if (flsTitle) {
-        const scoreText = (video.user_score !== undefined && video.user_score !== null) ? ` [${video.user_score}]` : '';
-        flsTitle.textContent = (video.filename || '') + scoreText;
-    }
+// Keep the title bar in sync when switching videos via next/random while
+// still in fullscreen. Unconditional now rather than FLS-only: the element
+// is display:none outside fullscreen anyway, and MP needs the same update.
+if (typeof window.syncVideoTitleBar === 'function') {
+    window.syncVideoTitleBar(video);
 }
 
 }; // This closes the rebuildVideoInfoDisplay function
@@ -6426,6 +6601,10 @@ if (sessionVolume !== null) {
 window.plyrPlayer.muted = sessionMuted;
 
 await window.plyrPlayer.play();
+
+// Set by any branch below that takes responsibility for lifting the reload
+// mask itself, so the fallback timer at the end doesn't lift it early.
+let maskLiftChained = false;
 
 //  Restore forced (manual-rotate) landscape mode if it was active
 // before this video started loading (see note above).

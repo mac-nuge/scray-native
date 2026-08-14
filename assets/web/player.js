@@ -841,6 +841,34 @@ function playPreviousInCurrentList() {
 const SWIPE_RANDOM_COOLDOWN_MS = 1200; // ⚙️ adjust if it feels sticky
 let lastSwipeRandomFireTime = 0;
 
+// Swipe up now stops playback rather than loading a random video.
+// The random path was replaced because .click() tore down and rebuilt the
+// Plyr instance from inside a touch handler, which kept wedging WKWebView
+// even after the trigger was deferred off the touch stack.
+//
+// "Stop" means the same thing the ■ button means: reset and hide the player.
+function triggerSwipeStopVideo() {
+    // Exactly what the ■ control does - inlineVideoPlayer.reset() tears the
+    // player down and hides it. Anything less (pause) leaves the video on
+    // screen, which isn't what "stop" means here.
+    if (typeof window.inlineVideoPlayer?.reset !== 'function') return;
+
+    // Deferred for the same reason the random trigger was: every caller is
+    // inside a touchend handler, and reset() destroys the Plyr instance and
+    // the wrapper those listeners are bound to. Letting the handler unwind
+    // first gives it the clean stack a button click gets.
+    showPlayerFeedback('⏹ Stopped', 'top-left');
+    setTimeout(() => {
+        try {
+            window.inlineVideoPlayer.reset();
+        } catch (err) {
+            console.warn('stop-on-swipe failed:', err);
+        }
+    }, 0);
+}
+
+// ⚠️ No longer called from anywhere - all four swipe-up sites now call
+// triggerSwipeStopVideo. Kept only so the random feature is easy to restore.
 function triggerSwipeRandomVideo() {
     const now = Date.now();
     if (now - lastSwipeRandomFireTime < SWIPE_RANDOM_COOLDOWN_MS) {
@@ -1033,10 +1061,8 @@ if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouch
             }
             showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
         } else if (deltaXPhysical > SWIPE_EXIT_THRESHOLD_PX) {
-            // Swipe up (FLS) - play a random video, same as tapping the
-            // corner "X"/"Xn" quick-action button. Guarded so one swipe
-            // can only ever produce one video.
-            triggerSwipeRandomVideo();
+            // Swipe up (FLS) - stop playback.
+            triggerSwipeStopVideo();
         }
     } else if (isForcedOrRealLandscapeMobile() && window.plyrPlayer.fullscreen.active) {
         // Genuine device landscape: no rotation involved, so a real
@@ -1047,18 +1073,18 @@ if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouch
             window.plyrPlayer.fullscreen.exit();
             showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
         } else if (deltaYPhysical < -SWIPE_EXIT_THRESHOLD_PX) {
-            // Swipe up (landscape) - play a random video.
-            triggerSwipeRandomVideo();
+            // Swipe up (landscape) - stop playback. Changed alongside FLS
+            // and MP: leaving the random path live here would keep the same
+            // teardown-inside-a-touch-handler crash in one mode.
+            triggerSwipeStopVideo();
         }
     } else if (window.plyrPlayer.fullscreen.active) {
-        // Mobile portrait (MP) fullscreen: a physical upward swipe plays
-        // a random video, mirroring the FLS/landscape "swipe up" gesture.
-        // Stays fullscreen - playVideoInline re-enters if the browser
-        // drops out on the source change.
+        // Mobile portrait (MP) fullscreen: a physical upward swipe stops
+        // playback, mirroring the FLS/landscape "swipe up" gesture.
         const endY = e.changedTouches[0].clientY;
         const deltaYPhysical = endY - startY; // negative = swiped up (physical)
         if (deltaYPhysical < -SWIPE_EXIT_THRESHOLD_PX) {
-            triggerSwipeRandomVideo();
+            triggerSwipeStopVideo();
         }
     }
 }
@@ -1419,12 +1445,16 @@ function setupPortraitFullscreenSwipeExit() {
             console.log('Portrait fullscreen exited via swipe down');
         } else if (deltaY < -PORTRAIT_FS_SWIPE_EXIT_THRESHOLD_PX &&
             deltaX < PORTRAIT_FS_SWIPE_MAX_HORIZONTAL_PX) {
-            // Swipe up (MP) - play a random video, same as tapping the
-            // corner "X"/"Xn" quick-action button. Stays in fullscreen:
-            // playVideoInline re-enters if the browser drops out on the
-            // source change (see wasPlainFullscreenBeforeLoad).
-            triggerSwipeRandomVideo();
-            console.log('Portrait fullscreen: random video via swipe up');
+            // Swipe up (MP) - stop playback.
+            //
+            // Note this is a SECOND handler for the same gesture: stopScrub
+            // has its own MP swipe-up branch, so both fire on one swipe. That
+            // was harmless-ish for random (a cooldown swallowed the second
+            // call) but it is very likely why the crash outlived the deferral
+            // fix - two independent paths both tearing the player down.
+            // Pausing twice is idempotent, so it's harmless now.
+            triggerSwipeStopVideo();
+            console.log('Portrait fullscreen: stopped via swipe up');
         }
     }, { passive: true });
 

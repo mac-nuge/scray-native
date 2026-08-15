@@ -936,15 +936,46 @@ const JOG_PX_PER_STEP = 8;
 // That's deliberate, not an oversight: in FLS your thumb rests low on the
 // screen, so fine control wants to be near it. In portrait the video sits
 // high and the space below it is where the thumb travels furthest.
-const JOG_MULT_BOTTOM = 8;
+// ⚙️ FLS ladder, top to bottom: 32x / 16x / 4x. Coarsest at the top, finest
+// at the bottom - so the fine band is the one that extends under the player
+// controls, where your thumb naturally rests.
+const JOG_MULT_BOTTOM = 4;
 const JOG_MULT_MIDDLE = 16;
 const JOG_MULT_TOP    = 32;
 
-const JOG_MP_MULT_BOTTOM = 64;
-const JOG_MP_MULT_MIDDLE = 32;
-const JOG_MP_MULT_TOP    = 16;
+// ⚙️ After a jog ends, playback resumes unless you touch again within this
+// window. Cancelled on touchstart rather than on the next completed jog, so
+// the window is "time to START touching again", not "time to finish a whole
+// gesture" - which makes 2s feel far longer than it sounds.
+const JOG_RESUME_DELAY_MS = 500;
+let jogResumeTimer = null;
 
-let jogEligible = false;   // FLS frame-step zone, or portrait while paused
+function cancelJogResume() {
+    if (jogResumeTimer) { clearTimeout(jogResumeTimer); jogResumeTimer = null; }
+}
+
+function scheduleJogResume() {
+    cancelJogResume();
+    jogResumeTimer = setTimeout(() => {
+        jogResumeTimer = null;
+        // Guards: a deliberate play, leaving FLS, or the player being torn
+        // down by a swipe-up stop must all cancel this. Otherwise a hidden
+        // player could start playing two seconds later.
+        if (!window.plyrPlayer) return;
+        if (!window.plyrPlayer.paused) return;
+        if (!isForcedOrRealLandscapeMobile() && window.innerWidth > 1024) return;
+        if (!document.querySelector('.plyr__video-wrapper')) return;
+        window.plyrPlayer.play();
+        showPlayerFeedback('▶ Resumed');
+    }, JOG_RESUME_DELAY_MS);
+}
+
+// ⚙️ MP ladder, bottom to top: 32x / 16x / 4x.
+const JOG_MP_MULT_BOTTOM = 32;
+const JOG_MP_MULT_MIDDLE = 16;
+const JOG_MP_MULT_TOP    = 4; 
+
+let jogEligible = false;   // paused on mobile - jog rather than seek
 let jogActive = false;     // jog has actually engaged
 let jogStartTime = 0;
 let jogMultiplier = JOG_MULT_BOTTOM;
@@ -996,10 +1027,17 @@ scrubbing = false; // Don't activate yet - wait to determine direction
 //         proportional scrubbing isn't what you want there. Playing,
 //         portrait behaves exactly as before.
 // Covers portrait fullscreen and inline alike - neither is landscape.
-const inPortraitMobile = window.innerWidth <= 1024 && !isForcedOrRealLandscapeMobile();
-const pausedJog = inPortraitMobile && !!window.plyrPlayer.paused;
+// Any new touch cancels a pending resume - this is what lets you keep
+// jogging by simply carrying on, rather than racing a timer.
+cancelJogResume();
 
-jogEligible = !!((manualRotationActive && target?.closest?.('.frame-step-tap-zone')) || pausedJog);
+// The rule is now purely about play state, not screen position:
+//   paused  -> jog, from anywhere on the video
+//   playing -> ordinary proportional seek, from anywhere
+// The old check required a .frame-step-tap-zone, and those zones were
+// removed with frame-by-frame - which killed FLS jog entirely.
+const isMobilePlayer = window.innerWidth <= 1024;
+jogEligible = !!(isMobilePlayer && window.plyrPlayer.paused);
 jogActive = false;
 jogStartTime = startTime;
 
@@ -1012,9 +1050,15 @@ if (jogEligible) {
     // FLS rotates the video 90°, so its vertical axis is the screen's X.
     // Either way the distance is measured from the video's BOTTOM edge, so
     // frac 0 = bottom and frac 1 = top in both modes.
+    // frac must mean the same thing in both modes: 0 = bottom of the video
+    // as the USER sees it, 1 = top. rotate(90deg) maps the video's local -y
+    // (up) onto screen +x, so the user's top is the screen's RIGHT edge -
+    // measuring from r.width inverted it, which is why setting BOTTOM=4 put
+    // 4x at the top. Unrotated, screen-top is small Y, so that one does need
+    // the subtraction.
     const edgeAxisSize = manualRotationActive ? r.width : r.height;
     const distanceFromEdge = manualRotationActive
-        ? r.width  - (startX - r.left)
+        ? (startX - r.left)
         : r.height - (startY - r.top);
     const frac = edgeAxisSize ? (distanceFromEdge / edgeAxisSize) : 1;
 
@@ -1092,6 +1136,16 @@ if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouch
 scrubbing = false;
 isHorizontalDrag = false;
 isDetermined = false;
+
+// Jog reset belongs HERE, on release - it was only ever being cleared at
+// touch-down, so nothing knew a jog had just finished.
+const jogJustEnded = jogActive;
+jogEligible = false;
+jogActive = false;
+
+// Only after a jog that actually engaged. A tap or an ordinary proportional
+// seek must not start playback on its own.
+if (jogJustEnded) scheduleJogResume();
 
 // ✅ Land on the exact frame on release - fastSeek during the drag is
 // intentionally imprecise for speed, so do one accurate seek now.
@@ -1466,7 +1520,11 @@ function setupPortraitFullscreenSwipeExit() {
 // ========================
 // Player feedback overlay
 // ========================
-function showPlayerFeedback(message, position = 'top-left') {
+function showPlayerFeedback(message, position = 'top-right') {
+    // ⚙️ Everything now lands top-right, next to the clock. Callers still
+    // pass 'top-left' in places; the override keeps them consistent rather
+    // than requiring every call site to change.
+    position = 'top-right';
 try {
 let overlay = document.getElementById('plyr-feedback');
 if (!overlay) {
@@ -3881,6 +3939,14 @@ const progressFractionFromPoint = (clientX, clientY) => {
     return Math.max(0, Math.min(1, raw));
 };
 
+// ⚙️ A tap always carries a few pixels of jitter, and without a threshold
+// each of those fired another seek on top of the tap-to-jump one. Throttled
+// or not, that's still a fresh range request per frame on a streamed source,
+// which is what made the bar feel oversensitive. Ignore movement below this.
+const PROGRESS_DRAG_THRESHOLD_PX = 8;
+let progressDragStarted = false;
+let progressTouchStartX = 0, progressTouchStartY = 0;
+
 progressBar.addEventListener('touchstart', (e) => {
 if (!window.plyrPlayer.duration) return;
 armBookmarkMarkers(progressBar);
@@ -3897,6 +3963,9 @@ if (e.target?.closest?.('.progress-bookmark-marker')) return;
 // not a drag, so it should land on the frame rather than a keyframe.
 const t = e.touches[0];
 if (!t) return;
+progressTouchStartX = t.clientX;
+progressTouchStartY = t.clientY;
+progressDragStarted = false;
 const percent = progressFractionFromPoint(t.clientX, t.clientY);
 const seekTime = percent * window.plyrPlayer.duration;
 
@@ -3923,6 +3992,18 @@ e.preventDefault();
 e.stopPropagation();
 
 const touch = e.touches[0];
+
+// Below the threshold this is still a tap, not a drag. The touchstart
+// handler already seeked to the tap point precisely - re-seeking on jitter
+// only undoes that with a less accurate keyframe-snapped value.
+if (!progressDragStarted) {
+    const moved = manualRotationActive
+        ? Math.abs(touch.clientY - progressTouchStartY)
+        : Math.abs(touch.clientX - progressTouchStartX);
+    if (moved < PROGRESS_DRAG_THRESHOLD_PX) return;
+    progressDragStarted = true;
+}
+
 // Axis-aware - see progressFractionFromPoint above. The old
 // touchX / rect.width was measuring across the bar in FLS.
 const percent = progressFractionFromPoint(touch.clientX, touch.clientY);
@@ -3960,6 +4041,7 @@ if (isSeeking) {
     console.log(`Seeked to ${formatDuration(window.plyrPlayer.currentTime * 1000)} via progress bar touch`);
 }
 isSeeking = false;
+progressDragStarted = false;
 });
 
 progressBar.addEventListener('touchcancel', () => {
@@ -4565,7 +4647,8 @@ attachPlayNextButton(); //  Add play-next quick-action button
 attachBasketQuickButton(); //  Add basket quick-view button
 attachBookmarkQuickButton(); //  Add bookmark quick-add button
 attachFrameStepButtons(); // Add frame-by-frame step buttons
-attachColumnFrameStepZones(); // Add single-tap frame-step columns over the seek zones
+// Frame-step columns removed - the left half is now jog-scrub and triple-tap
+// territory. attachColumnFrameStepZones is left defined but uncalled.
 updatePlayerStateClass();
 });
 
@@ -5045,13 +5128,47 @@ attachPlayNextButton(); //  Re-attach play-next button on new video
 attachBasketQuickButton(); //  Re-attach basket quick-view button on new video
 attachBookmarkQuickButton(); //  Re-attach bookmark quick-add button on new video
 attachFrameStepButtons(); // Re-attach frame-step buttons on new video
-attachColumnFrameStepZones(); // Re-attach single-tap frame-step columns on new video
+// (frame-step columns removed)
 computeBottomDock(); // ✅ Player height may have changed for the new video
 });
 
 // Double-tap gesture handler - works in ALL modes (inline and fullscreen)
 function setupDoubleTapHandler() {
  let lastTap = 0;
+
+ // ⚙️ Triple tap in the FLS left third opens the bookmark modal.
+ // Zone-scoped on purpose: the count resets whenever a tap lands outside
+ // that third, so a stray tap elsewhere can't accumulate into a phantom
+ // triple. 400ms between taps rather than 300 - three taps is a slower,
+ // more deliberate gesture than two.
+ const TRIPLE_TAP_MS = 400;
+ let tripleCount = 0;
+ let tripleLast = 0;
+ window.scraySuppressControlsToggle = false;
+
+ const trackTripleTap = (inZone) => {
+     const now = Date.now();
+     if (!inZone || now - tripleLast > TRIPLE_TAP_MS) {
+         tripleCount = inZone ? 1 : 0;
+         tripleLast = inZone ? now : 0;
+         window.scraySuppressControlsToggle = inZone;
+         return false;
+     }
+     tripleCount += 1;
+     tripleLast = now;
+     // Suppress Plyr's show/hide toggle mid-sequence, otherwise the controls
+     // flash on and off between taps. If single taps ever stop revealing the
+     // controls on the left, this flag is where to look.
+     window.scraySuppressControlsToggle = true;
+     if (tripleCount >= 3) {
+         tripleCount = 0;
+         tripleLast = 0;
+         window.scraySuppressControlsToggle = false;
+         return true;
+     }
+     return false;
+ };
+ window.scrayTrackTripleTap = trackTripleTap;
  
  // Handler function that can be attached to any element
  const handleDoubleTap = function(e) {
@@ -5061,6 +5178,30 @@ function setupDoubleTapHandler() {
      if (isMiniPlayer) return;
      
      const now = Date.now();
+
+     // Every tap feeds the triple counter, before the double-tap gate.
+     {
+         const tEl = e.currentTarget;
+         const tRect = tEl.getBoundingClientRect();
+         const remap = manualRotationActive
+             ? remapForManualRotation(e.changedTouches[0].clientX, e.changedTouches[0].clientY, tRect)
+             : null;
+         const tX = remap ? remap.x : (e.changedTouches[0].clientX - tRect.left);
+         const tW = remap ? remap.width : tRect.width;
+         const inFlsLeftThird = isForcedOrRealLandscapeMobile()
+             && window.innerWidth <= 1024
+             && tX < tW / 3;
+
+         if (window.scrayTrackTripleTap?.(inFlsLeftThird)) {
+             e.stopPropagation();
+             e.preventDefault();
+             lastTap = 0;
+             // Same modal the FLS title bar opens.
+             if (typeof showPlayerBasketModal === 'function') showPlayerBasketModal();
+             return;
+         }
+     }
+
      const tapLength = now - lastTap;
      if (tapLength < 300 && tapLength > 0) {
          e.stopPropagation();
@@ -5086,9 +5227,50 @@ function setupDoubleTapHandler() {
          const isMobile = window.innerWidth <= 1024;
          const isPortrait = !isLandscape;
    
-         // LANDSCAPE MOBILE: Left half = fullscreen, bottom-right quarter = seeking
+         // LANDSCAPE MOBILE: vertical thirds.
+         //   Left   (0-33%)   triple tap -> bookmark modal (no double-tap action)
+         //   Middle (33-66%)  double tap -> play/pause
+         //   Right  (66-100%) split into two sixths:
+         //        left sixth  = minus seeks, right sixth = plus seeks
+         //        vertical thirds, top to bottom: 30s / 10s / 3s
 if (isLandscape && isMobile) {
-    // Divide screen into halves
+    const thirdW = effRect.width / 3;
+    const inLeftThird   = effTapX < thirdW;
+    const inMiddleThird = effTapX >= thirdW && effTapX < thirdW * 2;
+
+    if (inLeftThird) {
+        // Nothing on double tap. This third is the triple-tap zone, handled
+        // separately - see the triple-tap tracker. Because there's no
+        // double-tap action here, the triple can fire on the third tap with
+        // no waiting period, which a shared zone would have forced.
+        return;
+    }
+
+    if (inMiddleThird) {
+        const willBePaused = !window.plyrPlayer.paused;
+        window.plyrPlayer.togglePlay();
+        showPlayerFeedback(willBePaused ? '⏸ Paused' : '▶ Playing');
+        return;
+    }
+
+    // RIGHT THIRD: two sixths side by side, three tiers tall.
+    const intoRight = (effTapX - thirdW * 2) / thirdW;   // 0..1 across the third
+    const isMinus = intoRight < 0.5;
+    const vFrac = effTapY / effRect.height;
+    const amount = vFrac < (1 / 3) ? 30 : vFrac < (2 / 3) ? 10 : 3;
+    const delta = isMinus ? -amount : amount;
+
+    window.plyrPlayer.currentTime = Math.max(
+        0, Math.min(window.plyrPlayer.duration, window.plyrPlayer.currentTime + delta)
+    );
+    showPlayerFeedback(
+        `${delta > 0 ? '+' : '−'}${amount}s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`
+    );
+    return;
+}
+
+// eslint-disable-next-line no-constant-condition
+if (false) {
     const halfWidth = effRect.width / 2;
     const isLeftHalf = effTapX <= halfWidth;
     

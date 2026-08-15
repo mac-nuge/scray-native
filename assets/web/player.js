@@ -947,7 +947,7 @@ const JOG_MULT_TOP    = 32;
 // window. Cancelled on touchstart rather than on the next completed jog, so
 // the window is "time to START touching again", not "time to finish a whole
 // gesture" - which makes 2s feel far longer than it sounds.
-const JOG_RESUME_DELAY_MS = 500;
+const JOG_RESUME_DELAY_MS = 1000;
 let jogResumeTimer = null;
 
 function cancelJogResume() {

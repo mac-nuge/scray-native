@@ -943,10 +943,37 @@ async function refreshVideoFromDb(video, { silent = false } = {}) {
   const key = video.videoKey || window.scrayVideoKey(video.filename);
   if (!key) throw new Error("no video_key for this file");
 
-  const [row, bm] = await Promise.all([
+  let [row, bm] = await Promise.all([
     window.scrayApiCall("get", { params: { id: key } }),
     window.scrayApiCall("bookmarks_get", { params: { id: key } }),
   ]);
+
+  // Key gone usually means the file was renamed on the OneDrive side, so the
+  // row moved out from under this device's filename. Same size-anchored
+  // lookup the sync uses - adopt the catalogue's key rather than failing and
+  // making the user wait for a full sync to notice.
+  if (!row.video && video.sizeBytes) {
+    const fp = await window.scrayApiCall("fingerprint_lookup", {
+      method: "POST",
+      body: { size: video.sizeBytes, duration_ms: video.durationMs, width: video.width, height: video.height }
+    }).catch(() => null);
+    // A single size match is already unambiguous — duration/dimensions get no
+    // veto. The catalogue's duration_ms is wrong often enough that requiring
+    // it rejected 29% of otherwise-clean unique matches.
+    const all = fp?.candidates || [];
+    const hits = all.length === 1 ? all : all.filter(c => c.corroborated);
+    if (hits.length === 1) {
+      const adopted = hits[0].video_key;
+      console.log(`↻ "${video.filename}" renamed upstream — adopting "${adopted}"`);
+      [row, bm] = await Promise.all([
+        window.scrayApiCall("get", { params: { id: adopted } }),
+        window.scrayApiCall("bookmarks_get", { params: { id: adopted } }),
+      ]);
+      await saveVideoMeta(video.oneDriveId, { videoKey: adopted, inCatalogue: true }, "sync");
+      video.videoKey = adopted;
+    }
+  }
+
   if (!row.video) throw new Error(`"${video.filename}" is not in the catalogue`);
 
   const patch = {

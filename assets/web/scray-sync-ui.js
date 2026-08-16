@@ -240,6 +240,69 @@ async function flagUncatalogued(allKeys) {
     (res.missing || []).forEach(k => missing.add(k));
   }
 
+  // Before flagging, give every orphan one size-anchored lookup. The row may
+  // well exist under a different name - renamed outside Picker, or imported
+  // to this device from Files. keycheck only ever answers "is this exact key
+  // present", so without this pass a renamed file stays orphaned forever.
+  //
+  // The CATALOGUE key wins: this device adopts it locally rather than rekeying
+  // the server row onto the local filename. Picker derives its key from the
+  // OneDrive filename on every push AND every scan, so moving the row here
+  // just makes Picker mint a second row under the old name.
+  const adoptions = new Map();   // local row id -> catalogue video_key
+  if (missing.size) {
+    const locals = await getAllVideos();
+    const claimedKeys = new Set();
+    for (const v of locals) {
+      const k = v.videoKey || window.scrayVideoKey(v.filename);
+      if (!k || !missing.has(k) || !v.sizeBytes) continue;
+      const localId = v.oneDriveId ?? v.idFromAPI ?? null;
+      if (!localId) continue;
+      try {
+        const res = await window.scrayApiCall("fingerprint_lookup", {
+          method: "POST",
+          body: { size: v.sizeBytes, duration_ms: v.durationMs, width: v.width, height: v.height }
+        });
+        const free = (res.candidates || []).filter(c => !claimedKeys.has(c.video_key));
+        // A single size match is already unambiguous - there is nothing for
+        // duration/dimensions to disambiguate, so they get no veto. The
+        // catalogue's duration_ms is wrong often enough (implied bitrates of
+        // 48 Mbps on 720p files) that requiring it rejected 29% of otherwise
+        // clean unique matches. Corroborate only when a tiebreak is needed.
+        const good = free.length === 1 ? free : free.filter(c => c.corroborated);
+        if (good.length !== 1) {
+          if (free.length) console.log(`[sync] "${k}": ${free.length} size match(es), none unambiguous — left flagged`);
+          continue;
+        }
+        claimedKeys.add(good[0].video_key);
+        adoptions.set(localId, good[0].video_key);
+        missing.delete(k);
+        console.log(`[sync] "${v.filename}" adopts catalogue key "${good[0].video_key}" (size ${v.sizeBytes})`);
+      } catch (err) {
+        console.warn(`[sync] lookup failed for "${k}":`, err.message);
+      }
+    }
+
+    // The adopted key has to be on the local row BEFORE pulling:
+    // scrayApplyPulledRow resolves rows through the videoKey index, so pulling
+    // first would find nothing and silently drop the metadata.
+    if (adoptions.size) {
+      const dbA = await openDB();
+      const txA = dbA.transaction(STORE_NAME, "readwrite");
+      const storeA = txA.objectStore(STORE_NAME);
+      for (const [id, key] of adoptions) {
+        const row = await new Promise((r2) => {
+          const r = storeA.get(id); r.onsuccess = () => r2(r.result); r.onerror = () => r2(null);
+        });
+        if (row) storeA.put({ ...row, videoKey: key, inCatalogue: true });
+      }
+      await new Promise((r2, rej) => { txA.oncomplete = r2; txA.onerror = () => rej(txA.error); });
+
+      await pullScoped([...adoptions.values()], 0);
+      console.log(`[sync] ${adoptions.size} local video(s) matched to catalogue rows by size`);
+    }
+  }
+
   const db = await openDB();
   const tx = db.transaction(STORE_NAME, "readwrite");
   const store = tx.objectStore(STORE_NAME);
@@ -247,9 +310,12 @@ async function flagUncatalogued(allKeys) {
     const r = store.getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error);
   });
   all.forEach(v => {
-    const k = v.videoKey || window.scrayVideoKey(v.filename);
-    const inCat = !missing.has(k);
-    if (v.inCatalogue !== inCat) store.put({ ...v, inCatalogue: inCat });
+    const adopted = adoptions.get(v.oneDriveId);
+    const k = adopted || v.videoKey || window.scrayVideoKey(v.filename);
+    const inCat = adopted ? true : !missing.has(k);
+    if (v.inCatalogue !== inCat || (adopted && v.videoKey !== adopted)) {
+      store.put({ ...v, videoKey: k, inCatalogue: inCat });
+    }
   });
   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
 

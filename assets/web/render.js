@@ -75,12 +75,16 @@ if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
 
 // Flag videos on this device that have no row in the SQLite catalogue.
  // They still play and still score — the scores just stay local, because
- // Native never auto-creates catalogue rows.
+ // Native never auto-creates catalogue rows. Tapping the badge looks for a
+ // catalogue entry with the same file size and adopts its key on confirmation.
  if (video.inCatalogue === false) {
      const notInCatSpan = document.createElement("span");
      notInCatSpan.className = "not-in-catalogue-badge";
      notInCatSpan.textContent = "⚠";
-     notInCatSpan.title = "Not in the SQLite catalogue — scores and bookmarks stay on this device";
+     notInCatSpan.title = "Not in the SQLite catalogue — tap to check for a match";
+     notInCatSpan.style.cursor = "pointer";
+     notInCatSpan.style.padding = "4px 6px";
+     notInCatSpan.onclick = (e) => { e.stopPropagation(); window.scrayTryFingerprintMatch(video, notInCatSpan); };
      li.appendChild(notInCatSpan);
  }
 
@@ -359,7 +363,10 @@ li.appendChild(nameSpan);
      const notInCatSpan = document.createElement("span");
      notInCatSpan.className = "not-in-catalogue-badge";
      notInCatSpan.textContent = "⚠";
-     notInCatSpan.title = "Not in the SQLite catalogue — scores and bookmarks stay on this device";
+     notInCatSpan.title = "Not in the SQLite catalogue — tap to check for a match";
+     notInCatSpan.style.cursor = "pointer";
+     notInCatSpan.style.padding = "4px 6px";
+     notInCatSpan.onclick = (e) => { e.stopPropagation(); window.scrayTryFingerprintMatch(video, notInCatSpan); };
      li.appendChild(notInCatSpan);
  }
 
@@ -692,3 +699,54 @@ function applyHighlightingToElement(element, searchTerms) {
 window.highlightSearchTerms = highlightSearchTerms;
 window.applyHighlightingToElement = applyHighlightingToElement;
 window.currentSearchTerms = []; // Track current search for highlighting
+
+/**
+ * Manual fallback for the ⚠ badge: look the file up by size and, on
+ * confirmation, adopt the catalogue's key locally. Top-level on purpose —
+ * both list renderers reference it, and defining it inside one of them left
+ * it undefined depending on which list drew first.
+ */
+window.scrayTryFingerprintMatch = async function (video, badgeEl) {
+  console.log("[fp] badge tapped", { file: video.filename, size: video.sizeBytes });
+  if (!video.sizeBytes) { alert("No file size known for this video — can't look up a match."); return; }
+  const original = badgeEl.textContent;
+  badgeEl.textContent = "…";
+  try {
+    const res = await window.scrayApiCall("fingerprint_lookup", {
+      method: "POST",
+      body: { size: video.sizeBytes, duration_ms: video.durationMs, width: video.width, height: video.height }
+    });
+    const candidates = res.candidates || [];
+    console.log(`[fp] ${candidates.length} candidate(s)`, candidates.map(c => c.video_key));
+    if (!candidates.length) { alert(`No catalogue entry has this file's size (${video.sizeBytes} bytes).`); return; }
+    const best = candidates.length === 1
+      ? candidates[0]
+      : (candidates.find(c => c.corroborated) || candidates[0]);
+    const extra = candidates.length > 1
+      ? `\n\n(${candidates.length - 1} other size match(es) found — check Picker's Duplicates panel if this isn't right.)`
+      : "";
+    if (!confirm(`Found a likely match in the catalogue:\n\n"${best.video_key}"\n\nAdopt its score, view count and bookmarks?${extra}`)) return;
+
+    // Adopt the catalogue's key locally — never move the server row onto this
+    // device's filename, or Picker's next push/scan mints a duplicate.
+    const newKey = best.video_key;
+    const localId = video.oneDriveId ?? video.idFromAPI ?? null;
+    if (localId) {
+      const db = await openDB();
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const row = await new Promise((r2) => {
+        const r = tx.objectStore(STORE_NAME).get(localId);
+        r.onsuccess = () => r2(r.result); r.onerror = () => r2(null);
+      });
+      if (row) tx.objectStore(STORE_NAME).put({ ...row, videoKey: newKey, inCatalogue: true });
+      await new Promise((r2, rej) => { tx.oncomplete = r2; tx.onerror = () => rej(tx.error); });
+      video.videoKey = newKey;
+    }
+    alert("Matched — sync or reload to pull its score and bookmarks.");
+  } catch (err) {
+    console.error("[fp] lookup failed", err);
+    alert(`Lookup failed: ${err.message}`);
+  } finally {
+    badgeEl.textContent = original;
+  }
+};

@@ -245,9 +245,20 @@ window.scrayIsServerReachable = isServerReachable;
 // -------------------------------------------------------------
 // Push / pull
 // -------------------------------------------------------------
-async function pushOutbox() {
-  const entries = await getOutbox();
-  if (!entries.length) return { pushed: 0, conflicts: [] };
+async function pushOutbox({ modes = null } = {}) {
+  let entries = await getOutbox();
+  if (!entries.length) return { pushed: 0, conflicts: [], held: 0 };
+
+  // Nothing leaves the device until the stamp on it agrees with the database
+  // the server is actually serving right now. `modes` is how the UI says
+  // "I asked, they said go" — see resolveHeld() in scray-dbmode.js.
+  let held = 0;
+  if (window.scrayDbMode) {
+    const verdict = await window.scrayDbMode.guardPush(entries, modes);
+    held = entries.length - verdict.send.length;
+    entries = verdict.send;
+    if (!entries.length) return { pushed: 0, conflicts: [], held };
+  }
 
   const size = window.SCRAY_SYNC.PUSH_BATCH_SIZE;
   let pushed = 0;
@@ -260,7 +271,7 @@ async function pushOutbox() {
     await clearOutboxEntries(batch.map(e => e.id));
     pushed += batch.length;
   }
-  return { pushed, conflicts: allConflicts };
+  return { pushed, conflicts: allConflicts, held };
 }
 window.scrayPushOutbox = pushOutbox;
 
@@ -327,7 +338,8 @@ async function drainQuietly() {
   if (draining) return;
   draining = true;
   try {
-    const { conflicts } = await pushOutbox();
+    const { conflicts, held } = await pushOutbox();
+    if (held && window.scrayDbMode) window.scrayDbMode.resolveHeld();
     if (conflicts.length && typeof window.scrayShowConflicts === "function") {
       window.scrayShowConflicts(conflicts);
     }

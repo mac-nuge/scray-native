@@ -7347,6 +7347,10 @@ computeBottomDock();
 // position every frame and only lock in the scroll once it has stopped
 // moving for a short stretch.
 (function stabilizeAndScrollToPageBookmark() {
+    // TESTING: disabled. The per-frame re-anchor below fights any scroll the
+    // user makes during the first 3s after load. Remove this line to restore.
+    return;
+
     const isMobilePortrait = window.innerWidth <= 768 && window.matchMedia('(orientation: portrait)').matches;
     if (!isMobilePortrait) return;
 

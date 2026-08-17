@@ -21,6 +21,7 @@
   const localScripts = [
     "keyboard-config.js",
     "scray-config.js",
+    "scray-dbmode.js",
     "catalog-match.js",
     "db.js",
     "scray-sync.js",
@@ -156,11 +157,14 @@
         window.scrollTo(0, 0);
       }
     };
+    // TESTING: the re-assert schedule below yanks the page back for up to 3s
+    // after unlock, overriding any scroll made in that window. Keeping the
+    // initial positioning, dropping the retries.
     scrollToConsole();
     requestAnimationFrame(scrollToConsole);
-    [50, 150, 300, 600, 1000, 2000, 3000].forEach(delay => {
-      setTimeout(scrollToConsole, delay);
-    });
+    // [50, 150, 300, 600, 1000, 2000, 3000].forEach(delay => {
+    //   setTimeout(scrollToConsole, delay);
+    // });
   }
 
   inputEl.addEventListener("input", function(){
@@ -455,7 +459,7 @@
 
 <div id="bottomSpacer" style="height:0px;"></div>
 
-<div id="versionCorner" style="font-size: 0.85rem; text-align: right; margin-top: 40px; padding: 6px 10px calc(env(safe-area-inset-bottom, 0px) + 96px) 10px;"><span id="appVersion"></span> | <span id="syncStatus" style="cursor:pointer; text-decoration:underline dotted;" title="Tap to sync">⚪ not synced</span> | <a href="#" id="changelogLink">Change Log</a> | <a href="#" id="clearCacheBtn" style="color: #999;">Clear Database</a> | <a href="https://excel.cloud.microsoft/open/onedrive/?docId=FC889D210229F431%21SD3D6F40D45714290BBFEEBBA760F157C&driveId=FC889D210229F431&wdOrigin=APPHOME-WEB.DIRECT%2CAPPHOME-WEB.JUMPBACKIN-OCDI&wdPreviousSession=5f06762c-3c19-4dc2-8e7c-d6a4ca5b55b6&wdPreviousSessionSrc=AppHomeWeb&ct=1769467854718" target="_blank">Excel db</a>
+<div id="versionCorner" style="font-size: 0.85rem; text-align: right; margin-top: 40px; padding: 6px 10px calc(env(safe-area-inset-bottom, 0px) + 96px) 10px;"><span id="appVersion"></span> | <span id="dbModePill"></span> | <span id="syncStatus" style="cursor:pointer; text-decoration:underline dotted;" title="Tap to sync">⚪ not synced</span> | <a href="#" id="changelogLink">Change Log</a> | <a href="#" id="clearCacheBtn" style="color: #999;">Clear Database</a> | <a href="https://excel.cloud.microsoft/open/onedrive/?docId=FC889D210229F431%21SD3D6F40D45714290BBFEEBBA760F157C&driveId=FC889D210229F431&wdOrigin=APPHOME-WEB.DIRECT%2CAPPHOME-WEB.JUMPBACKIN-OCDI&wdPreviousSession=5f06762c-3c19-4dc2-8e7c-d6a4ca5b55b6&wdPreviousSessionSrc=AppHomeWeb&ct=1769467854718" target="_blank">Excel db</a>
 </div>
 
 <div id="changelogOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 99999; align-items: center; justify-content: center;">

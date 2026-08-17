@@ -187,6 +187,22 @@ async function scrayGetSyncState(key) {
 }
 window.scrayGetSyncState = scrayGetSyncState;
 
+/**
+ * Drops the cursor and every per-row seq marker. Both have to go together: a
+ * half-reset leaves row markers that make freshly pulled rows look older than
+ * what's already local, and the pull gets discarded as stale.
+ */
+async function scrayClearSyncCursor() {
+  const db = await openDB();
+  const tx = db.transaction(SYNC_STATE, "readwrite");
+  const store = tx.objectStore(SYNC_STATE);
+  const keys = await new Promise((res) => {
+    const r = store.getAllKeys(); r.onsuccess = () => res(r.result || []); r.onerror = () => res([]);
+  });
+  for (const k of keys) if (k === "cursor" || String(k).startsWith("row:")) store.delete(k);
+  await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+}
+
 async function scraySetSyncState(key, value) {
   const db = await openDB();
   if (!db.objectStoreNames.contains(SYNC_STATE)) return;
@@ -281,6 +297,18 @@ window.scrayPushOutbox = pushOutbox;
  * Native writes to videoSource/videoMeta, Picker may just cache.
  */
 async function pullDeltas(applyRow) {
+  // The cursor is only meaningful against the database that issued it. After a
+  // rebuild the numbers point at unrelated rows, so a stale cursor makes the
+  // server answer "nothing new" - truthfully, and wrongly. Compare editions
+  // first and start clean if this is a different database.
+  const seenEpoch = await scrayGetSyncState("epoch");
+  const probe = await apiCall("pull", { params: { since: 0, limit: 1 } });
+  if (probe.epoch != null && seenEpoch?.epoch != null && seenEpoch.epoch !== probe.epoch) {
+    console.log(`[sync] database edition changed (${seenEpoch.epoch} → ${probe.epoch}) — re-pulling everything`);
+    await scrayClearSyncCursor();
+  }
+  if (probe.epoch != null) await scraySetSyncState("epoch", { epoch: probe.epoch });
+
   const cursor = await scrayGetSyncState("cursor");
   let since = cursor?.seq ?? 0;
   let pulled = 0;

@@ -24,6 +24,20 @@
   const MOBILE_MEDIA =
     '(max-width: 768px), (max-width: 1024px) and (orientation: landscape)';
 
+  // Mobile panel sits bottom-right. In portrait that corner is clear, but in
+  // landscape the app moves #cornerButtons to bottom-right too, so the panel
+  // lifts above that button row. Nudge these if either looks tight.
+  const MOBILE_BOTTOM_OFFSET = '6px';
+  const MOBILE_BOTTOM_OFFSET_LANDSCAPE = '58px';
+
+  // Native's WKWebView runs edge-to-edge with no browser chrome below it, so
+  // the same offset lands lower on the glass and closer to the home-swipe
+  // area. Extra lift added on top of the offsets above, Native only.
+  const NATIVE_EXTRA_LIFT = '30px';
+
+  // Mobile only: tapping anywhere off the panel collapses it.
+  const CLOSE_ON_OUTSIDE_TAP = true;
+
   // Screenshots, per layout — one is picked at random per load.
   // An entry is a path, or { src, fit, position } to override the defaults
   // below for that one screenshot.
@@ -60,7 +74,14 @@
   const FADE_COLOUR_INVERTED = '#000000';
 
   // Cycle order for the mode button. Trim entries to shorten the cycle.
-  const MODES = ['colour', 'grey', 'invert', 'greyinvert'];
+  // 'invertsafe' is Invert with the video counter-inverted so it plays in
+  // normal colour — see COUNTER_INVERT_SELECTOR below.
+  const MODES = ['colour', 'grey', 'invert', 'invertsafe', 'greyinvert'];
+
+  // What gets counter-inverted in 'invertsafe'. Widen to '.plyr' to keep the
+  // player controls upright too, or narrow to 'video' to invert the poster
+  // along with the rest of the page.
+  const COUNTER_INVERT_SELECTOR = 'video, .plyr__poster';
 
   // Should the mode also recolour the screenshot?
   // false keeps the dashboard looking like a real dashboard.
@@ -91,25 +112,69 @@
     colour: '',
     grey: 'grayscale(1)',
     invert: 'invert(1)',
+    invertsafe: 'invert(1)',
     greyinvert: 'grayscale(1) invert(1)'
   };
   const MODE_LABEL = {
     colour: 'Colour',
     grey: 'Greyscale',
     invert: 'Invert',
+    invertsafe: 'Invert (video ok)',
     greyinvert: 'Grey + Invert'
   };
   const MODE_LABEL_SHORT = {
     colour: 'Colour',
     grey: 'Grey',
     invert: 'Invert',
+    invertsafe: 'Inv+V',
     greyinvert: 'Gr+Inv'
   };
+  // Shown on the collapsed mobile launch button — keep these to 3 characters.
+  const MODE_LABEL_TINY = {
+    colour: 'COL',
+    grey: 'GRY',
+    invert: 'INV',
+    invertsafe: 'I+V',
+    greyinvert: 'G+I'
+  };
+  // Modes that pre-invert the video so the tint's inversion cancels out.
+  const MODE_COUNTER_INVERT = { invertsafe: true };
 
-  function isInverted(mode) { return mode === 'invert' || mode === 'greyinvert'; }
+  function isInverted(mode) {
+    return mode === 'invert' || mode === 'invertsafe' || mode === 'greyinvert';
+  }
+
+  // Scope every selector individually — a bare comma would leave the second
+  // one unscoped and it would fire during fullscreen.
+  const COUNTER_INVERT_RULE = COUNTER_INVERT_SELECTOR
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(s => `body:not(.fullscreen-active) ${s} { filter: invert(1) !important; }`)
+    .join('\n');
+
+  // Belt and braces for native fullscreen, which may not go through the app's
+  // own class. Separate rules, so an unsupported pseudo-class only kills its
+  // own line rather than the whole block.
+  const COUNTER_INVERT_GUARD =
+    'video:fullscreen { filter: none !important; }\n' +
+    'video:-webkit-full-screen { filter: none !important; }';
+
+  function setCounterInvert(on) {
+    const el = document.getElementById('scrayDisguiseVideoStyles');
+    if (!el) return;
+    el.textContent = on ? (COUNTER_INVERT_RULE + '\n' + COUNTER_INVERT_GUARD) : '';
+  }
 
   const mq = window.matchMedia(MOBILE_MEDIA);
   function isMobile() { return mq.matches; }
+
+  // True only inside Scray Native's WKWebView. Checks for the app's own
+  // message handler rather than window.webkit, which iOS Safari also has.
+  const IS_NATIVE = !!(
+    (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scrayBridge)
+    || window.ScrayBridge
+  );
 
   function normaliseShot(entry) {
     if (!entry) return null;
@@ -314,26 +379,28 @@
 
 /* ---- Collapsed: handle plus any assigned presets, nothing else ---- */
 #scrayDisguiseControl.is-collapsed #scrayDisguiseBody,
+#scrayDisguiseControl.is-collapsed #scrayDisguisePresets,
 #scrayDisguiseControl.is-collapsed #scrayDisguiseAssignBtn {
   display: none;
 }
-#scrayDisguiseControl.is-collapsed .scray-disguise-chip:not(.is-set) {
-  display: none;
-}
 #scrayDisguiseControl.is-collapsed {
-  padding: 6px 8px;
-  gap: 4px;
+  padding: 4px 6px;
+  gap: 0;
 }
 
 /* ---- Compact layout for phones ---- */
 @media ${MOBILE_MEDIA} {
   #scrayDisguiseControl {
-    top: calc(env(safe-area-inset-top, 0px) + 6px);
+    top: auto;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET});
     right: calc(env(safe-area-inset-right, 0px) + 6px);
     padding: 6px 8px;
     font-size: 11px;
     max-width: 46vw;
   }
+  /* Bottom-anchored, so the handle belongs at the bottom edge and the panel
+     grows upward from it. */
+  #scrayDisguiseHandle { order: 2; }
   .scray-disguise-row > span.scray-disguise-lbl { width: 26px; }
   .scray-disguise-row input[type="range"] { width: 88px; }
   .scray-disguise-val { min-width: 28px; }
@@ -347,17 +414,46 @@
     min-height: 26px;
     padding: 0;
   }
-  #scrayDisguiseControl.is-collapsed #scrayDisguisePresets {
-    display: flex;
-  }
   #scrayDisguiseModeBtn,
   #scrayDisguiseAssignBtn { padding: 6px; }
-  #scrayDisguiseHandle { min-height: 18px; }
+  #scrayDisguiseHandle {
+    min-height: 24px;
+    font-size: 13px;
+  }
+  #scrayDisguiseControl.is-collapsed #scrayDisguiseHandle {
+    min-width: 30px;
+    min-height: 26px;
+  }
+  #scrayDisguiseHandle.has-mode-tag {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: #6b6b6b;
+  }
+  #scrayDisguise.is-native #scrayDisguiseControl {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET} + ${NATIVE_EXTRA_LIFT});
+  }
+}
+
+/* Landscape phone: the app right-anchors #cornerButtons at bottom: 10px, so
+   clear that row rather than covering the burger buttons. */
+@media (max-width: 1024px) and (orientation: landscape) {
+  #scrayDisguiseControl {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET_LANDSCAPE});
+  }
+  #scrayDisguise.is-native #scrayDisguiseControl {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET_LANDSCAPE} + ${NATIVE_EXTRA_LIFT});
+  }
 }`;
     const styleEl = document.createElement('style');
     styleEl.id = 'scrayDisguiseStyles';
     styleEl.textContent = css;
     document.head.appendChild(styleEl);
+
+    // Toggled by setCounterInvert(); kept separate so the main sheet is static.
+    const videoStyleEl = document.createElement('style');
+    videoStyleEl.id = 'scrayDisguiseVideoStyles';
+    document.head.appendChild(videoStyleEl);
   }
 
   // Browser-only convenience for testing a fresh screenshot. See KNOCKOUT_WHITE.
@@ -442,6 +538,7 @@
 
     const root = document.createElement('div');
     root.id = 'scrayDisguise';
+    if (IS_NATIVE) root.classList.add('is-native');
 
     const tint = document.createElement('div');
     tint.id = 'scrayDisguiseTint';
@@ -493,14 +590,27 @@
       tint.style.webkitBackdropFilter = f;
       fade.style.background = isInverted(state.mode) ? FADE_COLOUR_INVERTED : FADE_COLOUR;
       shot.style.filter = MODE_AFFECTS_SCREENSHOT ? (f || 'none') : 'none';
+      setCounterInvert(!!MODE_COUNTER_INVERT[state.mode]);
       modeBtn.classList.toggle('is-on', state.mode !== 'colour');
       modeBtn.textContent = isMobile() ? MODE_LABEL_SHORT[state.mode] : MODE_LABEL[state.mode];
       modeBtn.title = 'Colour mode — tap to cycle';
+      renderOpen();   // the collapsed launch button carries the mode tag
     }
     function renderOpen() {
       control.classList.toggle('is-collapsed', !state.open);
-      handle.textContent = state.open ? '▴' : '▾';
-      handle.title = state.open ? 'Collapse' : 'Expand';
+      // Mobile anchors to the bottom and grows upward, so the caret has to
+      // point the other way to still mean "this is where it will go".
+      const upward = isMobile();
+      // Collapsed on mobile the button is the only thing on screen, so it
+      // carries the current mode rather than a caret.
+      const showModeTag = isMobile() && !state.open;
+      handle.textContent = showModeTag
+        ? (MODE_LABEL_TINY[state.mode] || '')
+        : (state.open ? (upward ? '▾' : '▴') : (upward ? '▴' : '▾'));
+      handle.classList.toggle('has-mode-tag', showModeTag);
+      handle.title = state.open
+        ? 'Collapse'
+        : 'Expand — ' + (MODE_LABEL[state.mode] || state.mode);
       handle.setAttribute('aria-expanded', String(state.open));
     }
 
@@ -657,6 +767,7 @@
         applyShot(currentShot);
       }
       renderMode();
+      renderOpen();
       renderChips();
     };
     if (mq.addEventListener) mq.addEventListener('change', onBreakpoint);
@@ -717,6 +828,21 @@
       e.preventDefault();
       e.stopPropagation();
     }, true);
+
+    // ---- Tap off the panel to collapse it (mobile) ----
+    // Capture phase and read-only: never preventDefault, so the tap still
+    // does whatever it was going to do in the app underneath.
+    if (CLOSE_ON_OUTSIDE_TAP) {
+      document.addEventListener('pointerdown', (e) => {
+        if (!state.open || !isMobile()) return;
+        if (e.target && control.contains(e.target)) return;
+        state.open = false;
+        capturing = false;
+        renderOpen();
+        renderChips();
+        save();
+      }, true);
+    }
 
     // Keep the layer as the last child of <body> so late-mounted elements
     // (docked player, modals, toasts — all at the same z-index ceiling)

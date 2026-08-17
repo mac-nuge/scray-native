@@ -301,7 +301,11 @@ async function pullDeltas(applyRow) {
   // rebuild the numbers point at unrelated rows, so a stale cursor makes the
   // server answer "nothing new" - truthfully, and wrongly. Compare editions
   // first and start clean if this is a different database.
-  const seenEpoch = await scrayGetSyncState("epoch");
+  // Keyed by mode, so switching live↔test doesn't read as a rebuild and
+  // trigger a full re-pull in each direction. Each database keeps its own
+  // epoch, so the client has to remember one per database too.
+  const epochKey = `epoch:${probeMode || "live"}`;
+  const seenEpoch = await scrayGetSyncState(epochKey);
   const probe = await apiCall("pull", { params: { since: 0, limit: 1 } });
   if (probe.epoch != null && seenEpoch?.epoch != null && seenEpoch.epoch !== probe.epoch) {
     console.log(`[sync] database edition changed (${seenEpoch.epoch} → ${probe.epoch}) — re-pulling everything`);

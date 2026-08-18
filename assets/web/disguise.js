@@ -6,7 +6,8 @@
 //     Invert -> Grey+Invert. backdrop-filter is used rather than an ancestor
 //     `filter` so nothing becomes a containing block and position:fixed keeps
 //     working throughout the app.
-//  2. Lays one of N screenshots over the whole viewport.
+//  2. Lays one of N screenshots BEHIND the page, so dropping Page opacity
+//     reveals it rather than washing the page out to white.
 //  3. Shot / Page opacity sliders, 10 preset slots, and a collapse handle.
 //     Desktop: presets also fire on Alt+0-9. Mobile: tap the numbered chips.
 //
@@ -68,20 +69,47 @@
   const TRANSPARENT_ABOVE = 0.94;   // 0-1 luminance, lighter than this goes
   const OPAQUE_BELOW = 0.80;        // 0-1 luminance, darker than this stays
 
-  // Colour the page fades toward as the Page slider drops. Inverted modes fade
-  // to black so a dark page doesn't wash out to white as it disappears.
-  const FADE_COLOUR = '#ffffff';
-  const FADE_COLOUR_INVERTED = '#000000';
+  // Painted behind the screenshot, so a knocked-out screenshot has something
+  // to sit on once the page above it goes transparent.
+  // This sits BELOW the tint, so inverted modes invert it too: white here
+  // shows as black on screen. Set the pre-tint value, not what you want to
+  // see. Leaving it white is what makes inverted modes read as a dark page.
+  const BACKDROP_COLOUR = '#ffffff';
 
-  // Cycle order for the mode button. Trim entries to shorten the cycle.
-  // 'invertsafe' is Invert with the video counter-inverted so it plays in
-  // normal colour — see COUNTER_INVERT_SELECTOR below.
-  const MODES = ['colour', 'grey', 'invert', 'invertsafe', 'greyinvert'];
+  // Cycle order for the mode button. Six is a lot of taps — trim entries you
+  // don't use. The "(player ok)" modes leave the player in true colour.
+  const MODES = [
+    'colour', 'grey', 'invert', 'invertsafe', 'greyinvert', 'greyinvertsafe'
+  ];
 
-  // What gets counter-inverted in 'invertsafe'. Widen to '.plyr' to keep the
-  // player controls upright too, or narrow to 'video' to invert the poster
-  // along with the rest of the page.
-  const COUNTER_INVERT_SELECTOR = 'video, .plyr__poster';
+  // Exempted from the tint in the "(player ok)" modes — video, controls,
+  // poster, overlays. Extra selectors are safe: overlapping boxes are merged,
+  // disjoint ones are not, so listing player chrome that sits outside the
+  // container only makes the exemption more accurate.
+  const PLAYER_EXEMPT_SELECTOR = [
+    '#inlineVideoContainer',
+    '#pipPlayerContainer',
+    '.plyr',
+    '.plyr--fullscreen',
+    '.plyr__video-wrapper',
+    '.plyr__controls'
+  ].join(', ');
+
+  // Body classes meaning "the player owns the whole screen" (FLS, forced
+  // landscape). In these states the tint switches off completely rather than
+  // trying to cut a box out of itself.
+  const FULLSCREEN_BODY_CLASSES = [
+    'fullscreen-active',
+    'portrait-fullscreen',
+    'manual-rotate-landscape'
+  ];
+
+  // 'clip'     — cut a hole in the tint over the player's box (default)
+  // 'tint-off' — switch the tint off entirely whenever a player is on screen
+  // Use 'tint-off' if clip-path turns out to be unreliable over
+  // backdrop-filter in WKWebView; the page loses its tint while a video is up,
+  // but the player is guaranteed true colour.
+  const PLAYER_EXEMPT_STRATEGY = 'clip';
 
   // Should the mode also recolour the screenshot?
   // false keeps the dashboard looking like a real dashboard.
@@ -113,57 +141,39 @@
     grey: 'grayscale(1)',
     invert: 'invert(1)',
     invertsafe: 'invert(1)',
-    greyinvert: 'grayscale(1) invert(1)'
+    greyinvert: 'grayscale(1) invert(1)',
+    greyinvertsafe: 'grayscale(1) invert(1)'
   };
   const MODE_LABEL = {
     colour: 'Colour',
     grey: 'Greyscale',
     invert: 'Invert',
-    invertsafe: 'Invert (video ok)',
-    greyinvert: 'Grey + Invert'
+    invertsafe: 'Invert (player ok)',
+    greyinvert: 'Grey + Invert',
+    greyinvertsafe: 'Grey + Invert (player ok)'
   };
   const MODE_LABEL_SHORT = {
     colour: 'Colour',
     grey: 'Grey',
     invert: 'Invert',
-    invertsafe: 'Inv+V',
-    greyinvert: 'Gr+Inv'
+    invertsafe: 'Inv +P',
+    greyinvert: 'Gr+Inv',
+    greyinvertsafe: 'GrInv +P'
   };
   // Shown on the collapsed mobile launch button — keep these to 3 characters.
   const MODE_LABEL_TINY = {
     colour: 'COL',
     grey: 'GRY',
     invert: 'INV',
-    invertsafe: 'I+V',
-    greyinvert: 'G+I'
+    invertsafe: 'I+P',
+    greyinvert: 'G+I',
+    greyinvertsafe: 'G+P'
   };
-  // Modes that pre-invert the video so the tint's inversion cancels out.
-  const MODE_COUNTER_INVERT = { invertsafe: true };
+  // Modes that cut the player out of the tint entirely.
+  const MODE_EXEMPT_PLAYER = { invertsafe: true, greyinvertsafe: true };
 
   function isInverted(mode) {
-    return mode === 'invert' || mode === 'invertsafe' || mode === 'greyinvert';
-  }
-
-  // Scope every selector individually — a bare comma would leave the second
-  // one unscoped and it would fire during fullscreen.
-  const COUNTER_INVERT_RULE = COUNTER_INVERT_SELECTOR
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(s => `body:not(.fullscreen-active) ${s} { filter: invert(1) !important; }`)
-    .join('\n');
-
-  // Belt and braces for native fullscreen, which may not go through the app's
-  // own class. Separate rules, so an unsupported pseudo-class only kills its
-  // own line rather than the whole block.
-  const COUNTER_INVERT_GUARD =
-    'video:fullscreen { filter: none !important; }\n' +
-    'video:-webkit-full-screen { filter: none !important; }';
-
-  function setCounterInvert(on) {
-    const el = document.getElementById('scrayDisguiseVideoStyles');
-    if (!el) return;
-    el.textContent = on ? (COUNTER_INVERT_RULE + '\n' + COUNTER_INVERT_GUARD) : '';
+    return (MODE_FILTER[mode] || '').indexOf('invert') !== -1;
   }
 
   const mq = window.matchMedia(MOBILE_MEDIA);
@@ -270,15 +280,18 @@
   pointer-events: none;
   z-index: ${Z};
 }
+/* Negative z-index under <html> paints above the canvas background but below
+   every in-flow descendant of <body> — i.e. behind the page. */
+#scrayDisguiseBack {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background: ${BACKDROP_COLOUR};
+}
 #scrayDisguiseTint,
-#scrayDisguiseFade,
 #scrayDisguiseShot {
   position: absolute; inset: 0;
   pointer-events: none;
-}
-#scrayDisguiseFade {
-  background: ${FADE_COLOUR};
-  opacity: 0;
 }
 #scrayDisguiseShot {
   background-color: transparent;
@@ -449,11 +462,6 @@
     styleEl.id = 'scrayDisguiseStyles';
     styleEl.textContent = css;
     document.head.appendChild(styleEl);
-
-    // Toggled by setCounterInvert(); kept separate so the main sheet is static.
-    const videoStyleEl = document.createElement('style');
-    videoStyleEl.id = 'scrayDisguiseVideoStyles';
-    document.head.appendChild(videoStyleEl);
   }
 
   // Browser-only convenience for testing a fresh screenshot. See KNOCKOUT_WHITE.
@@ -540,11 +548,14 @@
     root.id = 'scrayDisguise';
     if (IS_NATIVE) root.classList.add('is-native');
 
+    // Separate root so the screenshot can sit behind <body> while the tint and
+    // controls stay above it. Both live under <html>, not <body>, so the page
+    // opacity below doesn't fade the overlay along with the app.
+    const backRoot = document.createElement('div');
+    backRoot.id = 'scrayDisguiseBack';
+
     const tint = document.createElement('div');
     tint.id = 'scrayDisguiseTint';
-
-    const fade = document.createElement('div');
-    fade.id = 'scrayDisguiseFade';
 
     const shot = document.createElement('div');
     shot.id = 'scrayDisguiseShot';
@@ -582,15 +593,151 @@
     modeBtn.type = 'button';
 
     // ---- Renderers ----
+    // ---- Player exemption -------------------------------------------------
+    // Plyr's fullscreen here is the CSS fallback: position:fixed inset:0, still
+    // inside <body>, so the player never escapes the tint the way real
+    // top-layer fullscreen would. Counter-filtering only works for invert
+    // (greyscale is lossy), so instead the tint is either clipped around the
+    // player's box or switched off entirely.
+    let holeRaf = null;
+    let lastClip = '';
+    let lastFilter = null;
+
+    function playerOwnsScreen() {
+      for (let i = 0; i < FULLSCREEN_BODY_CLASSES.length; i++) {
+        if (document.body.classList.contains(FULLSCREEN_BODY_CLASSES[i])) return true;
+      }
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+
+    // Largest visible player box, merged with any matching box that overlaps
+    // it. Overlap is the test on purpose: it pulls in player chrome sitting
+    // outside the container without merging two separate players.
+    function playerRect() {
+      const nodes = document.querySelectorAll(PLAYER_EXEMPT_SELECTOR);
+      const boxes = [];
+      let best = null;
+      for (let i = 0; i < nodes.length; i++) {
+        const r = nodes[i].getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) continue;
+        boxes.push(r);
+        const area = r.width * r.height;
+        if (!best || area > best.area) best = { r: r, area: area };
+      }
+      if (!best) return null;
+      const u = { left: best.r.left, top: best.r.top, right: best.r.right, bottom: best.r.bottom };
+      for (let i = 0; i < boxes.length; i++) {
+        const b = boxes[i];
+        const overlaps = b.left < u.right && b.right > u.left && b.top < u.bottom && b.bottom > u.top;
+        if (!overlaps) continue;
+        u.left = Math.min(u.left, b.left);
+        u.top = Math.min(u.top, b.top);
+        u.right = Math.max(u.right, b.right);
+        u.bottom = Math.max(u.bottom, b.bottom);
+      }
+      return u;
+    }
+
+    function holeClip(r) {
+      if (!r) return '';
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const x1 = Math.max(0, Math.round(r.left));
+      const y1 = Math.max(0, Math.round(r.top));
+      const x2 = Math.min(vw, Math.round(r.right));
+      const y2 = Math.min(vh, Math.round(r.bottom));
+      if (x2 <= x1 || y2 <= y1) return '';
+      // evenodd: outer viewport ring, then the player box as a hole.
+      return 'polygon(evenodd, '
+        + `0px 0px, ${vw}px 0px, ${vw}px ${vh}px, 0px ${vh}px, 0px 0px, `
+        + `${x1}px ${y1}px, ${x1}px ${y2}px, ${x2}px ${y2}px, ${x2}px ${y1}px, ${x1}px ${y1}px)`;
+    }
+
+    // Single place that decides what the tint is doing. Writes are skipped
+    // when nothing changed, so this is cheap to call every frame.
+    function applyTint() {
+      const base = MODE_FILTER[state.mode] || '';
+      const exempt = !!MODE_EXEMPT_PLAYER[state.mode];
+      let filter = base;
+      let clip = '';
+
+      if (exempt) {
+        const rect = playerRect();
+        const whole = playerOwnsScreen();
+        if (whole || (PLAYER_EXEMPT_STRATEGY === 'tint-off' && rect)) {
+          filter = '';                       // player owns the screen: no tint
+        } else if (rect) {
+          clip = holeClip(rect);
+          if (!clip) filter = '';            // box covers the viewport
+        }
+      }
+
+      if (filter !== lastFilter) {
+        lastFilter = filter;
+        tint.style.backdropFilter = filter;
+        tint.style.webkitBackdropFilter = filter;
+        // The screenshot sits under the tint, so its counter-invert only
+        // applies while the tint is actually inverting.
+        shot.style.filter = (!MODE_AFFECTS_SCREENSHOT && filter.indexOf('invert') !== -1)
+          ? 'invert(1)' : 'none';
+      }
+      if (clip !== lastClip) {
+        lastClip = clip;
+        tint.style.clipPath = clip;
+        tint.style.webkitClipPath = clip;
+      }
+    }
+
+    function trackHole() {
+      applyTint();
+      holeRaf = MODE_EXEMPT_PLAYER[state.mode] ? requestAnimationFrame(trackHole) : null;
+    }
+
+    function startHoleTracking() {
+      if (holeRaf || !MODE_EXEMPT_PLAYER[state.mode]) return;
+      holeRaf = requestAnimationFrame(trackHole);
+    }
+
+    // Diagnostic: run scrayDisguiseDebug() in the console while a video is up.
+    window.scrayDisguiseDebug = function () {
+      const nodes = document.querySelectorAll(PLAYER_EXEMPT_SELECTOR);
+      const rows = [];
+      for (let i = 0; i < nodes.length; i++) {
+        const r = nodes[i].getBoundingClientRect();
+        rows.push({
+          el: nodes[i].id || ('.' + (nodes[i].className || '').toString().split(' ')[0]),
+          left: Math.round(r.left), top: Math.round(r.top),
+          w: Math.round(r.width), h: Math.round(r.height)
+        });
+      }
+      console.table(rows);
+      console.log({
+        mode: state.mode,
+        exemptMode: !!MODE_EXEMPT_PLAYER[state.mode],
+        strategy: PLAYER_EXEMPT_STRATEGY,
+        playerOwnsScreen: playerOwnsScreen(),
+        bodyClasses: document.body.className,
+        mergedRect: playerRect(),
+        appliedFilter: tint.style.backdropFilter,
+        appliedClip: tint.style.clipPath || '(none)',
+        viewport: [window.innerWidth, window.innerHeight]
+      });
+    };
+
     function renderShot() { shot.style.opacity = String(state.shot / 100); }
-    function renderPage() { fade.style.opacity = String((100 - state.page) / 100); }
+
+    // Real opacity on <body>, so lowering it reveals the screenshot underneath.
+    // Cleared entirely at 100 rather than set to 1, to avoid leaving the whole
+    // page in its own compositing layer for nothing.
+    function renderPage() {
+      const v = state.page / 100;
+      document.body.style.opacity = v >= 1 ? '' : String(v);
+    }
+
     function renderMode() {
-      const f = MODE_FILTER[state.mode] || '';
-      tint.style.backdropFilter = f;
-      tint.style.webkitBackdropFilter = f;
-      fade.style.background = isInverted(state.mode) ? FADE_COLOUR_INVERTED : FADE_COLOUR;
-      shot.style.filter = MODE_AFFECTS_SCREENSHOT ? (f || 'none') : 'none';
-      setCounterInvert(!!MODE_COUNTER_INVERT[state.mode]);
+      lastFilter = null;      // force a write on mode change
+      applyTint();
+      startHoleTracking();
       modeBtn.classList.toggle('is-on', state.mode !== 'colour');
       modeBtn.textContent = isMobile() ? MODE_LABEL_SHORT[state.mode] : MODE_LABEL[state.mode];
       modeBtn.title = 'Colour mode — tap to cycle';
@@ -744,11 +891,11 @@
     control.appendChild(presetWrap);
     control.appendChild(assignBtn);
 
+    backRoot.appendChild(shot);
     root.appendChild(tint);
-    root.appendChild(fade);
-    root.appendChild(shot);
     root.appendChild(control);
-    document.body.appendChild(root);
+    document.documentElement.appendChild(backRoot);
+    document.documentElement.appendChild(root);
 
     applyShot(currentShot);
     renderShot();
@@ -844,20 +991,19 @@
       }, true);
     }
 
-    // Keep the layer as the last child of <body> so late-mounted elements
-    // (docked player, modals, toasts — all at the same z-index ceiling)
-    // still sit underneath it.
-    const keepLast = new MutationObserver(() => {
-      if (document.body.lastElementChild !== root) document.body.appendChild(root);
-    });
-    keepLast.observe(document.body, { childList: true });
+    // No keep-last observer any more: the overlay is a sibling of <body>
+    // rather than a child, so nothing the app mounts can paint above it and
+    // DOM order stops mattering.
 
-    // Don't cover the password lock screen.
+    // Don't cover or fade the password lock screen.
     const lock = document.getElementById('lockOverlay');
     if (lock) {
       const syncLock = () => {
         const locked = getComputedStyle(lock).display !== 'none';
         root.style.display = locked ? 'none' : 'block';
+        backRoot.style.display = locked ? 'none' : 'block';
+        if (locked) document.body.style.opacity = '';
+        else renderPage();
       };
       syncLock();
       new MutationObserver(syncLock).observe(lock, {

@@ -59,16 +59,10 @@
         document.getElementById('lockOverlayVersion').textContent = `v${versionText}`;
         const versionLower = versionText.toLowerCase();
 
-        // Color the lock screen based on which environment this is
+        // Lock screen is always black now — environment colouring removed.
         const lockOverlayEl = document.getElementById('lockOverlay');
         if (lockOverlayEl) {
-          if (versionLower.includes('staging')) {
-            lockOverlayEl.style.background = '#7B1472'; // pink
-          } else if (versionLower.includes('uat')) {
-            lockOverlayEl.style.background = '#66420F'; // mustard
-          } else {
-            lockOverlayEl.style.background = '#111'; // black (main/default)
-          }
+          lockOverlayEl.style.background = '#111';
         }
         if (versionLower.includes('staging') || versionLower.includes('uat')) {
           const banner = document.createElement('div');

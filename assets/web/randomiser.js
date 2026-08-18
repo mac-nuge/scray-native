@@ -2280,6 +2280,8 @@ if (statsDiv) {
 /* =========================================
 Init
 ========================================= */
+
+
 window.addEventListener("DOMContentLoaded", async () => {
 
 // ✅ Refresh button - just refreshes Excel authentication (same as modal button)

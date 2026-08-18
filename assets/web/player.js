@@ -76,10 +76,29 @@ const MANUAL_ROTATE_PROPS = [
 ];
 
 function getManualRotationFullscreenElement() {
+    // Is a fullscreen-ish mode actually active?
+    //
+    // This used to be guaranteed by the caller, and the "last resort" branch
+    // below logged on that assumption. It stopped holding when the title bar
+    // became shared with the mini-player: ensureVideoTitleBar() now calls
+    // this from inline and MP too, and updatePlayerStateClass() calls THAT
+    // on every resize - which on mobile means every address-bar show/hide.
+    // Hence the console filling with "falling back to generic .plyr
+    // container". The fallback is correct and always was; only the logging
+    // was wrong, so the logs are now gated on genuinely expecting a
+    // fullscreen element and not finding one.
+    const expectsFullscreen = manualRotationActive
+        || !!(window.plyrPlayer && window.plyrPlayer.fullscreen && window.plyrPlayer.fullscreen.active)
+        || document.body.classList.contains('manual-rotate-landscape')
+        || document.body.classList.contains('portrait-fullscreen')
+        || document.body.classList.contains('landscape-fullscreen');
+
     // Prefer the real Fullscreen API element when available
     const nativeEl = document.fullscreenElement || document.webkitFullscreenElement || null;
     if (nativeEl) {
-        console.log('[rotate] using native fullscreen element:', nativeEl.className || nativeEl.tagName);
+        if (expectsFullscreen) {
+            console.log('[rotate] using native fullscreen element:', nativeEl.className || nativeEl.tagName);
+        }
         return nativeEl;
     }
 
@@ -90,20 +109,25 @@ function getManualRotationFullscreenElement() {
     const fallbackEl = document.querySelector('.plyr--fullscreen-fallback')
         || document.querySelector('.plyr--fullscreen');
     if (fallbackEl) {
-        console.log('[rotate] using fallback fullscreen element:', fallbackEl.className);
+        if (expectsFullscreen) {
+            console.log('[rotate] using fallback fullscreen element:', fallbackEl.className);
+        }
         return fallbackEl;
     }
 
-    // Last resort: fullscreen.active is already confirmed true by the
-    // caller at this point, so Plyr's own stylesheet has already made
-    // the single .plyr container fullscreen even if we can't match its
-    // exact modifier class - just grab it directly
+    // Last resort: the plain .plyr container. In fullscreen this is still the
+    // right element (Plyr's stylesheet has already sized it, even when the
+    // modifier class doesn't match). Outside fullscreen it's precisely what
+    // the shared title bar wants. So this is the NORMAL path most of the
+    // time, not a failure - worth a line only when we expected better.
     const plyrContainer = document.querySelector('#inlineVideoContainer .plyr') || document.querySelector('.plyr');
     if (plyrContainer) {
-        console.log('[rotate] falling back to generic .plyr container');
+        if (expectsFullscreen) console.log('[rotate] falling back to generic .plyr container');
         return plyrContainer;
     }
 
+    // No player in the DOM at all - genuinely worth knowing about whatever
+    // mode we're in.
     console.warn('[rotate] no fullscreen element found at all');
     return null;
 }
@@ -943,33 +967,6 @@ const JOG_MULT_BOTTOM = 4;
 const JOG_MULT_MIDDLE = 16;
 const JOG_MULT_TOP    = 32;
 
-// ⚙️ After a jog ends, playback resumes unless you touch again within this
-// window. Cancelled on touchstart rather than on the next completed jog, so
-// the window is "time to START touching again", not "time to finish a whole
-// gesture" - which makes 2s feel far longer than it sounds.
-const JOG_RESUME_DELAY_MS = 1000;
-let jogResumeTimer = null;
-
-function cancelJogResume() {
-    if (jogResumeTimer) { clearTimeout(jogResumeTimer); jogResumeTimer = null; }
-}
-
-function scheduleJogResume() {
-    cancelJogResume();
-    jogResumeTimer = setTimeout(() => {
-        jogResumeTimer = null;
-        // Guards: a deliberate play, leaving FLS, or the player being torn
-        // down by a swipe-up stop must all cancel this. Otherwise a hidden
-        // player could start playing two seconds later.
-        if (!window.plyrPlayer) return;
-        if (!window.plyrPlayer.paused) return;
-        if (!isForcedOrRealLandscapeMobile() && window.innerWidth > 1024) return;
-        if (!document.querySelector('.plyr__video-wrapper')) return;
-        window.plyrPlayer.play();
-        showPlayerFeedback('▶ Resumed');
-    }, JOG_RESUME_DELAY_MS);
-}
-
 // ⚙️ MP ladder, bottom to top: 32x / 16x / 4x.
 const JOG_MP_MULT_BOTTOM = 32;
 const JOG_MP_MULT_MIDDLE = 16;
@@ -1027,9 +1024,7 @@ scrubbing = false; // Don't activate yet - wait to determine direction
 //         proportional scrubbing isn't what you want there. Playing,
 //         portrait behaves exactly as before.
 // Covers portrait fullscreen and inline alike - neither is landscape.
-// Any new touch cancels a pending resume - this is what lets you keep
-// jogging by simply carrying on, rather than racing a timer.
-cancelJogResume();
+
 
 // The rule is now purely about play state, not screen position:
 //   paused  -> jog, from anywhere on the video
@@ -1139,13 +1134,8 @@ isDetermined = false;
 
 // Jog reset belongs HERE, on release - it was only ever being cleared at
 // touch-down, so nothing knew a jog had just finished.
-const jogJustEnded = jogActive;
 jogEligible = false;
 jogActive = false;
-
-// Only after a jog that actually engaged. A tap or an ordinary proportional
-// seek must not start playback on its own.
-if (jogJustEnded) scheduleJogResume();
 
 // ✅ Land on the exact frame on release - fastSeek during the drag is
 // intentionally imprecise for speed, so do one accurate seek now.
@@ -2552,6 +2542,51 @@ function showPlayerBasketModal() {
 
 window.showPlayerBasketModal = showPlayerBasketModal;
 
+/**
+ * Keeps playback paused for as long as the bookmark modal is on screen.
+ *
+ * Pausing once on open wasn't enough - Plyr, the jog-scrub resume, and a tap
+ * leaking through the overlay can all restart playback behind the modal.
+ * This pauses every <video>/<audio> on the page (which covers PIP, the
+ * mini-player and iOS native fullscreen, since they all share the same media
+ * element) and re-pauses on any play event until the overlay is gone.
+ */
+function holdPausedWhileBookmarkModalOpen(overlay) {
+    const pauseEverything = () => {
+        try {
+            if (window.plyrPlayer && !window.plyrPlayer.paused) window.plyrPlayer.pause();
+        } catch (e) {}
+        document.querySelectorAll('video, audio').forEach(m => {
+            try { if (!m.paused) m.pause(); } catch (e) {}
+        });
+    };
+
+    pauseEverything();
+
+    // 'play' does not bubble, but non-bubbling events still travel through
+    // the capture phase - hence the `true`. Listening on the media element
+    // directly would miss Plyr rebuilding it mid-modal.
+    const onPlay = () => {
+        if (document.getElementById('playerBookmarkModal')) pauseEverything();
+    };
+    document.addEventListener('play', onPlay, true);
+
+    const stop = () => {
+        document.removeEventListener('play', onPlay, true);
+        observer.disconnect();
+    };
+    // The modal is removed from three separate places (Save, Close, backdrop
+    // click), so watch for its removal rather than patching all three.
+    const observer = new MutationObserver(() => {
+        if (!overlay.isConnected) stop();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // Belt and braces - a missed callback would otherwise leave the listener
+    // attached, silently re-pausing for the rest of the session.
+    setTimeout(() => { if (!overlay.isConnected) stop(); }, 60000);
+}
+
 function showPlayerBookmarkModal() {
     const existing = document.getElementById('playerBookmarkModal');
     if (existing) existing.remove();
@@ -2946,6 +2981,7 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
     });
 
     document.body.appendChild(overlay);
+    holdPausedWhileBookmarkModalOpen(overlay);
     setTimeout(() => noteInput.focus(), 50);
 
     // ✅Load top bookmark notes as quick-add pills (async, non-blocking)
@@ -5146,13 +5182,21 @@ function setupDoubleTapHandler() {
  let tripleLast = 0;
  window.scraySuppressControlsToggle = false;
 
- const trackTripleTap = (inZone) => {
+ // ⚙️ The left third is now split into three vertical zones, so the tracker
+ // carries WHICH zone the taps landed in rather than a bare boolean. All
+ // three taps must land in the SAME zone - drifting between zones resets
+ // the count, so a sloppy gesture can never fire the wrong modal.
+ // Returns the zone name on the third tap, otherwise null.
+ let tripleZone = null;
+
+ const trackTripleTap = (zone) => {
      const now = Date.now();
-     if (!inZone || now - tripleLast > TRIPLE_TAP_MS) {
-         tripleCount = inZone ? 1 : 0;
-         tripleLast = inZone ? now : 0;
-         window.scraySuppressControlsToggle = inZone;
-         return false;
+     if (!zone || zone !== tripleZone || now - tripleLast > TRIPLE_TAP_MS) {
+         tripleCount = zone ? 1 : 0;
+         tripleLast = zone ? now : 0;
+         tripleZone = zone || null;
+         window.scraySuppressControlsToggle = !!zone;
+         return null;
      }
      tripleCount += 1;
      tripleLast = now;
@@ -5163,12 +5207,44 @@ function setupDoubleTapHandler() {
      if (tripleCount >= 3) {
          tripleCount = 0;
          tripleLast = 0;
+         tripleZone = null;
          window.scraySuppressControlsToggle = false;
-         return true;
+         return zone;
      }
-     return false;
+     return null;
  };
  window.scrayTrackTripleTap = trackTripleTap;
+
+ // The score picker (.score-context-menu) has no FLS awareness of its own -
+ // it positions itself at raw event coordinates and never rotates, unlike
+ // the basket and bookmark modals which both branch on
+ // body.manual-rotate-landscape. A touchend also carries no clientX/clientY
+ // (only changedTouches), so left alone the menu would land at 0,0 and read
+ // sideways in forced landscape. Centre it and rotate it to match.
+ const openScoreModalForCurrentVideo = () => {
+     const v = window.currentPlayingVideo;
+     if (!v || typeof window.showVideoScoringModal !== 'function') return;
+
+     window.showVideoScoringModal(v, {
+         clientX: window.innerWidth / 2,
+         clientY: window.innerHeight / 2
+     });
+
+     const menu = document.querySelector('.score-context-menu');
+     if (!menu) return;
+
+     const place = () => {
+         menu.style.top = '50%';
+         menu.style.left = '50%';
+         menu.style.transform = document.body.classList.contains('manual-rotate-landscape')
+             ? 'translate(-50%, -50%) rotate(90deg)'
+             : 'translate(-50%, -50%)';
+     };
+     place();
+     // showVideoScoringModal nudges left/top in its own setTimeout(0) when
+     // the menu overflows. Ours is queued after it, so ours wins.
+     setTimeout(place, 0);
+ };
  
  // Handler function that can be attached to any element
  const handleDoubleTap = function(e) {
@@ -5188,16 +5264,39 @@ function setupDoubleTapHandler() {
              : null;
          const tX = remap ? remap.x : (e.changedTouches[0].clientX - tRect.left);
          const tW = remap ? remap.width : tRect.width;
+         const tY = remap ? remap.y : (e.changedTouches[0].clientY - tRect.top);
+         const tH = remap ? remap.height : tRect.height;
          const inFlsLeftThird = isForcedOrRealLandscapeMobile()
              && window.innerWidth <= 1024
              && tX < tW / 3;
 
-         if (window.scrayTrackTripleTap?.(inFlsLeftThird)) {
+         // ⚙️ Left third, split top-to-bottom AS SEEN IN LANDSCAPE (the
+         // remap above has already converted forced-rotation coordinates,
+         // so this is the same maths in both real and forced landscape):
+         //   top third    -> basket modal (what triple tap always did)
+         //   middle third -> bookmark modal
+         //   bottom third -> score picker
+         let flsZone = null;
+         if (inFlsLeftThird) {
+             const vFrac = tY / tH;
+             flsZone = vFrac < (1 / 3) ? 'basket'
+                     : vFrac < (2 / 3) ? 'bookmark'
+                     : 'score';
+         }
+
+         const firedZone = window.scrayTrackTripleTap?.(flsZone);
+         if (firedZone) {
              e.stopPropagation();
              e.preventDefault();
              lastTap = 0;
-             // Same modal the FLS title bar opens.
-             if (typeof showPlayerBasketModal === 'function') showPlayerBasketModal();
+             if (firedZone === 'score') {
+                 openScoreModalForCurrentVideo();
+             } else if (firedZone === 'bookmark') {
+                 if (typeof showPlayerBookmarkModal === 'function') showPlayerBookmarkModal();
+             } else {
+                 // Same modal the FLS title bar opens.
+                 if (typeof showPlayerBasketModal === 'function') showPlayerBasketModal();
+             }
              return;
          }
      }

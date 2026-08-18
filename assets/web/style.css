@@ -4389,7 +4389,36 @@ cursor: pointer;
 position: relative;
 transition: height 0.15s ease;
 z-index: 50; /* Keep progress bar clickable */
+
+/* ⚙️ ADJUSTABLE: end-cap ticks marking exactly where the seekable track
+   starts and stops - without them the bar's ends are hard to find against
+   a bright or busy frame. */
+--scray-progress-endcap-color: #ff9800;
+--scray-progress-endcap-width: 2px;
+--scray-progress-endcap-overhang: 2px; /* how far they stick out, top & bottom */
 }
+
+/* Pseudo-elements ON THE BAR, rather than separate positioned divs: they
+   inherit the bar's own opacity and visibility, so they can never drift out
+   of sync with it - whatever fades or hides the bar takes these with it for
+   free. pointer-events:none keeps them clear of seeking, and z-index 55 sits
+   above the white fill (no z-index) but below the bookmark markers (60), so
+   a marker parked at 0% or 100% still shows and stays tappable. */
+.permanent-progress-bar::before,
+.permanent-progress-bar::after {
+content: '';
+position: absolute;
+top: calc(-1 * var(--scray-progress-endcap-overhang));
+bottom: calc(-1 * var(--scray-progress-endcap-overhang));
+width: var(--scray-progress-endcap-width);
+background: var(--scray-progress-endcap-color);
+border-radius: 1px;
+pointer-events: none;
+z-index: 55;
+}
+
+.permanent-progress-bar::before { left: 0; }
+.permanent-progress-bar::after  { right: 0; }
 
 /* =========================================
 BOOKMARK MARKERS ON PROGRESS BAR

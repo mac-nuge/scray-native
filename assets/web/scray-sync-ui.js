@@ -342,6 +342,7 @@ async function flagUncatalogued(allKeys) {
  */
 setTimeout(async () => {
   if (typeof window.scraySyncLibrary !== "function") return;
+
   // The server is on a different database than this mirror was built from and
   // you chose to leave it that way. Pulling would blend two catalogues.
   if (window.SCRAY_DB_MODE_DRIFT) {

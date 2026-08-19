@@ -673,6 +673,16 @@ async function migrateLocalVideoKey(oldId, newId, newFilename, newDownloadUrl) {
            ? generateTagsFromPath(newPath)
            : [];
 
+       // videoKey is the join to the catalogue, NOT a mirror of the filename.
+       // Once a row has been matched (inCatalogue true) the key belongs to the
+       // server and a local rename must never move it — see the comment in
+       // render.js's fingerprint adopt. But an unmatched row's key was only
+       // ever seeded from the filename at scan time, so leaving it behind
+       // points the row at a name this device no longer has.
+       const keyPatch = row.inCatalogue === true
+           ? {}
+           : { videoKey: window.scrayVideoKey(newFilename) };
+
        sourceStore.delete(oldId);
        sourceStore.put({
            ...row,
@@ -681,7 +691,8 @@ async function migrateLocalVideoKey(oldId, newId, newFilename, newDownloadUrl) {
            path: newPath,
            downloadUrl: newDownloadUrl,
            bracketTags,
-           tags: [...new Set([...pathTags, ...bracketTags])]
+           tags: [...new Set([...pathTags, ...bracketTags])],
+           ...keyPatch
        });
    }
 
@@ -733,16 +744,25 @@ async function renameLocalFile(video, newName) {
 
    const newDownloadUrl = `scray-video://local/${newRelPath.split('/').map(encodeURIComponent).join('/')}`;
 
+   // Same rule as migrateLocalVideoKey: a matched row's key belongs to the
+   // server, an unmatched row's key is just the filename and has to follow it.
+   // Kept in step so IndexedDB and the in-memory arrays can't disagree.
+   const keyPatch = video.inCatalogue === true
+       ? {}
+       : { videoKey: window.scrayVideoKey(newName) };
+
    await migrateLocalVideoKey(oldRelPath, newRelPath, newName, newDownloadUrl);
    rekeyVideoInMemory(oldRelPath, newRelPath, {
        filename: newName,
-       downloadUrl: newDownloadUrl
+       downloadUrl: newDownloadUrl,
+       ...keyPatch
    });
 
    // Mutate the caller's object so downstream code uses the new key
    video.oneDriveId = newRelPath;
    video.filename = newName;
    video.downloadUrl = newDownloadUrl;
+   Object.assign(video, keyPatch);
 
    console.log(`Local rename: ${oldRelPath} -> ${newRelPath}`);
    refreshAllLists();
@@ -2412,34 +2432,6 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         }
     }
 
-    if (false) {
-        try {
-            const excelData = { bookmarks: null };
-            if (excelData && Array.isArray(excelData.bookmarks)) {
-                video.bookmarks = excelData.bookmarks;
-                
-                // Update local caches so future opens are instant
-                if (typeof updateVideoInMemory === 'function') {
-                    updateVideoInMemory(video.oneDriveId, { bookmarks: video.bookmarks });
-                }
-                if (typeof updateVideoInDB === 'function') {
-                    await updateVideoInDB(video.oneDriveId, { bookmarks: video.bookmarks });
-                }
-                
-                // ✅ Refresh progress bar markers immediately if this is the
-                // video currently playing - previously only Save did this,
-                // so viewing/closing the modal left stale (or missing) markers
-                if (window.currentPlayingVideo && window.currentPlayingVideo.oneDriveId === video.oneDriveId) {
-                    window.currentPlayingVideo.bookmarks = video.bookmarks;
-                    if (typeof window.renderBookmarkMarkers === 'function') {
-                        window.renderBookmarkMarkers();
-                    }
-                }
-            }
-        } catch (err) {
-            console.warn('Could not fetch bookmarks from Excel:', err);
-        }
-    }
     
     // ✅Fetch top 10 most common bookmark notes for quick-add buttons
     let topNotes = [];
@@ -2688,54 +2680,6 @@ async function saveBookmarks(video, existingTooltip = null) {
         window.currentPlayingVideo.bookmarks = video.bookmarks;
         if (typeof window.renderBookmarkMarkers === 'function') {
             window.renderBookmarkMarkers();
-        }
-    }
-    // No excelAccessToken gate: local-scores-cache.js pins that to null, so
-    // this block never ran. Bookmarks also can't go through queueExcelUpdate
-    // any more — buildOp drops them, because they live in their own table now.
-    // Bookmarks are pushed by saveVideoMeta() in db.js — the single choke point
-    // every write already passes through. Pushing here too would race: the
-    // second push computes its deletes from a server state the first changed.
-    if (false) {
-        try {
-            const bmKey = video.videoKey || window.scrayVideoKey(video.filename);
-            // Diff against the server so removals become real tombstones. A
-            // union merge could never delete: another device just re-merged
-            // the removed bookmark back on the next sync.
-            const before = await window.scrayApiCall("bookmarks_get", { params: { id: bmKey } });
-            const serverTimes = new Set((before.bookmarks || []).map(b => b.time_ms));
-            const localTimes  = new Set(video.bookmarks.map(b => Math.round(b.time * 1000)));
-
-            await window.scrayApiCall("bookmarks_push", {
-                method: "POST",
-                body: {
-                    video_key: bmKey,
-                    device: window.SCRAY_SYNC.DEVICE_ID,
-                    upsert: video.bookmarks.map(b => ({
-                        time_ms: Math.round(b.time * 1000),
-                        note: b.note || ""
-                    })),
-                    delete: [...serverTimes].filter(t => !localTimes.has(t)),
-                }
-            });
-            if (typeof window.clearTopBookmarkNotesCache === 'function') {
-                window.clearTopBookmarkNotesCache();
-            }
-            if (existingTooltip && typeof window.updateBookmarkConfirmation === 'function') {
-                window.updateBookmarkConfirmation(existingTooltip, 'Bookmarks saved to Excel', '#28a745');
-                window.closeBookmarkConfirmation(existingTooltip);
-            } else if (typeof window.showBookmarkConfirmation === 'function') {
-                window.showBookmarkConfirmation('Bookmarks saved to Excel');
-            }
-        } catch (err) {
-            console.error('Failed to save bookmarks to the database:', err);
-            if (existingTooltip && typeof window.updateBookmarkConfirmation === 'function') {
-                window.updateBookmarkConfirmation(existingTooltip, '❌ Excel save failed', '#dc3545');
-                window.closeBookmarkConfirmation(existingTooltip);
-            } else if (typeof window.showBookmarkConfirmation === 'function') {
-                window.showBookmarkConfirmation('❌ Excel save failed', '#dc3545');
-            }
-            throw err;
         }
     }
     // saveVideoMeta() pushed to the bookmarks table on the way through, so by

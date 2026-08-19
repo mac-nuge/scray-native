@@ -134,7 +134,7 @@ async function renderFolderPills() {
       loadBtn.textContent = "Scanning...";
       loadBtn.disabled = true;
       try {
-        await scanLocalLibrary(folder.name);
+        await window.scrayWatch("folder refresh", () => scanLocalLibrary(folder.name));
       } catch (err) {
         console.error("Rescan failed:", err);
         alert(`Refresh failed: ${err.message}`);
@@ -423,7 +423,7 @@ window.addEventListener("DOMContentLoaded", () => {
       await renderFolderPills();
 
       if (btn) { btn.textContent = "Scanning..."; btn.disabled = true; }
-      await scanLocalLibrary(folderName);
+      await window.scrayWatch("folder add", () => scanLocalLibrary(folderName));
     } catch (err) {
       console.error("pickFolder ERROR: " + err.message);
     } finally {
@@ -437,7 +437,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const originalText = btn ? btn.textContent : null;
     if (btn) { btn.textContent = "Refreshing..."; btn.disabled = true; }
     try {
-      await scanLocalLibrary();
+      await window.scrayWatch("folder refresh", () => scanLocalLibrary());
     } catch (err) {
       console.error("Refresh failed:", err);
       alert(`Refresh failed: ${err.message}`);

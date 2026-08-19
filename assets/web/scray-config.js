@@ -25,23 +25,30 @@
    excel-sheets.js - the hooks must be in place before the first request.
    ========================================= */
 window.scrayBoot = (function () {
-  // ⚙️ ADJUSTABLE: earliest READY can appear, ms. Also covers work that
-  //    starts on a timer - Native's catalogue sync fires at 2s, so this must
-  //    stay above that or READY can land before the sync even begins.
-  const MIN_MS   = 3000;
-  // ⚙️ ADJUSTABLE: how long the network must stay silent before we call it
-  //    done, ms. Also the grace period for the IndexedDB writes that follow
-  //    each load ("Saved 332 scores..."). Raise if READY still feels early.
-  const QUIET_MS = 2000;
-  // ⚙️ ADJUSTABLE: hard ceiling, ms. Something is wedged - say so and stop.
-  const MAX_MS   = 90000;
+  // ⚙️ ADJUSTABLE: the start-up run. minMs is the earliest READY can appear -
+  //    it also covers work that starts on a timer, and Native's catalogue
+  //    sync fires at 2s, so it must stay above that or READY can land before
+  //    the sync even begins. quietMs is how long the network must stay silent
+  //    before we call it done, and doubles as the grace period for the
+  //    IndexedDB writes that follow each load ("Saved 332 scores..."). maxMs
+  //    is a hard ceiling - something is wedged, say so and stop.
+  const BOOT = { minMs: 3000, quietMs: 2000, maxMs: 90000 };
 
-  const t0 = Date.now();
+  // ⚙️ ADJUSTABLE: a folder refresh / folder add run. The work itself is
+  //    handed to watch() as a promise, so there is no timer-delayed work to
+  //    guard against and minMs can be short. The ceiling is generous because
+  //    a first scan of a large folder is thousands of metadata reads.
+  const TASK = { minMs: 800, quietMs: 1500, maxMs: 900000 };
+
+  const bootT0 = Date.now();
   let inFlight = 0;         // open HTTP requests
   let extra = 0;            // non-HTTP work registered via track()
   let lastActivity = Date.now();
-  let done = false;
-  let timer = null;
+
+  // The run currently being watched, or null between runs. Keeping this in
+  // one object rather than loose t0/done/timer is what lets a second run
+  // happen at all - the old flat state could only ever settle once.
+  let run = null;
 
   const bump = () => { lastActivity = Date.now(); };
 
@@ -104,10 +111,10 @@ window.scrayBoot = (function () {
   const READY_FONT     = '1.7rem';   // the word READY itself
   const READY_DWELL_MS = 2200;       // how long it sits before fading
 
-  function toast(secs) {
+  function toast(secs, label) {
     const el = document.createElement('div');
     el.innerHTML =
-      `✅ READY<br><span style="font-size:0.42em;opacity:0.9;font-weight:normal;">start-up finished in ${secs}s</span>`;
+      `✅ READY<br><span style="font-size:0.42em;opacity:0.9;font-weight:normal;">${label || 'start-up'} finished in ${secs}s</span>`;
     // Fully inline rather than borrowing .score-confirmation-tooltip: that
     // class positions itself near the bottom of the screen, and a class rule
     // fighting inline centring is exactly the kind of thing that silently
@@ -149,34 +156,96 @@ window.scrayBoot = (function () {
     }, READY_DWELL_MS);
   }
 
-  function settle(reason) {
-    if (done) return;
-    done = true;
-    clearInterval(timer);
-    // Put the originals back - no reason to keep instrumenting for the rest
-    // of the session.
-    if (origFetch) window.fetch = origFetch;
-    if (origSend) window.XMLHttpRequest.prototype.send = origSend;
+  // Note the fetch/XHR wrappers above now stay installed for the whole
+  // session - settle() no longer puts the originals back. That was fine when
+  // READY fired exactly once, but a second run needs the counters live again,
+  // and re-wrapping a wrapper (or unwrapping over somebody else's later
+  // wrapper) is how you end up with a permanently negative inFlight and a
+  // READY that never fires. A counter increment per request costs nothing.
 
-    const secs = ((Date.now() - t0) / 1000).toFixed(1);
-    if (reason === 'ceiling') {
-      console.warn(`[boot] hit the ${MAX_MS / 1000}s ceiling with ${inFlight} request(s) still open - calling it ready anyway`);
-    } else {
-      console.log(`[boot] READY - all start-up work finished in ${secs}s`);
+  function begin(label, cfg) {
+    // Already watching something - fold this in rather than stacking two
+    // toasts. Refresh-all-accounts fans out into one call per account and
+    // would otherwise fire a separate READY for each one.
+    if (run) {
+      if (label) run.label = label;
+      bump();
+      return run;
     }
-    try { toast(secs); } catch (e) { /* a failed toast must never break boot */ }
+    run = { label: label || null, cfg, t0: Date.now(), timer: null, done: false };
+    bump();
+    run.timer = setInterval(tick, 250);
+    return run;
   }
 
-  function start() {
-    timer = setInterval(() => {
-      const now = Date.now();
-      if (now - t0 > MAX_MS)           return settle('ceiling');
-      if (now - t0 < MIN_MS)           return;
-      if (inFlight > 0 || extra > 0)   return;
-      if (now - lastActivity < QUIET_MS) return;
-      settle('quiet');
-    }, 250);
+  function tick() {
+    if (!run) return;
+    const now = Date.now();
+    const { minMs, quietMs, maxMs } = run.cfg;
+    if (now - run.t0 > maxMs)           return settle('ceiling');
+    if (now - run.t0 < minMs)           return;
+    if (inFlight > 0 || extra > 0)      return;
+    if (now - lastActivity < quietMs)   return;
+    settle('quiet');
   }
+
+  // Ends a run WITHOUT a toast - used when the watched work throws. A refresh
+  // that failed must not be announced as READY.
+  function abandon() {
+    if (!run) return;
+    run.done = true;
+    clearInterval(run.timer);
+    run = null;
+  }
+
+  function settle(reason) {
+    if (!run || run.done) return;
+    const finished = run;
+    finished.done = true;
+    clearInterval(finished.timer);
+    run = null;
+
+    const label = finished.label || 'start-up';
+    const secs = ((Date.now() - finished.t0) / 1000).toFixed(1);
+    if (reason === 'ceiling') {
+      console.warn(`[boot] ${label}: hit the ${finished.cfg.maxMs / 1000}s ceiling with ${inFlight} request(s) still open - calling it ready anyway`);
+    } else {
+      console.log(`[boot] READY - ${label} finished in ${secs}s`);
+    }
+    try { toast(secs, label); } catch (e) { /* a failed toast must never break anything */ }
+  }
+
+  /**
+   * Watch a discrete piece of work and show the READY confirmation once it
+   * has genuinely finished - which is later than the promise resolving.
+   *
+   * A folder refresh returns as soon as its own awaits are done, but the
+   * catalogue push, the score re-apply, the tag dropdowns and the grid
+   * repaint are all still settling behind it. So the promise only holds the
+   * run OPEN; the same network-quiet test that ends start-up is what actually
+   * ends this. READY therefore means "loaded, pushed, joined and painted".
+   *
+   *   await window.scrayWatch("folder refresh", () => scanLocalLibrary());
+   */
+  function watch(label, work, cfg) {
+    const mine = begin(label, cfg || TASK);
+    let p;
+    try {
+      p = Promise.resolve(typeof work === 'function' ? work() : work);
+    } catch (err) {
+      if (run === mine) abandon();
+      return Promise.reject(err);
+    }
+    extra++; bump();
+    return p.then(
+      (val) => { extra--; bump(); return val; },
+      (err) => { extra--; bump(); if (run === mine) abandon(); throw err; }
+    );
+  }
+
+  // bootT0 is script-parse time, not DOMContentLoaded, so the reported
+  // start-up duration stays what it always was.
+  function start() { begin(null, BOOT).t0 = bootT0; }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start);
@@ -186,10 +255,23 @@ window.scrayBoot = (function () {
 
   return {
     track,
+    watch,
     settle: () => settle('manual'),
-    stats: () => ({ inFlight, extra, elapsed: Date.now() - t0 })
+    stats: () => ({ inFlight, extra, running: !!run, elapsed: run ? Date.now() - run.t0 : 0 })
   };
 })();
+
+/**
+ * One-liner so call sites don't each need a guard. Behaves exactly like
+ * scrayBoot.watch, but still runs the work if the watcher somehow isn't there
+ * - a missing confirmation must never cost you the refresh itself.
+ */
+window.scrayWatch = function (label, work) {
+  if (window.scrayBoot && typeof window.scrayBoot.watch === 'function') {
+    return window.scrayBoot.watch(label, work);
+  }
+  return Promise.resolve(typeof work === 'function' ? work() : work);
+};
 
 window.SCRAY_SYNC = {
   API_BASE: "https://macnguyen.com/scray/api.php",

@@ -23,6 +23,29 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
         let videoHandler = VideoSchemeHandler()
         config.setURLSchemeHandler(videoHandler, forURLScheme: "scray-video")
         config.userContentController.add(messageProxy, name: "scrayBridge")
+
+        // Expose the IPA's own identity to the web layer at documentStart, so
+        // it's available however the page was loaded (bundled file:// or the
+        // dev server) and stays correct even when the web assets are being
+        // served from another machine.
+        let info = Bundle.main.infoDictionary ?? [:]
+        let shortVersion = (info["CFBundleShortVersionString"] as? String) ?? "0.0.0"
+        let bundleBuild = (info["CFBundleVersion"] as? String) ?? "0"
+        let isDevVariant = (Bundle.main.bundleIdentifier ?? "").hasSuffix(".dev")
+        let nativeInfoJS = """
+        window.SCRAY_NATIVE = {
+          variant: "\(isDevVariant ? "dev" : "prd")",
+          version: "\(shortVersion)",
+          build: "\(bundleBuild)",
+          buildId: "\(BuildInfo.id)"
+        };
+        """
+        config.userContentController.addUserScript(
+            WKUserScript(source: nativeInfoJS,
+                         injectionTime: .atDocumentStart,
+                         forMainFrameOnly: true)
+        )
+
         webView = WKWebView(frame: .zero, configuration: config)
         super.init(appContext: appContext)
         messageProxy.target = self

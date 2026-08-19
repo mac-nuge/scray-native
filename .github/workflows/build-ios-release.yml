@@ -18,10 +18,28 @@ jobs:
           mkdir -p modules/scray-native/ios
           echo "// Auto-generated at build time — do not edit or commit" > modules/scray-native/ios/BuildInfo.swift
           echo "enum BuildInfo { static let id = \"$(date -u +%Y%m%dT%H%M%SZ)-${{ github.sha }}\" }" >> modules/scray-native/ios/BuildInfo.swift
+      - name: Generate web version.js
+        run: |
+          VERSION_TEXT="$(cat assets/web/VERSION 2>/dev/null | tr -d '\r\n')"
+          if [ -z "$VERSION_TEXT" ]; then
+            VERSION_TEXT="$(date -u +%Y%m%d)-$(echo ${{ github.sha }} | cut -c1-7)"
+          fi
+          echo "// Auto-generated at build time — do not edit or commit" > assets/web/version.js
+          echo "window.SCRAY_VERSION = \"$VERSION_TEXT\";" >> assets/web/version.js
+          cat assets/web/version.js
+      - name: Read IPA version
+        id: ipa
+        run: |
+          IPA_VERSION=$(node -p "require('./scripts/ipa-version').read('prd')")
+          WEB_VERSION="$(cat assets/web/VERSION 2>/dev/null | tr -d '\r\n')"
+          echo "version=$IPA_VERSION" >> $GITHUB_OUTPUT
+          echo "### pipa $IPA_VERSION (build ${{ github.run_number }})" >> $GITHUB_STEP_SUMMARY
+          echo "web assets: $WEB_VERSION" >> $GITHUB_STEP_SUMMARY
       - name: Prebuild iOS project (Release variant)
         run: npx expo prebuild --platform ios
         env:
           APP_VARIANT: production
+          IPA_BUILD_NUMBER: ${{ github.run_number }}
       - name: Discover scheme name
         id: scheme
         run: |
@@ -50,5 +68,5 @@ jobs:
           zip -r scray-native-release.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: scray-native-release-ipa
+          name: scray-native-prd-v${{ steps.ipa.outputs.version }}-b${{ github.run_number }}
           path: scray-native-release.ipa

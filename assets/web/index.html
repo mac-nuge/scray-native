@@ -1,6 +1,6 @@
 <html><head>
   <meta charset="UTF-8">
-  <title>Scray Picker</title>
+  <title>Universal Native</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -46,17 +46,71 @@
   });
   </script>
 
+  <script src="version.js"></script>
+
   <script>
-    async function setAppVersionFromFile() {
+    // ── Version resolution ────────────────────────────────────────────────
+    // Three independent streams:
+    //   web  — the VERSION file in this folder
+    //   dipa — dev IPA version   (ipa-versions.json -> CFBundleShortVersionString)
+    //   pipa — prd IPA version   (same source, production variant)
+    // The IPA identity arrives as window.SCRAY_NATIVE, injected by Swift at
+    // documentStart. It is absent in Picker and in a plain browser.
+
+    async function resolveWebVersion() {
       try {
         const res = await fetch('VERSION');
-        if (!res.ok) throw new Error(`Failed to load VERSION: ${res.status}`);
-        const versionText = (await res.text()).trim();
-        document.title = `Scray Picker (${versionText})`;
+        if (res.ok) {
+          const text = (await res.text()).trim();
+          if (text) return text;
+        }
+      } catch (err) {
+        // Expected in the offline IPA: the page is loaded from a file:// URL
+        // and WebKit refuses fetch() on the file scheme entirely.
+      }
+      if (typeof window.SCRAY_VERSION === 'string' && window.SCRAY_VERSION.trim()) {
+        return window.SCRAY_VERSION.trim();
+      }
+      throw new Error('No VERSION file and no window.SCRAY_VERSION');
+    }
+
+    // "10.0 disguise overlay" -> { number: "10.0", description: "disguise overlay" }
+    // "10.0-staging"          -> { number: "10.0", description: "staging" }
+    function splitWebVersion(text) {
+      const m = String(text).trim().match(/^v?([0-9][0-9.]*)\s*[-–—_:]?\s*(.*)$/);
+      if (!m) return { number: String(text).trim(), description: '' };
+      return { number: m[1], description: (m[2] || '').trim() };
+    }
+
+    function composeVersionLabel(versionText) {
+      const n = window.SCRAY_NATIVE;
+      if (!n || !n.version) return `v${versionText}`;
+      const { number, description } = splitWebVersion(versionText);
+      const prefix = n.variant === 'dev' ? 'dipa' : 'pipa';
+      return `${prefix} ${n.version} web ${number}${description ? ' ' + description : ''}`;
+    }
+
+    async function setAppVersionFromFile() {
+      try {
+        const versionText = await resolveWebVersion();
+        const label = composeVersionLabel(versionText);
+        // The <h1> is the app identity and is now owned by the markup, not by
+        // this script — we only read it so the document title matches.
         const h1 = document.querySelector('h1');
-        if (h1) h1.textContent = `Scray Picker (${versionText})`;
-        document.getElementById('appVersion').textContent = `v${versionText}`;
-        document.getElementById('lockOverlayVersion').textContent = `v${versionText}`;
+        const appName = (h1 && h1.textContent.trim()) || 'Universal';
+        if (window.SCRAY_NATIVE) {
+          console.log('[Scray] versions', {
+            ipa: `${window.SCRAY_NATIVE.variant} ${window.SCRAY_NATIVE.version}`,
+            bundleBuild: window.SCRAY_NATIVE.build,
+            buildId: window.SCRAY_NATIVE.buildId,
+            web: versionText
+          });
+        }
+        document.title = `${appName} (${label})`;
+        const headerLine = document.getElementById('appVersionLine');
+        if (headerLine) headerLine.textContent = label;
+        document.getElementById('appVersion').textContent = label;
+        document.getElementById('lockOverlayVersion').textContent = label;
         const versionLower = versionText.toLowerCase();
 
         // Lock screen is always black now — environment colouring removed.
@@ -279,7 +333,8 @@
 <!-- Layout switch removed - browser.html deprecated -->
 
 <div id="topSpacer"></div>
-<h1>Scray Picker</h1>
+<p id="appVersionLine"></p>
+<h1>Universal Native</h1>
 
 <!-- ✅ Console FIRST -->
 <div id="inlineConsole"></div>

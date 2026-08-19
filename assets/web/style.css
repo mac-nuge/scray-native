@@ -78,6 +78,17 @@ color: pink;
 margin-top: 0;
 }
 
+/* Fine-print version line sitting directly above the header. Populated by
+   setAppVersionFromFile() in index.html. */
+#appVersionLine {
+font-size: 0.7rem;
+line-height: 1.2;
+color: #888;
+margin: 0 0 2px 0;
+letter-spacing: 0.03em;
+min-height: 0.85rem; /* reserve the row so the header doesn't jump on load */
+}
+
 html, body {
 touch-action: manipulation;   /* disables double-tap zoom while preserving scroll/tap */
 -webkit-touch-callout: none;  /* prevents callout menu on long press in Safari */
@@ -3468,7 +3479,8 @@ padding-bottom: 80px !important;
 padding-bottom: 80px !important;
 }
 /* Hide header */
-h1 {
+h1,
+#appVersionLine {
 display: none !important;
 }
 

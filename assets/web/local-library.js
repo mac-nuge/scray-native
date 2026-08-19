@@ -241,7 +241,10 @@ async function removeLocalFolder(folderName) {
 
   for (const v of doomed) {
     try {
-      await deleteVideoFromDB(v.oneDriveId);
+      // localOnly — this un-registers the folder from THIS device. It is not
+      // a deletion. Without the flag every video queued a server tombstone,
+      // which is how one tap on the × wiped 209 catalogue rows.
+      await deleteVideoFromDB(v.oneDriveId, { localOnly: true });
       if (typeof removeVideoFromMemory === "function") {
         removeVideoFromMemory(v.oneDriveId);
       }
@@ -267,7 +270,7 @@ async function scanLocalLibrary(folderNameOverride) {
   const folderName = folderNameOverride || getActiveFolderName();
   console.log(`scanLocalLibrary: starting for "${folderName}"`);
   const relativePaths = await ScrayBridge.listVideoFiles();
-  console.log("scanLocalLibrary: found " + relativePaths.length + " files: " + JSON.stringify(relativePaths));
+  console.log(`scanLocalLibrary: native returned ${relativePaths.length} file(s)`);
 
   const videos = [];
   for (let i = 0; i < relativePaths.length; i++) {

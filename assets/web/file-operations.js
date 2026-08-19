@@ -955,20 +955,41 @@ if (!opts.fromSync && typeof window.scrayEnqueueOp === "function") {
 */
 async function deleteVideoFromDB(oneDriveId, opts = {}) {
    const db = await openDB();
+
+   // Read the row BEFORE deleting it — the outbox op needs the video_key and
+   // there is nothing left to derive it from afterwards.
+   const row = await new Promise((res) => {
+     const r = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(oneDriveId);
+     r.onsuccess = () => res(r.result || null);
+     r.onerror   = () => res(null);
+   });
+
    const tx = db.transaction(STORE_NAME, "readwrite");
    const store = tx.objectStore(STORE_NAME);
    store.delete(oneDriveId);
    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
 
+   // localOnly = "forget this file here", not "this video is gone".
+   if (opts.localOnly || opts.fromSync) return;
+
+   // oneDriveId is a RELATIVE PATH for local files. Sending it as the op id
+   // made api.php insert a new row keyed "subfolder/file.mp4" and tombstone
+   // that instead — 199 junk rows, one per nested video.
+   const key = row?.videoKey || (row?.filename ? window.scrayVideoKey(row.filename) : null);
+   if (!key) {
+       console.warn(`[sync] no video_key for ${oneDriveId} — delete not queued`);
+       return;
+   }
+
    // Soft-delete on the server. A hard delete would make the row look "new"
    // to any device that hasn't pulled yet, and it would come straight back.
-   if (!opts.fromSync && typeof window.scrayEnqueueOp === "function") {
+   if (typeof window.scrayEnqueueOp === "function") {
        try {
            const outboxDb = await openDB();
            const otx = outboxDb.transaction("outbox", "readwrite");
            otx.objectStore("outbox").add({
                oneDriveId,
-               op: { id: oneDriveId, device: window.SCRAY_SYNC.DEVICE_ID, delete: true },
+               op: { id: key, device: window.SCRAY_SYNC.DEVICE_ID, delete: true },
                at: new Date().toISOString()
            });
            await new Promise((res, rej) => { otx.oncomplete = res; otx.onerror = () => rej(otx.error); });

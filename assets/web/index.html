@@ -82,12 +82,15 @@
       return { number: m[1], description: (m[2] || '').trim() };
     }
 
+    // Picker / browser: "v10.0 disguise overlay"
+    // Dev IPA:          "dipa b42 web 10.0 disguise overlay"
+    // Prd IPA:          "pipa b42 web 10.0 disguise overlay"
     function composeVersionLabel(versionText) {
       const n = window.SCRAY_NATIVE;
-      if (!n || !n.version) return `v${versionText}`;
+      if (!n || !n.build) return `v${versionText}`;
       const { number, description } = splitWebVersion(versionText);
       const prefix = n.variant === 'dev' ? 'dipa' : 'pipa';
-      return `${prefix} ${n.version} web ${number}${description ? ' ' + description : ''}`;
+      return `${prefix} b${n.build} web ${number}${description ? ' ' + description : ''}`;
     }
 
     async function setAppVersionFromFile() {
@@ -100,8 +103,8 @@
         const appName = (h1 && h1.textContent.trim()) || 'Universal';
         if (window.SCRAY_NATIVE) {
           console.log('[Scray] versions', {
-            ipa: `${window.SCRAY_NATIVE.variant} ${window.SCRAY_NATIVE.version}`,
-            bundleBuild: window.SCRAY_NATIVE.build,
+            ipa: `${window.SCRAY_NATIVE.variant} b${window.SCRAY_NATIVE.build}`,
+            shortVersion: window.SCRAY_NATIVE.version,
             buildId: window.SCRAY_NATIVE.buildId,
             web: versionText
           });

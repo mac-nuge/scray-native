@@ -194,6 +194,7 @@ async function scraySyncLibrary({ quiet = false } = {}) {
 
   const cursor = await window.scrayGetSyncState("cursor");
   let pulled = 0;
+  window._scrayTombstonesIgnored = 0;
 
   if (freshKeys.size) {
     pulled += await pullScoped([...freshKeys], 0);
@@ -206,6 +207,9 @@ async function scraySyncLibrary({ quiet = false } = {}) {
   const stats = await window.scrayApiCall("stats");
   await window.scraySetSyncState("cursor", { seq: stats.head, at: new Date().toISOString() });
 
+  if (window._scrayTombstonesIgnored) {
+    console.log(`[sync] ${window._scrayTombstonesIgnored} catalogue tombstone(s) ignored — those files are on this device`);
+  }
   const flagged = await flagUncatalogued([...freshKeys, ...deltaKeys]);
   if (typeof refreshAllLists === "function") refreshAllLists();
   return { pulled, flagged };

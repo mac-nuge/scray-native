@@ -27,13 +27,12 @@ jobs:
           echo "// Auto-generated at build time — do not edit or commit" > assets/web/version.js
           echo "window.SCRAY_VERSION = \"$VERSION_TEXT\";" >> assets/web/version.js
           cat assets/web/version.js
-      - name: Read IPA version
+      - name: Compute artifact name
         id: ipa
         run: |
-          IPA_VERSION=$(node -p "require('./scripts/ipa-version').read('dev')")
           WEB_VERSION="$(cat assets/web/VERSION 2>/dev/null | tr -d '\r\n')"
-          echo "version=$IPA_VERSION" >> $GITHUB_OUTPUT
-          echo "### dipa $IPA_VERSION (build ${{ github.run_number }})" >> $GITHUB_STEP_SUMMARY
+          echo "name=scray-native-dev-b${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "### dipa b${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
           echo "web assets: $WEB_VERSION" >> $GITHUB_STEP_SUMMARY
       - name: Prebuild iOS project (Dev variant)
         run: npx expo prebuild --platform ios
@@ -65,8 +64,8 @@ jobs:
           echo "Found app at: $APP_PATH"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
-          zip -r scray-native.ipa Payload
+          zip -r "${{ steps.ipa.outputs.name }}.ipa" Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: scray-native-dev-v${{ steps.ipa.outputs.version }}-b${{ github.run_number }}
-          path: scray-native.ipa
+          name: ${{ steps.ipa.outputs.name }}
+          path: ${{ steps.ipa.outputs.name }}.ipa

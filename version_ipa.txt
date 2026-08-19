@@ -1,7 +1,0 @@
-# IPA version numbers. Bump by hand; one line per variant.
-#   dev -> the unsigned dev IPA, shown as "dipa <version>"
-#   prd -> the offline release IPA, shown as "pipa <version>"
-# Web asset versions are NOT maintained here — see assets/web/VERSION.
-
-dev=0.1.0
-prd=1.0.0

@@ -870,6 +870,24 @@ async function scrayApplyPulledRow(appRow, rawRow, bookmarksByKey = null) {
   if (!id) return;
 
   if (rawRow.deleted) {
+    // A tombstone means the row went away in the CATALOGUE. It says nothing
+    // about the file sitting on this device. A rename in Picker mints a new
+    // key and tombstones the old one, and the phone still holds the old
+    // filename — deleting here wiped 203 freshly scanned files off the device
+    // seconds after a folder scan, and did it before flagUncatalogued's
+    // size-anchored adoption pass ever got to look at them.
+    const row = await new Promise((res) => {
+      const r = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(id);
+      r.onsuccess = () => res(r.result || null);
+      r.onerror   = () => res(null);
+    });
+    const localFile = row && (typeof window.isLocalVideo === "function"
+      ? window.isLocalVideo(row)
+      : (row.driveId === "local" || (row.accountKey || "").startsWith("local::")));
+    if (localFile) {
+      window._scrayTombstonesIgnored = (window._scrayTombstonesIgnored || 0) + 1;
+      return;
+    }
     const tx = db.transaction([STORE_NAME, META_STORE_NAME], "readwrite");
     tx.objectStore(STORE_NAME).delete(id);
     tx.objectStore(META_STORE_NAME).delete(id);

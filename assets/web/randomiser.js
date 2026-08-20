@@ -2542,10 +2542,6 @@ searchBox.addEventListener("keydown", (e) => {
       document.getElementById("exportCsvBtn")?.click();
   });
 
-  document.getElementById("mobileImportCsvBtn")?.addEventListener("click", () => {
-      document.getElementById("bulkOperationsCsvInput")?.click();
-  });
-
    // Corner C Button - now mirrors the player Stop button exactly
 const clearBtnCorner = document.getElementById("clearBtnCorner");
 if (clearBtnCorner) {

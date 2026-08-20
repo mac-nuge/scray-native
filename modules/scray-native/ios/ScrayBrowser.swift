@@ -1,5 +1,6 @@
 import UIKit
 import WebKit
+import UniformTypeIdentifiers
 
 // ============================================================================
 // ScrayBrowser — a self-contained tabbed browser, so Picker and the DB console
@@ -138,6 +139,7 @@ final class ScrayBrowserViewController: UIViewController,
     private var backItem = UIBarButtonItem()
     private var forwardItem = UIBarButtonItem()
     private var tabsItem = UIBarButtonItem()
+    private var moreItem = UIBarButtonItem()
     private var reloadButton = UIButton(type: .system)
 
     private var observations: [NSKeyValueObservation] = []
@@ -201,11 +203,6 @@ final class ScrayBrowserViewController: UIViewController,
     // MARK: - Chrome
 
     private func buildChrome() {
-        let closeButton = UIButton(type: .system)
-        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
-        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-        closeButton.widthAnchor.constraint(equalToConstant: 40).isActive = true
-
         reloadButton.setImage(UIImage(systemName: "arrow.clockwise"), for: .normal)
         reloadButton.addTarget(self, action: #selector(reloadTapped), for: .touchUpInside)
         reloadButton.widthAnchor.constraint(equalToConstant: 40).isActive = true
@@ -224,7 +221,7 @@ final class ScrayBrowserViewController: UIViewController,
         addressField.placeholder = "Search or enter address"
         addressField.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
-        let header = UIStackView(arrangedSubviews: [closeButton, addressField, reloadButton])
+        let header = UIStackView(arrangedSubviews: [addressField, reloadButton])
         header.axis = .horizontal
         header.alignment = .center
         header.spacing = 4
@@ -239,6 +236,10 @@ final class ScrayBrowserViewController: UIViewController,
 
         webContainer.translatesAutoresizingMaskIntoConstraints = false
 
+        // ✕ sits bottom-left where the thumb already is, rather than up in
+        // the header next to the address bar.
+        let closeItem = UIBarButtonItem(image: UIImage(systemName: "xmark"),
+                                        style: .plain, target: self, action: #selector(closeTapped))
         backItem = UIBarButtonItem(image: UIImage(systemName: "chevron.left"),
                                    style: .plain, target: self, action: #selector(backTapped))
         forwardItem = UIBarButtonItem(image: UIImage(systemName: "chevron.right"),
@@ -248,15 +249,15 @@ final class ScrayBrowserViewController: UIViewController,
         tabsItem = UIBarButtonItem(title: "1 ⧉", style: .plain, target: self, action: #selector(tabsTapped))
         let newTabItem = UIBarButtonItem(image: UIImage(systemName: "plus"),
                                          style: .plain, target: self, action: #selector(newTabTapped))
-        let safariItem = UIBarButtonItem(image: UIImage(systemName: "safari"),
-                                         style: .plain, target: self, action: #selector(safariTapped))
+        moreItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"),
+                                   style: .plain, target: self, action: #selector(moreTapped))
         func flex() -> UIBarButtonItem {
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         }
         backItem.isEnabled = false
         forwardItem.isEnabled = false
-        toolbar.items = [backItem, flex(), forwardItem, flex(), homeItem,
-                         flex(), tabsItem, flex(), newTabItem, flex(), safariItem]
+        toolbar.items = [closeItem, flex(), backItem, flex(), forwardItem, flex(), homeItem,
+                         flex(), tabsItem, flex(), newTabItem, flex(), moreItem]
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(header)
@@ -495,6 +496,37 @@ final class ScrayBrowserViewController: UIViewController,
         UIApplication.shared.open(url, options: [:], completionHandler: nil)
     }
 
+    @objc private func moreTapped() {
+        let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        sheet.popoverPresentationController?.barButtonItem = moreItem
+
+        sheet.addAction(UIAlertAction(title: "Open in Safari", style: .default) { [weak self] _ in
+            self?.safariTapped()
+        })
+
+        let folder = ScrayDownloadFolder.shared
+        let label = folder.hasFolder
+            ? "Downloads → \(folder.displayName ?? "folder")"
+            : "Downloads → ask every time"
+        sheet.addAction(UIAlertAction(title: label, style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            ScrayDownloadFolder.shared.choose(from: self.dialogPresenter()) { name in
+                guard let name = name else { return }
+                self.flash("Downloads will be saved to \(name)")
+            }
+        })
+
+        if folder.hasFolder {
+            sheet.addAction(UIAlertAction(title: "Ask Every Time Instead", style: .destructive) { [weak self] _ in
+                ScrayDownloadFolder.shared.clear()
+                self?.flash("Downloads will ask where to save")
+            })
+        }
+
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSafely(sheet)
+    }
+
     @objc private func tabsTapped() {
         let list = ScrayTabListViewController(style: .plain)
         list.provider = { [weak self] in
@@ -561,8 +593,15 @@ final class ScrayBrowserViewController: UIViewController,
     func webView(_ webView: WKWebView,
                  didFailProvisionalNavigation navigation: WKNavigation!,
                  withError error: Error) {
-        guard (error as NSError).code != NSURLErrorCancelled else { return }
         guard webView === currentWebView else { return }
+        let ns = error as NSError
+        // Turning a navigation into a download *cancels* the navigation, and
+        // WebKit reports that as "Frame load interrupted" (WebKitErrorDomain
+        // 102). Nothing went wrong — the download is starting. 101 is the same
+        // story for a URL WebKit won't display itself.
+        let benign = ns.code == NSURLErrorCancelled
+            || (ns.domain == "WebKitErrorDomain" && (ns.code == 101 || ns.code == 102))
+        guard !benign else { return }
         showAlert(title: "Couldn't load page", message: error.localizedDescription)
     }
 
@@ -791,11 +830,14 @@ final class ScrayBrowserViewController: UIViewController,
         }
 
         let name = sanitizedFilename(body["filename"] as? String)
-        guard let fileURL = writeTempFile(data: data, filename: name) else {
-            showAlert(title: "Download failed", message: "Couldn't write a temporary file.")
-            return
+        confirmDownload(filename: name) { [weak self] proceed in
+            guard let self = self, proceed else { return }
+            guard let fileURL = self.writeTempFile(data: data, filename: name) else {
+                self.showAlert(title: "Download failed", message: "Couldn't write a temporary file.")
+                return
+            }
+            self.deliver(fileURL: fileURL)
         }
-        presentSaveToFiles(fileURL: fileURL)
     }
 
     private func sanitizedFilename(_ raw: String?) -> String {
@@ -821,13 +863,73 @@ final class ScrayBrowserViewController: UIViewController,
         }
     }
 
-    fileprivate func presentSaveToFiles(fileURL: URL) {
+    /// The Safari-style "do you want to download this?" prompt. Also the point
+    /// at which the destination is named, so there's no surprise about where
+    /// the file went.
+    fileprivate func confirmDownload(filename: String, completion: @escaping (Bool) -> Void) {
         DispatchQueue.main.async {
+            let folder = ScrayDownloadFolder.shared
+            let alert = UIAlertController(
+                title: "Download “\(filename)”?",
+                message: folder.hasFolder ? "Saving to \(folder.displayName ?? "your folder")." : nil,
+                preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completion(false) })
+            alert.addAction(UIAlertAction(title: "Download", style: .default) { _ in completion(true) })
+            self.presentSafely(alert)
+        }
+    }
+
+    /// Straight into the chosen folder if there is one, otherwise the export
+    /// sheet. A folder that's been moved or deleted since it was picked falls
+    /// back to the sheet rather than dropping the file on the floor.
+    fileprivate func deliver(fileURL: URL) {
+        DispatchQueue.main.async {
+            if let saved = ScrayDownloadFolder.shared.save(fileURL: fileURL) {
+                try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
+                self.flash("Saved \(saved.lastPathComponent)")
+                return
+            }
             self.exportingTempFiles.append(fileURL)
             let picker = UIDocumentPickerViewController(forExporting: [fileURL])
             picker.delegate = self
-            self.dialogPresenter().present(picker, animated: true)
+            self.presentSafely(picker)
         }
+    }
+
+    fileprivate func makeTempDestination(filename: String) -> URL? {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scray-downloads", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            return nil
+        }
+        return dir.appendingPathComponent(filename)
+    }
+
+    /// A brief, self-dismissing confirmation — the download equivalent of
+    /// Safari's little bounce, so a silent save to a folder isn't silent.
+    fileprivate func flash(_ message: String) {
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        presentSafely(alert)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { alert.dismiss(animated: true) }
+    }
+
+    /// UIKit silently drops a present() that lands mid-transition, which is
+    /// exactly what happens when a download finishes while another sheet is
+    /// still animating away — the file picker then never appears, or appears
+    /// much later once something else nudges the run loop.
+    fileprivate func presentSafely(_ vc: UIViewController, attempt: Int = 0) {
+        let top = dialogPresenter()
+        if top.isBeingPresented || top.isBeingDismissed || top.transitionCoordinator != nil {
+            guard attempt < 30 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.presentSafely(vc, attempt: attempt + 1)
+            }
+            return
+        }
+        top.present(vc, animated: true)
     }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
@@ -850,7 +952,7 @@ final class ScrayBrowserViewController: UIViewController,
     fileprivate func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
-        dialogPresenter().present(alert, animated: true)
+        presentSafely(alert)
     }
 }
 
@@ -863,28 +965,29 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
                   decideDestinationUsing response: URLResponse,
                   suggestedFilename: String,
                   completionHandler: @escaping (URL?) -> Void) {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("scray-downloads", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        } catch {
-            completionHandler(nil)
-            return
-        }
         let name = suggestedFilename.isEmpty ? "download" : suggestedFilename
-        let dest = dir.appendingPathComponent(name)
-        downloadDestinations[ObjectIdentifier(download)] = dest
-        completionHandler(dest)
+        // The completion handler may be called asynchronously, which is what
+        // lets the confirmation prompt sit in front of it.
+        confirmDownload(filename: name) { [weak self] proceed in
+            guard let self = self, proceed,
+                  let dest = self.makeTempDestination(filename: name) else {
+                completionHandler(nil)   // nil cancels the download
+                return
+            }
+            self.downloadDestinations[ObjectIdentifier(download)] = dest
+            completionHandler(dest)
+        }
     }
 
     func downloadDidFinish(_ download: WKDownload) {
         guard let url = downloadDestinations.removeValue(forKey: ObjectIdentifier(download)) else { return }
-        presentSaveToFiles(fileURL: url)
+        deliver(fileURL: url)
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        downloadDestinations.removeValue(forKey: ObjectIdentifier(download))
+        // No recorded destination means we cancelled it ourselves at the
+        // prompt — that isn't a failure worth an alert.
+        guard downloadDestinations.removeValue(forKey: ObjectIdentifier(download)) != nil else { return }
         showAlert(title: "Download failed", message: error.localizedDescription)
     }
 }

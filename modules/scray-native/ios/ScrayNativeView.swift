@@ -190,6 +190,19 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
             } catch {
                 reject(id: id, error: error.localizedDescription)
             }
+        case "openBrowser":
+            // Payload is either a bare URL string, or { url, home }. Both are
+            // optional — no URL means "resume wherever the browser was left".
+            var browserURL: String? = nil
+            var browserHome = "https://macnguyen.com/sp-staging-sql/"
+            if let s = payload as? String, !s.isEmpty {
+                browserURL = s
+            } else if let d = payload as? [String: Any] {
+                browserURL = (d["url"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                if let h = d["home"] as? String, !h.isEmpty { browserHome = h }
+            }
+            ScrayBrowser.shared.present(url: browserURL, home: browserHome)
+            resolve(id: id, result: ["success": true])
         case "debugBundle":
             let resourcePath = Bundle.main.resourcePath ?? "nil"
             let rootContents = (try? FileManager.default.contentsOfDirectory(atPath: resourcePath)) ?? []

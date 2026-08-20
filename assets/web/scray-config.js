@@ -275,6 +275,10 @@ window.scrayWatch = function (label, work) {
 
 window.SCRAY_SYNC = {
   API_BASE: "https://macnguyen.com/scray/api.php",
+
+  // Where the in-app browser's home button goes. Harmless in Picker itself,
+  // which keeps this file byte-identical to Native's copy.
+  PICKER_URL: "https://macnguyen.com/sp-staging-sql/",
   API_KEY:  "d0ae361fdf8759771caf2c989b1bfec07c3fb24b5c4d11433e01fbeae666d7cb",
 
   // Distinguishes rows in sync_log and drives conflict messages.

@@ -33,5 +33,10 @@ window.ScrayBridge = {
   exportCsv: (csvText, filename) => callNative('exportCsv', { csv: csvText, filename }),
   // ✅ Filesystem writes inside the security-scoped folder
   renameFile: (relativePath, newName) => callNative('renameFile', { path: relativePath, newName }),
-  deleteFile: (relativePath) => callNative('deleteFile', { path: relativePath })
+  deleteFile: (relativePath) => callNative('deleteFile', { path: relativePath }),
+  // ✅ In-app browser. Pass nothing to resume where it was left.
+  openBrowser: (url) => callNative('openBrowser', {
+    url: url || null,
+    home: (window.SCRAY_SYNC && window.SCRAY_SYNC.PICKER_URL) || null
+  })
 };

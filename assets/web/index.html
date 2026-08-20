@@ -166,6 +166,21 @@
       overlay.addEventListener('click', (e) => {
         if (e.target === overlay) overlay.style.display = 'none';
       });
+
+      // ✅ In-app browser. Native gets the real thing; anywhere else (dev
+      // server in Safari, Picker itself) falls back to a normal tab.
+      const openPickerBtn = document.getElementById('openPickerBtn');
+      openPickerBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        const url = (window.SCRAY_SYNC && window.SCRAY_SYNC.PICKER_URL)
+          || 'https://macnguyen.com/sp-staging-sql/';
+        if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
+          window.ScrayBridge.openBrowser(url)
+            .catch(err => console.error('[browser] openBrowser failed:', err));
+        } else {
+          window.open(url, '_blank');
+        }
+      });
     });
   </script>
 </head>
@@ -350,6 +365,7 @@
 <div class="top-buttons-row">
 <button id="pickFolderBtn">Choose Video Folder</button>
 <button id="rescanLibraryBtn">Refresh</button>
+<button id="openPickerBtn" title="Open Picker in the in-app browser">Picker</button>
 </div>
 
 <!-- ✅ Secondary compact row (mobile portrait only) -->

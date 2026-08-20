@@ -326,3 +326,93 @@ function showVideoScoringModal(video, event) {
 window.showScoreConfirmation = showScoreConfirmation;
 window.showVideoScoringModal = showVideoScoringModal;
 window.applyVideoScore = applyVideoScore;
+
+// =========================================
+// F TALLY (replaces the Excel-backed path from excel-sheets.js)
+// =========================================
+// Same story as showVideoScoringModal above: this modal only ever existed in
+// excel-sheets.js, which the native build doesn't load, so every "F tally"
+// button hit the `typeof window.showFTallyConfirmModal === 'function'` guard
+// at its call site and fell through to the misleading "Excel Online not
+// connected" alert. The counter itself has worked all along - queueExcelUpdate
+// above handles increment_f_tally, writing the absolute value to videoMeta for
+// local display and sending a delta op to the server. Only the modal was missing.
+
+async function showFTallyConfirmModal(video, event) {
+   return new Promise((resolve) => {
+       const modal = document.createElement('div');
+       modal.className = 'basket-json-modal';
+       modal.innerHTML = `
+           <div class="basket-json-modal-content">
+               <h3>Increment F Tally</h3>
+               <p style="font-size: 0.85rem; color: #666; margin-bottom: 16px;">${video.filename}</p>
+               <p style="margin-bottom: 20px;">Add +1 to F tally for this video?</p>
+               <div class="basket-json-modal-buttons">
+                   <button id="fTallyConfirmBtn" class="modal-btn modal-btn-primary">Confirm</button>
+                   <button id="fTallyCancelBtn" class="modal-btn modal-btn-cancel">Cancel</button>
+               </div>
+           </div>
+       `;
+       document.body.appendChild(modal);
+
+       const cleanup = () => {
+           modal.remove();
+           document.removeEventListener('keydown', fTallyEscHandler);
+       };
+
+       document.getElementById('fTallyConfirmBtn').addEventListener('click', async () => {
+           const confirmBtn = document.getElementById('fTallyConfirmBtn');
+           confirmBtn.disabled = true;
+           confirmBtn.textContent = 'Saving...';
+
+           try {
+               await window.queueExcelUpdate(video, { increment_f_tally: true });
+
+               confirmBtn.textContent = '✅ Success';
+               confirmBtn.style.background = '#28a745';
+
+               // Visual feedback on the button that opened this, if there was one.
+               if (event && event.target) {
+                   const btn = event.target;
+                   const originalText = btn.textContent;
+                   btn.textContent = 'Y';
+                   btn.style.background = '#28a745';
+                   setTimeout(() => {
+                       btn.textContent = originalText;
+                       btn.style.background = '#17a2b8';
+                   }, 10000);
+               }
+
+               setTimeout(() => { cleanup(); resolve(true); }, 1000);
+
+           } catch (err) {
+               console.error('Failed to increment F tally:', err);
+               confirmBtn.textContent = '❌ Failed';
+               confirmBtn.style.background = '#dc3545';
+               setTimeout(() => {
+                   cleanup();
+                   // The old copy said "Make sure Google Sheets is connected",
+                   // which was wrong in both apps and doubly so here.
+                   alert(`Failed to update F tally: ${err.message || err}`);
+                   resolve(false);
+               }, 1500);
+           }
+       });
+
+       document.getElementById('fTallyCancelBtn').addEventListener('click', () => {
+           cleanup();
+           resolve(false);
+       });
+
+       modal.addEventListener('click', (e) => {
+           if (e.target === modal) { cleanup(); resolve(false); }
+       });
+
+       const fTallyEscHandler = (e) => {
+           if (e.key === 'Escape') { cleanup(); resolve(false); }
+       };
+       document.addEventListener('keydown', fTallyEscHandler);
+   });
+}
+
+window.showFTallyConfirmModal = showFTallyConfirmModal;

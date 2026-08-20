@@ -473,7 +473,47 @@ function resetManualRotation() {
     if (rotateBtn) rotateBtn.classList.remove('active');
 }
 
+// FLS -> MP: leave forced landscape but STAY in fullscreen, landing in
+// ordinary mobile-portrait fullscreen.
+//
+// resetManualRotation() on its own only strips the rotation inline styles.
+// removeManualRotationStyles() also clears the MP control-stack offsets
+// (controls `bottom`, progress bar `top`/`bottom`) as collateral, and
+// nothing re-applies them - so the bar ends up wherever the stylesheet
+// leaves it until the next resize fires. Re-running the MP positioning
+// here closes that gap.
+//
+// applyFullscreenControlOffsets / releaseDockedVideoFit are Native-only;
+// the typeof guards let the identical function ship in Picker unchanged.
+function switchFlsToMobilePortrait() {
+    if (!manualRotationActive) {
+        showPlayerFeedback('Not in landscape view', 'top-left');
+        return;
+    }
+
+    resetManualRotation();
+
+    // Order matters: the state class goes on first, because the MP rules are
+    // keyed off body.portrait-fullscreen:not(.manual-rotate-landscape) - then
+    // the inline offsets that need to beat them.
+    if (typeof updatePlayerStateClass === 'function') updatePlayerStateClass();
+    if (typeof releaseDockedVideoFit === 'function') releaseDockedVideoFit();
+    if (typeof applyFullscreenControlOffsets === 'function') applyFullscreenControlOffsets();
+
+    // Second pass once the layout settles - same 100ms the enterfullscreen
+    // path already uses for this call.
+    setTimeout(() => {
+        if (manualRotationActive) return; // re-rotated in the meantime
+        if (typeof applyFullscreenControlOffsets === 'function') applyFullscreenControlOffsets();
+        if (typeof window.syncVideoTitleBar === 'function') window.syncVideoTitleBar();
+    }, 100);
+
+    updateScrollLockButtonDisplay();
+    showPlayerFeedback('↺ Portrait fullscreen', 'top-left');
+}
+
 window.toggleManualRotation = toggleManualRotation;
+window.switchFlsToMobilePortrait = switchFlsToMobilePortrait;
 window.toggleScrollLock = toggleScrollLock;
 
 // =========================================
@@ -1709,6 +1749,46 @@ if (fullscreenBtn) {
 }
 
 console.log('Manual rotate button attached');
+}
+
+// FLS-only companion to the ↻ button: rotates back out to MP fullscreen.
+// Hidden by CSS outside body.manual-rotate-landscape, and the ↻ button is
+// hidden while it's showing - so the FLS controls row keeps the same button
+// count either way.
+function attachFlsToMpButton() {
+const controls = document.querySelector('.plyr__controls');
+if (!controls) return;
+if (controls.querySelector('.plyr-fls-to-mp')) return; // prevent duplicates
+
+// Same touch/desktop detection as the other custom control buttons.
+const isTouchDevice = ('ontouchstart' in window) ||
+                      (navigator.maxTouchPoints > 0) ||
+                      (navigator.msMaxTouchPoints > 0);
+const isDesktop = window.innerWidth >= 769 && window.innerHeight >= 600 && !isTouchDevice;
+if (isDesktop) return;
+
+const mpBtn = document.createElement("button");
+mpBtn.className = "plyr__control plyr-fls-to-mp";
+mpBtn.innerHTML = '↺';
+mpBtn.title = 'Rotate back to portrait fullscreen';
+mpBtn.onclick = (e) => {
+    switchFlsToMobilePortrait();
+    e.currentTarget.blur();
+};
+
+// Sits immediately after the ↻ it replaces, so the row order is stable
+// when the two swap visibility.
+const rotateBtn = controls.querySelector('.plyr-manual-rotate');
+const fullscreenBtn = controls.querySelector('[data-plyr="fullscreen"]');
+if (rotateBtn) {
+    rotateBtn.insertAdjacentElement('afterend', mpBtn);
+} else if (fullscreenBtn) {
+    controls.insertBefore(mpBtn, fullscreenBtn);
+} else {
+    controls.appendChild(mpBtn);
+}
+
+console.log('FLS-to-MP button attached');
 }
 
 // SVG shackle paths for the padlock icon - swapped via the 'd' attribute.
@@ -4676,6 +4756,7 @@ attachStopButton();
 attachPIPButton(); // Add PIP button
 attachIOSFullscreenButton(); // Add iOS native fullscreen button
 attachManualRotateButton(); // Add manual rotate-to-landscape button
+attachFlsToMpButton(); // Add FLS -> MP portrait-fullscreen button (FLS only)
 attachScrollLockButton(); // Add scroll-lock button (manual rotation only)
 attachRandomVideoButton(); //  Add random-video quick-action button
 attachHistorySequenceButton(); //  Add play-through-history quick-action button
@@ -5157,6 +5238,7 @@ attachStopButton();
 attachPIPButton(); // Re-attach PIP button on new video
 attachIOSFullscreenButton(); // Re-attach iOS fullscreen button on new video
 attachManualRotateButton(); // Re-attach manual rotate button on new video
+attachFlsToMpButton(); // Re-attach FLS -> MP button on new video
 attachScrollLockButton(); // Re-attach scroll-lock button on new video
 attachRandomVideoButton(); //  Re-attach random-video button on new video
 attachHistorySequenceButton(); //  Re-attach play-through-history button on new video
@@ -5370,65 +5452,6 @@ if (isLandscape && isMobile) {
 
 // eslint-disable-next-line no-constant-condition
 if (false) {
-    const halfWidth = effRect.width / 2;
-    const isLeftHalf = effTapX <= halfWidth;
-    
-    if (isLeftHalf) {
-        // Left half double-tap toggles play/pause — applies to both forced
-        // (FLS) rotation and genuine device landscape, matching behavior
-        // across both landscape modes.
-        const willBePaused = !window.plyrPlayer.paused;
-        window.plyrPlayer.togglePlay();
-        showPlayerFeedback(willBePaused ? '⏸ Paused' : '▶ Playing', 'top-left');
-    } else {
-        // RIGHT HALF: Only bottom-right quarter has seeking
-        const halfHeight = effRect.height / 2;
-        const isBottomHalf = effTapY > halfHeight;
-        
-        if (isBottomHalf) {
-            // BOTTOM-RIGHT QUARTER: single row (no sub-split) - -3s (left) or +3s (right).
-            // Previously split into a 2x2 sub-grid (-10s/+10s top, -3s/+3s bottom); the
-            // bottom sub-row was removed since it conflicted with the frame-step/play-pause
-            // circles and player controls, and the remaining tiers shifted down by one.
-            const quarterX = (effTapX - halfWidth) / halfWidth;
-            const isQuarterLeft = quarterX < 0.5;
-            
-            if (isQuarterLeft) {
-                window.plyrPlayer.currentTime = Math.max(0, window.plyrPlayer.currentTime - 3);
-                showPlayerFeedback(`-3s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-left');
-            } else {
-                window.plyrPlayer.currentTime = Math.min(window.plyrPlayer.duration, window.plyrPlayer.currentTime + 3);
-                showPlayerFeedback(`+3s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-right');
-            }
-        } else {
-           // TOP-RIGHT QUARTER: 2x2 sub-grid for longer seeking
-           const quarterX = (effTapX - halfWidth) / halfWidth;
-           const quarterY = effTapY / halfHeight; // Relative to top half
-           
-           const isQuarterLeft = quarterX < 0.5;
-           const isQuarterTop = quarterY < 0.5;
-           
-           if (isQuarterTop) {
-               // Top half of quarter: -30s (left) or +30s (right)
-               if (isQuarterLeft) {
-                   window.plyrPlayer.currentTime = Math.max(0, window.plyrPlayer.currentTime - 30);
-                   showPlayerFeedback(`-30s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-left');
-               } else {
-                   window.plyrPlayer.currentTime = Math.min(window.plyrPlayer.duration, window.plyrPlayer.currentTime + 30);
-                   showPlayerFeedback(`+30s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-right');
-               }
-           } else {
-               // Bottom half of quarter: -10s (left) or +10s (right)
-               if (isQuarterLeft) {
-                   window.plyrPlayer.currentTime = Math.max(0, window.plyrPlayer.currentTime - 10);
-                   showPlayerFeedback(`-10s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-left');
-               } else {
-                   window.plyrPlayer.currentTime = Math.min(window.plyrPlayer.duration, window.plyrPlayer.currentTime + 10);
-                   showPlayerFeedback(`+10s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-right');
-               }
-           }
-       }
-    }
 } else {
     // ✅ PORTRAIT MOBILE: four vertical quarters.
     //   Q1 (0-25%)   fullscreen toggle
@@ -7450,46 +7473,6 @@ computeBottomDock();
     // user makes during the first 3s after load. Remove this line to restore.
     return;
 
-    const isMobilePortrait = window.innerWidth <= 768 && window.matchMedia('(orientation: portrait)').matches;
-    if (!isMobilePortrait) return;
-
-    const h1 = document.querySelector('h1');
-    if (!h1) return;
-
-    const STABLE_FRAMES_NEEDED = 12; // ~200ms of no movement at 60fps
-    const MAX_WAIT_MS = 3000;
-    const startTime = Date.now();
-    let lastTop = null;
-    let stableFrameCount = 0;
-
-    const finalize = () => {
-        const targetY = h1.getBoundingClientRect().top + window.pageYOffset;
-        window.scrollTo(0, targetY);
-    };
-
-    const tick = () => {
-        const currentTop = h1.getBoundingClientRect().top + window.pageYOffset;
-
-        if (lastTop !== null && Math.abs(currentTop - lastTop) < 1) {
-            stableFrameCount++;
-        } else {
-            stableFrameCount = 0;
-        }
-        lastTop = currentTop;
-
-        // Keep re-anchoring scroll while we wait, so the page doesn't
-        // sit at the blank spacer in the meantime
-        window.scrollTo(0, currentTop);
-
-        if (stableFrameCount >= STABLE_FRAMES_NEEDED || (Date.now() - startTime) > MAX_WAIT_MS) {
-            finalize();
-            return;
-        }
-
-        requestAnimationFrame(tick);
-    };
-
-    requestAnimationFrame(tick);
 })();
 });
 

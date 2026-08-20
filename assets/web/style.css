@@ -1746,6 +1746,7 @@ body.manual-rotate-landscape .plyr__controls .plyr__control,
 body.manual-rotate-landscape .plyr-stop,
 body.manual-rotate-landscape .plyr-ios-fullscreen,
 body.manual-rotate-landscape .plyr-manual-rotate,
+body.manual-rotate-landscape .plyr-fls-to-mp,
 body.manual-rotate-landscape .plyr-scroll-lock,
 body.manual-rotate-landscape .plyr-random-video,
 body.manual-rotate-landscape .plyr-history-sequence,
@@ -2172,6 +2173,41 @@ background: rgba(255, 255, 255, 0.3) !important;
    the same basket modal - free up the space in the controls row. */
 body.manual-rotate-landscape .plyr-basket-quick {
 display: none !important;
+}
+
+/* ↺ FLS -> MP button. Exists in the DOM at all times (attached alongside
+   the other custom controls) but only visible while forced landscape is
+   active. ⚙️ The FLS shrink block above also lists .plyr-fls-to-mp, so it
+   matches the 32px sizing of everything else in that row. */
+.plyr-fls-to-mp {
+min-width: 50px !important;
+min-height: 50px !important;
+font-size: 1.4rem !important;
+flex: 0 0 auto;
+background: transparent !important;
+display: none !important;
+}
+
+body.manual-rotate-landscape .plyr-fls-to-mp {
+display: inline-flex !important;
+align-items: center;
+justify-content: center;
+}
+
+/* ...and the plain ↻ steps aside while ↺ is showing. Both toggle out of
+   FLS, but only ↺ restores the MP control-stack offsets afterwards, so
+   there's no reason to offer the worse one. Delete this rule if you'd
+   rather keep both visible. */
+body.manual-rotate-landscape .plyr-manual-rotate {
+display: none !important;
+}
+
+.plyr-fls-to-mp:hover {
+background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.plyr-fls-to-mp:active {
+background: rgba(255, 255, 255, 0.3) !important;
 }
 
 /* Mobile portrait only (and NOT forced/manual-rotate landscape) - hide

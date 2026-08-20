@@ -1286,6 +1286,13 @@ select.on('change', function () {
 
 // Call exclude dropdown population
 await populateExcludeTagDropdown();
+
+// Default exclude list, straight after the options exist — select2 silently
+// discards a val() with no matching <option>, so loading this any earlier
+// looks like it worked and changes nothing.
+if (typeof window.loadDefaultExcludeTags === 'function') {
+    await window.loadDefaultExcludeTags();
+}
 }
 
 /* =========================================

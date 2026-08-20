@@ -6659,27 +6659,9 @@ if (searchBox) {
    }
  }
 } else if (action === 'default-exclude') {
- // Add to default exclude list in Excel
- if (typeof window.addTagToDefaultExcludeList === 'function') {
-   try {
-     const result = await window.addTagToDefaultExcludeList(tagName);
-     if (result.alreadyExists) {
-       showScoreConfirmation(`"${displayName}" already in default exclude list`, '#ffa500');
-     } else if (result.success) {
-       showScoreConfirmation(`✅ Added "${displayName}" to default exclude list`);
-     }
-   } catch (err) {
-     console.error('Failed to add to default exclude list:', err);
-     if (err.message === 'NOT_CONNECTED') {
-       showScoreConfirmation('❌ Excel Online not connected', '#f44336');
-       if (confirm('Excel Online not connected. Connect now?')) {
-         window.signInToExcelOnline();
-       }
-     } else {
-       showScoreConfirmation('❌ Failed to save', '#f44336');
-       alert(`Failed to add to default exclude list: ${err.message}`);
-     }
-   }
+ // Shared exclude_tags table — see scray-exclude.js.
+ if (typeof window.handleDefaultExcludeAction === 'function') {
+   await window.handleDefaultExcludeAction(tagName, displayName);
  }
 }
 });

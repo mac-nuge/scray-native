@@ -214,7 +214,7 @@ return new Promise((resolve) => {
                     🚫 Add to Exclude
                 </button>
                 <button id="tagActionDefaultExcludeBtn" class="modal-btn modal-btn-primary" style="background: #dc3545;">
-                    📊 Default Exclude (Excel)
+                    📊 Default Exclude (SQL)
                 </button>
             </div>
             <button id="tagActionCancelBtn" class="modal-btn modal-btn-cancel" style="margin-top: 10px;">Cancel</button>
@@ -407,27 +407,12 @@ if (searchBox) {
             }
         }
     } else if (action === 'default-exclude') {
-        // Add to default exclude list in Excel
-        if (typeof window.addTagToDefaultExcludeList === 'function') {
-            try {
-                const result = await window.addTagToDefaultExcludeList(tagName);
-                if (result.alreadyExists) {
-                    showScoreConfirmation(`"${displayName}" already in default exclude list`, '#ffa500');
-                } else if (result.success) {
-                    showScoreConfirmation(`✅ Added "${displayName}" to default exclude list`);
-                }
-            } catch (err) {
-                console.error('Failed to add to default exclude list:', err);
-                if (err.message === 'NOT_CONNECTED') {
-                    showScoreConfirmation('❌ Excel Online not connected', '#f44336');
-                    if (confirm('Excel Online not connected. Connect now?')) {
-                        window.signInToExcelOnline();
-                    }
-                } else {
-                    showScoreConfirmation('❌ Failed to save', '#f44336');
-                    alert(`Failed to add to default exclude list: ${err.message}`);
-                }
-            }
+        // Toggle the tag on the shared exclude_tags table. Pressing it on a
+        // tag that's already listed offers to remove it, which is how the
+        // list gets pruned. All six copies of this handler across the two
+        // apps are one-liners into scray-exclude.js now.
+        if (typeof window.handleDefaultExcludeAction === 'function') {
+            await window.handleDefaultExcludeAction(tagName, displayName);
         }
     }
  });
@@ -621,27 +606,9 @@ if ($excludeSelect.length) {
     }
 }
 } else if (action === 'default-exclude') {
-// Add to default exclude list in Excel
-if (typeof window.addTagToDefaultExcludeList === 'function') {
-    try {
-        const result = await window.addTagToDefaultExcludeList(tagName);
-        if (result.alreadyExists) {
-            showScoreConfirmation(`"${displayName}" already in default exclude list`, '#ffa500');
-        } else if (result.success) {
-            showScoreConfirmation(`✅ Added "${displayName}" to default exclude list`);
-        }
-    } catch (err) {
-        console.error('Failed to add to default exclude list:', err);
-        if (err.message === 'NOT_CONNECTED') {
-            showScoreConfirmation('❌ Excel Online not connected', '#f44336');
-            if (confirm('Excel Online not connected. Connect now?')) {
-                window.signInToExcelOnline();
-            }
-        } else {
-            showScoreConfirmation('❌ Failed to save', '#f44336');
-            alert(`Failed to add to default exclude list: ${err.message}`);
-        }
-    }
+// Shared exclude_tags table — see scray-exclude.js.
+if (typeof window.handleDefaultExcludeAction === 'function') {
+    await window.handleDefaultExcludeAction(tagName, displayName);
 }
 }
     });

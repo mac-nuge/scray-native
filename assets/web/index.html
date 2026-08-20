@@ -168,18 +168,28 @@
       });
 
       // ✅ In-app browser. Native gets the real thing; anywhere else (dev
-      // server in Safari, Picker itself) falls back to a normal tab.
-      const openPickerBtn = document.getElementById('openPickerBtn');
-      openPickerBtn?.addEventListener('click', (e) => {
-        e.preventDefault();
-        const url = (window.SCRAY_SYNC && window.SCRAY_SYNC.PICKER_URL)
-          || 'https://macnguyen.com/sp-staging-sql/';
+      // server in Safari, Picker itself) falls back to a normal tab. Both
+      // buttons land in the same browser — Picker as a tab, DB console as
+      // another — so the home button stays pointed at Picker either way.
+      function openInAppBrowser(url) {
         if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
           window.ScrayBridge.openBrowser(url)
             .catch(err => console.error('[browser] openBrowser failed:', err));
         } else {
           window.open(url, '_blank');
         }
+      }
+
+      document.getElementById('openPickerBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        openInAppBrowser((window.SCRAY_SYNC && window.SCRAY_SYNC.PICKER_URL)
+          || 'https://macnguyen.com/sp-staging-sql/');
+      });
+
+      document.getElementById('openBrowseBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        openInAppBrowser((window.SCRAY_SYNC && window.SCRAY_SYNC.BROWSE_URL)
+          || 'https://macnguyen.com/scray/browse.html');
       });
     });
   </script>
@@ -366,6 +376,7 @@
 <button id="pickFolderBtn">Choose Video Folder</button>
 <button id="rescanLibraryBtn">Refresh</button>
 <button id="openPickerBtn" title="Open Picker in the in-app browser">Picker</button>
+<button id="openBrowseBtn" title="Open the DB console in the in-app browser">DB</button>
 </div>
 
 <!-- ✅ Secondary compact row (mobile portrait only) -->

@@ -572,10 +572,15 @@ max-width: calc(100vw - 40px);
 }
 }
 
-/* ✅ Raise corner buttons in portrait mode (raised further to clear the bottom-docked player stack) */
+/* ⚙️ MPB: align the corner button block's baseline with the disguise
+   (invert colour) control, which disguise.js pins at
+   safe + MOBILE_BOTTOM_OFFSET + NATIVE_EXTRA_LIFT (6 + 30 = 36px).
+   Native's #cornerButtons is a two-row COLUMN, so it's ~80px tall - the
+   disguise handle ends up level with its BOTTOM row, which is the intent. */
 @media (max-width: 768px) and (orientation: portrait) {
 #cornerButtons {
-  bottom: calc(env(safe-area-inset-bottom,0px) + 20px) !important;
+  bottom: calc(env(safe-area-inset-bottom,0px) + 36px) !important;
+  max-width: calc(100vw - 40px - 44px) !important;
 }
 }
 

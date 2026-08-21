@@ -738,7 +738,7 @@ function computeBottomDock() {
     // longer reads the corner buttons' position, so it won't move when you
     // adjust the corner buttons separately. Increase to raise the stack
     // further off the bottom of the screen, decrease to lower it.
-    const baseBottomOffset = 140; // px from the bottom of the screen (up to lift)
+    const baseBottomOffset = 100; // px from the bottom of the screen (up to lift)
     let runningBottom = baseBottomOffset;
 
     const gapBetweenStackItems = 6; // small breathing room between info bar / player / filter bar
@@ -6905,28 +6905,20 @@ onClick: async (e) => {
 }
 },
 {
-label: "Refresh Folder",
-title: "Refresh the folder containing this file",
+label: "Refresh Data",
+title: "Pull the latest score, bookmarks and counters from the database",
 color: "#17a2b8",
 onClick: async (e) => {
    e.stopPropagation();
-   if (typeof window.showRefreshFolderConfirmModal === 'function') {
-       const confirmed = await window.showRefreshFolderConfirmModal(video);
-       if (!confirmed) return;
-   }
-   if (typeof window.refreshVideoFolder === 'function') {
-       try {
-           await window.refreshVideoFolder(video);
-       } catch (err) {
-           console.error('Folder refresh failed:', err);
-           alert(`Folder refresh failed: ${err.message}`);
-       }
-   } else {
-       alert('Folder refresh not available');
+   try {
+       await window.refreshVideoFromDb(video);
+       await window.refreshAfterDbPull(video);
+   } catch (err) {
+       console.error('DB refresh failed:', err);
+       alert(`Refresh failed: ${err.message}`);
    }
 }
 },
-
 {
 label: "Open Link",
 title: "Open in OneDrive",

@@ -212,33 +212,6 @@ if (window.innerWidth < 769 && typeof toggleBasket === 'function') {
         }
     }
 },
-{
-label: "Refresh",
-title: "Refresh",
-color: "#17a2b8",
-onClick: async (e) => {
-    e.stopPropagation();
-    try {
-        const refreshedVideo = await refreshSingleVideoComprehensive(video);
-        
-        // Update in basket
-        basketVideos[idx] = refreshedVideo;
-        window.basketVideos = basketVideos;
-        saveBasket();
-        renderBasket();
-        
-        // Refresh tag dropdowns
-        if (typeof populateTagDropdowns === 'function') {
-            await populateTagDropdowns();
-        }
-        
-        console.log(`Refreshed basket item: ${refreshedVideo.filename}`);
-    } catch (err) {
-        console.error('Failed to refresh item:', err);
-        alert(`Refresh failed: ${err.message}`);
-    }
-}
-},
  {
      label: "Move",
      title: "Move file to different folder",

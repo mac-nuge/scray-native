@@ -2634,10 +2634,15 @@ function showVideoScoringModal(video, event) {
   const gridContainer = document.createElement('div');
   gridContainer.className = 'score-grid';
   
-  for (let i = 1; i <= 10; i++) {
+  // ⚙️ 0 renders as "–" and CLEARS the score. `user_score = 0` is the
+  // project-wide convention for unscored/N/A (constraint is 0-10), so this
+  // writes 0 rather than null - null would break the score filter, which
+  // buckets unscored videos as 0.
+  for (let i = 0; i <= 10; i++) {
        const scoreBtn = document.createElement('button');
        scoreBtn.className = 'score-grid-btn';
-       scoreBtn.textContent = i;
+       scoreBtn.textContent = i === 0 ? '–' : i;
+       scoreBtn.title = i === 0 ? 'Clear score' : `Score ${i}/10`;
        scoreBtn.dataset.score = i;
        
        scoreBtn.addEventListener('click', async (e) => {
@@ -2688,7 +2693,8 @@ function showVideoScoringModal(video, event) {
 
      // ✅ Confirmation only shown after Excel has saved
      const message = document.createElement('div');
-     message.innerHTML = `✅ Score: ${i}<br><span style="font-size: 0.5em; opacity: 0.9;">${video.filename}</span>`;
+     const scoreLabel = i === 0 ? 'Score cleared' : `Score: ${i}`;
+     message.innerHTML = `✅ ${scoreLabel}<br><span style="font-size: 0.5em; opacity: 0.9;">${video.filename}</span>`;
      showScoreConfirmation(message.innerHTML);
      console.log(`Scored ${video.filename}: ${i}/10`);
 

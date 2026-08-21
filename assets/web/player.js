@@ -113,7 +113,7 @@ function getManualRotationFullscreenElement() {
     // This used to be guaranteed by the caller, and the "last resort" branch
     // below logged on that assumption. It stopped holding when the title bar
     // became shared with the mini-player: ensureVideoTitleBar() now calls
-    // this from inline and MP too, and updatePlayerStateClass() calls THAT
+    // this from inline and MPB/MPFS too, and updatePlayerStateClass() calls THAT
     // on every resize - which on mobile means every address-bar show/hide.
     // Hence the console filling with "falling back to generic .plyr
     // container". The fallback is correct and always was; only the logging
@@ -164,9 +164,9 @@ function getManualRotationFullscreenElement() {
     return null;
 }
 
-// The title bar, shared by FLS and MP. Created lazily inside whatever is
+// The title bar, shared by FLS, MPFS and MPB. Created lazily inside whatever is
 // currently acting as the player root, with the basket click handler always
-// attached - CSS decides whether it's interactive (FLS) or inert (MP), so it
+// attached - CSS decides whether it's interactive (FLS) or inert (MPFS/MPB), so it
 // doesn't matter which mode happens to create it first.
 function ensureVideoTitleBar() {
     const host = getManualRotationFullscreenElement()
@@ -211,9 +211,9 @@ function syncVideoTitleBar(video) {
 window.ensureVideoTitleBar = ensureVideoTitleBar;
 window.syncVideoTitleBar = syncVideoTitleBar;
 
-// The title bar, shared by FLS and MP. Created lazily inside whatever is
+// The title bar, shared by FLS, MPFS and MPB. Created lazily inside whatever is
 // currently acting as the player root, with the basket click handler always
-// attached - CSS decides whether it's interactive (FLS) or inert (MP), so it
+// attached - CSS decides whether it's interactive (FLS) or inert (MPFS/MPB), so it
 // doesn't matter which mode happens to create it first.
 function ensureVideoTitleBar() {
     const host = getManualRotationFullscreenElement()
@@ -266,7 +266,7 @@ function getManualRotationTargets() {
     const controls = container.querySelector('.plyr__controls') || document.querySelector('.plyr__controls');
     const progressBar = document.getElementById('permanentProgressBar');
     // ✅ Small title bar at the very top of the player, showing the current
-    // filename. Shared with MP now - see ensureVideoTitleBar above.
+    // filename. Shared with MPFS/MPB now - see ensureVideoTitleBar above.
     const title = ensureVideoTitleBar();
     console.log('[rotate] targets found:', {
         container: !!container,
@@ -505,14 +505,14 @@ function resetManualRotation() {
     if (rotateBtn) rotateBtn.classList.remove('active');
 }
 
-// FLS -> MP: leave forced landscape but STAY in fullscreen, landing in
+// FLS -> MPFS: leave forced landscape but STAY in fullscreen, landing in
 // ordinary mobile-portrait fullscreen.
 //
 // resetManualRotation() on its own only strips the rotation inline styles.
-// removeManualRotationStyles() also clears the MP control-stack offsets
+// removeManualRotationStyles() also clears the MPFS control-stack offsets
 // (controls `bottom`, progress bar `top`/`bottom`) as collateral, and
 // nothing re-applies them - so the bar ends up wherever the stylesheet
-// leaves it until the next resize fires. Re-running the MP positioning
+// leaves it until the next resize fires. Re-running the MPFS positioning
 // here closes that gap.
 //
 // applyFullscreenControlOffsets / releaseDockedVideoFit are Native-only;
@@ -525,7 +525,7 @@ function switchFlsToMpfs() {
 
     resetManualRotation();
 
-    // Order matters: the state class goes on first, because the MP rules are
+    // Order matters: the state class goes on first, because the MPFS rules are
     // keyed off body.portrait-fullscreen:not(.manual-rotate-landscape) - then
     // the inline offsets that need to beat them.
     if (typeof updatePlayerStateClass === 'function') updatePlayerStateClass();
@@ -549,7 +549,7 @@ window.switchFlsToMpfs = switchFlsToMpfs;
 window.toggleScrollLock = toggleScrollLock;
 
 // =========================================
-// ⚙️ FULLSCREEN CONTROL STACK POSITION (ordinary fullscreen, incl. MP)
+// ⚙️ FULLSCREEN CONTROL STACK POSITION (ordinary fullscreen, incl. MPFS)
 // Values are vh measured from the BOTTOM of the screen:
 //   LOWER number  = sits FURTHER DOWN the screen
 //   HIGHER number = sits FURTHER UP the screen
@@ -601,7 +601,7 @@ function clearFullscreenControlOffsets() {
 // Stack order bottom -> up: corner buttons, info bar, video player, filter bar
 // (Defined at top-level IIFE scope so it's accessible from playVideoInline,
 // rebuildVideoInfoDisplay, resetVideoInline, etc. - not just inside createPlayerElement)
-// ⚙️ MP DOCKED PLAYER - MAIN TUNING KNOB. Gap left above the video so its top
+// ⚙️ MPB PLAYER - MAIN TUNING KNOB. Gap left above the video so its top
 // edge never sits under the browser address bar. Raise for more clearance.
 const MPB_VIDEO_TOP_BUFFER = 24;
 // ⚙️ Never shrink the video below this height, however tall the stack gets.
@@ -610,7 +610,7 @@ const MPB_VIDEO_MIN_HEIGHT = 140;
 /**
 * Fit the docked video inside the space the dock stack actually leaves.
 *
-* The MP portrait stylesheet forces `width: 100% !important; height: auto
+* The MPB stylesheet forces `width: 100% !important; height: auto
 * !important` on the video, so a portrait clip renders ~100vw x (h/w) tall -
 * far more than the space between the dock's bottom offset and the top of the
 * screen. The container overflows UPWARD, off the top of the viewport, which
@@ -678,7 +678,7 @@ function releaseDockedVideoFit() {
     // FLS sets its OWN inline sizing on this same element via
     // applyManualRotationStyles() - never strip that out from under it.
     // ✅ Plain (non-FLS) fullscreen is deliberately NOT excluded any more:
-    // the docked px width/height were surviving into MP fullscreen, which is
+    // the docked px width/height were surviving into MPFS, which is
     // exactly what kept a narrow/tall clip squeezed to the dock's width
     // instead of stretching to the full screen width.
     if (manualRotationActive) return;
@@ -929,7 +929,7 @@ function playPreviousInCurrentList() {
 // ========================
 // Swipe-up = play random video (shared trigger)
 // ========================
-// Single entry point for every swipe-up gesture (FLS, landscape, MP).
+// Single entry point for every swipe-up gesture (FLS, landscape, MPFS).
 // Reuses the corner "X"/"Xn" quick-action button so the FLS-vs-portrait
 // weighting logic stays in one place. The cooldown guards against the
 // same physical swipe firing more than once - stale duplicate touchend
@@ -1027,7 +1027,7 @@ const JOG_PX_PER_STEP = 8;
 // starts in. Two ladders, and they run OPPOSITE ways on purpose:
 //
 //   FLS - bottom is finest (8x), top coarsest (32x)
-//   MP  - bottom is coarsest (64x), top finest (16x)
+//   MPB - bottom is coarsest (64x), top finest (16x)
 //
 // That's deliberate, not an oversight: in FLS your thumb rests low on the
 // screen, so fine control wants to be near it. In portrait the video sits
@@ -1039,7 +1039,7 @@ const JOG_MULT_BOTTOM = 4;
 const JOG_MULT_MIDDLE = 16;
 const JOG_MULT_TOP    = 32;
 
-// ⚙️ MP ladder, bottom to top: 32x / 16x / 4x.
+// ⚙️ MPB ladder, bottom to top: 32x / 16x / 4x.
 const JOG_MP_MULT_BOTTOM = 32;
 const JOG_MP_MULT_MIDDLE = 16;
 const JOG_MP_MULT_TOP    = 4; 
@@ -1091,7 +1091,7 @@ scrubbing = false; // Don't activate yet - wait to determine direction
 // ⚙️ Drop the manualRotationActive check to enable this outside FLS too.
 // Two ways in:
 //   FLS - the drag started on a left-half frame-step zone
-//   MP  - the video is PAUSED, in which case any scrub jogs. A paused
+//   MPB - the video is PAUSED, in which case any scrub jogs. A paused
 //         video is already a "find the exact frame" situation, so
 //         proportional scrubbing isn't what you want there. Playing,
 //         portrait behaves exactly as before.
@@ -1155,7 +1155,7 @@ const stopScrub = (e) => {
 // Swipe-to-exit fullscreen (down) / swipe-to-play-random (up): works in
 // both FLS and genuine device landscape, but the "down"/"up" direction
 // differs between the two since FLS rotates the video 90° relative to
-// the physical screen. Portrait (MP) fullscreen has its own swipe-up
+// the physical screen. MPFS has its own swipe-up
 // handler in setupMpfsSwipeExit().
 if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouches[0]) {
     const SWIPE_EXIT_THRESHOLD_PX = 60; // ⚙️ adjust sensitivity here
@@ -1185,12 +1185,12 @@ if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouch
             showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
         } else if (deltaYPhysical < -SWIPE_EXIT_THRESHOLD_PX) {
             // Swipe up (landscape) - stop playback. Changed alongside FLS
-            // and MP: leaving the random path live here would keep the same
+            // and MPFS: leaving the random path live here would keep the same
             // teardown-inside-a-touch-handler crash in one mode.
             triggerSwipeStopVideo();
         }
     } else if (window.plyrPlayer.fullscreen.active) {
-        // Mobile portrait (MP) fullscreen: a physical upward swipe stops
+        // MPFS: a physical upward swipe stops
         // playback, mirroring the FLS/landscape "swipe up" gesture.
         const endY = e.changedTouches[0].clientY;
         const deltaYPhysical = endY - startY; // negative = swiped up (physical)
@@ -1561,10 +1561,10 @@ function setupMpfsSwipeExit() {
             console.log('Portrait fullscreen exited via swipe down');
         } else if (deltaY < -PORTRAIT_FS_SWIPE_EXIT_THRESHOLD_PX &&
             deltaX < PORTRAIT_FS_SWIPE_MAX_HORIZONTAL_PX) {
-            // Swipe up (MP) - stop playback.
+            // Swipe up (MPFS) - stop playback.
             //
             // Note this is a SECOND handler for the same gesture: stopScrub
-            // has its own MP swipe-up branch, so both fire on one swipe. That
+            // has its own MPFS swipe-up branch, so both fire on one swipe. That
             // was harmless-ish for random (a cooldown swallowed the second
             // call) but it is very likely why the crash outlived the deferral
             // fix - two independent paths both tearing the player down.
@@ -1783,7 +1783,7 @@ if (fullscreenBtn) {
 console.log('Manual rotate button attached');
 }
 
-// FLS-only companion to the ↻ button: rotates back out to MP fullscreen.
+// FLS-only companion to the ↻ button: rotates back out to MPFS.
 // Hidden by CSS outside body.manual-rotate-landscape, and the ↻ button is
 // hidden while it's showing - so the FLS controls row keeps the same button
 // count either way.
@@ -1800,7 +1800,7 @@ const isDesktop = window.innerWidth >= 769 && window.innerHeight >= 600 && !isTo
 if (isDesktop) return;
 
 const mpBtn = document.createElement("button");
-mpBtn.className = "plyr__control plyr-fls-to-mp";
+mpBtn.className = "plyr__control plyr-fls-to-mpfs";
 mpBtn.innerHTML = '↺';
 mpBtn.title = 'Rotate back to portrait fullscreen';
 mpBtn.onclick = (e) => {
@@ -1820,7 +1820,7 @@ if (rotateBtn) {
     controls.appendChild(mpBtn);
 }
 
-console.log('FLS-to-MP button attached');
+console.log('FLS-to-MPFS button attached');
 }
 
 // SVG shackle paths for the padlock icon - swapped via the 'd' attribute.
@@ -4782,13 +4782,13 @@ if (feedbackMsg) {
 window.plyrPlayer.on('ready', () => {
 setupPlayerKeyboardShortcuts();
 setupFrameStepKeyboardShortcuts(); // N/O frame-step keys (desktop)
-setupMpfsSwipeExit(); // swipe down to exit MP fullscreen
+setupMpfsSwipeExit(); // swipe down to exit MPFS
 enableAnywhereScrubbing();
 attachStopButton();
 attachPIPButton(); // Add PIP button
 attachIOSFullscreenButton(); // Add iOS native fullscreen button
 attachManualRotateButton(); // Add manual rotate-to-landscape button
-attachFlsToMpfsButton(); // Add FLS -> MP portrait-fullscreen button (FLS only)
+attachFlsToMpfsButton(); // Add FLS -> MPB-fullscreen button (FLS only)
 attachScrollLockButton(); // Add scroll-lock button (manual rotation only)
 attachRandomVideoButton(); //  Add random-video quick-action button
 attachHistorySequenceButton(); //  Add play-through-history quick-action button
@@ -5270,7 +5270,7 @@ attachStopButton();
 attachPIPButton(); // Re-attach PIP button on new video
 attachIOSFullscreenButton(); // Re-attach iOS fullscreen button on new video
 attachManualRotateButton(); // Re-attach manual rotate button on new video
-attachFlsToMpfsButton(); // Re-attach FLS -> MP button on new video
+attachFlsToMpfsButton(); // Re-attach FLS -> MPFS button on new video
 attachScrollLockButton(); // Re-attach scroll-lock button on new video
 attachRandomVideoButton(); //  Re-attach random-video button on new video
 attachHistorySequenceButton(); //  Re-attach play-through-history button on new video
@@ -5485,7 +5485,7 @@ if (isLandscape && isMobile) {
 // eslint-disable-next-line no-constant-condition
 if (false) {
 } else {
-    // ✅ PORTRAIT MOBILE: four vertical quarters.
+    // ✅ MPB: four vertical quarters.
     //   Q1 (0-25%)   fullscreen toggle
     //   Q2 (25-50%)  play/pause  <- deliberate dead space in the middle,
     //                               so there's somewhere safe to double-tap
@@ -6310,7 +6310,7 @@ const FULLSCREEN_RELOAD_MAX_MS = 5000;
 
 // The loading overlay lives inside .plyr at z-index 99998, which only
 // competes within .plyr's stacking context. That's fine for the FLS mask
-// (also inside .plyr, at 99990, deliberately just underneath). The MP mask
+// (also inside .plyr, at 99990, deliberately just underneath). The MPFS mask
 // is at body level, so it covers the whole .plyr subtree no matter what the
 // overlay's z-index is - the overlay has to come out with it.
 let loadingOverlayHome = null;
@@ -6367,7 +6367,7 @@ function beginFullscreenReload() {
         // host as well - there the rotated container IS the whole screen,
         // and that path already looks clean.
         //
-        // MP is the one that was broken. iOS uses NATIVE video fullscreen,
+        // MPFS is the one that was broken. iOS uses NATIVE video fullscreen,
         // which sets neither document.fullscreenElement nor the webkit one,
         // so the mask fell through to .plyr - trapped inside .plyr's
         // stacking context. Everything that flashes during the transient
@@ -6440,9 +6440,9 @@ getAllVideos().then(vs => {
 const wasForcedLandscapeBeforeLoad = manualRotationActive;
 
 // ✅ Same idea for plain (non-rotated) fullscreen - i.e. mobile portrait
-// (MP) fullscreen. The browser can drop out of real fullscreen when the
+// MPFS. The browser can drop out of real fullscreen when the
 // source changes; previously only FLS was restored, so a swipe-up random
-// in MP left the player half-out of fullscreen in an odd in-between state.
+// in MPFS left the player half-out of fullscreen in an odd in-between state.
 const wasPlainFullscreenBeforeLoad =
     !!window.plyrPlayer?.fullscreen?.active && !manualRotationActive;
 
@@ -6471,7 +6471,7 @@ if (window.innerWidth <= 1024) {
 const container = document.getElementById("inlineVideoContainer");
 if (container) {
     // A smooth scroll is a ~400ms animation that carries on after the
-    // reload mask lifts, so in MP you watch the page slide into place
+    // reload mask lifts, so in MPFS you watch the page slide into place
     // behind the returning fullscreen. During a reload we're going back
     // into fullscreen anyway - jump there instantly instead.
     container.scrollIntoView({
@@ -7017,7 +7017,7 @@ computeBottomDock(); // Info bar height may have changed - recompute dock
 
 // Keep the title bar in sync when switching videos via next/random while
 // still in fullscreen. Unconditional now rather than FLS-only: the element
-// is display:none outside fullscreen anyway, and MP needs the same update.
+// is display:none outside fullscreen anyway, and MPFS needs the same update.
 if (typeof window.syncVideoTitleBar === 'function') {
     window.syncVideoTitleBar(video);
 }
@@ -7198,7 +7198,7 @@ if (wasForcedLandscapeBeforeLoad) {
         window.plyrPlayer.fullscreen.enter();
     }
 } else if (wasPlainFullscreenBeforeLoad && !window.plyrPlayer.fullscreen?.active) {
-    // ✅ Plain (MP) fullscreen was dropped by the browser on the source
+    // ✅ MPFS was dropped by the browser on the source
     // change - go straight back in, no rotation involved. Small delay so
     // Plyr has finished swapping in the rebuilt <video> element first.
     setTimeout(() => {

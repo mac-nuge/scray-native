@@ -1746,7 +1746,7 @@ body.manual-rotate-landscape .plyr__controls .plyr__control,
 body.manual-rotate-landscape .plyr-stop,
 body.manual-rotate-landscape .plyr-ios-fullscreen,
 body.manual-rotate-landscape .plyr-manual-rotate,
-body.manual-rotate-landscape .plyr-fls-to-mp,
+body.manual-rotate-landscape .plyr-fls-to-mpfs,
 body.manual-rotate-landscape .plyr-scroll-lock,
 body.manual-rotate-landscape .plyr-random-video,
 body.manual-rotate-landscape .plyr-history-sequence,
@@ -2177,9 +2177,9 @@ display: none !important;
 
 /* ↺ FLS -> MP button. Exists in the DOM at all times (attached alongside
    the other custom controls) but only visible while forced landscape is
-   active. ⚙️ The FLS shrink block above also lists .plyr-fls-to-mp, so it
+   active. ⚙️ The FLS shrink block above also lists .plyr-fls-to-mpfs, so it
    matches the 32px sizing of everything else in that row. */
-.plyr-fls-to-mp {
+.plyr-fls-to-mpfs {
 min-width: 50px !important;
 min-height: 50px !important;
 font-size: 1.4rem !important;
@@ -2188,7 +2188,7 @@ background: transparent !important;
 display: none !important;
 }
 
-body.manual-rotate-landscape .plyr-fls-to-mp {
+body.manual-rotate-landscape .plyr-fls-to-mpfs {
 display: inline-flex !important;
 align-items: center;
 justify-content: center;
@@ -2202,11 +2202,11 @@ body.manual-rotate-landscape .plyr-manual-rotate {
 display: none !important;
 }
 
-.plyr-fls-to-mp:hover {
+.plyr-fls-to-mpfs:hover {
 background: rgba(255, 255, 255, 0.2) !important;
 }
 
-.plyr-fls-to-mp:active {
+.plyr-fls-to-mpfs:active {
 background: rgba(255, 255, 255, 0.3) !important;
 }
 

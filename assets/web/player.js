@@ -203,57 +203,171 @@ function ensureVideoTitleBar() {
 function syncVideoTitleBar(video) {
     const v = video || window.currentPlayingVideo;
     const bar = ensureVideoTitleBar();
-    if (!bar || !v) return;
-    const scoreText = (v.user_score !== undefined && v.user_score !== null) ? ` [${v.user_score}]` : '';
-    bar.textContent = (v.filename || '') + scoreText;
-}
+    if (!bar) return;
 
-window.ensureVideoTitleBar = ensureVideoTitleBar;
-window.syncVideoTitleBar = syncVideoTitleBar;
-
-// The title bar, shared by FLS, MPFS and MPB. Created lazily inside whatever is
-// currently acting as the player root, with the basket click handler always
-// attached - CSS decides whether it's interactive (FLS) or inert (MPFS/MPB), so it
-// doesn't matter which mode happens to create it first.
-function ensureVideoTitleBar() {
-    const host = getManualRotationFullscreenElement()
-        || document.querySelector('#inlineVideoContainer .plyr')
-        || document.querySelector('.plyr');
-    if (!host) return null;
-
-    let title = host.querySelector('.fls-video-title');
-    if (!title) {
-        // It may already exist but be parented elsewhere after a player
-        // rebuild - move that one rather than ending up with two.
-        const orphan = document.querySelector('.fls-video-title');
-        if (orphan) {
-            title = orphan;
-        } else {
-            title = document.createElement('div');
-            title.className = 'fls-video-title';
-            title.title = 'View basket';
-            // Tapping opens the basket modal. Only reachable in FLS -
-            // pointer-events is none by default and CSS only re-enables it
-            // under body.manual-rotate-landscape.
-            title.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (typeof showPlayerBasketModal === 'function') {
-                    showPlayerBasketModal();
-                }
-            });
-        }
-        host.appendChild(title);
+    // The bar is a flex row now: filename text + the filter pill. Rebuild
+    // only the text span, so the pill (and its listeners) survive a re-sync.
+    let textEl = bar.querySelector('.fls-video-title-text');
+    if (!textEl) {
+        textEl = document.createElement('span');
+        textEl.className = 'fls-video-title-text';
+        // Strip the bare text node the old single-node version left behind.
+        Array.from(bar.childNodes).forEach(n => { if (n.nodeType === 3) n.remove(); });
+        bar.insertBefore(textEl, bar.firstChild);
     }
-    return title;
+    if (v) {
+        const scoreText = (v.user_score !== undefined && v.user_score !== null) ? ` [${v.user_score}]` : '';
+        textEl.textContent = (v.filename || '') + scoreText;
+    }
+    syncFullscreenFilterPill();
 }
 
-function syncVideoTitleBar(video) {
-    const v = video || window.currentPlayingVideo;
-    const bar = ensureVideoTitleBar();
-    if (!bar || !v) return;
-    const scoreText = (v.user_score !== undefined && v.user_score !== null) ? ` [${v.user_score}]` : '';
-    bar.textContent = (v.filename || '') + scoreText;
+// ---------------------------------------------------------------
+// FLS / MPFS search-filter pill.
+//
+// Lives INSIDE .fls-video-title rather than being positioned against it, so
+// it inherits that bar's placement in both modes and its fade-out with
+// .plyr--hide-controls for free - no measuring, no rAF loop.
+// ---------------------------------------------------------------
+function getMainSearchTerm() {
+    return (document.getElementById('filenameSearchBox')?.value || '').trim();
 }
+
+function applyFullscreenFilterTerm(term) {
+    const mainBox = document.getElementById('filenameSearchBox');
+    if (mainBox) mainBox.value = term;
+    const clearX = document.getElementById('clearSearchX');
+    if (clearX) clearX.style.display = term ? 'block' : 'none';
+
+    const panelBox = document.getElementById('panelSearchBox');
+    if (panelBox) panelBox.value = term;
+    const panelClearX = document.getElementById('panelSearchClearX');
+    if (panelClearX) panelClearX.style.display = term ? 'block' : 'none';
+
+    // We're sitting in fullscreen - never scroll the page to the search box
+    // or pop the landscape playlist panel open behind the player.
+    window.skipSearchScroll = true;
+    window.skipPanelAutoOpen = true;
+    if (typeof filterDisplayedByFilename === 'function') filterDisplayedByFilename();
+
+    syncFullscreenFilterPill();
+}
+
+function ensureFullscreenFilterPill() {
+    const bar = ensureVideoTitleBar();
+    if (!bar) return null;
+
+    let pill = bar.querySelector('.fls-filter-pill');
+    if (pill) return pill;
+
+    pill = document.createElement('span');
+    pill.className = 'fls-filter-pill';
+
+    const label = document.createElement('span');
+    label.className = 'fls-filter-pill-label';
+    pill.appendChild(label);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'fls-filter-pill-input';
+    input.placeholder = 'Filter';
+    input.setAttribute('autocapitalize', 'none');
+    input.setAttribute('autocorrect', 'off');
+    input.setAttribute('spellcheck', 'false');
+    pill.appendChild(input);
+
+    const bin = document.createElement('button');
+    bin.type = 'button';
+    bin.className = 'fls-filter-pill-bin';
+    bin.textContent = '🗑️';
+    bin.title = 'Clear filter';
+    pill.appendChild(bin);
+
+    // In FLS the title bar itself opens the basket on tap - none of the
+    // pill's own gestures should ever reach it.
+    ['click', 'mousedown', 'touchstart', 'touchend'].forEach(type => {
+        pill.addEventListener(type, ev => ev.stopPropagation());
+    });
+
+    label.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        startFullscreenFilterEdit();
+    });
+
+    input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+        else if (ev.key === 'Escape') { ev.preventDefault(); input.value = getMainSearchTerm(); input.blur(); }
+    });
+    input.addEventListener('blur', () => endFullscreenFilterEdit(true));
+
+    // preventDefault on the press stops the bin stealing focus mid-edit -
+    // otherwise the input blurs, the keyboard closes, and the tap lands on
+    // nothing. iOS then swallows the synthesized click, so act on touchend.
+    bin.addEventListener('mousedown', ev => ev.preventDefault());
+    bin.addEventListener('touchstart', ev => ev.preventDefault(), { passive: false });
+    const clearFromBin = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (bin.dataset.firing === '1') return;   // desktop click vs iOS touchend
+        bin.dataset.firing = '1';
+        setTimeout(() => { delete bin.dataset.firing; }, 400);
+        input.value = '';
+        if (pill.classList.contains('editing')) {
+            input.blur();               // blur handler commits the empty term
+        } else {
+            applyFullscreenFilterTerm('');
+        }
+    };
+    bin.addEventListener('touchend', clearFromBin, { passive: false });
+    bin.addEventListener('click', clearFromBin);
+
+    bar.appendChild(pill);
+    return pill;
+}
+
+function syncFullscreenFilterPill() {
+    const pill = ensureFullscreenFilterPill();
+    if (!pill) return;
+    const term = getMainSearchTerm();
+    const label = pill.querySelector('.fls-filter-pill-label');
+    const bin = pill.querySelector('.fls-filter-pill-bin');
+    if (label) label.textContent = term ? ('🔍 ' + term) : '🔍';
+    if (bin) bin.style.display = term ? 'inline-block' : 'none';
+    pill.title = term ? 'Tap to edit the filter' : 'Tap to set a filter';
+}
+
+function startFullscreenFilterEdit() {
+    const pill = ensureFullscreenFilterPill();
+    if (!pill) return;
+    const input = pill.querySelector('.fls-filter-pill-input');
+    if (!input) return;
+    input.value = getMainSearchTerm();
+    // Flags the app as "editing from fullscreen" so the MPB keyboard rules
+    // don't hide #inlineVideoContainer - in MPFS that IS the fullscreen
+    // surface, and hiding it would drop us out of fullscreen mid-keystroke.
+    document.body.classList.add('fls-filter-editing');
+    pill.classList.add('editing');
+    input.focus({ preventScroll: true });
+    setTimeout(() => {
+        const len = input.value.length;
+        try { input.setSelectionRange(len, len); } catch (_) {}
+    }, 50);
+}
+
+function endFullscreenFilterEdit(commit) {
+    const pill = document.querySelector('.fls-filter-pill');
+    document.body.classList.remove('fls-filter-editing');
+    if (!pill) return;
+    pill.classList.remove('editing');
+    const input = pill.querySelector('.fls-filter-pill-input');
+    if (commit && input) {
+        applyFullscreenFilterTerm(input.value.trim());
+    } else {
+        syncFullscreenFilterPill();
+    }
+}
+
+window.syncFullscreenFilterPill = syncFullscreenFilterPill;
 
 window.ensureVideoTitleBar = ensureVideoTitleBar;
 window.syncVideoTitleBar = syncVideoTitleBar;
@@ -374,20 +488,55 @@ function applyManualRotationStyles() {
         'z-index': '2147483647'
     });
 
-    // Video title, pinned to the very top of the rotated player (opposite
-    // edge from the controls bar below), showing the current filename.
+    // Video title + filter pill, laid out like a chart's y-axis label: pinned
+    // to the rotated container's LEFT edge, centred along it, and counter-
+    // rotated -90deg.
+    //
+    // The container is already rotate(90deg), so a child at rotate(-90deg)
+    // composes to a net rotation of zero - the block renders upright in
+    // PHYSICAL screen terms. And the container's local left edge maps to the
+    // physical TOP edge under that same +90deg. Net effect: the block lands
+    // in exactly the same absolute screen position as MPFS puts it, while
+    // reading bottom-to-top on the far left of the FLS view.
     if (title) {
+        // ⚙️ Gap between the block's outer edge and the container's left edge
+        // (= the physical top of the screen). 8px matched MPFS but sat under
+        // the notch/camera once the phone was turned, so this now lines the
+        // block's near edge up with where the progress bar starts.
+        // Keep in step with PROGRESS_BAR_FLS_INSET_PX below - it can't be
+        // referenced directly from here, it's declared further down the same
+        // block scope and would be in the temporal dead zone.
+        const FLS_TITLE_EDGE_INSET_PX = 70;
+
         // Through the shared sync so a plain re-apply shows the score suffix
         // too - previously only the video-change path added it.
         syncVideoTitleBar();
         setImportantStyles(title, {
             position: 'absolute',
-            top: 'calc(5% + 2px)',
-            left: '50%',
+            top: '50%',
+            left: '0px',
             right: 'auto',
-            transform: 'translateX(-50%)',
+            bottom: 'auto',
+            // After the counter-rotation the block's WIDTH runs along the
+            // container's vertical axis, which is the physical screen's
+            // width - so cap against screenW, not the container's own width.
+            'max-width': Math.round(screenW * 0.8) + 'px',
+            transform: 'translate(-50%, -50%) rotate(-90deg)',
+            'transform-origin': 'center center',
             'z-index': '2147483647'
         });
+
+        // offsetHeight is a pre-transform layout value, so it's the block's
+        // thickness across the physical screen's vertical axis. The rotated
+        // box is centred on `left`, so half the thickness has to be added to
+        // the inset to keep that edge gap honest. Fallback covers the case
+        // where the bar hasn't been laid out yet (offsetHeight 0).
+        const titleThickness = title.offsetHeight || 34;
+        title.style.setProperty(
+            'left',
+            (FLS_TITLE_EDGE_INSET_PX + (titleThickness / 2)) + 'px',
+            'important'
+        );
     }
     // The progress bar goes BELOW the controls, i.e. closer to the
     // container's own local edge - so its "bottom" offset must be SMALLER
@@ -606,6 +755,12 @@ function clearFullscreenControlOffsets() {
 const MPB_VIDEO_TOP_BUFFER = 24;
 // ⚙️ Never shrink the video below this height, however tall the stack gets.
 const MPB_VIDEO_MIN_HEIGHT = 140;
+// ⚙️ MPB PORTRAIT-VIDEO CAP. A portrait clip would otherwise eat the whole
+// space the stack leaves, pushing the page off the top of the screen. Cap it
+// at this fraction of the viewport height so there's always page visible
+// above the player. Lower = more page showing, higher = bigger video.
+// Only applied to clips that are actually taller than they are wide.
+const MPB_PORTRAIT_MAX_VH = 0.52;
 
 /**
 * Fit the docked video inside the space the dock stack actually leaves.
@@ -643,13 +798,20 @@ function fitDockedVideoToStack(infoHeight, baseBottomOffset, gapBetweenStackItem
         - progressBarHeight
         - MPB_VIDEO_TOP_BUFFER;
 
-    const targetHeight = Math.max(MPB_VIDEO_MIN_HEIGHT, Math.round(available));
-
     // Intrinsic dimensions. videoWidth/Height are 0 until metadata loads, so
     // fall back to the values stored on the video record - reliable now that
     // native scanning + the orientation backfill populate width/height.
     const intrinsicW = videoEl.videoWidth || window.currentPlayingVideo?.width || 0;
     const intrinsicH = videoEl.videoHeight || window.currentPlayingVideo?.height || 0;
+
+    // Portrait clips get an extra ceiling so the page stays visible above the
+    // player. Landscape clips are naturally short and keep the full space.
+    const isPortraitClip = !!(intrinsicW && intrinsicH) && intrinsicH > intrinsicW;
+    const cappedAvailable = isPortraitClip
+        ? Math.min(available, window.innerHeight * MPB_PORTRAIT_MAX_VH)
+        : available;
+
+    const targetHeight = Math.max(MPB_VIDEO_MIN_HEIGHT, Math.round(cappedAvailable));
 
     videoEl.style.setProperty('object-fit', 'contain', 'important');
     videoEl.dataset.dockFitted = '1';

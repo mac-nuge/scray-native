@@ -19,7 +19,9 @@ Object.defineProperty(window, 'filteredVideosGlobal', {
 });
 let currentSortState = 'none'; // 'none', 'asc', 'desc'
 // ✅ NEW: Add sort states for created and modified dates
-let currentCreatedSortState = 'none';
+// ⚙️ DEFAULT SORT ON BOOT/REFRESH: newest created first. Set back to 'none'
+// for the old unsorted default, or 'asc' for oldest first.
+let currentCreatedSortState = 'desc';
 let currentModifiedSortState = 'none';
 let currentFilenameSortState = 'none';
 let currentScoreSortState = 'none';
@@ -1033,40 +1035,7 @@ if (excludeTags.length > 0) {
   container.appendChild(pill);
 }
 
-// Excel connection status pill - mirrors the top Excel button exactly
-const excelPill = document.createElement("span");
-const isExcelConnected = !!window.excelAccessToken;
-const notesReady = typeof window.isExcelBookmarkNotesReady === 'function' ? window.isExcelBookmarkNotesReady() : true;
-const autoTrackOn = typeof window.isAutoTrackEnabled === 'function' ? window.isAutoTrackEnabled() : true;
-
-if (!isExcelConnected) {
-  excelPill.className = "floating-tag-pill floating-tag-excel-disconnected";
-  excelPill.textContent = "Connect Excel";
-  excelPill.title = "Excel not connected - tap to connect";
-} else if (!notesReady) {
-  excelPill.className = "floating-tag-pill floating-tag-excel-disconnected";
-  excelPill.textContent = "📊...";
-  excelPill.title = "Excel connecting - tap for options";
-} else {
-  excelPill.className = "floating-tag-pill floating-tag-excel-connected";
-  excelPill.textContent = autoTrackOn ? "📊✓ " : "📊";
-  excelPill.title = autoTrackOn ? "Excel connected, auto-track on - tap for options" : "Excel connected, auto-track off - tap for options";
-}
-
-excelPill.addEventListener("click", () => {
-  if (window.excelAccessToken) {
-      if (typeof window.showExcelOnlineOptionsModal === 'function') {
-          window.showExcelOnlineOptionsModal();
-      }
-  } else {
-      if (typeof window.signInToExcelOnline === 'function') {
-          window.signInToExcelOnline();
-      }
-  }
-});
-excelPill.style.marginLeft = "auto";
-excelPill.style.display = "none"; // ✅ Hidden per request
-container.appendChild(excelPill);
+// Excel connection status pill removed - Excel path is retired.
 }
 // Refresh filters & pills
 function refreshFiltersFromCommonSet() {
@@ -1870,6 +1839,12 @@ searchBar.scrollIntoView({ behavior: "smooth", block: "start" });
 if (typeof updateFloatingTagPillsFromCommon === 'function') {
  updateFloatingTagPillsFromCommon();
 }
+
+// Keep the FLS/MPFS in-player filter pill in step with the filter, however
+// the filter was changed (pill, main box, panel box, bin, clear-all).
+if (typeof window.syncFullscreenFilterPill === 'function') {
+ window.syncFullscreenFilterPill();
+}
 }
 
 async function clearAllFilters() {
@@ -2330,6 +2305,12 @@ const sortBtn = document.getElementById('sortSizeBtn');
    if (sortCreatedBtn) {
        sortCreatedBtn.addEventListener('click', toggleCreatedSortState);
        updateCreatedSortButton();
+   }
+   // Mirror the boot default onto the landscape panel's own sort button,
+   // which otherwise stays showing a plain "Create" while the list is
+   // already sorted newest-first.
+   if (typeof updatePanelSortButton === 'function') {
+       updatePanelSortButton('panelSortCreatedBtn', currentCreatedSortState);
    }
    
    const sortModifiedBtn = document.getElementById('sortModifiedBtn');

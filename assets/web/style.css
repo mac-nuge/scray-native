@@ -240,17 +240,19 @@ font-size: 0.8rem;
 pointer-events: none;
 }
 
-/* ✅ Portrait mobile: move pills higher to clear raised corner buttons */
+/* ⚙️ Portrait mobile: sit the pills DIRECTLY above the single corner-button
+   row. 36px = the corner block's own bottom offset, 34px = one button row,
+   6px = the gap. Tweak the 6px for more/less breathing room. */
 @media (max-width: 768px) and (orientation: portrait) {
 #floatingTagPillsBar {
-bottom: calc(env(safe-area-inset-bottom,0px) + 115px) !important;
+bottom: calc(env(safe-area-inset-bottom,0px) + 36px + 34px + 6px) !important;
 }
 }
 
-/* ✅ Landscape mobile: keep pills at original position */
+/* ⚙️ Landscape mobile: same idea - corner block sits at bottom:10px there. */
 @media (max-width: 1024px) and (orientation: landscape) {
 #floatingTagPillsBar {
-bottom: calc(env(safe-area-inset-bottom,0px) + 98px) !important;
+bottom: calc(env(safe-area-inset-bottom,0px) + 10px + 34px + 6px) !important;
 }
 }
 
@@ -575,8 +577,10 @@ max-width: calc(100vw - 40px);
 /* ⚙️ MPB: align the corner button block's baseline with the disguise
    (invert colour) control, which disguise.js pins at
    safe + MOBILE_BOTTOM_OFFSET + NATIVE_EXTRA_LIFT (6 + 30 = 36px).
-   Native's #cornerButtons is a two-row COLUMN, so it's ~80px tall - the
-   disguise handle ends up level with its BOTTOM row, which is the intent. */
+   #cornerButtons is now a SINGLE row (~34px tall), so its bottom edge and
+   the disguise handle line up directly. ⚙️ CORNER_ROW_BOTTOM = 36px - if
+   you change it, change the matching number in the #floatingTagPillsBar
+   rules above so the pills stay directly on top of the row. */
 @media (max-width: 768px) and (orientation: portrait) {
 #cornerButtons {
   bottom: calc(env(safe-area-inset-bottom,0px) + 36px) !important;
@@ -1041,6 +1045,10 @@ white-space: normal;
 position: fixed !important;
 bottom: calc(env(safe-area-inset-bottom,0px) + var(--keyboard-offset, 0px)) !important;
 transform: translateY(var(--keyboard-scroll-offset, 0px)) !important;
+/* ⚙️ #cornerButtons is z-index 9999 and the pills bar creates its own
+   stacking context, so at 2600 the clear-filter bin was rendering behind
+   the buttons. Lift the whole bar over them while the keyboard is up. */
+z-index: 10000 !important;
 }
 
 /* When keyboard is open AND a search pill is visible, hide the video
@@ -2081,7 +2089,10 @@ background: #000 !important;
 }
 
 body.manual-rotate-landscape .fls-video-title {
-display: block;
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: 4px;
 pointer-events: auto;
 cursor: pointer;
 }
@@ -2094,7 +2105,10 @@ cursor: pointer;
    applyManualRotationStyles, and removeManualRotationStyles strips those on
    exit, so these take over cleanly. */
 body.portrait-fullscreen:not(.manual-rotate-landscape) .fls-video-title {
-display: block;
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: 4px;
 position: absolute;
 top: calc(env(safe-area-inset-top, 0px) + 8px);
 left: 50%;
@@ -2109,6 +2123,98 @@ z-index: 2147483647;
 .plyr--hide-controls .fls-video-title {
 opacity: 0 !important;
 pointer-events: none;
+}
+
+/* The title bar is a row now: filename + filter pill. The filename keeps the
+   ellipsis; the pill keeps its natural width. */
+.fls-video-title-text {
+overflow: hidden;
+text-overflow: ellipsis;
+white-space: nowrap;
+min-width: 0;
+max-width: 100%;
+}
+
+/* ⚙️ FLS/MPFS filter pill. Deliberately transparent - it rides on the title
+   bar's own translucent background and inherits that bar's fade-out with the
+   controls, so it needs no visibility logic of its own. */
+.fls-filter-pill {
+display: inline-flex;
+align-items: center;
+gap: 4px;
+flex: 0 0 auto;
+max-width: 100%;   /* the pill now sits on its own row under the filename */
+background: transparent;
+border: 1px solid rgba(255,255,255,0.35);
+border-radius: 10px;
+padding: 1px 5px;
+color: #fff;
+font-size: 0.6rem;
+line-height: 1.4;
+cursor: pointer;
+white-space: nowrap;
+/* The bar is pointer-events:none in MPFS - opt the pill back in so it's
+   tappable in BOTH modes, not just FLS. */
+pointer-events: auto;
+}
+
+.fls-filter-pill-label {
+overflow: hidden;
+text-overflow: ellipsis;
+white-space: nowrap;
+}
+
+.fls-filter-pill-input {
+display: none;
+background: rgba(0,0,0,0.6);
+border: none;
+outline: none;
+color: #fff;
+font: inherit;
+padding: 0 2px;
+border-radius: 4px;
+width: 9em;   /* ⚙️ widen if your filter terms run long */
+}
+
+.fls-filter-pill.editing .fls-filter-pill-label { display: none; }
+.fls-filter-pill.editing .fls-filter-pill-input { display: inline-block; }
+
+.fls-filter-pill-bin {
+background: transparent;
+border: none;
+color: #fff;
+font-size: 0.7rem;
+line-height: 1;
+padding: 0 2px;
+cursor: pointer;
+-webkit-tap-highlight-color: rgba(255,255,255,0.2);
+}
+
+/* Faded out with the controls means untappable too - otherwise it stays a
+   live target sitting invisibly over the video. */
+.plyr--hide-controls .fls-filter-pill { pointer-events: none; }
+
+/* ...unless the filter is actually being edited. Plyr fades its controls on
+   playback inactivity, and typing on the on-screen keyboard doesn't count as
+   activity - so mid-edit the bar (and the input you're typing into) would
+   vanish. Both selectors carry one more class than the .plyr--hide-controls
+   rules above, so they win on specificity. */
+body.fls-filter-editing .plyr--hide-controls .fls-video-title {
+opacity: 1 !important;   /* ⚙️ base is 0.5 - full opacity while editing */
+}
+
+/* Only the pill opts back in. Leaving the BAR at pointer-events:none matters:
+   the bar carries the open-basket click handler, and re-enabling it here
+   would make a stray tap next to the pill open the basket mid-edit. */
+body.fls-filter-editing .plyr--hide-controls .fls-filter-pill {
+pointer-events: auto;
+}
+
+/* While the filter is being edited from inside the player, the MPB keyboard
+   rule must not hide #inlineVideoContainer - in MPFS that IS the fullscreen
+   surface. */
+body.fls-filter-editing.keyboard-active.search-pill-active #inlineVideoContainer {
+display: block !important;
 }
 
 /* ⚙️ Forced landscape: hide the mobile filter bar entirely - it isn't

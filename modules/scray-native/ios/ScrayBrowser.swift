@@ -149,6 +149,12 @@ final class ScrayBrowserViewController: UIViewController,
     private let downloadBar = ScrayDownloadBar()
     private var exportingTempFiles: [URL] = []
     private var pendingExportJobID: String?
+    /// WKDownload keys we cancelled ourselves in order to pause, so the
+    /// resulting failure callback isn't mistaken for a real one.
+    private var pausingKeys: Set<ObjectIdentifier> = []
+    /// Destinations for downloads being resumed — a resumed transfer must go
+    /// back to the same partial file, and must not re-prompt.
+    private var resumeDestinations: [ObjectIdentifier: URL] = [:]
 
     init(homeURL: URL) {
         self.homeURL = homeURL
@@ -520,6 +526,8 @@ final class ScrayBrowserViewController: UIViewController,
     @objc private func downloadsTapped() {
         let list = ScrayDownloadsViewController(style: .insetGrouped)
         list.onCancel = { [weak self] id in self?.cancelDownload(id: id) }
+        list.onPause  = { [weak self] id in self?.pauseDownload(id: id) }
+        list.onResume = { [weak self] id in self?.resumeDownload(id: id) }
         let nav = UINavigationController(rootViewController: list)
         presentSafely(nav)
     }
@@ -820,7 +828,7 @@ final class ScrayBrowserViewController: UIViewController,
         fetch(href)
           .then(function (r) { return r.blob(); })
           .then(function (blob) {
-            pending[id] = blob;
+            pending[id] = { blob: blob, offset: 0, paused: false, running: false };
             post({ phase: 'offer', id: id, filename: filename || 'download', size: blob.size });
           })
           .catch(function (err) {
@@ -842,34 +850,53 @@ final class ScrayBrowserViewController: UIViewController,
 
       window.__scrayDownloadCancel = function (id) { delete pending[id]; };
 
+      window.__scrayDownloadPause = function (id) {
+        var job = pending[id];
+        if (job) job.paused = true;
+      };
+
+      window.__scrayDownloadResume = function (id) {
+        var job = pending[id];
+        if (!job || !job.paused) return;
+        job.paused = false;
+        if (!job.running) pump(id);
+      };
+
       // Phase two: stream it. Chunked so the native side can show real
-      // progress, and so a big export isn't one enormous bridge message.
-      window.__scrayDownloadStart = function (id) {
-        var blob = pending[id];
-        if (!blob) { post({ phase: 'error', id: id, message: 'Nothing to download' }); return; }
-        var offset = 0;
-        function step() {
-          if (!pending[id]) return;                       // cancelled
-          if (offset >= blob.size) {
-            delete pending[id];
-            post({ phase: 'done', id: id });
-            return;
-          }
-          var end = Math.min(offset + CHUNK, blob.size);
-          var slice = blob.slice(offset, end);
-          b64(slice)
-            .then(function (data) {
-              if (!pending[id]) return;
-              post({ phase: 'chunk', id: id, base64: data });
-              offset = end;
-              setTimeout(step, 0);                        // let the UI breathe
-            })
-            .catch(function (err) {
-              delete pending[id];
-              post({ phase: 'error', id: id, message: String((err && err.message) || err) });
-            });
+      // progress, so a big export isn't one enormous bridge message, and so
+      // pausing means simply not scheduling the next chunk — the offset is
+      // already on the job, so resuming picks up exactly where it stopped.
+      function pump(id) {
+        var job = pending[id];
+        if (!job) return;                                 // cancelled
+        if (job.paused) { job.running = false; return; }
+        job.running = true;
+
+        if (job.offset >= job.blob.size) {
+          delete pending[id];
+          post({ phase: 'done', id: id });
+          return;
         }
-        step();
+
+        var end = Math.min(job.offset + CHUNK, job.blob.size);
+        b64(job.blob.slice(job.offset, end))
+          .then(function (data) {
+            var live = pending[id];
+            if (!live) return;                            // cancelled mid-chunk
+            post({ phase: 'chunk', id: id, base64: data });
+            live.offset = end;
+            if (live.paused) { live.running = false; return; }
+            setTimeout(function () { pump(id); }, 0);     // let the UI breathe
+          })
+          .catch(function (err) {
+            delete pending[id];
+            post({ phase: 'error', id: id, message: String((err && err.message) || err) });
+          });
+      }
+
+      window.__scrayDownloadStart = function (id) {
+        if (!pending[id]) { post({ phase: 'error', id: id, message: 'Nothing to download' }); return; }
+        pump(id);
       };
 
       // Picker builds its anchors detached and calls .click() directly, so a
@@ -1001,6 +1028,107 @@ final class ScrayBrowserViewController: UIViewController,
         cancelDownload(id: job.id)
     }
 
+    fileprivate func pauseDownload(id: String) {
+        guard let job = jobs.first(where: { $0.id == id }) else { return }
+
+        if let webView = job.webView {
+            let escaped = job.id.replacingOccurrences(of: "'", with: "")
+            webView.evaluateJavaScript("window.__scrayDownloadPause && window.__scrayDownloadPause('\(escaped)')")
+            job.pausedInPage = true
+            ScrayDownloadCenter.shared.pause(id: id)
+            return
+        }
+
+        // WKDownload has no pause. Cancelling *with resume data* is the whole
+        // mechanism — the partial file stays where it is and the token we get
+        // back is what lets it carry on later.
+        guard #available(iOS 14.5, *) else { return }
+        guard let dl = job.httpDownload as? WKDownload,
+              let key = job.httpKey,
+              let dest = downloadDestinations[key] else { return }
+
+        pausingKeys.insert(key)
+        job.fileURL = dest
+        job.progressObs?.invalidate()
+        job.progressObs = nil
+
+        dl.cancel { [weak self] data in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.downloadDestinations.removeValue(forKey: key)
+                job.httpKey = nil
+                job.httpDownload = nil
+                guard let data = data else {
+                    // Server won't do ranged requests, so there's no resuming
+                    // this one. Better to say so than to leave a dead row.
+                    self.discardJob(id: id)
+                    ScrayDownloadCenter.shared.cancel(id: id)
+                    self.showAlert(title: "Can't pause",
+                                   message: "This download can't be resumed, so it was stopped.")
+                    return
+                }
+                job.resumeData = data
+                ScrayDownloadCenter.shared.pause(id: id)
+                self.refreshDownloadBar()
+            }
+        }
+    }
+
+    fileprivate func resumeDownload(id: String) {
+        guard let job = jobs.first(where: { $0.id == id }) else { return }
+
+        if let webView = job.webView {
+            let escaped = job.id.replacingOccurrences(of: "'", with: "")
+            webView.evaluateJavaScript("window.__scrayDownloadResume && window.__scrayDownloadResume('\(escaped)')")
+            job.pausedInPage = false
+            ScrayDownloadCenter.shared.resume(id: id)
+            return
+        }
+
+        guard #available(iOS 14.5, *) else { return }
+        guard let data = job.resumeData, let host = currentWebView else { return }
+
+        job.wasResumed = true
+        host.resumeDownload(fromResumeData: data) { [weak self] download in
+            guard let self = self else { return }
+            download.delegate = self
+            let key = ObjectIdentifier(download)
+            job.httpKey = key
+            job.httpDownload = download
+            job.resumeData = nil
+            if let dest = job.fileURL {
+                self.downloadDestinations[key] = dest
+                self.resumeDestinations[key] = dest
+            }
+            job.progressObs = self.makeProgressObserver(for: job, download: download)
+            ScrayDownloadCenter.shared.resume(id: id)
+            self.refreshDownloadBar()
+        }
+    }
+
+    /// A resumed WKDownload reports progress against the remainder, not the
+    /// whole file, so its own counters would make the bar jump backwards.
+    /// The partial file on disk is the one number that's always right.
+    @available(iOS 14.5, *)
+    fileprivate func makeProgressObserver(for job: ScrayDownloadJob,
+                                          download: WKDownload) -> NSKeyValueObservation {
+        return download.progress.observe(\.fractionCompleted) { [weak self, weak job] progress, _ in
+            DispatchQueue.main.async {
+                guard let job = job else { return }
+                if job.wasResumed, let path = job.fileURL?.path,
+                   let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size]) as? NSNumber {
+                    job.receivedBytes = size.int64Value
+                } else {
+                    job.receivedBytes = progress.completedUnitCount
+                }
+                if progress.totalUnitCount > 0, !job.wasResumed {
+                    job.totalBytes = progress.totalUnitCount
+                }
+                self?.refreshDownloadBar()
+            }
+        }
+    }
+
     fileprivate func cancelDownload(id: String) {
         guard let job = jobs.first(where: { $0.id == id }) else {
             // No live transfer — the record is all that's left of it.
@@ -1010,7 +1138,12 @@ final class ScrayBrowserViewController: UIViewController,
         if #available(iOS 14.5, *), let dl = job.httpDownload as? WKDownload {
             dl.cancel { _ in }
         }
-        if let key = job.httpKey { downloadDestinations.removeValue(forKey: key) }
+        job.resumeData = nil
+        if let key = job.httpKey {
+            downloadDestinations.removeValue(forKey: key)
+            resumeDestinations.removeValue(forKey: key)
+            pausingKeys.remove(key)
+        }
         if let webView = job.webView {
             let escaped = job.id.replacingOccurrences(of: "'", with: "")
             webView.evaluateJavaScript("window.__scrayDownloadCancel && window.__scrayDownloadCancel('\(escaped)')")
@@ -1149,6 +1282,16 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
                   decideDestinationUsing response: URLResponse,
                   suggestedFilename: String,
                   completionHandler: @escaping (URL?) -> Void) {
+        // A resume lands here too, but it already has a destination and an
+        // answered prompt — asking again would be nonsense and would point
+        // the transfer at a fresh empty file.
+        let key = ObjectIdentifier(download)
+        if let known = resumeDestinations.removeValue(forKey: key) {
+            downloadDestinations[key] = known
+            completionHandler(known)
+            return
+        }
+
         let name = suggestedFilename.isEmpty ? "download" : suggestedFilename
         let expected = response.expectedContentLength > 0 ? response.expectedContentLength : 0
 
@@ -1162,21 +1305,13 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
                 completionHandler(nil)   // nil cancels the download
                 return
             }
-            let key = ObjectIdentifier(download)
             self.downloadDestinations[key] = dest
 
             let job = ScrayDownloadJob(id: UUID().uuidString, filename: name)
             job.totalBytes = expected
             job.httpKey = key
             job.httpDownload = download
-            job.progressObs = download.progress.observe(\.fractionCompleted) { [weak self, weak job] progress, _ in
-                DispatchQueue.main.async {
-                    guard let job = job else { return }
-                    job.receivedBytes = progress.completedUnitCount
-                    if progress.totalUnitCount > 0 { job.totalBytes = progress.totalUnitCount }
-                    self?.refreshDownloadBar()
-                }
-            }
+            job.progressObs = self.makeProgressObserver(for: job, download: download)
             ScrayDownloadCenter.shared.begin(id: job.id, filename: name, total: expected)
             self.jobs.append(job)
             self.refreshDownloadBar()
@@ -1199,6 +1334,10 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         let key = ObjectIdentifier(download)
+
+        // We cancelled this one ourselves to pause it. The job stays put.
+        if pausingKeys.remove(key) != nil { return }
+
         if let idx = jobs.firstIndex(where: { $0.httpKey == key }) {
             ScrayDownloadCenter.shared.fail(id: jobs[idx].id, message: error.localizedDescription)
             jobs[idx].progressObs?.invalidate()

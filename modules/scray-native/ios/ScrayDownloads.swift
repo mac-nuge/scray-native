@@ -24,6 +24,16 @@ final class ScrayDownloadJob {
     var httpDownload: AnyObject?
     var progressObs: NSKeyValueObservation?
 
+    /// Pause state. WKDownload has no pause — the only thing it offers is
+    /// cancelling *with resume data*, so a paused HTTP download is a
+    /// cancelled one holding the bytes needed to pick up again. The blob
+    /// route just stops pumping chunks and keeps its offset.
+    var resumeData: Data?
+    var wasResumed = false
+
+    var isPaused: Bool { resumeData != nil || pausedInPage }
+    var pausedInPage = false
+
     init(id: String, filename: String) {
         self.id = id
         self.filename = filename

@@ -12,7 +12,7 @@ import UIKit
 
 final class ScrayDownloadRecord {
 
-    enum State: Equatable { case active, finished, failed, cancelled }
+    enum State: Equatable { case active, paused, finished, failed, cancelled }
 
     let id: String
     let filename: String
@@ -22,6 +22,9 @@ final class ScrayDownloadRecord {
     var state: State = .active
     var savedURL: URL?
     var message: String?
+
+    /// Transferring or stopped-but-resumable, as opposed to done with.
+    var isLive: Bool { state == .active || state == .paused }
 
     init(id: String, filename: String, total: Int64) {
         self.id = id
@@ -42,7 +45,10 @@ final class ScrayDownloadCenter {
     var onChange: (() -> Void)?
 
     var activeCount: Int { records.filter { $0.state == .active }.count }
-    var hasFinished: Bool { records.contains { $0.state != .active } }
+
+    /// Paused still counts as live — "Clear" must not sweep away something
+    /// you're part-way through and meant to come back to.
+    var hasFinished: Bool { records.contains { !$0.isLive } }
 
     @discardableResult
     func begin(id: String, filename: String, total: Int64) -> ScrayDownloadRecord {
@@ -59,6 +65,18 @@ final class ScrayDownloadCenter {
         changed()
     }
 
+    func pause(id: String) {
+        guard let r = records.first(where: { $0.id == id }), r.state == .active else { return }
+        r.state = .paused
+        changed()
+    }
+
+    func resume(id: String) {
+        guard let r = records.first(where: { $0.id == id }), r.state == .paused else { return }
+        r.state = .active
+        changed()
+    }
+
     func finish(id: String, savedURL: URL?) {
         guard let r = records.first(where: { $0.id == id }) else { return }
         r.state = .finished
@@ -68,14 +86,14 @@ final class ScrayDownloadCenter {
     }
 
     func fail(id: String, message: String) {
-        guard let r = records.first(where: { $0.id == id }), r.state == .active else { return }
+        guard let r = records.first(where: { $0.id == id }), r.isLive else { return }
         r.state = .failed
         r.message = message
         changed()
     }
 
     func cancel(id: String) {
-        guard let r = records.first(where: { $0.id == id }), r.state == .active else { return }
+        guard let r = records.first(where: { $0.id == id }), r.isLive else { return }
         r.state = .cancelled
         changed()
     }
@@ -86,7 +104,7 @@ final class ScrayDownloadCenter {
     }
 
     func clearFinished() {
-        records.removeAll { $0.state != .active }
+        records.removeAll { !$0.isLive }
         changed()
     }
 
@@ -99,10 +117,17 @@ final class ScrayDownloadCenter {
 
 final class ScrayDownloadCell: UITableViewCell {
 
+    /// Tapped straight on the row. Swiping to reach a control you need
+    /// mid-transfer was fiddly enough to be a bug in its own right.
+    var onPauseResume: (() -> Void)?
+    var onCancel: (() -> Void)?
+
     private let icon = UIImageView()
     private let nameLabel = UILabel()
     private let detailLabel = UILabel()
     private let bar = UIProgressView(progressViewStyle: .default)
+    private let pauseButton = UIButton(type: .system)
+    private let cancelButton = UIButton(type: .system)
 
     private static let formatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
@@ -136,10 +161,24 @@ final class ScrayDownloadCell: UITableViewCell {
         text.axis = .vertical
         text.spacing = 3
 
-        let row = UIStackView(arrangedSubviews: [icon, text])
+        for (button, symbol, action) in [
+            (pauseButton, "pause.circle", #selector(pauseTapped)),
+            (cancelButton, "xmark.circle", #selector(cancelTapped))
+        ] {
+            button.setImage(UIImage(systemName: symbol), for: .normal)
+            button.addTarget(self, action: action, for: .touchUpInside)
+            button.setContentHuggingPriority(.required, for: .horizontal)
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
+            button.widthAnchor.constraint(equalToConstant: 40).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        }
+        pauseButton.tintColor = .systemBlue
+        cancelButton.tintColor = .systemRed
+
+        let row = UIStackView(arrangedSubviews: [icon, text, pauseButton, cancelButton])
         row.axis = .horizontal
         row.alignment = .center
-        row.spacing = 12
+        row.spacing = 8
         row.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(row)
 
@@ -151,9 +190,18 @@ final class ScrayDownloadCell: UITableViewCell {
         ])
     }
 
+    @objc private func pauseTapped() { onPauseResume?() }
+    @objc private func cancelTapped() { onCancel?() }
+
     func configure(with r: ScrayDownloadRecord) {
         nameLabel.text = r.filename
         let f = Self.formatter
+
+        // Controls only make sense while there's something to control.
+        pauseButton.isHidden = !r.isLive
+        cancelButton.isHidden = !r.isLive
+        pauseButton.setImage(UIImage(systemName: r.state == .paused ? "play.circle" : "pause.circle"),
+                             for: .normal)
 
         switch r.state {
         case .active:
@@ -166,6 +214,18 @@ final class ScrayDownloadCell: UITableViewCell {
             } else {
                 bar.setProgress(0, animated: false)
                 detailLabel.text = f.string(fromByteCount: r.received)
+            }
+
+        case .paused:
+            icon.image = UIImage(systemName: "pause.circle.fill")
+            icon.tintColor = .systemOrange
+            bar.isHidden = false
+            if r.total > 0 {
+                bar.setProgress(Float(min(1.0, Double(r.received) / Double(r.total))), animated: false)
+                detailLabel.text = "Paused · \(f.string(fromByteCount: r.received)) of \(f.string(fromByteCount: r.total))"
+            } else {
+                bar.setProgress(0, animated: false)
+                detailLabel.text = "Paused · \(f.string(fromByteCount: r.received))"
             }
 
         case .finished:
@@ -206,6 +266,8 @@ final class ScrayDownloadsViewController: UITableViewController {
 
     /// Handed back to the browser, which owns the actual transfer.
     var onCancel: ((String) -> Void)?
+    var onPause: ((String) -> Void)?
+    var onResume: ((String) -> Void)?
 
     private var reloadScheduled = false
     private let emptyLabel = UILabel()
@@ -273,6 +335,16 @@ final class ScrayDownloadsViewController: UITableViewController {
         if let cell = cell as? ScrayDownloadCell,
            let record = record(at: indexPath) {
             cell.configure(with: record)
+            cell.onPauseResume = { [weak self] in
+                guard let self = self else { return }
+                if record.state == .paused { self.onResume?(record.id) }
+                else { self.onPause?(record.id) }
+                self.refresh()
+            }
+            cell.onCancel = { [weak self] in
+                self?.onCancel?(record.id)
+                self?.refresh()
+            }
         }
         return cell
     }
@@ -301,14 +373,9 @@ final class ScrayDownloadsViewController: UITableViewController {
                             -> UISwipeActionsConfiguration? {
         guard let record = record(at: indexPath) else { return nil }
 
-        if record.state == .active {
-            let cancel = UIContextualAction(style: .destructive, title: "Cancel") { [weak self] _, _, done in
-                self?.onCancel?(record.id)
-                self?.refresh()
-                done(true)
-            }
-            return UISwipeActionsConfiguration(actions: [cancel])
-        }
+        // Live rows carry their own pause and cancel buttons — no swipe, so
+        // a stray horizontal drag while scrolling can't do anything.
+        guard !record.isLive else { return nil }
 
         let remove = UIContextualAction(style: .destructive, title: "Remove") { [weak self] _, _, done in
             ScrayDownloadCenter.shared.remove(id: record.id)

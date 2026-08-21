@@ -144,6 +144,8 @@ final class ScrayBrowserViewController: UIViewController,
 
     private var observations: [NSKeyValueObservation] = []
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
+    private var jobs: [ScrayDownloadJob] = []
+    private let downloadBar = ScrayDownloadBar()
     private var exportingTempFiles: [URL] = []
 
     init(homeURL: URL) {
@@ -260,9 +262,14 @@ final class ScrayBrowserViewController: UIViewController,
                          flex(), tabsItem, flex(), newTabItem, flex(), moreItem]
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
+        downloadBar.translatesAutoresizingMaskIntoConstraints = false
+        downloadBar.isHidden = true
+        downloadBar.onCancel = { [weak self] in self?.cancelActiveDownload() }
+
         view.addSubview(header)
         view.addSubview(progressView)
         view.addSubview(webContainer)
+        view.addSubview(downloadBar)
         view.addSubview(toolbar)
 
         let guide = view.safeAreaLayoutGuide
@@ -280,6 +287,13 @@ final class ScrayBrowserViewController: UIViewController,
             webContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             webContainer.bottomAnchor.constraint(equalTo: toolbar.topAnchor),
+
+            // Floats over the bottom of the page rather than resizing it —
+            // a reflow mid-download would be worse than 52pt of overlap.
+            downloadBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            downloadBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            downloadBar.bottomAnchor.constraint(equalTo: toolbar.topAnchor),
+            downloadBar.heightAnchor.constraint(equalToConstant: 52),
 
             toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -762,6 +776,10 @@ final class ScrayBrowserViewController: UIViewController,
       if (window.__scrayDownloadShim) return;
       window.__scrayDownloadShim = true;
 
+      var CHUNK = 512 * 1024;
+      var pending = {};
+      var seq = 0;
+
       function isLocal(href) { return /^(blob:|data:)/i.test(href || ''); }
 
       function post(payload) {
@@ -769,30 +787,72 @@ final class ScrayBrowserViewController: UIViewController,
         catch (e) { console.error('[download] bridge unavailable', e); }
       }
 
-      function grab(href, filename) {
+      // Phase one: hand over the name and size straight away so the prompt
+      // can appear before a single byte has been copied. Resolving a blob:
+      // URL is a lookup, not a read, so this is instant.
+      function offer(href, filename) {
+        var id = 'dl' + (++seq);
         fetch(href)
           .then(function (r) { return r.blob(); })
-          .then(function (b) {
-            return new Promise(function (resolve, reject) {
-              var fr = new FileReader();
-              fr.onload = function () { resolve(String(fr.result)); };
-              fr.onerror = function () { reject(fr.error); };
-              fr.readAsDataURL(b);
-            });
+          .then(function (blob) {
+            pending[id] = blob;
+            post({ phase: 'offer', id: id, filename: filename || 'download', size: blob.size });
           })
-          .then(function (dataUrl) {
-            var comma = dataUrl.indexOf(',');
-            post({ filename: filename || 'download', base64: dataUrl.slice(comma + 1) });
-          })
-          .catch(function (err) { post({ error: String((err && err.message) || err) }); });
+          .catch(function (err) {
+            post({ phase: 'error', id: id, message: String((err && err.message) || err) });
+          });
       }
+
+      function b64(chunk) {
+        return new Promise(function (resolve, reject) {
+          var fr = new FileReader();
+          fr.onload = function () {
+            var s = String(fr.result);
+            resolve(s.slice(s.indexOf(',') + 1));
+          };
+          fr.onerror = function () { reject(fr.error); };
+          fr.readAsDataURL(chunk);
+        });
+      }
+
+      window.__scrayDownloadCancel = function (id) { delete pending[id]; };
+
+      // Phase two: stream it. Chunked so the native side can show real
+      // progress, and so a big export isn't one enormous bridge message.
+      window.__scrayDownloadStart = function (id) {
+        var blob = pending[id];
+        if (!blob) { post({ phase: 'error', id: id, message: 'Nothing to download' }); return; }
+        var offset = 0;
+        function step() {
+          if (!pending[id]) return;                       // cancelled
+          if (offset >= blob.size) {
+            delete pending[id];
+            post({ phase: 'done', id: id });
+            return;
+          }
+          var end = Math.min(offset + CHUNK, blob.size);
+          var slice = blob.slice(offset, end);
+          b64(slice)
+            .then(function (data) {
+              if (!pending[id]) return;
+              post({ phase: 'chunk', id: id, base64: data });
+              offset = end;
+              setTimeout(step, 0);                        // let the UI breathe
+            })
+            .catch(function (err) {
+              delete pending[id];
+              post({ phase: 'error', id: id, message: String((err && err.message) || err) });
+            });
+        }
+        step();
+      };
 
       // Picker builds its anchors detached and calls .click() directly, so a
       // document listener alone would never see them.
       var origClick = HTMLAnchorElement.prototype.click;
       HTMLAnchorElement.prototype.click = function () {
         if (this.hasAttribute('download') && isLocal(this.href)) {
-          grab(this.href, this.getAttribute('download'));
+          offer(this.href, this.getAttribute('download'));
           return;
         }
         return origClick.apply(this, arguments);
@@ -803,13 +863,13 @@ final class ScrayBrowserViewController: UIViewController,
         if (a && isLocal(a.href)) {
           e.preventDefault();
           e.stopPropagation();
-          grab(a.href, a.getAttribute('download'));
+          offer(a.href, a.getAttribute('download'));
         }
       }, true);
 
       var origOpen = window.open;
       window.open = function (url) {
-        if (isLocal(url)) { grab(url, 'download'); return null; }
+        if (isLocal(url)) { offer(url, 'download'); return null; }
         return origOpen.apply(window, arguments);
       };
     })();
@@ -817,27 +877,99 @@ final class ScrayBrowserViewController: UIViewController,
 
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "scrayDownload",
-              let body = message.body as? [String: Any] else { return }
+              let body = message.body as? [String: Any],
+              let phase = body["phase"] as? String,
+              let id = body["id"] as? String else { return }
 
-        if let err = body["error"] as? String {
-            showAlert(title: "Download failed", message: err)
-            return
-        }
-        guard let base64 = body["base64"] as? String,
-              let data = Data(base64Encoded: base64) else {
-            showAlert(title: "Download failed", message: "Couldn't read the file data.")
-            return
-        }
+        switch phase {
 
-        let name = sanitizedFilename(body["filename"] as? String)
-        confirmDownload(filename: name) { [weak self] proceed in
-            guard let self = self, proceed else { return }
-            guard let fileURL = self.writeTempFile(data: data, filename: name) else {
-                self.showAlert(title: "Download failed", message: "Couldn't write a temporary file.")
-                return
+        case "offer":
+            let name = sanitizedFilename(body["filename"] as? String)
+            let size = (body["size"] as? NSNumber)?.int64Value ?? 0
+            let webView = message.webView
+            confirmDownload(filename: name, size: size) { [weak self] proceed in
+                guard let self = self else { return }
+                let escaped = id.replacingOccurrences(of: "'", with: "")
+                guard proceed else {
+                    webView?.evaluateJavaScript("window.__scrayDownloadCancel('\(escaped)')")
+                    return
+                }
+                guard let url = self.makeTempDestination(filename: name),
+                      FileManager.default.createFile(atPath: url.path, contents: nil),
+                      let handle = try? FileHandle(forWritingTo: url) else {
+                    webView?.evaluateJavaScript("window.__scrayDownloadCancel('\(escaped)')")
+                    self.showAlert(title: "Download failed", message: "Couldn't open a temporary file.")
+                    return
+                }
+                let job = ScrayDownloadJob(id: id, filename: name)
+                job.totalBytes = size
+                job.fileURL = url
+                job.handle = handle
+                job.webView = webView
+                self.jobs.append(job)
+                self.refreshDownloadBar()
+                webView?.evaluateJavaScript("window.__scrayDownloadStart('\(escaped)')")
             }
-            self.deliver(fileURL: fileURL)
+
+        case "chunk":
+            guard let job = jobs.first(where: { $0.id == id }),
+                  let base64 = body["base64"] as? String,
+                  let data = Data(base64Encoded: base64) else { return }
+            try? job.handle?.write(contentsOf: data)
+            job.receivedBytes += Int64(data.count)
+            refreshDownloadBar()
+
+        case "done":
+            guard let idx = jobs.firstIndex(where: { $0.id == id }) else { return }
+            let job = jobs.remove(at: idx)
+            try? job.handle?.close()
+            refreshDownloadBar()
+            if let url = job.fileURL { deliver(fileURL: url) }
+
+        case "error":
+            discardJob(id: id)
+            showAlert(title: "Download failed",
+                      message: body["message"] as? String ?? "Unknown error")
+
+        default:
+            break
         }
+    }
+
+    fileprivate func refreshDownloadBar() {
+        guard let job = jobs.first else {
+            downloadBar.isHidden = true
+            return
+        }
+        downloadBar.isHidden = false
+        downloadBar.update(filename: job.filename,
+                           received: job.receivedBytes,
+                           total: job.totalBytes,
+                           queued: jobs.count - 1)
+    }
+
+    private func discardJob(id: String) {
+        guard let idx = jobs.firstIndex(where: { $0.id == id }) else { return }
+        let job = jobs.remove(at: idx)
+        job.progressObs?.invalidate()
+        try? job.handle?.close()
+        if let url = job.fileURL {
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+        }
+        refreshDownloadBar()
+    }
+
+    fileprivate func cancelActiveDownload() {
+        guard let job = jobs.first else { return }
+        if #available(iOS 14.5, *), let dl = job.httpDownload as? WKDownload {
+            dl.cancel { _ in }
+        }
+        if let key = job.httpKey { downloadDestinations.removeValue(forKey: key) }
+        if let webView = job.webView {
+            let escaped = job.id.replacingOccurrences(of: "'", with: "")
+            webView.evaluateJavaScript("window.__scrayDownloadCancel && window.__scrayDownloadCancel('\(escaped)')")
+        }
+        discardJob(id: job.id)
     }
 
     private func sanitizedFilename(_ raw: String?) -> String {
@@ -849,29 +981,22 @@ final class ScrayBrowserViewController: UIViewController,
         return cleaned.isEmpty ? "download" : cleaned
     }
 
-    private func writeTempFile(data: Data, filename: String) -> URL? {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("scray-downloads", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let url = dir.appendingPathComponent(filename)
-            try data.write(to: url, options: .atomic)
-            return url
-        } catch {
-            return nil
-        }
-    }
-
     /// The Safari-style "do you want to download this?" prompt. Also the point
     /// at which the destination is named, so there's no surprise about where
     /// the file went.
-    fileprivate func confirmDownload(filename: String, completion: @escaping (Bool) -> Void) {
+    fileprivate func confirmDownload(filename: String, size: Int64, completion: @escaping (Bool) -> Void) {
         DispatchQueue.main.async {
             let folder = ScrayDownloadFolder.shared
+            var bits: [String] = []
+            if size > 0 {
+                let f = ByteCountFormatter()
+                f.countStyle = .file
+                bits.append(f.string(fromByteCount: size))
+            }
+            if folder.hasFolder { bits.append("Saving to \(folder.displayName ?? "your folder")") }
             let alert = UIAlertController(
                 title: "Download “\(filename)”?",
-                message: folder.hasFolder ? "Saving to \(folder.displayName ?? "your folder")." : nil,
+                message: bits.isEmpty ? nil : bits.joined(separator: " · "),
                 preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completion(false) })
             alert.addAction(UIAlertAction(title: "Download", style: .default) { _ in completion(true) })
@@ -923,8 +1048,8 @@ final class ScrayBrowserViewController: UIViewController,
     fileprivate func presentSafely(_ vc: UIViewController, attempt: Int = 0) {
         let top = dialogPresenter()
         if top.isBeingPresented || top.isBeingDismissed || top.transitionCoordinator != nil {
-            guard attempt < 30 else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            guard attempt < 60 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 self.presentSafely(vc, attempt: attempt + 1)
             }
             return
@@ -966,28 +1091,60 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
                   suggestedFilename: String,
                   completionHandler: @escaping (URL?) -> Void) {
         let name = suggestedFilename.isEmpty ? "download" : suggestedFilename
+        let expected = response.expectedContentLength > 0 ? response.expectedContentLength : 0
+
         // The completion handler may be called asynchronously, which is what
-        // lets the confirmation prompt sit in front of it.
-        confirmDownload(filename: name) { [weak self] proceed in
+        // lets the prompt sit in front of it. The transfer only starts once
+        // this returns a destination — so everything after the tap is real
+        // work, and the bar below shows it happening.
+        confirmDownload(filename: name, size: expected) { [weak self] proceed in
             guard let self = self, proceed,
                   let dest = self.makeTempDestination(filename: name) else {
                 completionHandler(nil)   // nil cancels the download
                 return
             }
-            self.downloadDestinations[ObjectIdentifier(download)] = dest
+            let key = ObjectIdentifier(download)
+            self.downloadDestinations[key] = dest
+
+            let job = ScrayDownloadJob(id: UUID().uuidString, filename: name)
+            job.totalBytes = expected
+            job.httpKey = key
+            job.httpDownload = download
+            job.progressObs = download.progress.observe(\.fractionCompleted) { [weak self, weak job] progress, _ in
+                DispatchQueue.main.async {
+                    guard let job = job else { return }
+                    job.receivedBytes = progress.completedUnitCount
+                    if progress.totalUnitCount > 0 { job.totalBytes = progress.totalUnitCount }
+                    self?.refreshDownloadBar()
+                }
+            }
+            self.jobs.append(job)
+            self.refreshDownloadBar()
             completionHandler(dest)
         }
     }
 
     func downloadDidFinish(_ download: WKDownload) {
-        guard let url = downloadDestinations.removeValue(forKey: ObjectIdentifier(download)) else { return }
+        let key = ObjectIdentifier(download)
+        if let idx = jobs.firstIndex(where: { $0.httpKey == key }) {
+            jobs[idx].progressObs?.invalidate()
+            jobs.remove(at: idx)
+            refreshDownloadBar()
+        }
+        guard let url = downloadDestinations.removeValue(forKey: key) else { return }
         deliver(fileURL: url)
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        // No recorded destination means we cancelled it ourselves at the
-        // prompt — that isn't a failure worth an alert.
-        guard downloadDestinations.removeValue(forKey: ObjectIdentifier(download)) != nil else { return }
+        let key = ObjectIdentifier(download)
+        if let idx = jobs.firstIndex(where: { $0.httpKey == key }) {
+            jobs[idx].progressObs?.invalidate()
+            jobs.remove(at: idx)
+            refreshDownloadBar()
+        }
+        // No recorded destination means we cancelled it ourselves — at the
+        // prompt, or from the bar. Not a failure worth an alert.
+        guard downloadDestinations.removeValue(forKey: key) != nil else { return }
         showAlert(title: "Download failed", message: error.localizedDescription)
     }
 }

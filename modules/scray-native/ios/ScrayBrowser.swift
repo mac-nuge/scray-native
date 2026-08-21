@@ -139,7 +139,8 @@ final class ScrayBrowserViewController: UIViewController,
     private var backItem = UIBarButtonItem()
     private var forwardItem = UIBarButtonItem()
     private var tabsItem = UIBarButtonItem()
-    private var moreItem = UIBarButtonItem()
+    private var downloadsItem = UIBarButtonItem()
+    private let moreButton = UIButton(type: .system)
     private var reloadButton = UIButton(type: .system)
 
     private var observations: [NSKeyValueObservation] = []
@@ -147,6 +148,7 @@ final class ScrayBrowserViewController: UIViewController,
     private var jobs: [ScrayDownloadJob] = []
     private let downloadBar = ScrayDownloadBar()
     private var exportingTempFiles: [URL] = []
+    private var pendingExportJobID: String?
 
     init(homeURL: URL) {
         self.homeURL = homeURL
@@ -207,7 +209,11 @@ final class ScrayBrowserViewController: UIViewController,
     private func buildChrome() {
         reloadButton.setImage(UIImage(systemName: "arrow.clockwise"), for: .normal)
         reloadButton.addTarget(self, action: #selector(reloadTapped), for: .touchUpInside)
-        reloadButton.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        reloadButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
+
+        moreButton.setImage(UIImage(systemName: "ellipsis.circle"), for: .normal)
+        moreButton.addTarget(self, action: #selector(moreTapped), for: .touchUpInside)
+        moreButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
 
         addressField.font = .systemFont(ofSize: 13)
         addressField.backgroundColor = .secondarySystemBackground
@@ -223,7 +229,7 @@ final class ScrayBrowserViewController: UIViewController,
         addressField.placeholder = "Search or enter address"
         addressField.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
-        let header = UIStackView(arrangedSubviews: [addressField, reloadButton])
+        let header = UIStackView(arrangedSubviews: [addressField, reloadButton, moreButton])
         header.axis = .horizontal
         header.alignment = .center
         header.spacing = 4
@@ -249,22 +255,23 @@ final class ScrayBrowserViewController: UIViewController,
         let homeItem = UIBarButtonItem(image: UIImage(systemName: "house"),
                                        style: .plain, target: self, action: #selector(homeTapped))
         tabsItem = UIBarButtonItem(title: "1 ⧉", style: .plain, target: self, action: #selector(tabsTapped))
-        let newTabItem = UIBarButtonItem(image: UIImage(systemName: "plus"),
-                                         style: .plain, target: self, action: #selector(newTabTapped))
-        moreItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"),
-                                   style: .plain, target: self, action: #selector(moreTapped))
+        downloadsItem = UIBarButtonItem(image: UIImage(systemName: "tray.and.arrow.down"),
+                                        style: .plain, target: self, action: #selector(downloadsTapped))
         func flex() -> UIBarButtonItem {
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         }
         backItem.isEnabled = false
         forwardItem.isEnabled = false
         toolbar.items = [closeItem, flex(), backItem, flex(), forwardItem, flex(), homeItem,
-                         flex(), tabsItem, flex(), newTabItem, flex(), moreItem]
+                         flex(), tabsItem, flex(), downloadsItem]
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         downloadBar.translatesAutoresizingMaskIntoConstraints = false
         downloadBar.isHidden = true
         downloadBar.onCancel = { [weak self] in self?.cancelActiveDownload() }
+        // Tapping the bar opens the full list, same as the tray button.
+        downloadBar.addGestureRecognizer(
+            UITapGestureRecognizer(target: self, action: #selector(downloadsTapped)))
 
         view.addSubview(header)
         view.addSubview(progressView)
@@ -510,9 +517,27 @@ final class ScrayBrowserViewController: UIViewController,
         UIApplication.shared.open(url, options: [:], completionHandler: nil)
     }
 
+    @objc private func downloadsTapped() {
+        let list = ScrayDownloadsViewController(style: .insetGrouped)
+        list.onCancel = { [weak self] id in self?.cancelDownload(id: id) }
+        let nav = UINavigationController(rootViewController: list)
+        presentSafely(nav)
+    }
+
     @objc private func moreTapped() {
         let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
-        sheet.popoverPresentationController?.barButtonItem = moreItem
+        sheet.popoverPresentationController?.sourceView = moreButton
+        sheet.popoverPresentationController?.sourceRect = moreButton.bounds
+
+        let active = ScrayDownloadCenter.shared.activeCount
+        let downloadsTitle = active > 0 ? "Downloads (\(active) active)" : "Downloads"
+        sheet.addAction(UIAlertAction(title: downloadsTitle, style: .default) { [weak self] _ in
+            self?.downloadsTapped()
+        })
+
+        sheet.addAction(UIAlertAction(title: "New Tab", style: .default) { [weak self] _ in
+            self?.newTabTapped()
+        })
 
         sheet.addAction(UIAlertAction(title: "Open in Safari", style: .default) { [weak self] _ in
             self?.safariTapped()
@@ -520,8 +545,8 @@ final class ScrayBrowserViewController: UIViewController,
 
         let folder = ScrayDownloadFolder.shared
         let label = folder.hasFolder
-            ? "Downloads → \(folder.displayName ?? "folder")"
-            : "Downloads → ask every time"
+            ? "Save Downloads To → \(folder.displayName ?? "folder")"
+            : "Save Downloads To → ask every time"
         sheet.addAction(UIAlertAction(title: label, style: .default) { [weak self] _ in
             guard let self = self else { return }
             ScrayDownloadFolder.shared.choose(from: self.dialogPresenter()) { name in
@@ -906,6 +931,7 @@ final class ScrayBrowserViewController: UIViewController,
                 job.fileURL = url
                 job.handle = handle
                 job.webView = webView
+                ScrayDownloadCenter.shared.begin(id: id, filename: name, total: size)
                 self.jobs.append(job)
                 self.refreshDownloadBar()
                 webView?.evaluateJavaScript("window.__scrayDownloadStart('\(escaped)')")
@@ -924,12 +950,13 @@ final class ScrayBrowserViewController: UIViewController,
             let job = jobs.remove(at: idx)
             try? job.handle?.close()
             refreshDownloadBar()
-            if let url = job.fileURL { deliver(fileURL: url) }
+            if let url = job.fileURL { deliver(fileURL: url, jobID: job.id) }
 
         case "error":
+            let reason = body["message"] as? String ?? "Unknown error"
+            ScrayDownloadCenter.shared.fail(id: id, message: reason)
             discardJob(id: id)
-            showAlert(title: "Download failed",
-                      message: body["message"] as? String ?? "Unknown error")
+            showAlert(title: "Download failed", message: reason)
 
         default:
             break
@@ -937,6 +964,16 @@ final class ScrayBrowserViewController: UIViewController,
     }
 
     fileprivate func refreshDownloadBar() {
+        for job in jobs {
+            ScrayDownloadCenter.shared.progress(id: job.id,
+                                                received: job.receivedBytes,
+                                                total: job.totalBytes)
+        }
+        // The tray lights up while anything is in flight.
+        downloadsItem.tintColor = jobs.isEmpty
+            ? nil
+            : UIColor(red: 1.0, green: 0.596, blue: 0.0, alpha: 1.0)
+
         guard let job = jobs.first else {
             downloadBar.isHidden = true
             return
@@ -961,6 +998,15 @@ final class ScrayBrowserViewController: UIViewController,
 
     fileprivate func cancelActiveDownload() {
         guard let job = jobs.first else { return }
+        cancelDownload(id: job.id)
+    }
+
+    fileprivate func cancelDownload(id: String) {
+        guard let job = jobs.first(where: { $0.id == id }) else {
+            // No live transfer — the record is all that's left of it.
+            ScrayDownloadCenter.shared.cancel(id: id)
+            return
+        }
         if #available(iOS 14.5, *), let dl = job.httpDownload as? WKDownload {
             dl.cancel { _ in }
         }
@@ -969,6 +1015,7 @@ final class ScrayBrowserViewController: UIViewController,
             let escaped = job.id.replacingOccurrences(of: "'", with: "")
             webView.evaluateJavaScript("window.__scrayDownloadCancel && window.__scrayDownloadCancel('\(escaped)')")
         }
+        ScrayDownloadCenter.shared.cancel(id: job.id)
         discardJob(id: job.id)
     }
 
@@ -1007,14 +1054,16 @@ final class ScrayBrowserViewController: UIViewController,
     /// Straight into the chosen folder if there is one, otherwise the export
     /// sheet. A folder that's been moved or deleted since it was picked falls
     /// back to the sheet rather than dropping the file on the floor.
-    fileprivate func deliver(fileURL: URL) {
+    fileprivate func deliver(fileURL: URL, jobID: String?) {
         DispatchQueue.main.async {
             if let saved = ScrayDownloadFolder.shared.save(fileURL: fileURL) {
                 try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
+                if let id = jobID { ScrayDownloadCenter.shared.finish(id: id, savedURL: saved) }
                 self.flash("Saved \(saved.lastPathComponent)")
                 return
             }
             self.exportingTempFiles.append(fileURL)
+            self.pendingExportJobID = jobID
             let picker = UIDocumentPickerViewController(forExporting: [fileURL])
             picker.delegate = self
             self.presentSafely(picker)
@@ -1058,10 +1107,20 @@ final class ScrayBrowserViewController: UIViewController,
     }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        // forExporting: hands back where the file actually landed, which is
+        // the only way the list can offer to open it again later.
+        if let id = pendingExportJobID {
+            ScrayDownloadCenter.shared.finish(id: id, savedURL: urls.first)
+            pendingExportJobID = nil
+        }
         cleanupExports()
     }
 
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        if let id = pendingExportJobID {
+            ScrayDownloadCenter.shared.cancel(id: id)
+            pendingExportJobID = nil
+        }
         cleanupExports()
     }
 
@@ -1118,6 +1177,7 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
                     self?.refreshDownloadBar()
                 }
             }
+            ScrayDownloadCenter.shared.begin(id: job.id, filename: name, total: expected)
             self.jobs.append(job)
             self.refreshDownloadBar()
             completionHandler(dest)
@@ -1126,18 +1186,21 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
 
     func downloadDidFinish(_ download: WKDownload) {
         let key = ObjectIdentifier(download)
+        var jobID: String?
         if let idx = jobs.firstIndex(where: { $0.httpKey == key }) {
+            jobID = jobs[idx].id
             jobs[idx].progressObs?.invalidate()
             jobs.remove(at: idx)
             refreshDownloadBar()
         }
         guard let url = downloadDestinations.removeValue(forKey: key) else { return }
-        deliver(fileURL: url)
+        deliver(fileURL: url, jobID: jobID)
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         let key = ObjectIdentifier(download)
         if let idx = jobs.firstIndex(where: { $0.httpKey == key }) {
+            ScrayDownloadCenter.shared.fail(id: jobs[idx].id, message: error.localizedDescription)
             jobs[idx].progressObs?.invalidate()
             jobs.remove(at: idx)
             refreshDownloadBar()

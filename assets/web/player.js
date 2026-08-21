@@ -2938,13 +2938,19 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
     // this if the modal still feels slightly clipped.
     const FORCED_LANDSCAPE_MODAL_WIDTH_SAFETY_MARGIN_PX = 16;
 
+    // ⚙️ ADJUSTABLE: width (as seen in landscape) of the bookmark-list panel
+    // added to the LEFT of the FLS modal. The box grows by exactly this much
+    // and its centre is pushed the same amount the other way, so nothing that
+    // was already in the modal shifts.
+    const FLS_BOOKMARK_LIST_WIDTH_PX = 130;
+
     if (isForcedLandscape) {
         const screenW = window.innerWidth;
         const screenH = window.innerHeight;
         inner.style.position = 'fixed';
         inner.style.top = '50%';
         inner.style.left = '50%';
-        inner.style.width = Math.round(screenH * FORCED_LANDSCAPE_MODAL_HEIGHT_FACTOR) + 'px';
+        inner.style.width = (Math.round(screenH * FORCED_LANDSCAPE_MODAL_HEIGHT_FACTOR) + FLS_BOOKMARK_LIST_WIDTH_PX) + 'px';
         // Clamp the desired width so it never exceeds the phone's actual
         // physical width (screenW) - exceeding it is what was causing the
         // rotated modal to get clipped ("cut off top/bottom in landscape").
@@ -2955,7 +2961,12 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
         const actualExtraWidthPx = modalWidthPx - baseModalWidthPx;
         const widthExtendShiftPx = actualExtraWidthPx / 2;
         inner.style.height = modalWidthPx + 'px';
-        inner.style.transform = `translate(-50%, calc(-50% + ${FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX + FORCED_LANDSCAPE_MODAL_RIGHT_SHIFT_PX + widthExtendShiftPx}px)) rotate(90deg)`;
+        // The + FLS_BOOKMARK_LIST_WIDTH_PX / 2 is the compensation described
+        // above: the box grew along its own x axis (screen-vertical once
+        // rotated) and centring is symmetric, so half the growth would show up
+        // on the right. Shifting the centre screen-down by that half moves all
+        // of the new space to the left.
+        inner.style.transform = `translate(-50%, calc(-50% + ${FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX + FORCED_LANDSCAPE_MODAL_RIGHT_SHIFT_PX + widthExtendShiftPx + (FLS_BOOKMARK_LIST_WIDTH_PX / 2)}px)) rotate(90deg)`;
         inner.style.padding = '8px';
         // Only the notes grid should scroll - the modal box itself
         // inherits overflow-y:auto from the base style set above, which
@@ -2963,11 +2974,40 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
         inner.style.overflowY = 'hidden';
         inner.style.overflowX = 'hidden';
         inner.style.display = 'flex';
-        inner.style.flexDirection = 'column';
+        inner.style.flexDirection = 'row';
+        inner.style.gap = '8px';
         inner.style.boxSizing = 'border-box';
     } else {
         inner.style.width = '80vw';
         inner.style.maxWidth = '400px';
+    }
+
+    // FLS only: the modal becomes [bookmark list][everything it had before].
+    // Portrait is untouched - contentHost === inner there, so every append
+    // below lands exactly where it used to.
+    let bmListPanel = null;
+    let contentHost = inner;
+    if (isForcedLandscape) {
+        bmListPanel = document.createElement('div');
+        bmListPanel.style.cssText = `
+            flex: 0 0 ${FLS_BOOKMARK_LIST_WIDTH_PX}px;
+            width: ${FLS_BOOKMARK_LIST_WIDTH_PX}px;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            border-right: 1px solid #333;
+            padding-right: 6px;
+            box-sizing: border-box;
+        `;
+        inner.appendChild(bmListPanel);
+
+        const mainCol = document.createElement('div');
+        mainCol.style.cssText = 'flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden;';
+        inner.appendChild(mainCol);
+        contentHost = mainCol;
     }
 
     const title = document.createElement('h3');
@@ -2975,14 +3015,14 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
     title.style.cssText = isForcedLandscape
         ? 'margin: 0 0 6px 0; font-size: 0.8rem;'
         : 'margin: 0 0 10px 0; font-size: 1rem;';
-    inner.appendChild(title);
+    contentHost.appendChild(title);
 
     const timeDisplay = document.createElement('div');
     timeDisplay.textContent = `Time: ${formatDuration(currentTime * 1000)}`;
     timeDisplay.style.cssText = isForcedLandscape
         ? 'font-family: monospace; font-size: 0.75rem; margin-bottom: 6px;'
         : 'font-family: monospace; font-size: 0.9rem; margin-bottom: 10px;';
-    inner.appendChild(timeDisplay);
+    contentHost.appendChild(timeDisplay);
 
     const noteInput = isForcedLandscape ? document.createElement('textarea') : document.createElement('input');
     if (!isForcedLandscape) {
@@ -3015,7 +3055,7 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
         margin-bottom: 12px;
     `;
     if (isForcedLandscape) {
-        inner.appendChild(noteInput);
+        contentHost.appendChild(noteInput);
     } else {
         // Wrap in a form so any mobile keyboard's Enter/Go/Done action
         // reliably triggers save - browsers fire a 'submit' event for
@@ -3028,7 +3068,7 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
             e.preventDefault();
             saveBtn.click();
         });
-        inner.appendChild(noteForm);
+        contentHost.appendChild(noteForm);
     }
 
     const quickNotesContainer = document.createElement('div');
@@ -3049,9 +3089,9 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
         // leftover space is what was sitting empty before.
         notesAndActionsRow.style.cssText = 'display: flex; gap: 5px; align-items: stretch; flex: 1; min-height: 0; min-width: 0; overflow: hidden;';
         notesAndActionsRow.appendChild(quickNotesContainer);
-        inner.appendChild(notesAndActionsRow);
+        contentHost.appendChild(notesAndActionsRow);
     } else {
-        inner.appendChild(quickNotesContainer);
+        contentHost.appendChild(quickNotesContainer);
     }
 
     // ⚙️ ADJUSTABLE: width of the static actions column (Space/Clear/Save/
@@ -3064,9 +3104,11 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
     }
 
     const spaceClearRow = document.createElement('div');
-    spaceClearRow.style.cssText = isForcedLandscape
-        ? 'display: flex; flex-direction: column; gap: 6px; flex: 1;'
-        : 'display: flex; gap: 8px; margin-bottom: 10px;';
+    if (isForcedLandscape) {
+        actionsColumn.appendChild(spaceClearRow);
+    }
+    // Portrait: appended after btnRow further down, so Save/Close sit on top
+    // of Space/Clear.
 
     const spaceBtn = document.createElement('button');
     spaceBtn.textContent = 'Space';
@@ -3139,7 +3181,7 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
     const btnRow = document.createElement('div');
     btnRow.style.cssText = isForcedLandscape
         ? 'display: flex; flex-direction: column; gap: 6px; flex: 1;'
-        : 'display: flex; gap: 8px;';
+        : 'display: flex; gap: 8px; margin-bottom: 10px;';
 
     const saveBtn = document.createElement('button');
     saveBtn.textContent = 'Save';
@@ -3244,7 +3286,8 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
     if (isForcedLandscape) {
         actionsColumn.appendChild(btnRow);
     } else {
-        inner.appendChild(btnRow);
+        contentHost.appendChild(btnRow);
+        contentHost.appendChild(spaceClearRow);
     }
 
     overlay.appendChild(inner);
@@ -3257,6 +3300,111 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
     document.body.appendChild(overlay);
     holdPausedWhileBookmarkModalOpen(overlay);
     setTimeout(() => noteInput.focus(), 50);
+
+    // ── FLS bookmark list ────────────────────────────────────────────────
+    // Same three controls as the MPB BM modal: timestamp jump, editable note,
+    // delete. There's no list-level Save to hang them off here - this modal's
+    // Save creates a NEW bookmark at the playhead, so anyone deleting a row
+    // would get an unwanted one back. Edits and deletes therefore write
+    // through immediately. No tooltip: the modal sits at max z-index and
+    // would hide it, so the panel heading carries the state instead.
+    const persistBookmarkList = async () => {
+        if (typeof window.saveBookmarks !== 'function') return;
+        const head = bmListPanel && bmListPanel.querySelector('[data-bm-list-heading]');
+        if (head) head.textContent = 'Saving…';
+        try {
+            await window.saveBookmarks(video);
+            if (head && head.isConnected) head.textContent = `Bookmarks (${video.bookmarks.length})`;
+        } catch (err) {
+            console.error('Bookmark list save failed:', err);
+            if (head && head.isConnected) head.textContent = 'Save failed';
+        }
+        if (typeof window.renderBookmarkMarkers === 'function') window.renderBookmarkMarkers();
+    };
+
+    const renderFlsBookmarkList = () => {
+        if (!bmListPanel) return;
+        bmListPanel.innerHTML = '';
+
+        const head = document.createElement('div');
+        head.setAttribute('data-bm-list-heading', '');
+        head.textContent = `Bookmarks (${video.bookmarks.length})`;
+        head.style.cssText = 'flex: 0 0 auto; font-size: 0.6rem; color: #999; margin-bottom: 2px;';
+        bmListPanel.appendChild(head);
+
+        if (!video.bookmarks.length) {
+            const empty = document.createElement('div');
+            empty.textContent = 'None yet.';
+            empty.style.cssText = 'font-size: 0.6rem; color: #666; font-style: italic;';
+            bmListPanel.appendChild(empty);
+            return;
+        }
+
+        // slice() so the sort doesn't reorder the live array under the Save
+        // handler; the rows still hold the same object references, which is
+        // what indexOf() below relies on.
+        video.bookmarks.slice().sort((a, b) => a.time - b.time).forEach(bm => {
+            const row = document.createElement('div');
+            row.style.cssText = 'flex: 0 0 auto; display: flex; align-items: center; gap: 3px;';
+
+            const jumpBtn = document.createElement('button');
+            jumpBtn.type = 'button';
+            jumpBtn.textContent = formatDuration(bm.time * 1000);
+            jumpBtn.title = 'Jump to this bookmark';
+            jumpBtn.style.cssText = 'flex: 0 0 auto; padding: 4px 3px; background: #6c757d; color: #fff; border: none; border-radius: 4px; font-family: monospace; font-size: 0.55rem; cursor: pointer;';
+            jumpBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                overlay.remove();
+                if (window.plyrPlayer) {
+                    window.plyrPlayer.currentTime = bm.time;
+                    window.plyrPlayer.play();
+                }
+            });
+            row.appendChild(jumpBtn);
+
+            const noteEl = document.createElement('input');
+            noteEl.type = 'text';
+            noteEl.value = bm.note || '';
+            noteEl.placeholder = 'note';
+            noteEl.style.cssText = 'flex: 1 1 auto; min-width: 0; padding: 3px; background: #2a2a2a; color: #fff; border: 1px solid #555; border-radius: 4px; font-size: 0.55rem;';
+            noteEl.addEventListener('click', (e) => e.stopPropagation());
+            noteEl.addEventListener('change', () => {
+                bm.note = noteEl.value.trim();
+                persistBookmarkList();
+            });
+            row.appendChild(noteEl);
+
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.textContent = '×';
+            delBtn.title = 'Delete this bookmark';
+            delBtn.style.cssText = 'flex: 0 0 auto; padding: 3px 6px; background: #dc3545; color: #fff; border: none; border-radius: 4px; font-size: 0.7rem; line-height: 1; cursor: pointer;';
+            delBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = video.bookmarks.indexOf(bm);
+                if (idx >= 0) video.bookmarks.splice(idx, 1);
+                renderFlsBookmarkList();
+                persistBookmarkList();
+            });
+            row.appendChild(delBtn);
+
+            bmListPanel.appendChild(row);
+        });
+    };
+
+    if (bmListPanel) {
+        renderFlsBookmarkList();
+        // Same read path the MPB modal uses, so the list shows the table and
+        // not a stale local copy. Non-blocking, and it won't redraw over a
+        // note the user is part-way through editing.
+        if (typeof window.scrayBmSync === 'function' && video.inCatalogue !== false) {
+            window.scrayBmSync(video).then(() => {
+                if (!overlay.isConnected) return;
+                if (bmListPanel.contains(document.activeElement)) return;
+                renderFlsBookmarkList();
+            }).catch(err => console.warn('Could not refresh bookmarks for the list:', err.message));
+        }
+    }
 
     // ✅Load top bookmark notes as quick-add pills (async, non-blocking)
     if (typeof window.getTopBookmarkNotes === 'function') {
@@ -3321,14 +3469,17 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
                 `;
                 pill.addEventListener('click', (e) => {
                     e.stopPropagation();
+                    // Tapping a common note is the "instead of typing" path, so it
+                    // commits straight away rather than parking text in the box and
+                    // waiting for Save. Anything already typed is kept: the note is
+                    // inserted at the caret first, then the normal Save path runs
+                    // (which pushes the bookmark and closes the modal).
                     const start = noteInput.selectionStart ?? noteInput.value.length;
                     const end = noteInput.selectionEnd ?? noteInput.value.length;
                     const before = noteInput.value.substring(0, start);
                     const after = noteInput.value.substring(end);
                     noteInput.value = before + note + after;
-                    const newPos = start + note.length;
-                    noteInput.focus();
-                    noteInput.setSelectionRange(newPos, newPos);
+                    saveBtn.click();
                 });
                 quickNotesContainer.appendChild(pill);
             });

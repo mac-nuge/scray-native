@@ -2506,16 +2506,16 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         }
         
         html += `
-                <div style="display: flex; gap: 6px; margin-bottom: 10px;">
-                    <button id="quickSpaceBtn" class="modal-btn modal-btn-secondary" style="flex: 1; padding: 6px 10px; font-size: 0.75rem; margin: 0;">Space</button>
-                    <button id="quickClearBtn" class="modal-btn modal-btn-secondary" style="flex: 1; padding: 6px 10px; font-size: 0.75rem; margin: 0;">Clear</button>
+                <div class="file-operation-buttons" style="display: flex; flex-direction: row; gap: 8px; margin-bottom: 10px;">
+                    <button id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="flex: 1; background: #28a745;">Save</button>
+                    <button id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1;">Close</button>
                 </div>
         `;
         
         html += `
-                <div class="file-operation-buttons" style="display: flex; flex-direction: row; gap: 8px;">
-                    <button id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="flex: 1; background: #28a745;">Save</button>
-                    <button id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1;">Close</button>
+                <div style="display: flex; gap: 6px;">
+                    <button id="quickSpaceBtn" class="modal-btn modal-btn-secondary" style="flex: 1; padding: 6px 10px; font-size: 0.75rem; margin: 0;">Space</button>
+                    <button id="quickClearBtn" class="modal-btn modal-btn-secondary" style="flex: 1; padding: 6px 10px; font-size: 0.75rem; margin: 0;">Clear</button>
                 </div>
                 </form>
             </div>

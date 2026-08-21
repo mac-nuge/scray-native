@@ -44,7 +44,14 @@ final class ScrayDownloadCenter {
     /// out. One slot is enough — only one panel can be up at a time.
     var onChange: (() -> Void)?
 
+    /// The browser's own hook, held for the life of the browser. Separate from
+    /// onChange so the panel appearing and disappearing can't unhook the badge.
+    var onCountChange: (() -> Void)?
+
     var activeCount: Int { records.filter { $0.state == .active }.count }
+
+    /// What the tray badge counts: finished and not yet cleared away.
+    var completedCount: Int { records.filter { $0.state == .finished }.count }
 
     /// Paused still counts as live — "Clear" must not sweep away something
     /// you're part-way through and meant to come back to.
@@ -109,7 +116,10 @@ final class ScrayDownloadCenter {
     }
 
     private func changed() {
-        DispatchQueue.main.async { self.onChange?() }
+        DispatchQueue.main.async {
+            self.onChange?()
+            self.onCountChange?()
+        }
     }
 }
 

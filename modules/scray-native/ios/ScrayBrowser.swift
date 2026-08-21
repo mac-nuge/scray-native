@@ -140,6 +140,10 @@ final class ScrayBrowserViewController: UIViewController,
     private var forwardItem = UIBarButtonItem()
     private var tabsItem = UIBarButtonItem()
     private var downloadsItem = UIBarButtonItem()
+    private let trayButton = ScrayTrayButton(frame: .zero)
+    private let toastView = ScrayToastView(frame: .zero)
+    private var toastBottom: NSLayoutConstraint!
+    private var toastHide: DispatchWorkItem?
     private let moreButton = UIButton(type: .system)
     private var reloadButton = UIButton(type: .system)
 
@@ -174,6 +178,8 @@ final class ScrayBrowserViewController: UIViewController,
         view.backgroundColor = .systemBackground
         buildConfiguration()
         buildChrome()
+        ScrayDownloadCenter.shared.onCountChange = { [weak self] in self?.refreshTray() }
+        refreshTray()
         restoreTabs()
         consumePendingURL()
     }
@@ -261,8 +267,10 @@ final class ScrayBrowserViewController: UIViewController,
         let homeItem = UIBarButtonItem(image: UIImage(systemName: "house"),
                                        style: .plain, target: self, action: #selector(homeTapped))
         tabsItem = UIBarButtonItem(title: "1 ⧉", style: .plain, target: self, action: #selector(tabsTapped))
-        downloadsItem = UIBarButtonItem(image: UIImage(systemName: "tray.and.arrow.down"),
-                                        style: .plain, target: self, action: #selector(downloadsTapped))
+        // A custom view rather than a plain item, because a bar button item
+        // has nowhere to hang a badge.
+        trayButton.addTarget(self, action: #selector(downloadsTapped), for: .touchUpInside)
+        downloadsItem = UIBarButtonItem(customView: trayButton)
         func flex() -> UIBarButtonItem {
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         }
@@ -284,6 +292,14 @@ final class ScrayBrowserViewController: UIViewController,
         view.addSubview(webContainer)
         view.addSubview(downloadBar)
         view.addSubview(toolbar)
+
+        toastView.translatesAutoresizingMaskIntoConstraints = false
+        toastView.onTap = { [weak self] in
+            self?.hideToast(animated: false)
+            self?.downloadsTapped()
+        }
+        view.addSubview(toastView)
+        toastBottom = toastView.bottomAnchor.constraint(equalTo: toolbar.topAnchor, constant: -6)
 
         let guide = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
@@ -307,6 +323,10 @@ final class ScrayBrowserViewController: UIViewController,
             downloadBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             downloadBar.bottomAnchor.constraint(equalTo: toolbar.topAnchor),
             downloadBar.heightAnchor.constraint(equalToConstant: 52),
+
+            toastBottom,
+            toastView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+            toastView.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 40),
 
             toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -996,20 +1016,27 @@ final class ScrayBrowserViewController: UIViewController,
                                                 received: job.receivedBytes,
                                                 total: job.totalBytes)
         }
-        // The tray lights up while anything is in flight.
-        downloadsItem.tintColor = jobs.isEmpty
-            ? nil
-            : UIColor(red: 1.0, green: 0.596, blue: 0.0, alpha: 1.0)
+        refreshTray()
 
         guard let job = jobs.first else {
             downloadBar.isHidden = true
+            toastBottom.constant = -6
             return
         }
         downloadBar.isHidden = false
+        toastBottom.constant = -58   // clear the progress bar
         downloadBar.update(filename: job.filename,
                            received: job.receivedBytes,
                            total: job.totalBytes,
                            queued: jobs.count - 1)
+    }
+
+    /// Badge counts finished-and-not-yet-cleared; the tint marks in-flight.
+    fileprivate func refreshTray() {
+        trayButton.badgeCount = ScrayDownloadCenter.shared.completedCount
+        trayButton.tintColor = jobs.isEmpty
+            ? nil
+            : UIColor(red: 1.0, green: 0.596, blue: 0.0, alpha: 1.0)
     }
 
     private func discardJob(id: String) {
@@ -1215,12 +1242,36 @@ final class ScrayBrowserViewController: UIViewController,
         return dir.appendingPathComponent(filename)
     }
 
-    /// A brief, self-dismissing confirmation — the download equivalent of
-    /// Safari's little bounce, so a silent save to a folder isn't silent.
+    /// A tooltip above the tray, not a dialog. A finished download is worth
+    /// noticing; it isn't worth blocking everything until it's dismissed.
     fileprivate func flash(_ message: String) {
-        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-        presentSafely(alert)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { alert.dismiss(animated: true) }
+        DispatchQueue.main.async {
+            self.toastHide?.cancel()
+            self.toastView.setText(message)
+            self.toastView.isHidden = false
+            self.view.bringSubviewToFront(self.toastView)
+            self.view.layoutIfNeeded()
+            UIView.animate(withDuration: 0.2) { self.toastView.alpha = 1 }
+
+            let hide = DispatchWorkItem { [weak self] in self?.hideToast(animated: true) }
+            self.toastHide = hide
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.6, execute: hide)
+        }
+    }
+
+    fileprivate func hideToast(animated: Bool) {
+        toastHide?.cancel()
+        toastHide = nil
+        guard animated else {
+            toastView.alpha = 0
+            toastView.isHidden = true
+            return
+        }
+        UIView.animate(withDuration: 0.25, animations: {
+            self.toastView.alpha = 0
+        }, completion: { _ in
+            self.toastView.isHidden = true
+        })
     }
 
     /// UIKit silently drops a present() that lands mid-transition, which is
@@ -1246,6 +1297,7 @@ final class ScrayBrowserViewController: UIViewController,
             ScrayDownloadCenter.shared.finish(id: id, savedURL: urls.first)
             pendingExportJobID = nil
         }
+        if let name = urls.first?.lastPathComponent { flash("Saved \(name)") }
         cleanupExports()
     }
 

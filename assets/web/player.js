@@ -21,6 +21,38 @@ const ROTATE_LOCK_KEY = 'scray_rotate_locked';
 let manualRotationOffsetY = 0; // px; positive = shifted down on screen
 let scrollLockActive = false; // true = position locked, dragging disabled
 
+// =========================================
+// PLAYER MODES - CANONICAL NAMES
+//
+// Three distinct player surfaces. Use these abbreviations everywhere -
+// in comments, identifiers, log messages and CSS class names.
+//
+//   MPB   Mobile Portrait Browser
+//         The docked, in-page player. Phone held portrait, NOT fullscreen.
+//         body: portrait-inline    container: #inlineVideoContainer.bottom-docked
+//         Sized by fitDockedVideoToStack(); position by computeBottomDock().
+//
+//   MPFS  Mobile Portrait Full Screen
+//         Plain (unrotated) fullscreen, phone still held portrait.
+//         body: portrait-fullscreen:not(.manual-rotate-landscape)
+//         NOTE: Plyr runs CSS-only FALLBACK fullscreen here and applies
+//         .plyr--fullscreen-fallback, NOT .plyr--fullscreen - so CSS must
+//         key off the body class, never .plyr--fullscreen.
+//
+//   FLS   Forced Landscape
+//         Video rotated 90deg inside fullscreen on a portrait-locked phone.
+//         body: manual-rotate-landscape (portrait-fullscreen is ALSO set -
+//         that's why every MPFS rule needs :not(.manual-rotate-landscape)).
+//         Positions itself inline via applyManualRotationStyles().
+//
+// Not player modes, listed to avoid confusion:
+//   real device landscape  - phone physically rotated, no forced rotation
+//   mini-player            - .mini-player, either orientation
+//   desktop                - >=769px
+// =========================================
+
+
+
 function loadManualRotationPrefs() {
     try {
         scrollLockActive = localStorage.getItem(ROTATE_LOCK_KEY) === '1';
@@ -485,7 +517,7 @@ function resetManualRotation() {
 //
 // applyFullscreenControlOffsets / releaseDockedVideoFit are Native-only;
 // the typeof guards let the identical function ship in Picker unchanged.
-function switchFlsToMobilePortrait() {
+function switchFlsToMpfs() {
     if (!manualRotationActive) {
         showPlayerFeedback('Not in landscape view', 'top-left');
         return;
@@ -513,7 +545,7 @@ function switchFlsToMobilePortrait() {
 }
 
 window.toggleManualRotation = toggleManualRotation;
-window.switchFlsToMobilePortrait = switchFlsToMobilePortrait;
+window.switchFlsToMpfs = switchFlsToMpfs;
 window.toggleScrollLock = toggleScrollLock;
 
 // =========================================
@@ -571,9 +603,9 @@ function clearFullscreenControlOffsets() {
 // rebuildVideoInfoDisplay, resetVideoInline, etc. - not just inside createPlayerElement)
 // ⚙️ MP DOCKED PLAYER - MAIN TUNING KNOB. Gap left above the video so its top
 // edge never sits under the browser address bar. Raise for more clearance.
-const MP_VIDEO_TOP_BUFFER = 24;
+const MPB_VIDEO_TOP_BUFFER = 24;
 // ⚙️ Never shrink the video below this height, however tall the stack gets.
-const MP_VIDEO_MIN_HEIGHT = 140;
+const MPB_VIDEO_MIN_HEIGHT = 140;
 
 /**
 * Fit the docked video inside the space the dock stack actually leaves.
@@ -609,9 +641,9 @@ function fitDockedVideoToStack(infoHeight, baseBottomOffset, gapBetweenStackItem
         - infoHeight
         - gapBetweenStackItems
         - progressBarHeight
-        - MP_VIDEO_TOP_BUFFER;
+        - MPB_VIDEO_TOP_BUFFER;
 
-    const targetHeight = Math.max(MP_VIDEO_MIN_HEIGHT, Math.round(available));
+    const targetHeight = Math.max(MPB_VIDEO_MIN_HEIGHT, Math.round(available));
 
     // Intrinsic dimensions. videoWidth/Height are 0 until metadata loads, so
     // fall back to the values stored on the video record - reliable now that
@@ -1124,7 +1156,7 @@ const stopScrub = (e) => {
 // both FLS and genuine device landscape, but the "down"/"up" direction
 // differs between the two since FLS rotates the video 90° relative to
 // the physical screen. Portrait (MP) fullscreen has its own swipe-up
-// handler in setupPortraitFullscreenSwipeExit().
+// handler in setupMpfsSwipeExit().
 if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouches[0]) {
     const SWIPE_EXIT_THRESHOLD_PX = 60; // ⚙️ adjust sensitivity here
 
@@ -1477,7 +1509,7 @@ const PORTRAIT_FS_SWIPE_MAX_HORIZONTAL_PX = 80;
 
 let portraitSwipeExitInitialized = false;
 
-function setupPortraitFullscreenSwipeExit() {
+function setupMpfsSwipeExit() {
     if (portraitSwipeExitInitialized) return;
     portraitSwipeExitInitialized = true;
 
@@ -1485,14 +1517,14 @@ function setupPortraitFullscreenSwipeExit() {
     let startY = 0;
     let tracking = false;
 
-    const isPortraitFullscreen = () =>
+    const isMpfs = () =>
         !!window.plyrPlayer?.fullscreen?.active &&
         !manualRotationActive &&
         window.matchMedia('(orientation: portrait)').matches;
 
     document.addEventListener('touchstart', (e) => {
         tracking = false;
-        if (!isPortraitFullscreen()) return;
+        if (!isMpfs()) return;
         if (e.touches.length !== 1) return;
 
         const touch = e.touches[0];
@@ -1755,10 +1787,10 @@ console.log('Manual rotate button attached');
 // Hidden by CSS outside body.manual-rotate-landscape, and the ↻ button is
 // hidden while it's showing - so the FLS controls row keeps the same button
 // count either way.
-function attachFlsToMpButton() {
+function attachFlsToMpfsButton() {
 const controls = document.querySelector('.plyr__controls');
 if (!controls) return;
-if (controls.querySelector('.plyr-fls-to-mp')) return; // prevent duplicates
+if (controls.querySelector('.plyr-fls-to-mpfs')) return; // prevent duplicates
 
 // Same touch/desktop detection as the other custom control buttons.
 const isTouchDevice = ('ontouchstart' in window) ||
@@ -1772,7 +1804,7 @@ mpBtn.className = "plyr__control plyr-fls-to-mp";
 mpBtn.innerHTML = '↺';
 mpBtn.title = 'Rotate back to portrait fullscreen';
 mpBtn.onclick = (e) => {
-    switchFlsToMobilePortrait();
+    switchFlsToMpfs();
     e.currentTarget.blur();
 };
 
@@ -4750,13 +4782,13 @@ if (feedbackMsg) {
 window.plyrPlayer.on('ready', () => {
 setupPlayerKeyboardShortcuts();
 setupFrameStepKeyboardShortcuts(); // N/O frame-step keys (desktop)
-setupPortraitFullscreenSwipeExit(); // swipe down to exit MP fullscreen
+setupMpfsSwipeExit(); // swipe down to exit MP fullscreen
 enableAnywhereScrubbing();
 attachStopButton();
 attachPIPButton(); // Add PIP button
 attachIOSFullscreenButton(); // Add iOS native fullscreen button
 attachManualRotateButton(); // Add manual rotate-to-landscape button
-attachFlsToMpButton(); // Add FLS -> MP portrait-fullscreen button (FLS only)
+attachFlsToMpfsButton(); // Add FLS -> MP portrait-fullscreen button (FLS only)
 attachScrollLockButton(); // Add scroll-lock button (manual rotation only)
 attachRandomVideoButton(); //  Add random-video quick-action button
 attachHistorySequenceButton(); //  Add play-through-history quick-action button
@@ -5238,7 +5270,7 @@ attachStopButton();
 attachPIPButton(); // Re-attach PIP button on new video
 attachIOSFullscreenButton(); // Re-attach iOS fullscreen button on new video
 attachManualRotateButton(); // Re-attach manual rotate button on new video
-attachFlsToMpButton(); // Re-attach FLS -> MP button on new video
+attachFlsToMpfsButton(); // Re-attach FLS -> MP button on new video
 attachScrollLockButton(); // Re-attach scroll-lock button on new video
 attachRandomVideoButton(); //  Re-attach random-video button on new video
 attachHistorySequenceButton(); //  Re-attach play-through-history button on new video

@@ -207,6 +207,15 @@ final class ScrayBrowserViewController: UIViewController,
 
         messageProxy.target = self
         config.userContentController.add(messageProxy, name: "scrayDownload")
+
+        // Lets Picker tell it is inside Native's own browser rather than
+        // Safari. The "N" button only works here, because this is the only
+        // place the scraynative:// hop can be caught and this modal dismissed.
+        config.userContentController.addUserScript(
+            WKUserScript(source: "window.SCRAY_IN_APP_BROWSER = true;",
+                         injectionTime: .atDocumentStart,
+                         forMainFrameOnly: true)
+        )
         config.userContentController.addUserScript(
             WKUserScript(source: Self.downloadShimJS,
                          injectionTime: .atDocumentStart,
@@ -621,6 +630,22 @@ final class ScrayBrowserViewController: UIViewController,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.allow); return }
         let scheme = (url.scheme ?? "").lowercased()
+
+        // Picker's "N" button. Handled in-process, NOT via the generic
+        // UIApplication.shared.open below: opening our own scheme relaunches
+        // us behind this modal, so the browser would still be full-screen over
+        // the player. Dismiss first, then hand the key to the main web view.
+        if scheme == "scraynative" {
+            decisionHandler(.cancel)
+            let key = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "key" })?.value
+            dismiss(animated: true) {
+                if let key, !key.isEmpty {
+                    ScrayNativeView.current?.playVideo(key: key)
+                }
+            }
+            return
+        }
 
         if !["http", "https", "about", "data", "blob", "file"].contains(scheme) {
             // msauth://, ms-authenticator://, tel:, mailto: … hand off to iOS.

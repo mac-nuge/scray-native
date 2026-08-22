@@ -211,10 +211,55 @@ async function scraySyncLibrary({ quiet = false } = {}) {
     console.log(`[sync] ${window._scrayTombstonesIgnored} catalogue tombstone(s) ignored — those files are on this device`);
   }
   const flagged = await flagUncatalogued([...freshKeys, ...deltaKeys]);
+  await pushOfflineFlags();
   if (typeof refreshAllLists === "function") refreshAllLists();
   return { pulled, flagged };
 }
 window.scraySyncLibrary = scraySyncLibrary;
+
+/**
+ * Tell the server which catalogue rows have a copy on this device.
+ *
+ * Sits inside scraySyncLibrary rather than in scanLocalLibrary, so it covers
+ * both callers: the folder refresh AND the boot sync. And it runs after
+ * flagUncatalogued, because that is where fingerprint adoption happens — go
+ * earlier and a renamed file reports its local key, which the catalogue has
+ * never heard of, and silently never gets marked.
+ */
+async function pushOfflineFlags() {
+  // The server is on a different database than this mirror was built from.
+  // Publishing against it would flag the wrong catalogue's rows.
+  if (window.SCRAY_DB_MODE_DRIFT) return null;
+
+  const locals = await getAllVideos();
+
+  // offline_sync has whole-list semantics, so an empty list clears every flag
+  // in the catalogue. A fresh install before the folder is picked looks
+  // exactly like that — refuse to send rather than wipe the lot.
+  if (!locals.length) return null;
+
+  const keys = [...new Set(
+    locals
+      .filter(v => v.inCatalogue === true)
+      .map(v => v.videoKey || window.scrayVideoKey(v.filename))
+      .filter(Boolean)
+  )];
+  if (!keys.length) return null;
+
+  try {
+    const res = await window.scrayApiCall("offline_sync", {
+      method: "POST",
+      body: { keys, device: window.SCRAY_SYNC.DEVICE_ID }
+    });
+    console.log(`[offline] ${res.total_offline} file(s) flagged offline (+${res.marked_offline}, -${res.cleared})`);
+    return res;
+  } catch (err) {
+    // Non-fatal. The scan itself succeeded; the next sync republishes.
+    console.warn("[offline] could not publish the offline list:", err.message);
+    return null;
+  }
+}
+window.scrayPushOfflineFlags = pushOfflineFlags;
 
 async function pullScoped(keys, since, received = null) {
   let total = 0, from = since;

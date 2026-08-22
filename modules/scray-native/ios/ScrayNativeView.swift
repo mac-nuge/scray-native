@@ -17,6 +17,24 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
     let webView: WKWebView
     let messageProxy = ScriptMessageProxy()
 
+    /// The live main web view, so ScrayBrowser can hand a scraynative:// link
+    /// back to the app that is already running rather than round-tripping
+    /// through iOS. Weak — Expo owns the view's lifetime, not this reference.
+    static weak var current: ScrayNativeView?
+
+    /// Play a catalogue key. Called by ScrayBrowser after it dismisses itself,
+    /// so the player is already on screen by the time this lands.
+    func playVideo(key: String) {
+        let escaped = key
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        DispatchQueue.main.async {
+            self.webView.evaluateJavaScript(
+                "window.scrayPlayByKey && window.scrayPlayByKey('\(escaped)');"
+            )
+        }
+    }
+
     required init(appContext: AppContext? = nil) {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
@@ -54,6 +72,7 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
         // and confirm() returns false
         webView.uiDelegate = self
         addSubview(webView)
+        ScrayNativeView.current = self
     }
 
     override func layoutSubviews() {

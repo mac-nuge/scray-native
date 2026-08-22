@@ -40,3 +40,36 @@ window.ScrayBridge = {
     home: (window.SCRAY_SYNC && window.SCRAY_SYNC.PICKER_URL) || null
   })
 };
+
+/**
+ * Native -> web, the opposite direction to everything above.
+ *
+ * Picker's "N" button navigates to scraynative://play?key=... inside
+ * ScrayBrowser. Swift cancels that navigation, dismisses the browser, and
+ * calls this on the main web view once the dismissal animation has finished.
+ */
+window.scrayPlayByKey = async function (key) {
+  key = String(key || "").normalize("NFC").trim().toLowerCase();
+  if (!key) return false;
+  try {
+    const all = await window.getAllVideos();
+    const match = all.find(v =>
+      (v.videoKey || window.scrayVideoKey(v.filename)) === key
+    );
+    if (!match) {
+      // The catalogue said this was offline but the file isn't here — a stale
+      // flag, or the folder was re-picked. Say so rather than fail silently.
+      alert(`That file isn't on this device.\n\nKey: ${key}`);
+      return false;
+    }
+    // Play it in the context of the main list where possible, so next/previous
+    // still work. Falls back to a standalone play if it's filtered out.
+    const list = (window.paginationState && window.paginationState.allVideos) || [];
+    const idx = list.findIndex(v => v.oneDriveId === match.oneDriveId);
+    window.inlineVideoPlayer.play(match, idx >= 0 ? "main" : null, idx >= 0 ? idx : null);
+    return true;
+  } catch (err) {
+    console.error("scrayPlayByKey failed:", err);
+    return false;
+  }
+};

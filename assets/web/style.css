@@ -599,6 +599,15 @@ background: hsl(330, 100%, 84%) !important; /* Hot pink */
 background: hsl(330, 100%, 84%) !important; /* Deeper pink */
 }
 
+/* =========================================
+BLUE PICKER BUTTON
+========================================= */
+.burger-btn-blue,
+.burger-btn-blue:hover {
+background: #007bff !important;
+color: #fff !important;
+}
+
 
 /* =========================================
 BASKET PANEL
@@ -2135,6 +2144,20 @@ min-width: 0;
 max-width: 100%;
 }
 
+/* FLS and MPFS: let a long name wrap onto a second line instead of being cut
+   off. body.portrait-fullscreen is set during FLS too, so this one selector
+   covers both; MPB isn't fullscreen and keeps the single-line ellipsis, since
+   it's a thin bar with no room to grow. overflow-wrap:anywhere rather than
+   break-word so an unbroken 60-character filename still splits. */
+body.portrait-fullscreen .fls-video-title,
+body.portrait-fullscreen .fls-video-title-text {
+white-space: normal;
+text-overflow: clip;
+overflow: visible;
+overflow-wrap: anywhere;
+line-height: 1.25;
+}
+
 /* ⚙️ FLS/MPFS filter pill. Deliberately transparent - it rides on the title
    bar's own translucent background and inherits that bar's fade-out with the
    controls, so it needs no visibility logic of its own. */
@@ -2279,10 +2302,11 @@ background: rgba(255, 255, 255, 0.3) !important;
 }
 }
 
-/* FLS (forced/manual-rotate landscape) only: the basket button is
-   redundant now that tapping the video title (top of player) opens
-   the same basket modal - free up the space in the controls row. */
-body.manual-rotate-landscape .plyr-basket-quick {
+/* FLS (forced/manual-rotate landscape) only: the title bar now opens RENAME,
+   so the basket needs its own control again - show "B" and drop "BM" instead,
+   keeping the same single slot in the row. Both buttons are always attached;
+   this only picks which one FLS shows. */
+body.manual-rotate-landscape .plyr-bookmark-quick {
 display: none !important;
 }
 
@@ -3223,6 +3247,29 @@ BASKET JSON IMPORT/EXPORT MODALS
   z-index: 2147483000;
   padding: 20px;
   box-sizing: border-box;
+}
+
+/* FLS: 2147483000 is the same layer as body.manual-rotate-landscape::before,
+   the black backdrop that sits BELOW the player - so this modal was always
+   going to lose to the player and its title bar at 2147483647. Match them.
+   Only the player element carries the 90deg rotation, so the panel has to be
+   counter-rotated too or it reads sideways with the phone held in landscape.
+   Viewport-centred rather than player-centred (which is what
+   showPlayerBasketModal does with manualRotationOffsetY): that offset isn't
+   reachable from CSS, and the player fills nearly the whole screen here. */
+body.manual-rotate-landscape .basket-json-modal {
+  z-index: 2147483647;
+  padding: 0;
+}
+
+/* Rotated 90deg, so the panel's own width runs along the screen's HEIGHT and
+   its height along the screen's WIDTH - hence vh for width and vw for height,
+   which looks backwards but isn't. */
+body.manual-rotate-landscape .basket-json-modal-content {
+  transform: rotate(90deg);
+  width: 90vh;
+  max-width: 90vh;
+  max-height: 90vw;
 }
 
 /* .file-operation-modal was referenced by several modals (clear

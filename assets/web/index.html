@@ -180,10 +180,14 @@
         }
       }
 
-      document.getElementById('openPickerBtn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        openInAppBrowser((window.SCRAY_SYNC && window.SCRAY_SYNC.PICKER_URL)
-          || 'https://macnguyen.com/sp-staging-sql/');
+      // Both the top-row "Picker" button and the corner "P" go through the
+      // same listener - one source of truth for the URL fallback.
+      ['openPickerBtn', 'pickerCornerBtn'].forEach(id => {
+        document.getElementById(id)?.addEventListener('click', (e) => {
+          e.preventDefault();
+          openInAppBrowser((window.SCRAY_SYNC && window.SCRAY_SYNC.PICKER_URL)
+            || 'https://macnguyen.com/sp-staging-sql/');
+        });
       });
 
       document.getElementById('openBrowseBtn')?.addEventListener('click', (e) => {
@@ -278,6 +282,7 @@
 
 <div id="cornerButtons">
 <div class="corner-btn-row">
+<button id="pickerCornerBtn" class="burger-btn burger-btn-blue" title="Open Picker in the in-app browser">P</button>
 <button id="jumpSearchBtn" class="burger-btn" title="Jump to Search">F</button>
 <button id="playRandomFilteredBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video">X</button>
 <button id="playPreviousBtn" class="burger-btn burger-btn-pink" title="Play Previous in Current List">&lt;</button>

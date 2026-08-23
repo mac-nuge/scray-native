@@ -168,6 +168,32 @@ function getManualRotationFullscreenElement() {
 // currently acting as the player root, with the basket click handler always
 // attached - CSS decides whether it's interactive (FLS) or inert (MPFS/MPB), so it
 // doesn't matter which mode happens to create it first.
+// ⚙️ Gap between the rotated title block's outer edge and the physical top of
+// the screen. Lines the block's near edge up with where the progress bar
+// starts - keep in step with PROGRESS_BAR_FLS_INSET_PX in
+// applyManualRotationStyles.
+const FLS_TITLE_EDGE_INSET_PX = 70;
+
+/**
+ * The rotated title block is centred on `left`, so half its own thickness has
+ * to be added to the inset to keep that edge gap honest. offsetHeight is a
+ * pre-transform layout value, so it is the thickness across the physical
+ * screen's vertical axis. Fallback covers the not-yet-laid-out case.
+ *
+ * Called on every title sync rather than only on entering FLS: now that long
+ * names wrap, stepping from a one-line to a two-line title changes the
+ * thickness mid-session and the block would otherwise drift off its inset.
+ */
+function applyFlsTitleInset(title) {
+    if (!title) return;
+    const titleThickness = title.offsetHeight || 34;
+    title.style.setProperty(
+        'left',
+        (FLS_TITLE_EDGE_INSET_PX + (titleThickness / 2)) + 'px',
+        'important'
+    );
+}
+
 function ensureVideoTitleBar() {
     const host = getManualRotationFullscreenElement()
         || document.querySelector('#inlineVideoContainer .plyr')
@@ -184,15 +210,18 @@ function ensureVideoTitleBar() {
         } else {
             title = document.createElement('div');
             title.className = 'fls-video-title';
-            title.title = 'View basket';
-            // Tapping opens the basket modal. Only reachable in FLS -
-            // pointer-events is none by default and CSS only re-enables it
-            // under body.manual-rotate-landscape.
+            title.title = 'Rename this file';
+            // Tapping opens the rename modal, matching what the filename does
+            // in every list. Only reachable in FLS - pointer-events is none by
+            // default and CSS only re-enables it under
+            // body.manual-rotate-landscape. The basket modal moved to the "B"
+            // button in the controls row.
             title.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (typeof showPlayerBasketModal === 'function') {
-                    showPlayerBasketModal();
-                }
+                const v = window.currentPlayingVideo;
+                if (!v || typeof window.showRenameModal !== 'function') return;
+                Promise.resolve(window.showRenameModal(v))
+                    .catch(err => console.error('[fls] rename modal failed:', err));
             });
         }
         host.appendChild(title);
@@ -220,6 +249,12 @@ function syncVideoTitleBar(video) {
         textEl.textContent = (v.filename || '') + scoreText;
     }
     syncFullscreenFilterPill();
+
+    // Re-measure after the text changed - a wrapped two-line title is thicker
+    // than a one-line one, and the rotated block is positioned off that.
+    if (document.body.classList.contains('manual-rotate-landscape')) {
+        applyFlsTitleInset(bar);
+    }
 }
 
 // ---------------------------------------------------------------
@@ -499,15 +534,6 @@ function applyManualRotationStyles() {
     // in exactly the same absolute screen position as MPFS puts it, while
     // reading bottom-to-top on the far left of the FLS view.
     if (title) {
-        // ⚙️ Gap between the block's outer edge and the container's left edge
-        // (= the physical top of the screen). 8px matched MPFS but sat under
-        // the notch/camera once the phone was turned, so this now lines the
-        // block's near edge up with where the progress bar starts.
-        // Keep in step with PROGRESS_BAR_FLS_INSET_PX below - it can't be
-        // referenced directly from here, it's declared further down the same
-        // block scope and would be in the temporal dead zone.
-        const FLS_TITLE_EDGE_INSET_PX = 70;
-
         // Through the shared sync so a plain re-apply shows the score suffix
         // too - previously only the video-change path added it.
         syncVideoTitleBar();
@@ -526,17 +552,7 @@ function applyManualRotationStyles() {
             'z-index': '2147483647'
         });
 
-        // offsetHeight is a pre-transform layout value, so it's the block's
-        // thickness across the physical screen's vertical axis. The rotated
-        // box is centred on `left`, so half the thickness has to be added to
-        // the inset to keep that edge gap honest. Fallback covers the case
-        // where the bar hasn't been laid out yet (offsetHeight 0).
-        const titleThickness = title.offsetHeight || 34;
-        title.style.setProperty(
-            'left',
-            (FLS_TITLE_EDGE_INSET_PX + (titleThickness / 2)) + 'px',
-            'important'
-        );
+        applyFlsTitleInset(title);
     }
     // The progress bar goes BELOW the controls, i.e. closer to the
     // container's own local edge - so its "bottom" offset must be SMALLER
@@ -1185,26 +1201,17 @@ let scrubRafScheduled = false;
 // at frame-step granularity instead of doing a normal proportional scrub.
 // Pixels per step - lower = more time travelled per finger movement.
 const JOG_PX_PER_STEP = 8;
-// ⚙️ Speed tiers, picked by which third of the video's HEIGHT the drag
-// starts in. Two ladders, and they run OPPOSITE ways on purpose:
+// ⚙️ Speed tiers, picked by which third of the video the drag starts in.
+// ONE ladder for every mode - FLS, MPB and MPFS - so the gesture feels the
+// same wherever you are. It used to be two ladders running opposite ways;
+// they now match, and the per-mode work is purely about which physical axis
+// counts as "bottom" (see the frac calculation in startScrub).
 //
-//   FLS - bottom is finest (8x), top coarsest (32x)
-//   MPB - bottom is coarsest (64x), top finest (16x)
-//
-// That's deliberate, not an oversight: in FLS your thumb rests low on the
-// screen, so fine control wants to be near it. In portrait the video sits
-// high and the space below it is where the thumb travels furthest.
-// ⚙️ FLS ladder, top to bottom: 32x / 16x / 4x. Coarsest at the top, finest
-// at the bottom - so the fine band is the one that extends under the player
-// controls, where your thumb naturally rests.
-const JOG_MULT_BOTTOM = 4;
-const JOG_MULT_MIDDLE = 16;
-const JOG_MULT_TOP    = 32;
-
-// ⚙️ MPB ladder, bottom to top: 32x / 16x / 4x.
-const JOG_MP_MULT_BOTTOM = 32;
-const JOG_MP_MULT_MIDDLE = 16;
-const JOG_MP_MULT_TOP    = 4; 
+// ⚙️ Ladder, bottom to top: 128x / 64x / 32x. Coarsest at the bottom,
+// finest at the top.
+const JOG_MULT_BOTTOM = 128;
+const JOG_MULT_MIDDLE = 64;
+const JOG_MULT_TOP    = 32; 
 
 let jogEligible = false;   // paused on mobile - jog rather than seek
 let jogActive = false;     // jog has actually engaged
@@ -1282,19 +1289,20 @@ if (jogEligible) {
     // frac must mean the same thing in both modes: 0 = bottom of the video
     // as the USER sees it, 1 = top. rotate(90deg) maps the video's local -y
     // (up) onto screen +x, so the user's top is the screen's RIGHT edge -
-    // measuring from r.width inverted it, which is why setting BOTTOM=4 put
-    // 4x at the top. Unrotated, screen-top is small Y, so that one does need
-    // the subtraction.
+    // measuring from r.width inverted it, which put the BOTTOM tier at the
+    // top. Unrotated, screen-top is small Y, so that one does need the
+    // subtraction.
     const edgeAxisSize = manualRotationActive ? r.width : r.height;
     const distanceFromEdge = manualRotationActive
         ? (startX - r.left)
         : r.height - (startY - r.top);
     const frac = edgeAxisSize ? (distanceFromEdge / edgeAxisSize) : 1;
 
-    // ⚙️ Swap BOTTOM and TOP within a ladder if that mode feels inverted.
-    const ladder = manualRotationActive
-        ? [JOG_MULT_BOTTOM,    JOG_MULT_MIDDLE,    JOG_MULT_TOP]
-        : [JOG_MP_MULT_BOTTOM, JOG_MP_MULT_MIDDLE, JOG_MP_MULT_TOP];
+    // ⚙️ One ladder for all modes. frac is already normalised above so 0 is
+    // the bottom of the video as the USER sees it in whichever mode is
+    // active, which is what keeps this mode-agnostic - swap BOTTOM and TOP
+    // here if the whole thing ever feels inverted.
+    const ladder = [JOG_MULT_BOTTOM, JOG_MULT_MIDDLE, JOG_MULT_TOP];
 
     jogMultiplier = frac < (1 / 3) ? ladder[0]
                   : frac < (2 / 3) ? ladder[1]
@@ -1462,9 +1470,10 @@ if (!scrubbing) {
 return;
 }
 
-// ---- Jog-scrub (FLS zones, or portrait while paused) ----------
-// Same feel as holding a frame-step button at 4x, but the finger drives
-// direction and distance instead of a timer. Position-based rather than
+// ---- Jog-scrub (any mode, while paused) ----------
+// Same feel as holding a frame-step button down, but the finger drives
+// direction and distance instead of a timer, at whichever tier the drag
+// started in. Position-based rather than
 // incremental: the offset is computed from the TOTAL drag each time, so
 // dragging back lands exactly where you started with no accumulated
 // drift, which per-move stepping would give you.

@@ -2247,16 +2247,38 @@ body.manual-rotate-landscape #mobileElements .search-wrapper {
 display: none !important;
 }
 
-/* FLS: prevent text on the page underneath the rotated player from
-   being accidentally selected by gestures on/around the player -
-   "scroll lock" above only locks the player's own drag position, it
-   doesn't stop touch gestures from reaching selectable text behind it. */
-body.manual-rotate-landscape {
+/* Stop gestures on/around the player from selecting text on the page behind
+   it - to WebKit a scrub or jog drag is indistinguishable from a
+   long-press-and-drag selection. "Scroll lock" only pins the player's own
+   drag position; it does nothing about touches reaching selectable text.
+
+   portrait-fullscreen covers MPFS and FLS both (FLS sets it too), which is
+   why the old manual-rotate-landscape-only version of this rule is gone.
+   portrait-inline is MPB, where the page behind must still SCROLL - so only
+   selection is disabled here and touch-action is deliberately left alone. */
+body.portrait-fullscreen,
+body.portrait-inline {
 -webkit-user-select: none !important;
 -moz-user-select: none !important;
 -ms-user-select: none !important;
 user-select: none !important;
 -webkit-touch-callout: none !important;
+}
+
+/* ...but anything you type into has to stay selectable, or the search box,
+   the rename modal and the notes fields become unusable. Matters in FLS in
+   particular now that tapping the title opens rename. */
+body.portrait-fullscreen input,
+body.portrait-fullscreen textarea,
+body.portrait-fullscreen [contenteditable="true"],
+body.portrait-inline input,
+body.portrait-inline textarea,
+body.portrait-inline [contenteditable="true"] {
+-webkit-user-select: text !important;
+-moz-user-select: text !important;
+-ms-user-select: text !important;
+user-select: text !important;
+-webkit-touch-callout: default !important;
 }
 
 /* Quick-action buttons: random video (X), play-through-history (H<),

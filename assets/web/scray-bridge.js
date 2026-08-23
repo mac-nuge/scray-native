@@ -37,7 +37,7 @@ window.ScrayBridge = {
   // ✅ In-app browser. Pass nothing to resume where it was left.
   openBrowser: (url) => callNative('openBrowser', {
     url: url || null,
-    home: (window.SCRAY_SYNC && window.SCRAY_SYNC.PICKER_URL) || null
+    home: (typeof window.scrayPickerUrl === 'function' ? window.scrayPickerUrl() : null)
   })
 };
 

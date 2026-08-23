@@ -1063,8 +1063,13 @@ function removeVideoFromMemory(oneDriveId) {
        }
    }
 
-   // ✅ DO NOT remove from history - keep the play history intact
-   // Users may want to see what they watched even if the file is deleted
+   // Remove from history too. A history entry for a file that is gone is
+   // still tappable, and playing it hangs the WebView on a request for a
+   // path that no longer resolves - which is the freeze this fixes.
+   if (typeof window.removeFromHistoryByVideoId === "function") {
+       const gone = window.removeFromHistoryByVideoId(oneDriveId);
+       if (gone) console.log(`Removed ${gone} history entr${gone === 1 ? 'y' : 'ies'}`);
+   }
    
    // Remove from filtered videos global (main list)
    if (window.filteredVideosGlobal) {

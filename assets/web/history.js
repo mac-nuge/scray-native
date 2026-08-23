@@ -35,6 +35,31 @@ localStorage.setItem("scray_history", JSON.stringify(historyVideos));
 window.historyVideos = historyVideos;
 }
 
+/**
+ * Drop every history entry for a file that no longer exists on the device.
+ *
+ * Has to live here: historyVideos is a module-level `let` and window.historyVideos
+ * is only a mirror of it, so reassigning the mirror from file-operations.js
+ * would leave renderHistory() still reading the old array.
+ *
+ * Returns how many entries went, so the caller can decide whether to repaint.
+ */
+function removeFromHistoryByVideoId(oneDriveId) {
+if (!oneDriveId) return 0;
+const before = historyVideos.length;
+historyVideos = historyVideos.filter(v => (v.oneDriveId ?? v.idFromAPI) !== oneDriveId);
+const removed = before - historyVideos.length;
+if (!removed) return 0;
+
+window.historyVideos = historyVideos;
+// Positions shifted, so a queued play-through would jump to the wrong item.
+if (typeof resetHistoryPlayIndex === "function") resetHistoryPlayIndex();
+saveHistory();
+if (typeof updateHistoryCount === "function") updateHistoryCount();
+return removed;
+}
+window.removeFromHistoryByVideoId = removeFromHistoryByVideoId;
+
 function updateHistoryCount() {
 const countEl = document.getElementById("historyCount");
 if (countEl) countEl.textContent = historyVideos.length;

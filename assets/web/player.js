@@ -1258,12 +1258,9 @@ scrubbing = false; // Don't activate yet - wait to determine direction
 // swipe-up-for-random and swipe-to-exit gestures, which also start here.
 // scrubMove commits to it once the drag is confirmed as on-axis.
 // ⚙️ Drop the manualRotationActive check to enable this outside FLS too.
-// Two ways in:
-//   FLS - the drag started on a left-half frame-step zone
-//   MPB - the video is PAUSED, in which case any scrub jogs. A paused
-//         video is already a "find the exact frame" situation, so
-//         proportional scrubbing isn't what you want there. Playing,
-//         portrait behaves exactly as before.
+// One way in, in every mode: the video is PAUSED. A paused video is already
+// a "find the exact frame" situation, so proportional scrubbing isn't what
+// you want there. Playing behaves exactly as before.
 // Covers portrait fullscreen and inline alike - neither is landscape.
 
 
@@ -1292,11 +1289,33 @@ if (jogEligible) {
     // measuring from r.width inverted it, which put the BOTTOM tier at the
     // top. Unrotated, screen-top is small Y, so that one does need the
     // subtraction.
-    const edgeAxisSize = manualRotationActive ? r.width : r.height;
+    // The controls bar overlays the user's-bottom edge of the video, and the
+    // guard at the top of startScrub hands any touch landing on it to Plyr -
+    // so that strip can never begin a jog. Dividing the FULL rect into thirds
+    // therefore spent most of the bottom band on dead space: in MPB only ~22px
+    // of the 128x band was reachable against ~67px for each of the others.
+    // Measure the bar and divide only the part you can actually start on.
+    const plyrRoot = wrapper.closest('.plyr');
+    let controlsThickness = 0;
+    // Hidden controls have pointer-events:none, so the touch lands on the
+    // video and the guard never fires - nothing to exclude in that case.
+    if (plyrRoot && !plyrRoot.classList.contains('plyr--hide-controls')) {
+        const controlsEl = plyrRoot.querySelector('.plyr__controls');
+        if (controlsEl) {
+            const cr = controlsEl.getBoundingClientRect();
+            // Rotated, the bar's own height becomes its extent along screen X.
+            controlsThickness = manualRotationActive ? cr.width : cr.height;
+        }
+    }
+
+    const rawAxisSize = manualRotationActive ? r.width : r.height;
+    const edgeAxisSize = Math.max(1, rawAxisSize - controlsThickness);
     const distanceFromEdge = manualRotationActive
-        ? (startX - r.left)
-        : r.height - (startY - r.top);
-    const frac = edgeAxisSize ? (distanceFromEdge / edgeAxisSize) : 1;
+        ? (startX - r.left) - controlsThickness
+        : (r.height - controlsThickness) - (startY - r.top);
+    // Clamped: a stray touch on the bar itself would otherwise go negative and
+    // land in no band at all.
+    const frac = Math.max(0, Math.min(1, distanceFromEdge / edgeAxisSize));
 
     // ⚙️ One ladder for all modes. frac is already normalised above so 0 is
     // the bottom of the video as the USER sees it in whichever mode is

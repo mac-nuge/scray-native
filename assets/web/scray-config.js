@@ -273,11 +273,53 @@ window.scrayWatch = function (label, work) {
   return Promise.resolve(typeof work === 'function' ? work() : work);
 };
 
+const PICKER_URL_KEY = "scray_picker_url";
+
+/**
+ * Where the Picker buttons and the in-app browser's home button point.
+ * A localStorage override beats the SCRAY_SYNC default, so staging, production
+ * and a laptop dev server can be swapped on the device. Matters most in
+ * Native, which ships as a signed IPA - editing the constant means a rebuild.
+ */
+window.scrayPickerUrl = function () {
+  try {
+    const override = localStorage.getItem(PICKER_URL_KEY);
+    if (override) return override;
+  } catch {}
+  return window.SCRAY_SYNC.PICKER_URL;
+};
+
+/**
+ * Pass a falsy value to clear the override and fall back to the default.
+ * Returns the URL now in effect; throws if the input isn't a usable http(s)
+ * URL, so a typo can't leave the button pointing at nowhere.
+ */
+window.scraySetPickerUrl = function (url) {
+  try {
+    const trimmed = String(url || "").trim();
+    if (!trimmed) {
+      localStorage.removeItem(PICKER_URL_KEY);
+    } else {
+      // new URL() throws on nonsense; the protocol check then keeps out
+      // javascript: and file:, which parse fine but have no business here.
+      const parsed = new URL(trimmed);
+      if (!/^https?:$/.test(parsed.protocol)) throw new Error("must be http or https");
+      localStorage.setItem(PICKER_URL_KEY, parsed.href);
+    }
+  } catch (err) {
+    console.warn("[picker-url] rejected:", err.message);
+    throw err;
+  }
+  return window.scrayPickerUrl();
+};
+
 window.SCRAY_SYNC = {
   API_BASE: "https://macnguyen.com/scray/api.php",
 
   // Where the in-app browser's home button goes. Harmless in Picker itself,
   // which keeps this file byte-identical to Native's copy.
+  // This is the DEFAULT - the live value comes from scrayPickerUrl() below,
+  // which lets a per-device localStorage override win.
   PICKER_URL: "https://macnguyen.com/sp-staging-sql/",
   BROWSE_URL: "https://macnguyen.com/scray/browse.html",
   API_KEY:  "d0ae361fdf8759771caf2c989b1bfec07c3fb24b5c4d11433e01fbeae666d7cb",

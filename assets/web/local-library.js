@@ -266,6 +266,54 @@ async function removeLocalFolder(folderName) {
 }
 window.removeLocalFolder = removeLocalFolder;
 
+/**
+ * Drop rows whose file is no longer on disk.
+ *
+ * The scan only ever added and updated - nothing reconciled the other way - so
+ * a file that left the device by any route other than the in-app Delete button
+ * (Files app, iOS reclaiming storage, an interrupted download) kept its row
+ * forever. The list rendered it, playback requested a path that no longer
+ * resolves, and the WebView stalled on the pending request.
+ *
+ * localOnly, deliberately: the file leaving THIS device is not a catalogue
+ * deletion. Without the flag every stray would queue a server tombstone -
+ * the same mechanism that once wiped 209 rows from one tap on the folder x.
+ */
+async function pruneMissingLocalVideos(relativePaths, folderName) {
+  // An empty listing is indistinguishable from a permissions or bookmark-scope
+  // failure, and acting on it would clear the whole library. Refuse.
+  if (!Array.isArray(relativePaths) || relativePaths.length === 0) {
+    console.warn("pruneMissingLocalVideos: scan returned no files - skipping prune");
+    return 0;
+  }
+
+  const onDisk = new Set(relativePaths);
+  const allVideos = await getAllVideos();
+  const strays = allVideos.filter(v =>
+    v.driveId === "local" &&
+    v.accountName === folderName &&
+    !onDisk.has(v.oneDriveId)
+  );
+  if (!strays.length) return 0;
+
+  for (const v of strays) {
+    try {
+      await deleteVideoFromDB(v.oneDriveId, { localOnly: true });
+      // Clears basket, main list and pagination - and now history too. The
+      // basket in particular is persisted separately from IndexedDB, so
+      // without this a deleted file sits in it indefinitely.
+      if (typeof removeVideoFromMemory === "function") {
+        removeVideoFromMemory(v.oneDriveId);
+      }
+    } catch (err) {
+      console.warn(`pruneMissingLocalVideos: could not remove ${v.filename}:`, err);
+    }
+  }
+
+  console.log(`pruneMissingLocalVideos: removed ${strays.length} video(s) no longer on disk`);
+  return strays.length;
+}
+
 async function scanLocalLibrary(folderNameOverride) {
   const folderName = folderNameOverride || getActiveFolderName();
   console.log(`scanLocalLibrary: starting for "${folderName}"`);
@@ -317,6 +365,8 @@ async function scanLocalLibrary(folderNameOverride) {
   await saveVideos(videos, folderName, "local", "local");
   registerLocalFolder(folderName);
   console.log(`scanLocalLibrary: saved ${videos.length} videos under "${folderName}"`);
+
+  await pruneMissingLocalVideos(relativePaths, folderName);
 
   if (typeof renderFolderPills === "function") await renderFolderPills();
 

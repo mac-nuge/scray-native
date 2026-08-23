@@ -180,14 +180,55 @@
         }
       }
 
+      // Long-press either Picker button to repoint it. No settings screen
+      // exists, and this keeps the control on the thing it controls.
+      function editPickerUrl() {
+        const next = prompt(
+          'Picker URL\n\nBlank + OK resets to the built-in default:\n'
+            + window.SCRAY_SYNC.PICKER_URL,
+          window.scrayPickerUrl()
+        );
+        if (next === null) return;   // cancelled - not the same as blank
+        try {
+          alert(`Picker URL set to:\n${window.scraySetPickerUrl(next)}`);
+        } catch (err) {
+          alert(`That URL wasn't valid:\n${err.message}`);
+        }
+      }
+
       // Both the top-row "Picker" button and the corner "P" go through the
-      // same listener - one source of truth for the URL fallback.
+      // same listener - one source of truth for the URL.
       ['openPickerBtn', 'pickerCornerBtn'].forEach(id => {
-        document.getElementById(id)?.addEventListener('click', (e) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+
+        let longPressFired = false;
+        let pressTimer = null;
+        const cancelPress = () => {
+          if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        };
+
+        btn.addEventListener('click', (e) => {
           e.preventDefault();
-          openInAppBrowser((window.SCRAY_SYNC && window.SCRAY_SYNC.PICKER_URL)
-            || 'https://macnguyen.com/sp-staging-sql/');
+          // touchend fires a click after the long-press already opened the
+          // prompt - swallow that one, or you get the browser too.
+          if (longPressFired) { longPressFired = false; return; }
+          openInAppBrowser(window.scrayPickerUrl());
         });
+
+        btn.addEventListener('touchstart', () => {
+          longPressFired = false;
+          pressTimer = setTimeout(() => {
+            pressTimer = null;
+            longPressFired = true;
+            editPickerUrl();
+          }, 600);
+        }, { passive: true });
+        btn.addEventListener('touchend', cancelPress);
+        btn.addEventListener('touchmove', cancelPress);
+        btn.addEventListener('touchcancel', cancelPress);
+        // Stops iOS offering its own copy/share menu on the same gesture.
+        btn.addEventListener('contextmenu', (e) => e.preventDefault());
       });
 
       document.getElementById('openBrowseBtn')?.addEventListener('click', (e) => {

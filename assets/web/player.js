@@ -2969,8 +2969,13 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
     // ⚙️ ADJUSTABLE: width (as seen in landscape) of the bookmark-list panel
     // added to the LEFT of the FLS modal. The box grows by exactly this much
     // and its centre is pushed the same amount the other way, so nothing that
-    // was already in the modal shifts.
-    const FLS_BOOKMARK_LIST_WIDTH_PX = 130;
+    // was already in the modal shifts - which is why this constant is the
+    // only safe way to resize the panel.
+    // At 130 the note field was left with ~49px, about 9 characters, once the
+    // timestamp button and delete had taken their share. Ceiling is
+    // screenH - (screenH * HEIGHT_FACTOR) - margin, so ~410px even on the
+    // smallest phone; 190 is nowhere near it.
+    const FLS_BOOKMARK_LIST_WIDTH_PX = 190;
 
     if (isForcedLandscape) {
         const screenW = window.innerWidth;
@@ -3372,14 +3377,21 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
         // handler; the rows still hold the same object references, which is
         // what indexOf() below relies on.
         video.bookmarks.slice().sort((a, b) => a.time - b.time).forEach(bm => {
+            // Two lines, not one: the timestamp and delete are fixed-width, so
+            // side by side they left the note ~9 characters. Stacked, it gets
+            // the whole panel.
             const row = document.createElement('div');
-            row.style.cssText = 'flex: 0 0 auto; display: flex; align-items: center; gap: 3px;';
+            row.style.cssText = 'flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding-bottom: 4px; margin-bottom: 2px; border-bottom: 1px solid #2a2a2a;';
+
+            const topLine = document.createElement('div');
+            topLine.style.cssText = 'display: flex; align-items: center; gap: 3px;';
+            row.appendChild(topLine);
 
             const jumpBtn = document.createElement('button');
             jumpBtn.type = 'button';
             jumpBtn.textContent = formatDuration(bm.time * 1000);
             jumpBtn.title = 'Jump to this bookmark';
-            jumpBtn.style.cssText = 'flex: 0 0 auto; padding: 4px 3px; background: #6c757d; color: #fff; border: none; border-radius: 4px; font-family: monospace; font-size: 0.55rem; cursor: pointer;';
+            jumpBtn.style.cssText = 'flex: 1 1 auto; text-align: left; padding: 4px 5px; background: #6c757d; color: #fff; border: none; border-radius: 4px; font-family: monospace; font-size: 0.62rem; cursor: pointer;';
             jumpBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 overlay.remove();
@@ -3388,25 +3400,28 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
                     window.plyrPlayer.play();
                 }
             });
-            row.appendChild(jumpBtn);
+            topLine.appendChild(jumpBtn);
 
             const noteEl = document.createElement('input');
             noteEl.type = 'text';
             noteEl.value = bm.note || '';
             noteEl.placeholder = 'note';
-            noteEl.style.cssText = 'flex: 1 1 auto; min-width: 0; padding: 3px; background: #2a2a2a; color: #fff; border: 1px solid #555; border-radius: 4px; font-size: 0.55rem;';
+            // width 100% + border-box rather than flex sizing - it's the only
+            // child on its line now, so it should simply fill it.
+            noteEl.style.cssText = 'width: 100%; box-sizing: border-box; min-width: 0; padding: 4px; background: #2a2a2a; color: #fff; border: 1px solid #555; border-radius: 4px; font-size: 0.62rem;';
             noteEl.addEventListener('click', (e) => e.stopPropagation());
             noteEl.addEventListener('change', () => {
                 bm.note = noteEl.value.trim();
                 persistBookmarkList();
             });
-            row.appendChild(noteEl);
-
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
             delBtn.textContent = '×';
             delBtn.title = 'Delete this bookmark';
-            delBtn.style.cssText = 'flex: 0 0 auto; padding: 3px 6px; background: #dc3545; color: #fff; border: none; border-radius: 4px; font-size: 0.7rem; line-height: 1; cursor: pointer;';
+            // width:auto is load-bearing - the global `button { width: 100% }`
+            // in style.css feeds straight into flex-basis:auto, so without it
+            // this claims the entire top line and crushes the timestamp.
+            delBtn.style.cssText = 'flex: 0 0 auto; width: auto; margin: 0; padding: 3px 7px; background: #dc3545; color: #fff; border: none; border-radius: 4px; font-size: 0.75rem; line-height: 1; cursor: pointer;';
             delBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const idx = video.bookmarks.indexOf(bm);
@@ -3414,7 +3429,8 @@ const FORCED_LANDSCAPE_MODAL_DOWN_SHIFT_PX = 60;
                 renderFlsBookmarkList();
                 persistBookmarkList();
             });
-            row.appendChild(delBtn);
+            topLine.appendChild(delBtn);
+            row.appendChild(noteEl);
 
             bmListPanel.appendChild(row);
         });

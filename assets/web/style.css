@@ -2374,8 +2374,14 @@ background: rgba(255, 255, 255, 0.3) !important;
 body:not(.manual-rotate-landscape) .plyr-random-video,
 body:not(.manual-rotate-landscape) .plyr-history-sequence,
 body:not(.manual-rotate-landscape) .plyr-play-next,
-body:not(.manual-rotate-landscape) .plyr-basket-quick,
-body:not(.manual-rotate-landscape) .plyr-bookmark-quick {
+body:not(.manual-rotate-landscape) .plyr-basket-quick {
+    display: none !important;
+}
+
+/* BM stays hidden in MPB inline - the now-playing strip's own BM button is
+   the way in there - but MPFS has neither that strip nor a triple-tap zone,
+   so the player control is how the bookmark modal is reached in that mode. */
+body:not(.manual-rotate-landscape):not(.portrait-fullscreen) .plyr-bookmark-quick {
     display: none !important;
 }
 

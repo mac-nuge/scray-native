@@ -2395,40 +2395,73 @@ return new Promise((resolve) => {
 });
 }
 
+/**
+ * The single bookmark modal. MPB, MPFS and FLS all open this one - there is
+ * no separate rotated variant any more, and it renders in the same place and
+ * the same way up in all three.
+ *
+ * Layout:
+ *   Bookmarks / filename
+ *   NEW BOOKMARK row   [hh:mm:ss] [note field] [swap]
+ *   Existing bookmarks  one button each, "hh:mm:ss | note", split into a
+ *                       timestamp half (jump + close) and a note half (edit)
+ *   Quick-note pills
+ *   [Save] [Delete] [Close]
+ *
+ * Three modes. Normal is the default; the swap icon arms SWAP, the Delete
+ * button arms DELETE. Each recolours the list so it's obvious which is live,
+ * each disarms the other, and each disarms on a second tap.
+ *
+ * Nothing touches video.bookmarks until Save. Every edit is staged on a
+ * working copy, which is what makes "Close discards everything" actually
+ * true - the old modal spliced the live array as you went and couldn't
+ * honour that.
+ */
 async function showBookmarksModal(video, autoAddTimestamp = false) {
-    // Ensure bookmarks array exists locally first
+    // Only ever one. The BM control, the now-playing BM button and the FLS
+    // triple-tap zone can all fire in quick succession; without this they
+    // stack overlays that each hold their own working copy.
+    document.getElementById('bookmarksModal')?.remove();
+
     video.bookmarks = video.bookmarks || [];
-    
-    // Pause video when opening bookmarks modal
+
     if (window.plyrPlayer && !window.plyrPlayer.paused) {
         window.plyrPlayer.pause();
     }
-    
+
+    // FLS rotates .basket-json-modal-content 90deg and zeroes the overlay
+    // padding. This modal is deliberately identical in all three modes, so it
+    // opts out inline (inline beats the class rule, no CSS change needed).
+    // z-index has to be the ceiling too: the base 2147483000 loses to the
+    // fullscreen player at 2147483647 in both MPFS and FLS.
+    const OVERLAY_STYLE = 'padding: 20px; z-index: 2147483647;';
+    const CONTENT_STYLE = 'max-width: 500px; width: 100%; transform: none; max-height: 90vh;';
+
     const modal = document.createElement('div');
     modal.className = 'basket-json-modal';
-    
-    // ✅ Show a lightweight loading state immediately so the UI isn't blank
-    // while we sync with Excel, but DON'T allow editing yet.
+    modal.id = 'bookmarksModal';
+    modal.setAttribute('style', OVERLAY_STYLE);
+
     modal.innerHTML = `
-        <div class="basket-json-modal-content" style="max-width: 500px;">
+        <div class="basket-json-modal-content" style="${CONTENT_STYLE}">
             <h3>Bookmarks</h3>
             <p style="font-size: 0.85rem; color: #666; margin-bottom: 16px;">${video.filename}</p>
             <p style="color: #999; font-style: italic; text-align: center;">Syncing bookmarks...</p>
         </div>
     `;
     document.body.appendChild(modal);
-    
+
+    // Backdrop tap: closes, discards. Same contract as the Close button.
     modal.addEventListener('click', (e) => {
         if (e.target === modal) modal.remove();
     });
-    
-    // ✅ CRITICAL FIX: Wait for any pending write for this video to finish,
-    // THEN fetch latest bookmarks from Excel, BEFORE rendering the editable
-    // modal. This prevents a slow in-flight fetch from later overwriting a
-    // bookmark the user added while it was still loading.
-    // Read straight from the bookmarks table. The old path was gated on an
-    // Excel token (null in Native) and read a `bookmarks` column that no
-    // longer exists, so the modal never actually refreshed from the server.
+
+    // Keeps playback down for as long as the modal is up. Shared with the old
+    // player modal; harmless if player.js hasn't loaded.
+    if (typeof window.holdPausedWhileBookmarkModalOpen === 'function') {
+        window.holdPausedWhileBookmarkModalOpen(modal);
+    }
+
     if (video.inCatalogue !== false) {
         try {
             await window.scrayBmSync(video);
@@ -2437,8 +2470,6 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         }
     }
 
-    
-    // ✅Fetch top 10 most common bookmark notes for quick-add buttons
     let topNotes = [];
     if (typeof window.getTopBookmarkNotes === 'function') {
         try {
@@ -2447,228 +2478,303 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             console.warn('Could not load top bookmark notes:', err);
         }
     }
-    
-    // If modal was closed while we were syncing, stop here
+
     if (!modal.isConnected) return;
-    
-    // Auto-add a bookmark at the current playhead and focus its note
-    // field (used by the "now playing" bar's BM button)
-    let focusBookmarkTime = null;
-    if (autoAddTimestamp) {
-        let currentTime = 0;
-        if (window.currentPlayingVideo && window.currentPlayingVideo.oneDriveId === video.oneDriveId && window.plyrPlayer) {
-            currentTime = window.plyrPlayer.currentTime;
+
+    // The new-bookmark row only makes sense when there's a playhead on THIS
+    // video. Opened from a list context menu on some other file there isn't
+    // one, so the row is omitted rather than offering a bogus 00:00:00.
+    const hasPlayhead = !!(window.plyrPlayer
+        && window.currentPlayingVideo
+        && window.currentPlayingVideo.oneDriveId === video.oneDriveId);
+    const newTime = hasPlayhead ? window.plyrPlayer.currentTime : null;
+
+    // Working copy. `deleted` is a pending mark, not a removal - Save applies
+    // it, Close throws it away.
+    let working = video.bookmarks
+        .map(b => ({ time: b.time, note: b.note || '', deleted: false }))
+        .sort((a, b) => a.time - b.time);
+
+    let mode = 'normal';        // 'normal' | 'swap' | 'delete'
+    let editingIndex = null;    // which row is currently an open note input
+    let newNote = '';           // survives re-renders
+    let committed = false;      // guards against a double-fire closing twice
+
+    const esc = (s) => String(s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    /**
+     * The one write path. Applies pending deletions, optionally appends the
+     * new bookmark, pushes, and closes. `saveBookmarks` owns the tooltip text
+     * from "Saving..." onwards, so the confirmation is the same wording every
+     * caller gets.
+     */
+    const commitAndClose = async (extra) => {
+        if (committed) return;
+        committed = true;
+
+        const next = working
+            .filter(b => !b.deleted)
+            .map(b => ({ time: b.time, note: b.note }));
+        if (extra) next.push(extra);
+        next.sort((a, b) => a.time - b.time);
+
+        video.bookmarks = next;
+        modal.remove();
+
+        let tip = null;
+        if (typeof window.showBookmarkConfirmation === 'function') {
+            tip = window.showBookmarkConfirmation('Saving bookmarks...', '#6c757d', true);
         }
-        video.bookmarks.push({ time: currentTime, note: "" });
-        focusBookmarkTime = currentTime;
-    }
-    
-    let activeNoteInput = null;
-    
+        try {
+            await saveBookmarks(video, tip);
+        } catch (err) {
+            console.error('Bookmark save failed:', err);
+            if (tip && typeof window.updateBookmarkConfirmation === 'function') {
+                window.updateBookmarkConfirmation(tip, '\u274c Save failed', '#dc3545');
+                window.closeBookmarkConfirmation(tip);
+            }
+        }
+    };
+
+    const jumpTo = (time) => {
+        modal.remove();
+        if (window.innerWidth <= 1024) {
+            if (typeof toggleBasket === 'function') toggleBasket(false);
+            if (typeof toggleHistory === 'function') toggleHistory(false);
+            if (typeof window.toggleRandomPlaylistPanel === 'function') window.toggleRandomPlaylistPanel(false);
+        }
+        if (!window.currentPlayingVideo || window.currentPlayingVideo.oneDriveId !== video.oneDriveId) {
+            window.inlineVideoPlayer.play(video).then(() => {
+                setTimeout(() => {
+                    if (window.plyrPlayer) window.plyrPlayer.currentTime = time;
+                }, 800);
+            });
+        } else if (window.plyrPlayer) {
+            window.plyrPlayer.currentTime = time;
+            window.plyrPlayer.play();
+        }
+    };
+
+    // style.css has a global `button, select, input { width: 100%; padding:
+    // 12px; margin-bottom: 10px }` under @media (max-width: 1024px). On a
+    // flex child that width becomes the flex-basis, so ANY button in here
+    // that doesn't say width:auto claims the whole line - which is exactly
+    // what was hiding the note behind the timestamp. Every pill button starts
+    // from this preamble; don't drop the width/margin resets from it.
+    const PILL_BTN = 'flex: 0 0 auto; width: auto; margin: 0; padding: 5px 8px; '
+        + 'border: none; line-height: 1.25; cursor: pointer; ';
+    // ⚙️ Longest a note may render before it ellipsises, so one wordy note
+    // can't take a whole line to itself. The full text is in the title.
+    const NOTE_MAX_PX = 190;
+
     const renderContent = () => {
-        // Sort bookmarks chronologically
-        video.bookmarks.sort((a, b) => a.time - b.time);
-        
+        // Row colours are the mode indicator: blue = swap is armed, red =
+        // delete is armed. Pending deletions stay struck through in every
+        // mode so you can disarm and still see what Save will remove.
+        const armedBg = mode === 'swap' ? '#007bff' : mode === 'delete' ? '#dc3545' : null;
+        const timeBg = armedBg || '#eaeaea';
+        const noteBg = armedBg || '#f9f9f9';
+        const fg = armedBg ? '#fff' : '#333';
+
         let html = `
-            <div class="basket-json-modal-content" style="max-width: 500px;">
+            <div class="basket-json-modal-content" style="${CONTENT_STYLE}">
                 <form id="bookmarksForm">
                 <h3>Bookmarks</h3>
-                <p style="font-size: 0.85rem; color: #666; margin-bottom: 16px;">${video.filename}</p>
-                
-                <div id="bookmarksList" style="max-height: 300px; overflow-y: auto; margin-bottom: 16px;">
+                <p style="font-size: 0.85rem; color: #666; margin-bottom: 12px;">${esc(video.filename)}</p>
         `;
-        
-        if (video.bookmarks.length === 0) {
-            html += `<p style="color: #999; font-style: italic; text-align: center;">No bookmarks yet.</p>`;
-        } else {
-            video.bookmarks.forEach((bm, idx) => {
-                html += `
-                <div class="bookmark-item" style="display: flex; gap: 6px; align-items: center; margin-bottom: 8px; background: #f9f9f9; padding: 8px; border-radius: 4px; width: 100%; box-sizing: border-box;">
-                    <button class="modal-btn modal-btn-secondary jump-bm-btn" data-time="${bm.time}" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 8px !important; font-family: monospace; font-size: 0.75rem; white-space: nowrap; margin-bottom: 0 !important;">
-                        ${formatDuration(bm.time * 1000)}
-                    </button>
-                    <input type="text" class="bm-note-input" data-index="${idx}" value="${(bm.note || '').replace(/"/g, '&quot;')}" placeholder="Add a note..." style="flex: 1 1 auto !important; width: auto !important; min-width: 0; padding: 6px !important; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; margin-bottom: 0 !important;">
-                    <button class="modal-btn modal-btn-danger del-bm-btn" data-index="${idx}" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 8px !important; min-width: 0; margin-bottom: 0 !important;">&times;</button>
+
+        if (hasPlayhead) {
+            html += `
+                <div class="bookmark-item" style="display: flex; gap: 6px; align-items: center; margin-bottom: 12px; background: #f9f9f9; padding: 8px; border-radius: 4px; width: 100%; box-sizing: border-box;">
+                    <button type="button" id="newBmTimeBtn" class="modal-btn modal-btn-secondary" title="Save this bookmark now" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 8px !important; font-family: monospace; font-size: 0.75rem; white-space: nowrap; margin-bottom: 0 !important;">${formatDuration(newTime * 1000)}</button>
+                    <input type="text" id="newBmNote" value="${esc(newNote)}" placeholder="Add a note..." style="flex: 1 1 auto !important; width: auto !important; min-width: 0; padding: 6px !important; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; margin-bottom: 0 !important;">
+                    <button type="button" id="swapBmBtn" class="modal-btn" title="Swap: move an existing bookmark's note to this timestamp" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 10px !important; min-width: 0; margin-bottom: 0 !important; background: ${mode === 'swap' ? '#0056b3' : '#007bff'}; color: #fff; font-size: 1rem; line-height: 1;">&#8644;</button>
                 </div>
             `;
+        }
+
+        // Wrapping rail of content-sized pills, same shape as the quick-note
+        // row below it - two or three bookmarks per line rather than one
+        // full-width row each.
+        html += `<div id="bookmarksList" style="display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; max-height: 200px; overflow-y: auto; margin-bottom: 12px;">`;
+
+        if (!working.length) {
+            html += `<p style="color: #999; font-style: italic; text-align: center;">No bookmarks yet.</p>`;
+        } else {
+            working.forEach((bm, idx) => {
+                const struck = bm.deleted ? 'opacity: 0.5; text-decoration: line-through;' : '';
+                html += `
+                <div class="bm-pill" style="display: inline-flex; flex: 0 0 auto; width: auto; max-width: 100%; align-items: stretch; border: 1px solid #ccc; border-radius: 4px; overflow: hidden; box-sizing: border-box; ${struck}">
+                    <button type="button" class="bm-jump" data-index="${idx}" style="${PILL_BTN}border-right: 1px solid #ccc; background: ${timeBg}; color: ${fg}; font-family: monospace; font-size: 0.72rem; white-space: nowrap;">${formatDuration(bm.time * 1000)}</button>
+                `;
+                if (editingIndex === idx && mode === 'normal') {
+                    html += `<input type="text" class="bm-note-edit" data-index="${idx}" value="${esc(bm.note)}" placeholder="Add a note..." style="flex: 0 1 auto; width: auto; min-width: 110px; margin: 0; padding: 5px 8px; border: none; font-size: 0.78rem; line-height: 1.25; background: #fff; color: #333;">`;
+                } else {
+                    html += `<button type="button" class="bm-note-btn" data-index="${idx}" title="${esc(bm.note || '')}" style="${PILL_BTN}flex-shrink: 1; min-width: 0; max-width: ${NOTE_MAX_PX}px; text-align: left; background: ${noteBg}; color: ${bm.note ? fg : '#999'}; font-size: 0.78rem; font-style: ${bm.note ? 'normal' : 'italic'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${bm.note ? esc(bm.note) : 'no note'}</button>`;
+                }
+                html += `</div>`;
             });
         }
-        
-        html += `
-                </div>
-        `;
-        
-        if (topNotes.length > 0) {
-            const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+        html += `</div>`;
+
+        if (topNotes.length > 0 && hasPlayhead) {
             html += `
-                <div style="margin-bottom: 10px;">
-                    <div style="font-size: 0.7rem; color: #999; margin-bottom: 4px;">Quick notes (tap a note field, then tap one to insert):</div>
+                <div style="margin-bottom: 12px;">
+                    <div style="font-size: 0.7rem; color: #999; margin-bottom: 4px;">Quick notes (tap one to save a bookmark with it):</div>
                     <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 120px; overflow-y: auto;">
-                        ${topNotes.map((note, i) => `<button class="quick-note-btn modal-btn modal-btn-secondary" data-note-index="${i}" style="flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.75rem; margin: 0;">${escapeHtml(note)}</button>`).join('')}
+                        ${topNotes.map((n, i) => `<button type="button" class="quick-note-btn modal-btn modal-btn-secondary" data-note-index="${i}" style="flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.75rem; margin: 0;">${esc(n)}</button>`).join('')}
                     </div>
                 </div>
             `;
         }
-        
+
+        const pending = working.filter(b => b.deleted).length;
         html += `
-                <div class="file-operation-buttons" style="display: flex; flex-direction: row; gap: 8px; margin-bottom: 10px;">
-                    <button id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="flex: 1; background: #28a745;">Save</button>
-                    <button id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1;">Close</button>
-                </div>
-        `;
-        
-        html += `
-                <div style="display: flex; gap: 6px;">
-                    <button id="quickSpaceBtn" class="modal-btn modal-btn-secondary" style="flex: 1; padding: 6px 10px; font-size: 0.75rem; margin: 0;">Space</button>
-                    <button id="quickClearBtn" class="modal-btn modal-btn-secondary" style="flex: 1; padding: 6px 10px; font-size: 0.75rem; margin: 0;">Clear</button>
+                <div class="file-operation-buttons" style="display: flex; flex-direction: row; gap: 8px;">
+                    <button type="button" id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="flex: 1; background: #28a745;">Save${pending ? ` (${pending})` : ''}</button>
+                    <button type="button" id="deleteBookmarksBtn" class="modal-btn" style="flex: 1; background: ${mode === 'delete' ? '#a71d2a' : '#dc3545'}; color: #fff;">Delete</button>
+                    <button type="button" id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1;">Close</button>
                 </div>
                 </form>
             </div>
-        `; 
-        
+        `;
+
         modal.innerHTML = html;
-        
-        // Focus the notes field for a newly auto-added bookmark (once)
-        if (focusBookmarkTime !== null) {
-            const focusIdx = video.bookmarks.findIndex(bm => bm.time === focusBookmarkTime);
-            if (focusIdx >= 0) {
-                const noteInput = modal.querySelector(`.bm-note-input[data-index="${focusIdx}"]`);
-                if (noteInput) {
-                    noteInput.focus();
-                    activeNoteInput = noteInput;
-                }
+
+        const newNoteEl = modal.querySelector('#newBmNote');
+
+        // Blur fires before click, so a re-render here would swap the Save
+        // button out from under the tap that caused the blur and swallow it.
+        // Staging the value without redrawing keeps the button alive; every
+        // other handler flushes first, so nothing reads a stale note.
+        const flushOpenEdit = (rerender) => {
+            const el = modal.querySelector('.bm-note-edit');
+            if (el) {
+                const idx = parseInt(el.dataset.index, 10);
+                if (working[idx]) working[idx].note = el.value.trim();
+                editingIndex = null;
             }
-            focusBookmarkTime = null;
-        }
-        
-        // Attach events
-        modal.querySelectorAll('.jump-bm-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const time = parseFloat(btn.dataset.time);
-                
-                modal.remove(); // Dismiss modal immediately
-                
-                // Mobile only: dismiss any open basket/history panels so the
-                // player is fully visible when starting playback from a bookmark
-                if (window.innerWidth <= 1024) {
-                    if (typeof toggleBasket === 'function') toggleBasket(false);
-                    if (typeof toggleHistory === 'function') toggleHistory(false);
-                    if (typeof window.toggleRandomPlaylistPanel === 'function') window.toggleRandomPlaylistPanel(false);
-                }
-                
-                if (!window.currentPlayingVideo || window.currentPlayingVideo.oneDriveId !== video.oneDriveId) {
-                    window.inlineVideoPlayer.play(video).then(() => {
-                        setTimeout(() => {
-                            if (window.plyrPlayer) window.plyrPlayer.currentTime = time;
-                        }, 800); // Allow video time to buffer
-                    });
-                } else if (window.plyrPlayer) {
-                    window.plyrPlayer.currentTime = time;
-                    window.plyrPlayer.play();
-                }
-            });
-        });
-        
-        modal.querySelectorAll('.bm-note-input').forEach(input => {
-            input.addEventListener('focus', () => {
-                activeNoteInput = input;
-            });
-            input.addEventListener('change', (e) => {
-                const idx = parseInt(input.dataset.index);
-                video.bookmarks[idx].note = input.value.trim();
-                // Local only - no auto-save, user must tap Save button
-            });
-        });
-        
-        modal.querySelectorAll('.del-bm-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const idx = parseInt(btn.dataset.index);
-                video.bookmarks.splice(idx, 1);
-                renderContent(); // Update modal instantly, save happens on Save tap
-            });
-        });
-        
-        const insertIntoActiveNoteInput = (text) => {
-            if (!activeNoteInput || !activeNoteInput.isConnected) {
-                alert('Tap into a note field first, then tap a quick note to insert it there.');
-                return;
-            }
-            
-            const input = activeNoteInput;
-            const start = input.selectionStart ?? input.value.length;
-            const end = input.selectionEnd ?? input.value.length;
-            const before = input.value.substring(0, start);
-            const after = input.value.substring(end);
-            
-            input.value = before + text + after;
-            
-            const bmIdx = parseInt(input.dataset.index);
-            video.bookmarks[bmIdx].note = input.value.trim();
-            
-            const newPos = start + text.length;
-            input.focus();
-            input.setSelectionRange(newPos, newPos);
+            if (newNoteEl) newNote = newNoteEl.value;
+            if (rerender) renderContent();
         };
-        
-        modal.querySelectorAll('.quick-note-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const idx = parseInt(btn.dataset.noteIndex);
-                insertIntoActiveNoteInput(topNotes[idx]);
-            });
-        });
-        
-        modal.querySelector('#quickSpaceBtn')?.addEventListener('click', () => {
-            insertIntoActiveNoteInput(' ');
-        });
-        
-        modal.querySelector('#quickClearBtn')?.addEventListener('click', () => {
-            if (!activeNoteInput || !activeNoteInput.isConnected) {
-                alert('Tap into a note field first, then tap Clear to empty it.');
-                return;
-            }
-            const input = activeNoteInput;
-            input.value = '';
-            const bmIdx = parseInt(input.dataset.index);
-            video.bookmarks[bmIdx].note = '';
-            input.focus();
-        });
-        
+
+        const setMode = (next) => {
+            flushOpenEdit(false);
+            mode = (mode === next) ? 'normal' : next;
+            renderContent();
+        };
+
+        // Enter in a text field must not submit-and-reload; route it to Save.
         modal.querySelector('#bookmarksForm')?.addEventListener('submit', (e) => {
             e.preventDefault();
             modal.querySelector('#saveBookmarksBtn')?.click();
         });
-        
-        modal.querySelector('#saveBookmarksBtn').addEventListener('click', async () => {
-            // Dismiss modal immediately
-            modal.remove();
-            
-            // Show persistent "Saving..." tooltip
-            let bookmarkTooltip = null;
-            if (typeof window.showBookmarkConfirmation === 'function') {
-                bookmarkTooltip = window.showBookmarkConfirmation('Saving bookmarks...', '#6c757d', true);
+
+        newNoteEl?.addEventListener('input', () => { newNote = newNoteEl.value; });
+
+        // The timestamp on the new-bookmark row is the "commit this one now"
+        // button - the only way to store a bookmark with no note at all.
+        modal.querySelector('#newBmTimeBtn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            flushOpenEdit(false);
+            commitAndClose({ time: newTime, note: (newNoteEl?.value || '').trim() });
+        });
+
+        modal.querySelector('#swapBmBtn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setMode('swap');
+        });
+
+        modal.querySelector('#deleteBookmarksBtn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setMode('delete');
+        });
+
+        // One handler for both halves of a row: which half was tapped only
+        // matters in normal mode. In swap and delete the whole row is the
+        // target, which is what the recolouring is telling you.
+        const rowAction = (idx, half) => {
+            flushOpenEdit(false);
+            if (mode === 'swap') {
+                if (!hasPlayhead) return;
+                const target = working[idx];
+                working.splice(idx, 1);
+                commitAndClose({ time: newTime, note: target.note });
+                return;
             }
-            
-            try {
-                await saveBookmarks(video, bookmarkTooltip);
-                // Re-read so the modal shows exactly what the table now holds,
-                // including anything another device changed in the meantime.
-                await window.scrayBmSync(video);
+            if (mode === 'delete') {
+                working[idx].deleted = !working[idx].deleted;
                 renderContent();
-            } catch (err) {
-                if (bookmarkTooltip && typeof window.updateBookmarkConfirmation === 'function') {
-                    window.updateBookmarkConfirmation(bookmarkTooltip, '❌ Save failed', '#dc3545');
-                    window.closeBookmarkConfirmation(bookmarkTooltip);
-                }
+                return;
             }
+            if (half === 'time') {
+                jumpTo(working[idx].time);
+            } else {
+                editingIndex = idx;
+                renderContent();
+            }
+        };
+
+        modal.querySelectorAll('.bm-jump').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                rowAction(parseInt(btn.dataset.index, 10), 'time');
+            });
         });
-        
-        modal.querySelector('#closeBookmarksBtn').addEventListener('click', () => {
+
+        modal.querySelectorAll('.bm-note-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                rowAction(parseInt(btn.dataset.index, 10), 'note');
+            });
+        });
+
+        const editEl = modal.querySelector('.bm-note-edit');
+        if (editEl) {
+            editEl.focus();
+            editEl.addEventListener('blur', () => flushOpenEdit(false));
+            editEl.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); flushOpenEdit(true); }
+            });
+        }
+
+        // A quick note is the "instead of typing" path: it saves the new
+        // bookmark straight away. While swap or delete is armed it only fills
+        // the field, since the mode is waiting on a row tap.
+        modal.querySelectorAll('.quick-note-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                flushOpenEdit(false);
+                const text = topNotes[parseInt(btn.dataset.noteIndex, 10)];
+                if (mode === 'normal') {
+                    commitAndClose({ time: newTime, note: text });
+                } else if (newNoteEl) {
+                    newNoteEl.value = newNote = text;
+                }
+            });
+        });
+
+        modal.querySelector('#saveBookmarksBtn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            flushOpenEdit(false);
+            const note = (newNoteEl?.value || '').trim();
+            commitAndClose(note ? { time: newTime, note } : null);
+        });
+
+        modal.querySelector('#closeBookmarksBtn').addEventListener('click', (e) => {
+            e.stopPropagation();
             modal.remove();
         });
+
+        if (autoAddTimestamp && hasPlayhead && newNoteEl && mode === 'normal' && editingIndex === null) {
+            newNoteEl.focus();
+            autoAddTimestamp = false;
+        }
     };
-    
+
     renderContent();
 }
 

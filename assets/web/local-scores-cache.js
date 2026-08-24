@@ -82,6 +82,19 @@ async function getCachedVideoBookmarks(forceRefresh = false) {
     return cachedVideoBookmarks;
 }
 
+/**
+ * Synchronous "does this video have any bookmarks", for button styling that
+ * has to decide during a render. Prefers the object's own array (list rows
+ * come from getAllVideos and carry it) and falls back to the cache, since
+ * basket and history entries are stored separately and often don't.
+ */
+function scrayHasBookmarks(video) {
+    if (!video) return false;
+    if (Array.isArray(video.bookmarks)) return video.bookmarks.length > 0;
+    return cachedVideoBookmarks.has(video.oneDriveId);
+}
+window.scrayHasBookmarks = scrayHasBookmarks;
+
 // ✅ Local persistence: the same update shape excel-sheets.js uses, but
 // written to videoMeta instead of Graph. Without this, view_count,
 // last_played and f_tally were never recorded anywhere.

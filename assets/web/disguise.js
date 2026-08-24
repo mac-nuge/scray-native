@@ -29,6 +29,16 @@
   // landscape the app moves #cornerButtons to bottom-right too, so the panel
   // lifts above that button row. Nudge these if either looks tight.
   const MOBILE_BOTTOM_OFFSET = '6px';
+  // ⚙️ MPFS only: the player's own control row owns the bottom-right corner.
+  // style.css anchors those controls at `bottom: 7vh`, so clearing them means
+  // 7vh PLUS their height - a flat pixel offset lands inside the row on some
+  // screens and above it on others. The 62px is the control row's height plus
+  // a little air; that's the number to nudge if it's still tight.
+  const MOBILE_BOTTOM_OFFSET_MPFS = 'calc(7vh + 62px)';
+  // ⚙️ Air left between the top of the control row and the bottom of this
+  // panel once the row can actually be measured. With the measurement in
+  // place this is the only number worth nudging.
+  const MPFS_CONTROLS_CLEARANCE_PX = 12;
   const MOBILE_BOTTOM_OFFSET_LANDSCAPE = '58px';
 
   // Native's WKWebView runs edge-to-edge with no browser chrome below it, so
@@ -174,6 +184,46 @@
 
   function isInverted(mode) {
     return (MODE_FILTER[mode] || '').indexOf('invert') !== -1;
+  }
+
+  /**
+   * MPFS puts a full-width player control row across the bottom of the
+   * screen, and a fixed bottom offset kept landing on the volume button.
+   * The row's height AND its distance from the bottom are both set in vh by
+   * the app's stylesheet - and two competing !important rules put it at
+   * either 7vh or 20vh depending on which fullscreen class Plyr applied - so
+   * no fixed pixel value clears it on every device. Measure the row instead
+   * and sit above whatever it actually is. Every other mode clears the inline
+   * value so the stylesheet keeps control there.
+   */
+  function positionAbovePlayerControls() {
+    const el = document.getElementById('scrayDisguiseControl');
+    if (!el) return;
+    const body = document.body;
+    const inMpfs = body.classList.contains('portrait-fullscreen')
+      && !body.classList.contains('manual-rotate-landscape');
+    if (!inMpfs || !isMobile()) { el.style.removeProperty('bottom'); return; }
+
+    const controls = document.querySelector('.plyr__controls');
+    const rect = controls && controls.getBoundingClientRect();
+    if (!rect || !rect.height) { el.style.removeProperty('bottom'); return; }
+
+    // rect.top is the top of the row; measuring from the viewport bottom
+    // clears the whole row plus whatever gap it sits on.
+    const clearRow = window.innerHeight - rect.top;
+    el.style.setProperty('bottom', (clearRow + MPFS_CONTROLS_CLEARANCE_PX) + 'px', 'important');
+  }
+
+  function watchPlayerControls() {
+    const run = () => positionAbovePlayerControls();
+    window.addEventListener('resize', run);
+    window.addEventListener('orientationchange', run);
+    // Entering and leaving MPFS is a body class change, and Plyr rebuilds the
+    // control row on every source change, so watch both.
+    new MutationObserver(run).observe(document.body, {
+      attributes: true, attributeFilter: ['class'],
+    });
+    run();
   }
 
   const mq = window.matchMedia(MOBILE_MEDIA);
@@ -445,6 +495,14 @@
   }
   #scrayDisguise.is-native #scrayDisguiseControl {
     bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET} + ${NATIVE_EXTRA_LIFT});
+  }
+  /* MPFS. Both variants are needed: the .is-native selector above carries two
+     IDs, so a single body-scoped rule would lose to it on specificity. */
+  body.portrait-fullscreen:not(.manual-rotate-landscape) #scrayDisguiseControl {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET_MPFS});
+  }
+  body.portrait-fullscreen:not(.manual-rotate-landscape) #scrayDisguise.is-native #scrayDisguiseControl {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET_MPFS} + ${NATIVE_EXTRA_LIFT});
   }
 }
 
@@ -1011,6 +1069,11 @@
         attributeFilter: ['style', 'class']
       });
     }
+
+    // Must come after the panel is in the DOM: the positioner looks the panel
+    // up by id, so starting it any earlier makes its first run a no-op and
+    // leaves a session that BOOTS in MPFS on the CSS fallback for ever.
+    watchPlayerControls();
 
     console.log(`✓ Disguise layer mounted (${currentShot ? currentShot.src : 'no screenshot'}, `
       + `${state.mode}, ${isMobile() ? 'mobile' : 'desktop'})`);

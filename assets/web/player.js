@@ -3963,138 +3963,288 @@ bookmarkArmTimer = setTimeout(() => {
 * Render clickable bookmark markers on the permanent progress bar
 * Reads bookmarks from the currently playing video
 */
+// ⚙️ Markers whose centres sit closer than this (px along the bar) are a
+// cluster: one tap on any of them raises the whole group, because at this
+// spacing a fingertip can't pick out a single dot.
+const BOOKMARK_CLUSTER_PX = 26;
+// ⚙️ Tooltip rail. Chips are equal width and share one row; the rail is
+// centred on the play button and floats just above the control bar.
+const CHIP_GAP_PX = 6;
+const CHIP_PREFERRED_PX = 150;   // per chip, before the rail hits its cap
+const RAIL_GAP_ABOVE_CONTROLS_PX = 10;
+const RAIL_SIDE_MARGIN_PX = 8;
+const RAIL_FADE_MS = 5000;
+const RAIL_ID = 'bookmarkTooltipRail';
+
+/**
+ * Remove the tooltip rail, wherever it currently lives.
+ *
+ * On window because the rail outlives any single render: the bar's disarm
+ * listener is bound once and must be able to close whatever is up.
+ */
+function hideBookmarkRail() {
+    document.getElementById(RAIL_ID)?.remove();
+}
+window.hideBookmarkRail = hideBookmarkRail;
+
+/**
+ * Offset of `el` inside `ancestor`, in the ancestor's own layout coordinates.
+ *
+ * offsetLeft/offsetTop are pre-transform, which is exactly what's wanted: in
+ * FLS the control bar is rotated as a unit, so anything measured in its local
+ * frame comes out right with no rotation maths at all.
+ */
+function localOffsetWithin(el, ancestor) {
+    let x = 0, y = 0, n = el;
+    while (n && n !== ancestor) {
+        x += n.offsetLeft;
+        y += n.offsetTop;
+        n = n.offsetParent;
+    }
+    return n === ancestor ? { x, y } : null;
+}
+
+/**
+ * Raise the tooltip rail for a group of bookmarks.
+ *
+ * The rail is a child of .plyr__controls on purpose. The controls are the one
+ * element the forced-landscape code already rotates and positions correctly,
+ * so parenting to them means the rail needs no orientation handling of its
+ * own, and both anchors below are expressible in their coordinate space.
+ *
+ * soloPercent: position along the bar (0-100) to sit above, or null to sit
+ * above the play button. A single bookmark points at its own marker; a fanned
+ * cluster doesn't, because it has no single marker to point at.
+ */
+function showBookmarkRail(group, onPick, soloPercent = null) {
+    hideBookmarkRail();
+
+    const controls = document.querySelector('.plyr__controls');
+    if (!controls) return null;
+
+    // Must be a containing block for the absolutely positioned rail. Plyr
+    // already positions the controls in most modes; only promote it when it
+    // genuinely isn't, so we never fight Plyr's own layout.
+    if (getComputedStyle(controls).position === 'static') {
+        controls.style.position = 'relative';
+    }
+
+    const rail = document.createElement('div');
+    rail.id = RAIL_ID;
+    rail.style.cssText = `
+        position: absolute;
+        bottom: 100%;
+        margin-bottom: ${RAIL_GAP_ABOVE_CONTROLS_PX}px;
+        display: flex;
+        gap: ${CHIP_GAP_PX}px;
+        z-index: 71;
+        pointer-events: auto;
+    `;
+
+    group.forEach(entry => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'bookmark-tooltip-chip';
+        chip.textContent = entry.bm.note
+            ? `${formatDuration(entry.bm.time * 1000)} ${entry.bm.note}`
+            : formatDuration(entry.bm.time * 1000);
+        chip.title = chip.textContent;
+        // Equal widths come from flex-grow/shrink/basis against the rail's
+        // fixed width - longhands rather than the `flex` shorthand, which
+        // some engines reserialise as `flex-basis: 0%` and others drop.
+        // width:auto and the margin reset are for the global mobile
+        // `button { width: 100% }` rule.
+        chip.style.cssText = `
+            flex-grow: 1;
+            flex-shrink: 1;
+            flex-basis: 0;
+            width: auto;
+            min-width: 0;
+            margin: 0;
+            padding: 6px 8px;
+            border: none;
+            border-radius: 4px;
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            font-size: 0.65rem;
+            line-height: 1.25;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+        `;
+        chip.addEventListener('mousedown', (e) => e.stopPropagation());
+        chip.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+        chip.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            hideBookmarkRail();
+            onPick(entry);
+        });
+        rail.appendChild(chip);
+    });
+
+    controls.appendChild(rail);
+
+    // ---- place it: centred on the play button, clamped inside the bar ----
+    const maxWidth = Math.max(120, controls.clientWidth - RAIL_SIDE_MARGIN_PX * 2);
+    const wanted = group.length * CHIP_PREFERRED_PX + (group.length - 1) * CHIP_GAP_PX;
+    const railWidth = Math.min(wanted, maxWidth);
+    rail.style.width = railWidth + 'px';
+
+    let anchorX = null;
+
+    if (soloPercent !== null) {
+        // Marker-anchored. The bar and the controls are separate elements, so
+        // the marker's position has to be re-expressed in the controls' frame.
+        // Comparing the two bounding boxes works in FLS as well as anywhere
+        // else: both elements carry the same 90deg rotation, so their length
+        // axes both map onto screen Y there and onto screen X otherwise.
+        const bar = document.querySelector('.permanent-progress-bar');
+        if (bar) {
+            const rotated = (typeof manualRotationActive !== 'undefined' && manualRotationActive);
+            const b = bar.getBoundingClientRect();
+            const c = controls.getBoundingClientRect();
+            const barLen = rotated ? b.height : b.width;
+            const delta = rotated ? (b.top - c.top) : (b.left - c.left);
+            if (barLen) anchorX = delta + (soloPercent / 100) * barLen;
+        }
+    }
+
+    if (anchorX === null) {
+        const playBtn = controls.querySelector('.plyr__control[data-plyr="play"]');
+        const off = playBtn ? localOffsetWithin(playBtn, controls) : null;
+        anchorX = off
+            ? off.x + playBtn.offsetWidth / 2
+            : controls.clientWidth / 2;   // no play button found - centre the bar
+    }
+
+    const half = railWidth / 2;
+    const clamped = Math.max(
+        half + RAIL_SIDE_MARGIN_PX,
+        Math.min(anchorX, controls.clientWidth - half - RAIL_SIDE_MARGIN_PX)
+    );
+    rail.style.left = clamped + 'px';
+    rail.style.transform = 'translateX(-50%)';
+
+    return rail;
+}
+
 function renderBookmarkMarkers() {
 const progressBar = document.querySelector('.permanent-progress-bar');
 if (!progressBar) return;
 
-// Remove any existing markers first
+// A rail left over from the previous video would point at bookmarks that
+// are no longer on this bar.
+hideBookmarkRail();
 progressBar.querySelectorAll('.progress-bookmark-marker').forEach(m => m.remove());
 
 const video = window.currentPlayingVideo;
 if (!video || !Array.isArray(video.bookmarks) || video.bookmarks.length === 0) {
-    return; // No bookmarks to render
+    return;
 }
 
 const duration = window.plyrPlayer?.duration;
 if (!duration || isNaN(duration) || duration <= 0) {
-    // Duration not ready yet - try again shortly (loadedmetadata should have fired though)
     return;
 }
 
-// Track which marker is "armed" (tooltip shown) on mobile - tap once to
-// show, tap again (on the same marker) to jump. Tapping elsewhere resets.
-let armedMarker = null;
-
-// Proper hover-capability detection instead of touch-point detection
-// (many desktop trackpads/touchscreens report maxTouchPoints > 0, which
-// broke the previous check). This checks if the device can actually hover.
 const canHover = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 const isTouchDevice = !canHover;
+
+const entries = [];
 
 video.bookmarks.forEach(bm => {
     if (typeof bm.time !== 'number') return;
 
     const percent = Math.max(0, Math.min(100, (bm.time / duration) * 100));
-    const tooltipText = bm.note
-        ? `${formatDuration(bm.time * 1000)} ${bm.note}`
-        : formatDuration(bm.time * 1000);
 
     const marker = document.createElement('div');
     marker.className = 'progress-bookmark-marker';
     marker.style.left = `${percent}%`;
 
-    const tooltip = document.createElement('div');
-    tooltip.className = 'bookmark-marker-tooltip';
-    tooltip.textContent = tooltipText;
-    marker.appendChild(tooltip);
-
-    let autoFadeTimer = null;
-
-    const jumpToBookmark = () => {
-        if (autoFadeTimer) {
-            clearTimeout(autoFadeTimer);
-            autoFadeTimer = null;
-        }
-        if (window.plyrPlayer && !isNaN(bm.time)) {
-            window.plyrPlayer.currentTime = bm.time;
-            window.plyrPlayer.play();
-            showPlayerFeedback(`→ ${formatDuration(bm.time * 1000)}`, 'top-left');
-        }
-        tooltip.classList.remove('show');
-        armedMarker = null;
-    };
-
-    // CRITICAL: Block the underlying progress bar's seek handlers from
-    // ever firing when interacting with a marker - stop propagation on
-    // EVERY pointer event, not just click, since the bar listens on
-    // mousedown (desktop seek) and touchstart (mobile seek).
-    marker.addEventListener('mousedown', (e) => e.stopPropagation());
-    marker.addEventListener('touchstart', (e) => {
-        e.stopPropagation();
-    }, { passive: true });
-
-    if (isTouchDevice) {
-        // Mobile: first tap shows tooltip (auto-fades after 3s), second tap (while armed) jumps
-        marker.addEventListener('click', (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-
-            if (armedMarker === marker) {
-                // Second tap on same marker - jump
-                jumpToBookmark();
-            } else {
-                // First tap (or tapped a different marker) - show tooltip only, no jump
-                if (armedMarker && armedMarker !== marker) {
-                    armedMarker.querySelector('.bookmark-marker-tooltip')?.classList.remove('show');
-                }
-                tooltip.classList.add('show');
-                armedMarker = marker;
-
-                // Auto-fade after 3 seconds and disarm
-                if (autoFadeTimer) clearTimeout(autoFadeTimer);
-                autoFadeTimer = setTimeout(() => {
-                    tooltip.classList.remove('show');
-                    if (armedMarker === marker) armedMarker = null;
-                }, 3000);
-            }
-        });
-    } else {
-        // Desktop: hover shows tooltip (preview only, no jump), click jumps
-        marker.addEventListener('mouseenter', () => {
-            tooltip.classList.add('show');
-        });
-        marker.addEventListener('mouseleave', () => {
-            tooltip.classList.remove('show');
-        });
-        marker.addEventListener('click', (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            jumpToBookmark();
-        });
-    }
-
     progressBar.appendChild(marker);
+    entries.push({ bm, marker, percent, cluster: null });
 });
 
-// Tapping anywhere else on mobile disarms any armed marker (hides tooltip)
-if (isTouchDevice && !progressBar.dataset.bookmarkDisarmBound) {
-    progressBar.dataset.bookmarkDisarmBound = 'true';
-    progressBar.addEventListener('touchstart', (e) => {
-        if (!e.target.closest('.progress-bookmark-marker') && armedMarker) {
-            armedMarker.querySelector('.bookmark-marker-tooltip')?.classList.remove('show');
-            armedMarker = null;
-        }
-    }, { passive: true });
-}
+if (!entries.length) return;
 
-// Tapping anywhere else on mobile disarms any armed marker (hides tooltip)
+// ---- cluster detection -------------------------------------------------
+// Turning a % gap into a px gap needs the bar's length. In FLS the bar is
+// rotate(90deg), so getBoundingClientRect().width reports its THICKNESS -
+// the length runs down .height there, same as the seek maths.
+const rect = progressBar.getBoundingClientRect();
+const rotated = (typeof manualRotationActive !== 'undefined' && manualRotationActive);
+const barLengthPx = (rotated ? rect.height : rect.width) || progressBar.offsetWidth || 0;
+
+const sorted = entries.slice().sort((a, b) => a.percent - b.percent);
+let group = [sorted[0]];
+const groups = [group];
+for (let i = 1; i < sorted.length; i++) {
+    const gapPx = ((sorted[i].percent - sorted[i - 1].percent) / 100) * barLengthPx;
+    if (gapPx < BOOKMARK_CLUSTER_PX) {
+        group.push(sorted[i]);
+    } else {
+        group = [sorted[i]];
+        groups.push(group);
+    }
+}
+// Every entry gets a cluster, including singletons - a lone bookmark is just
+// a group of one, so the rail is built by exactly the same code path.
+groups.forEach(g => g.forEach(e => { e.cluster = g; }));
+
+const jumpTo = (entry) => {
+    hideBookmarkRail();
+    if (window.plyrPlayer && !isNaN(entry.bm.time)) {
+        window.plyrPlayer.currentTime = entry.bm.time;
+        window.plyrPlayer.play();
+        showPlayerFeedback(`→ ${formatDuration(entry.bm.time * 1000)}`, 'top-left');
+    }
+};
+
+let fadeTimer = null;
+const raise = (entry) => {
+    if (fadeTimer) clearTimeout(fadeTimer);
+    // A lone bookmark points at its own marker. A fanned cluster stays put
+    // above the play button - it covers several markers, so there's no one
+    // marker for it to sit over.
+    const solo = entry.cluster.length === 1 ? entry.percent : null;
+    showBookmarkRail(entry.cluster, jumpTo, solo);
+    fadeTimer = setTimeout(hideBookmarkRail, RAIL_FADE_MS);
+};
+
+entries.forEach(entry => {
+    const { marker } = entry;
+
+    // CRITICAL: Block the underlying progress bar's seek handlers from ever
+    // firing when interacting with a marker - stop propagation on EVERY
+    // pointer event, not just click, since the bar listens on mousedown
+    // (desktop seek) and touchstart (mobile seek).
+    marker.addEventListener('mousedown', (e) => e.stopPropagation());
+    marker.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+
+    // The marker only ever RAISES the rail. It deliberately never jumps, on
+    // any number of taps: two taps to reach a bookmark and the second is
+    // always on a chip, so there's no armed state to remember and no way to
+    // seek by accident while trying to read a note.
+    marker.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        raise(entry);
+    });
+
+    if (!isTouchDevice) {
+        marker.addEventListener('mouseenter', () => raise(entry));
+    }
+});
+
+// Tapping the bar itself dismisses whatever is up.
 if (isTouchDevice && !progressBar.dataset.bookmarkDisarmBound) {
     progressBar.dataset.bookmarkDisarmBound = 'true';
     progressBar.addEventListener('touchstart', (e) => {
-        if (!e.target.closest('.progress-bookmark-marker') && armedMarker) {
-            armedMarker.querySelector('.bookmark-marker-tooltip')?.classList.remove('show');
-            armedMarker = null;
-        }
+        if (e.target.closest('.progress-bookmark-marker')) return;
+        hideBookmarkRail();
     }, { passive: true });
 }
 }
@@ -6609,7 +6759,8 @@ onClick: (e) => {
 {
    label: "BM",
    title: "Bookmarks",
-   color: "#6f42c1",
+   color: window.scrayHasBookmarks(video) ? "#6f42c1" : "#ece6f6",
+   textColor: window.scrayHasBookmarks(video) ? "white" : "#6f42c1",
    fontSize: "0.55rem",
    onClick: (e) => {
        e.stopPropagation();

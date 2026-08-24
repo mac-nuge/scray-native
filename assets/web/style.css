@@ -2217,6 +2217,15 @@ cursor: pointer;
    live target sitting invisibly over the video. */
 .plyr--hide-controls .fls-filter-pill { pointer-events: none; }
 
+/* The bookmark rail lives inside .plyr__controls so it inherits the forced-
+   landscape rotation for free - but that also means Plyr's idle fade would
+   take the tooltips with it, a second after you asked to see them. Keep the
+   bar awake for as long as a rail is up. */
+.plyr--hide-controls .plyr__controls:has(#bookmarkTooltipRail) {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
 /* ...unless the filter is actually being edited. Plyr fades its controls on
    playback inactivity, and typing on the on-screen keyboard doesn't count as
    activity - so mid-edit the bar (and the input you're typing into) would

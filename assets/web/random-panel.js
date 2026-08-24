@@ -168,7 +168,8 @@ const buttons = [
 {
    label: "BM",
    title: "Bookmarks",
-   color: "#6f42c1",
+   color: window.scrayHasBookmarks(video) ? "#6f42c1" : "#ece6f6",
+   textColor: window.scrayHasBookmarks(video) ? "white" : "#6f42c1",
    onClick: (e) => {
        e.stopPropagation();
        if (typeof window.showBookmarksModal === 'function') {
@@ -234,7 +235,8 @@ onClick: async (e) => {
  {
    label: "Bookmarks",
    title: "Bookmarks",
-   color: "#6f42c1",
+   color: window.scrayHasBookmarks(video) ? "#6f42c1" : "#ece6f6",
+   textColor: window.scrayHasBookmarks(video) ? "white" : "#6f42c1",
    onClick: (e) => {
        e.stopPropagation();
        if (typeof window.showBookmarksModal === 'function') {
@@ -519,7 +521,8 @@ onClick: async (e) => {
     {
    label: "Bookmarks",
    title: "Bookmarks",
-   color: "#6f42c1",
+   color: window.scrayHasBookmarks(video) ? "#6f42c1" : "#ece6f6",
+   textColor: window.scrayHasBookmarks(video) ? "white" : "#6f42c1",
    onClick: (e) => {
        e.stopPropagation();
        if (typeof window.showBookmarksModal === 'function') {
@@ -773,7 +776,8 @@ onClick: async (e) => {
     {
    label: "Bookmarks",
    title: "Bookmarks",
-   color: "#6f42c1",
+   color: window.scrayHasBookmarks(video) ? "#6f42c1" : "#ece6f6",
+   textColor: window.scrayHasBookmarks(video) ? "white" : "#6f42c1",
    onClick: (e) => {
        e.stopPropagation();
        if (typeof window.showBookmarksModal === 'function') {

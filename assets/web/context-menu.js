@@ -175,7 +175,8 @@ visibleButtons.forEach(btn => {
           element.style.background = '#007bff';
       }
       
-      element.style.color = 'white';
+      // Light-filled buttons need dark text; default stays white.
+      element.style.color = btn.textColor || 'white';
       
       if (btn.title) element.title = btn.title;
       if (btn.disabled) {

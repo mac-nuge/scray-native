@@ -2434,8 +2434,19 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     // opts out inline (inline beats the class rule, no CSS change needed).
     // z-index has to be the ceiling too: the base 2147483000 loses to the
     // fullscreen player at 2147483647 in both MPFS and FLS.
-    const OVERLAY_STYLE = 'padding: 20px; z-index: 2147483647;';
-    const CONTENT_STYLE = 'max-width: 500px; width: 100%; transform: none; max-height: 90vh;';
+    // ⚙️ Base lift. The modal is vertically centred, so bottom padding pushes
+    // it up; this is the "sits a bit high" resting position.
+    const MODAL_LIFT_PX = 40;
+    const OVERLAY_STYLE = `padding: 20px 20px ${20 + MODAL_LIFT_PX}px; z-index: 2147483647;`;
+    // display:flex + overflow:hidden is the fix for the buttons vanishing
+    // behind the keyboard. The panel used to be one scrolling box, so once it
+    // was capped short the button row simply scrolled off the bottom of it.
+    // Now the panel is a column, only the middle scrolls, and the buttons are
+    // a fixed footer that cannot move.
+    const CONTENT_STYLE = 'max-width: 500px; width: 100%; transform: none; max-height: 90vh; '
+        + 'display: flex; flex-direction: column; overflow: hidden;';
+    const FORM_STYLE = 'display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden;';
+    const SCROLL_STYLE = 'flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;';
 
     const modal = document.createElement('div');
     modal.className = 'basket-json-modal';
@@ -2569,6 +2580,38 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     // can't take a whole line to itself. The full text is in the title.
     const NOTE_MAX_PX = 190;
 
+    // WKWebView doesn't shrink the layout viewport for the on-screen
+    // keyboard, so a centred modal stays centred and Save/Delete/Close end up
+    // behind the keys. visualViewport does report the covered strip - feed it
+    // back as bottom padding so the modal centres in what's actually visible,
+    // and cap the panel so its own scroll takes over instead of overflowing.
+    const vv = window.visualViewport;
+    const applyKeyboardInset = () => {
+        if (!modal.isConnected) return;
+        const covered = vv
+            ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+            : 0;
+        modal.style.paddingBottom = (20 + MODAL_LIFT_PX + covered) + 'px';
+        const panel = modal.querySelector('.basket-json-modal-content');
+        if (panel) {
+            // Only #bmScroll gives way when this shrinks - the header, the
+            // new-bookmark row and the button row are all flex: 0 0 auto.
+            const usable = (vv ? vv.height : window.innerHeight) - 40 - MODAL_LIFT_PX;
+            panel.style.maxHeight = Math.max(180, usable) + 'px';
+        }
+    };
+    if (vv) {
+        vv.addEventListener('resize', applyKeyboardInset);
+        vv.addEventListener('scroll', applyKeyboardInset);
+        const vvWatch = new MutationObserver(() => {
+            if (modal.isConnected) return;
+            vv.removeEventListener('resize', applyKeyboardInset);
+            vv.removeEventListener('scroll', applyKeyboardInset);
+            vvWatch.disconnect();
+        });
+        vvWatch.observe(document.body, { childList: true });
+    }
+
     const renderContent = () => {
         // Row colours are the mode indicator: blue = swap is armed, red =
         // delete is armed. Pending deletions stay struck through in every
@@ -2580,25 +2623,30 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
 
         let html = `
             <div class="basket-json-modal-content" style="${CONTENT_STYLE}">
-                <form id="bookmarksForm">
-                <h3>Bookmarks</h3>
-                <p style="font-size: 0.85rem; color: #666; margin-bottom: 12px;">${esc(video.filename)}</p>
+                <form id="bookmarksForm" style="${FORM_STYLE}">
+                <h3 style="flex: 0 0 auto;">Bookmarks</h3>
+                <p style="flex: 0 0 auto; font-size: 0.85rem; color: #666; margin-bottom: 12px;">${esc(video.filename)}</p>
         `;
 
         if (hasPlayhead) {
             html += `
-                <div class="bookmark-item" style="display: flex; gap: 6px; align-items: center; margin-bottom: 12px; background: #f9f9f9; padding: 8px; border-radius: 4px; width: 100%; box-sizing: border-box;">
+                <div class="bookmark-item" style="flex: 0 0 auto; display: flex; gap: 6px; align-items: center; margin-bottom: 4px; background: #f9f9f9; padding: 8px; border-radius: 4px; width: 100%; box-sizing: border-box;">
                     <button type="button" id="newBmTimeBtn" class="modal-btn modal-btn-secondary" title="Save this bookmark now" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 8px !important; font-family: monospace; font-size: 0.75rem; white-space: nowrap; margin-bottom: 0 !important;">${formatDuration(newTime * 1000)}</button>
                     <input type="text" id="newBmNote" value="${esc(newNote)}" placeholder="Add a note..." style="flex: 1 1 auto !important; width: auto !important; min-width: 0; padding: 6px !important; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; margin-bottom: 0 !important;">
                     <button type="button" id="swapBmBtn" class="modal-btn" title="Swap: move an existing bookmark's note to this timestamp" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 10px !important; min-width: 0; margin-bottom: 0 !important; background: ${mode === 'swap' ? '#0056b3' : '#007bff'}; color: #fff; font-size: 1rem; line-height: 1;">&#8644;</button>
                 </div>
+                <div id="newBmHint" style="flex: 0 0 auto; font-size: 0.65rem; color: #999; margin: 0 0 12px 2px;">Tap timestamp to save without note</div>
             `;
         }
 
         // Wrapping rail of content-sized pills, same shape as the quick-note
         // row below it - two or three bookmarks per line rather than one
         // full-width row each.
-        html += `<div id="bookmarksList" style="display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; max-height: 200px; overflow-y: auto; margin-bottom: 12px;">`;
+        // Everything between the new-bookmark row and the buttons scrolls as
+        // one region; the list no longer caps itself, or it would be a
+        // scroller inside a scroller.
+        html += `<div id="bmScroll" style="${SCROLL_STYLE}">`;
+        html += `<div id="bookmarksList" style="display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; margin-bottom: 12px;">`;
 
         if (!working.length) {
             html += `<p style="color: #999; font-style: italic; text-align: center;">No bookmarks yet.</p>`;
@@ -2624,16 +2672,18 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             html += `
                 <div style="margin-bottom: 12px;">
                     <div style="font-size: 0.7rem; color: #999; margin-bottom: 4px;">Quick notes (tap one to save a bookmark with it):</div>
-                    <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 120px; overflow-y: auto;">
+                    <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px;">
                         ${topNotes.map((n, i) => `<button type="button" class="quick-note-btn modal-btn modal-btn-secondary" data-note-index="${i}" style="flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.75rem; margin: 0;">${esc(n)}</button>`).join('')}
                     </div>
                 </div>
             `;
         }
 
+        html += `</div>`;   // #bmScroll
+
         const pending = working.filter(b => b.deleted).length;
         html += `
-                <div class="file-operation-buttons" style="display: flex; flex-direction: row; gap: 8px;">
+                <div class="file-operation-buttons" style="flex: 0 0 auto; display: flex; flex-direction: row; gap: 8px; padding-top: 10px; background: #fff;">
                     <button type="button" id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="flex: 1; background: #28a745;">Save${pending ? ` (${pending})` : ''}</button>
                     <button type="button" id="deleteBookmarksBtn" class="modal-btn" style="flex: 1; background: ${mode === 'delete' ? '#a71d2a' : '#dc3545'}; color: #fff;">Delete</button>
                     <button type="button" id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1;">Close</button>
@@ -2773,6 +2823,9 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             newNoteEl.focus();
             autoAddTimestamp = false;
         }
+
+        // innerHTML was just replaced, so the panel is a new node - re-apply.
+        applyKeyboardInset();
     };
 
     renderContent();

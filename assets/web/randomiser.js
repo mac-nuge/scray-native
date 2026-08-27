@@ -134,7 +134,7 @@ if (typeof updatePanelSortButton === 'function') {
       
       const container = document.getElementById(paginationState.containerId);
       container.innerHTML = "";
-      renderNextChunk(25);
+      renderNextChunk(firstChunk);
   }
 }
 
@@ -168,7 +168,7 @@ if (typeof updatePanelSortButton === 'function') {
       
       const container = document.getElementById(paginationState.containerId);
       container.innerHTML = "";
-      renderNextChunk(25);
+      renderNextChunk(firstChunk);
   }
 }
 
@@ -202,7 +202,7 @@ if (typeof updatePanelSortButton === 'function') {
       
       const container = document.getElementById(paginationState.containerId);
       container.innerHTML = "";
-      renderNextChunk(25);
+      renderNextChunk(firstChunk);
   }
 }
 
@@ -301,7 +301,7 @@ if (paginationState.allVideos && paginationState.allVideos.length > 0) {
      
      const container = document.getElementById(paginationState.containerId);
      container.innerHTML = "";
-     renderNextChunk(25);
+     renderNextChunk(firstChunk);
  }
 }
 
@@ -356,7 +356,7 @@ if (paginationState.allVideos && paginationState.allVideos.length > 0) {
     
     const container = document.getElementById(paginationState.containerId);
     container.innerHTML = "";
-    renderNextChunk(25);
+    renderNextChunk(firstChunk);
 }
 }
 
@@ -2115,9 +2115,27 @@ if (currentSortState !== 'none') {
   sortedVideos = sortVideosByScore(videos, currentScoreSortState);
 }
 
+// The reset to 25 is right for a genuine filter/search change and wrong for
+// a plain refresh - same function serves both, which is why the list
+// collapsed after every score, delete or sync pull. Render the first chunk
+// at the depth the list was already showing instead.
+const keepDepth = !!window.scrayKeepListDepth;
+const prevDepth = keepDepth ? (paginationState.currentEndIndex || 0) : 0;
+window.scrayKeepListDepth = false;
+const firstChunk = Math.max(25, Math.min(prevDepth, sortedVideos.length));
+// Scroll has to come with it, or restoring the rows still lands you at
+// whatever offset the shorter list had.
+const scrollEl = document.scrollingElement || document.documentElement;
+const prevScroll = keepDepth ? scrollEl.scrollTop : 0;
+if (keepDepth) requestAnimationFrame(() => { scrollEl.scrollTop = prevScroll; });
+
 paginationState.allVideos = sortedVideos;
-paginationState.pageSize = 25;
+paginationState.pageSize = firstChunk;
 paginationState.currentEndIndex = 0;
+// pageSize is the chunk size for "show more" too, so put it back once the
+// initial render has consumed it. The renderers below are synchronous, so
+// this lands after them and before any interaction.
+queueMicrotask(() => { paginationState.pageSize = 25; });
 
 // ✅ Check if in landscape mobile mode
 const isLandscape = window.matchMedia('(orientation: landscape)').matches;
@@ -2147,7 +2165,7 @@ if (isLandscape && isMobile && !window.skipPanelAutoOpen) { // ✅ Check global 
  const container = document.getElementById(paginationState.containerId);
  container.innerHTML = "";
  document.getElementById("paginationControls").style.display = "flex";
- renderNextChunk(25);
+ renderNextChunk(firstChunk);
 }
 
 function renderNextChunk(amount = null) {

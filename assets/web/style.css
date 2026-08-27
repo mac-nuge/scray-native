@@ -542,7 +542,7 @@ body:has(#historyPanel.history-open) #cornerButtons {
 #cornerButtons .corner-btn-row {
 display: flex;
 flex-wrap: nowrap;
-justify-content: center;
+justify-content: flex-start;
 gap: 6px;
 overflow-x: auto;
 overflow-y: hidden;
@@ -2283,6 +2283,38 @@ body.portrait-fullscreen [contenteditable="true"],
 body.portrait-inline input,
 body.portrait-inline textarea,
 body.portrait-inline [contenteditable="true"] {
+-webkit-user-select: text !important;
+-moz-user-select: text !important;
+-ms-user-select: text !important;
+user-select: text !important;
+-webkit-touch-callout: default !important;
+}
+
+/* The state-class rules above only apply while body carries
+   portrait-fullscreen / portrait-inline, and the subtree version of this
+   rule missed the real case: a long press anchors the range on a page-level
+   ancestor ABOVE the player, which is why the selection survived exiting
+   FLS. Selection is off page-wide instead - nothing outside a field is
+   meant to be selectable in this app - with the exemptions below. */
+html,
+body {
+-webkit-user-select: none !important;
+-moz-user-select: none !important;
+-ms-user-select: none !important;
+user-select: none !important;
+-webkit-touch-callout: none !important;
+}
+
+/* ...except anything you type into, plus the console, where reading a value
+   off the screen is the whole point. Add .allow-select to opt anything else
+   back in. */
+input,
+textarea,
+[contenteditable="true"],
+#inlineConsole,
+#inlineConsole *,
+.allow-select,
+.allow-select * {
 -webkit-user-select: text !important;
 -moz-user-select: text !important;
 -ms-user-select: text !important;

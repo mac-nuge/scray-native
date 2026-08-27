@@ -63,6 +63,7 @@ if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
 
   // Score display (if available from Excel)
  const scoreSpan = document.createElement("span");
+ scoreSpan.className = "list-score-badge";
  if (video.user_score !== undefined && video.user_score !== null) {
    scoreSpan.textContent = ` [${video.user_score}]`;
      scoreSpan.style.marginLeft = "4px";
@@ -349,6 +350,7 @@ li.appendChild(nameSpan);
 
  // Score display (if available from Excel)
  const scoreSpan = document.createElement("span");
+ scoreSpan.className = "list-score-badge";
  if (video.user_score !== undefined && video.user_score !== null) {
    scoreSpan.textContent = ` [${video.user_score}]`;
      scoreSpan.style.marginLeft = "4px";

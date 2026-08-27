@@ -406,6 +406,9 @@ setTimeout(async () => {
       // invisible until they are rebuilt.
       if (typeof window.loadCachesFromMeta === "function") await window.loadCachesFromMeta(true);
       if (typeof window.refreshAllLists === "function") window.refreshAllLists();
+      // Second, direct call - the flag was already consumed by the refresh
+      // above, so it needs setting again or this one collapses the list.
+      window.scrayKeepListDepth = true;
       if (typeof filterDisplayedByFilename === "function") await filterDisplayedByFilename();
     }
   } catch (err) {

@@ -2687,9 +2687,11 @@ function showVideoScoringModal(video, event) {
          updateVideoInDB(video.oneDriveId, { userScore: i, user_score: i }).catch(console.warn);
      }
 
-     // Re-render the main list. The basket, history and player each get
-     // patched individually above, but nothing was redrawing the grid.
-     if (typeof refreshAllLists === 'function') refreshAllLists();
+     // Patch the grid's badge in place instead of rebuilding it. The basket,
+     // history and player are each patched individually above already.
+     if (typeof window.patchScoreInLists === 'function') {
+         window.patchScoreInLists(video.oneDriveId, i);
+     }
 
      // ✅ Confirmation only shown after Excel has saved
      const message = document.createElement('div');

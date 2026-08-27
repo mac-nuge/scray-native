@@ -4727,6 +4727,24 @@ function updatePlayerStateClass() {
 
 window.addEventListener('resize', updatePlayerStateClass);
 
+// Backstop for the double-tap-to-seek selection. The CSS above covers the
+// subtree, but WebKit ignores user-select on the <video> element itself in a
+// few paths, so clear anything that still lands inside the player before the
+// callout bar can attach to it. selectionchange only fires when a selection
+// actually changes and this bails immediately on collapsed ones, so it costs
+// nothing during normal playback.
+document.addEventListener('selectionchange', () => {
+    const sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const node = sel.anchorNode;
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    if (!el) return;
+    // Anchored on a page-level ancestor, not the player - checking for the
+    // player subtree here was the reason the long-press case got through.
+    if (el.closest('input, textarea, [contenteditable="true"], #inlineConsole, .allow-select')) return;
+    sel.removeAllRanges();
+});
+
 window.addEventListener('orientationchange', () => {
   setTimeout(() => {
       if (container.classList.contains('mini-player')) {

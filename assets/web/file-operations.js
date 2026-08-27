@@ -897,8 +897,13 @@ async function deleteFile(video) {
    // Remove from in-memory arrays
    removeVideoFromMemory(video.oneDriveId);
 
-   // Re-render all lists
-   refreshAllLists();
+   // Pull just this row out of the grid rather than rebuilding it. Basket
+   // and history are short panels, so they still redraw in full.
+   if (typeof window.removeRowFromLists === 'function') {
+       window.removeRowFromLists(video.oneDriveId);
+   }
+   if (typeof window.renderBasket === 'function') window.renderBasket();
+   if (typeof window.renderHistory === 'function') window.renderHistory();
 
       // Log what was kept
    console.log('File removed from all lists except history');
@@ -1095,6 +1100,58 @@ function removeVideoFromMemory(oneDriveId) {
 /**
 * Refresh all visible lists
 */
+// Targeted alternatives to refreshAllLists() for the two cases that only
+// change one row. The grid is the expensive list to redraw and the only one
+// that loses the user's place - basket, history and the random panel are
+// short and cheap, so those still go through their own renderers.
+function patchScoreInLists(oneDriveId, score) {
+    if (!oneDriveId) return;
+    const rows = document.querySelectorAll(`li[data-video-id="${CSS.escape(oneDriveId)}"]`);
+    rows.forEach(li => {
+        let badge = li.querySelector('.list-score-badge');
+        if (score === undefined || score === null) {
+            if (badge) badge.remove();
+            return;
+        }
+        if (!badge) {
+            // Unscored rows have no badge at all, so one has to be built and
+            // dropped into the same slot the renderers use: straight after
+            // the name/path span, ahead of the ⚠ and size/duration spans.
+            badge = document.createElement('span');
+            badge.className = 'list-score-badge';
+            badge.style.marginLeft = '4px';
+            badge.style.fontSize = '0.65rem';
+            badge.style.color = '#ff9800';
+            badge.style.fontWeight = 'bold';
+            badge.style.display = 'inline';
+            const nameSpan = li.querySelector('span');
+            if (nameSpan && nameSpan.nextSibling) li.insertBefore(badge, nameSpan.nextSibling);
+            else li.appendChild(badge);
+        }
+        // 0 is the project's "unscored" value and the renderers show it as
+        // [0] rather than hiding the badge, so this matches that.
+        badge.textContent = ` [${score}]`;
+    });
+}
+window.patchScoreInLists = patchScoreInLists;
+
+function removeRowFromLists(oneDriveId) {
+    if (!oneDriveId) return;
+    document.querySelectorAll(`li[data-video-id="${CSS.escape(oneDriveId)}"]`)
+        .forEach(li => li.remove());
+    // Leading "N. " is a bare text node at the front of the name span, so the
+    // numbering goes stale as soon as a row is pulled out from under it.
+    const container = document.getElementById('playlist');
+    if (!container) return;
+    let n = 0;
+    container.querySelectorAll('li[data-video-id]').forEach(li => {
+        n++;
+        const first = li.querySelector('span')?.firstChild;
+        if (first && first.nodeType === 3) first.nodeValue = `${n}. `;
+    });
+}
+window.removeRowFromLists = removeRowFromLists;
+
 function refreshAllLists() {
 // Re-render basket
 if (typeof window.renderBasket === 'function') {
@@ -1110,6 +1167,10 @@ if (typeof window.renderHistory === 'function') {
 if (typeof window.filterDisplayedByFilename === 'function') {
    window.skipSearchScroll = true;
    window.skipPanelAutoOpen = true; // ✅ Prevent panel from auto-opening during refresh
+   // Marks this as a refresh rather than a new filter/search, so
+   // renderPaginatedListSetup redraws what's already on screen instead of
+   // collapsing back to the first 25.
+   window.scrayKeepListDepth = true;
    window.filterDisplayedByFilename();
 }
 
@@ -2447,6 +2508,10 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         + 'display: flex; flex-direction: column; overflow: hidden;';
     const FORM_STYLE = 'display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden;';
     const SCROLL_STYLE = 'flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;';
+    // iOS/WKWebView ignores ::-webkit-scrollbar and scrollbar-width entirely,
+    // so there's no way to make the native overlay bar more visible. #bmScroll
+    // gets its own wrapper + a hand-drawn thumb (#bmScrollThumb) instead.
+    const SCROLL_WRAP_STYLE = 'position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;';
 
     const modal = document.createElement('div');
     modal.className = 'basket-json-modal';
@@ -2588,16 +2653,62 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     const vv = window.visualViewport;
     const applyKeyboardInset = () => {
         if (!modal.isConnected) return;
-        const covered = vv
-            ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
-            : 0;
-        modal.style.paddingBottom = (20 + MODAL_LIFT_PX + covered) + 'px';
+        // Two separate quantities, conflated before. kb is the keyboard's own
+        // height. offsetTop is how far iOS has shifted the VISUAL viewport to
+        // reveal the focused field - subtracting it from kb (as this used to)
+        // under-reads the keyboard and leaves the panel short.
+        const visH = vv ? vv.height : window.innerHeight;
+        const kb = vv ? Math.max(0, window.innerHeight - visH) : 0;
+        const shift = vv ? Math.round(vv.offsetTop || 0) : 0;
+        const KEYBOARD_GAP_PX = 12;
+        // iOS positions fixed elements against the LAYOUT viewport. In MPB the
+        // document scrolls to reveal the field, so offsetTop stays 0 and this
+        // is a no-op. In MPFS/FLS body.fullscreen-active sets overflow: hidden,
+        // so there's nothing to scroll and iOS shifts the visual viewport
+        // instead - taking the visible strip away from the fixed overlay.
+        // Translating by offsetTop puts the overlay back over it. That's the
+        // whole reason this was cut off in those two modes and not in MPB.
+        modal.style.transform = shift ? `translateY(${shift}px)` : 'none';
+        // Bottom-anchor while the keyboard's up: align-items: center would
+        // split the reserve evenly above and below, so only half of it would
+        // count as clearance and the rest would just push the panel upward.
+        modal.style.alignItems = kb > 0 ? 'flex-end' : 'center';
+        modal.style.paddingTop = kb > 0 ? KEYBOARD_GAP_PX + 'px' : '20px';
+        modal.style.paddingBottom = kb > 0
+            ? (kb + KEYBOARD_GAP_PX) + 'px'
+            : (20 + MODAL_LIFT_PX) + 'px';
         const panel = modal.querySelector('.basket-json-modal-content');
         if (panel) {
             // Only #bmScroll gives way when this shrinks - the header, the
             // new-bookmark row and the button row are all flex: 0 0 auto.
-            const usable = (vv ? vv.height : window.innerHeight) - 40 - MODAL_LIFT_PX;
+            // With the keyboard up the panel is pinned GAP above the keys and
+            // GAP below the top of the visible strip, so it fills that strip
+            // rather than sitting in the middle of it. The 40 + MODAL_LIFT_PX
+            // reserve only applies to the centred resting position.
+            const usable = kb > 0
+                ? visH - (KEYBOARD_GAP_PX * 2)
+                : visH - 40 - MODAL_LIFT_PX;
             panel.style.maxHeight = Math.max(180, usable) + 'px';
+        }
+        // The field being edited lives inside #bmScroll, its own scroll
+        // context - WebKit's native focus scroll doesn't reach it (that's
+        // switched off above via preventScroll). Do it ourselves, scoped to
+        // #bmScroll, once the panel has settled at its post-keyboard size.
+        const active = modal.querySelector('.bm-note-edit');
+        if (active && document.activeElement === active) {
+            active.scrollIntoView({ block: 'nearest' });
+        }
+        // Keep the scroll-position thumb in sync too - the panel's usable
+        // height (and so #bmScroll's overflow) just changed.
+        const scroller = modal.querySelector('#bmScroll');
+        const thumb = modal.querySelector('#bmScrollThumb');
+        if (scroller && thumb) {
+            const overflowing = scroller.scrollHeight > scroller.clientHeight + 1;
+            thumb.style.display = overflowing ? 'block' : 'none';
+            if (overflowing) {
+                thumb.style.height = Math.max(24, scroller.clientHeight * scroller.clientHeight / scroller.scrollHeight) + 'px';
+                thumb.style.top = (scroller.scrollTop * scroller.clientHeight / scroller.scrollHeight) + 'px';
+            }
         }
     };
     if (vv) {
@@ -2645,7 +2756,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         // Everything between the new-bookmark row and the buttons scrolls as
         // one region; the list no longer caps itself, or it would be a
         // scroller inside a scroller.
-        html += `<div id="bmScroll" style="${SCROLL_STYLE}">`;
+        html += `<div style="${SCROLL_WRAP_STYLE}"><div id="bmScroll" style="${SCROLL_STYLE}">`;
         html += `<div id="bookmarksList" style="display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; margin-bottom: 12px;">`;
 
         if (!working.length) {
@@ -2679,7 +2790,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             `;
         }
 
-        html += `</div>`;   // #bmScroll
+        html += `</div><div id="bmScrollThumb" style="position: absolute; right: 2px; top: 0; width: 4px; border-radius: 2px; background: rgba(0,0,0,0.25); pointer-events: none; display: none;"></div></div>`;   // #bmScroll + wrap
 
         const pending = working.filter(b => b.deleted).length;
         html += `
@@ -2695,6 +2806,22 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         modal.innerHTML = html;
 
         const newNoteEl = modal.querySelector('#newBmNote');
+
+        // Hand-drawn scroll thumb for #bmScroll - see SCROLL_WRAP_STYLE.
+        const bmScroll = modal.querySelector('#bmScroll');
+        const bmScrollThumb = modal.querySelector('#bmScrollThumb');
+        const updateBmScrollThumb = () => {
+            if (!bmScroll || !bmScrollThumb) return;
+            const { scrollTop, scrollHeight, clientHeight } = bmScroll;
+            const overflowing = scrollHeight > clientHeight + 1;
+            bmScrollThumb.style.display = overflowing ? 'block' : 'none';
+            if (overflowing) {
+                bmScrollThumb.style.height = Math.max(24, clientHeight * clientHeight / scrollHeight) + 'px';
+                bmScrollThumb.style.top = (scrollTop * clientHeight / scrollHeight) + 'px';
+            }
+        };
+        bmScroll?.addEventListener('scroll', updateBmScrollThumb, { passive: true });
+        updateBmScrollThumb();
 
         // Blur fires before click, so a re-render here would swap the Save
         // button out from under the tap that caused the blur and swallow it.
@@ -2784,7 +2911,12 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
 
         const editEl = modal.querySelector('.bm-note-edit');
         if (editEl) {
-            editEl.focus();
+            // preventScroll stops WebKit's own "scroll the focused input into
+            // view" - it acts on the page, not on #bmScroll, and was the
+            // thing inflating visualViewport.offsetTop and over-pushing the
+            // modal. applyKeyboardInset() does our own version below, scoped
+            // to #bmScroll, once the keyboard has finished opening.
+            editEl.focus({ preventScroll: true });
             editEl.addEventListener('blur', () => flushOpenEdit(false));
             editEl.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') { e.preventDefault(); flushOpenEdit(true); }

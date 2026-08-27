@@ -21,10 +21,18 @@ final class ScrayDownloadRecord {
     var received: Int64 = 0
     var state: State = .active
     var savedURL: URL?
+
+    /// Where the bytes came from, kept so a failed transfer can be re-issued.
+    /// nil for the blob:/data: route: those URLs are page-scoped and usually
+    /// revoked the moment the page moves on, so there is nothing to retry.
+    var sourceURL: URL?
     var message: String?
 
     /// Transferring or stopped-but-resumable, as opposed to done with.
     var isLive: Bool { state == .active || state == .paused }
+
+    /// Only a failure with a re-requestable source can be started again.
+    var canRetry: Bool { state == .failed && sourceURL != nil }
 
     init(id: String, filename: String, total: Int64) {
         self.id = id
@@ -58,8 +66,9 @@ final class ScrayDownloadCenter {
     var hasFinished: Bool { records.contains { !$0.isLive } }
 
     @discardableResult
-    func begin(id: String, filename: String, total: Int64) -> ScrayDownloadRecord {
+    func begin(id: String, filename: String, total: Int64, source: URL? = nil) -> ScrayDownloadRecord {
         let record = ScrayDownloadRecord(id: id, filename: filename, total: total)
+        record.sourceURL = source
         records.insert(record, at: 0)
         changed()
         return record
@@ -99,6 +108,17 @@ final class ScrayDownloadCenter {
         changed()
     }
 
+    /// Put a failed row back into flight. The record is reused rather than a
+    /// second one added, so a flaky connection needing three goes leaves one
+    /// row behind rather than three.
+    func retry(id: String) {
+        guard let r = records.first(where: { $0.id == id }), r.state == .failed else { return }
+        r.state = .active
+        r.received = 0
+        r.message = nil
+        changed()
+    }
+
     func cancel(id: String) {
         guard let r = records.first(where: { $0.id == id }), r.isLive else { return }
         r.state = .cancelled
@@ -132,12 +152,20 @@ final class ScrayDownloadCell: UITableViewCell {
     var onPauseResume: (() -> Void)?
     var onCancel: (() -> Void)?
 
+    /// Failed rows only. Retry re-requests from the original URL; remove drops
+    /// the row without going through the swipe, which is hard to find when the
+    /// row is the one thing on screen you want rid of.
+    var onRetry: (() -> Void)?
+    var onRemove: (() -> Void)?
+
     private let icon = UIImageView()
     private let nameLabel = UILabel()
     private let detailLabel = UILabel()
     private let bar = UIProgressView(progressViewStyle: .default)
     private let pauseButton = UIButton(type: .system)
     private let cancelButton = UIButton(type: .system)
+    private let retryButton = UIButton(type: .system)
+    private let removeButton = UIButton(type: .system)
 
     private static let formatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
@@ -173,7 +201,9 @@ final class ScrayDownloadCell: UITableViewCell {
 
         for (button, symbol, action) in [
             (pauseButton, "pause.circle", #selector(pauseTapped)),
-            (cancelButton, "xmark.circle", #selector(cancelTapped))
+            (cancelButton, "xmark.circle", #selector(cancelTapped)),
+            (retryButton, "arrow.clockwise.circle", #selector(retryTapped)),
+            (removeButton, "trash.circle", #selector(removeTapped))
         ] {
             button.setImage(UIImage(systemName: symbol), for: .normal)
             button.addTarget(self, action: action, for: .touchUpInside)
@@ -183,9 +213,14 @@ final class ScrayDownloadCell: UITableViewCell {
             button.heightAnchor.constraint(equalToConstant: 40).isActive = true
         }
         pauseButton.tintColor = .systemBlue
+        retryButton.tintColor = .systemBlue
+        removeButton.tintColor = .tertiaryLabel
         cancelButton.tintColor = .systemRed
 
-        let row = UIStackView(arrangedSubviews: [icon, text, pauseButton, cancelButton])
+        // Hidden arranged subviews collapse, so the two failure controls cost
+        // nothing on the rows that never show them.
+        let row = UIStackView(arrangedSubviews: [icon, text, pauseButton, cancelButton,
+                                                 retryButton, removeButton])
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 8
@@ -202,6 +237,8 @@ final class ScrayDownloadCell: UITableViewCell {
 
     @objc private func pauseTapped() { onPauseResume?() }
     @objc private func cancelTapped() { onCancel?() }
+    @objc private func retryTapped() { onRetry?() }
+    @objc private func removeTapped() { onRemove?() }
 
     func configure(with r: ScrayDownloadRecord) {
         nameLabel.text = r.filename
@@ -210,6 +247,9 @@ final class ScrayDownloadCell: UITableViewCell {
         // Controls only make sense while there's something to control.
         pauseButton.isHidden = !r.isLive
         cancelButton.isHidden = !r.isLive
+        // Retry needs a source to go back to; a blob built in the page has none.
+        retryButton.isHidden = !r.canRetry
+        removeButton.isHidden = r.state != .failed
         pauseButton.setImage(UIImage(systemName: r.state == .paused ? "play.circle" : "pause.circle"),
                              for: .normal)
 
@@ -278,6 +318,7 @@ final class ScrayDownloadsViewController: UITableViewController {
     var onCancel: ((String) -> Void)?
     var onPause: ((String) -> Void)?
     var onResume: ((String) -> Void)?
+    var onRetry: ((String) -> Void)?
 
     private var reloadScheduled = false
     private let emptyLabel = UILabel()
@@ -353,6 +394,14 @@ final class ScrayDownloadsViewController: UITableViewController {
             }
             cell.onCancel = { [weak self] in
                 self?.onCancel?(record.id)
+                self?.refresh()
+            }
+            cell.onRetry = { [weak self] in
+                self?.onRetry?(record.id)
+                self?.refresh()
+            }
+            cell.onRemove = { [weak self] in
+                ScrayDownloadCenter.shared.remove(id: record.id)
                 self?.refresh()
             }
         }

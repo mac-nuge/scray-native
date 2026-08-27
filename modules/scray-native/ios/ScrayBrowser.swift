@@ -564,6 +564,7 @@ final class ScrayBrowserViewController: UIViewController,
         list.onCancel = { [weak self] id in self?.cancelDownload(id: id) }
         list.onPause  = { [weak self] id in self?.pauseDownload(id: id) }
         list.onResume = { [weak self] id in self?.resumeDownload(id: id) }
+        list.onRetry  = { [weak self] id in self?.retryDownload(id: id) }
         let nav = UINavigationController(rootViewController: list)
         presentSafely(nav)
     }
@@ -1188,6 +1189,52 @@ final class ScrayBrowserViewController: UIViewController,
         }
     }
 
+    /// Start a failed download again from its original URL.
+    ///
+    /// Deliberately not a resume: a stop that produced resume data was a pause,
+    /// and what actually lands in .failed is dropped connections, timeouts and
+    /// 5xx - nothing worth resuming a byte range from. So this re-requests the
+    /// whole file into a fresh temp destination.
+    fileprivate func retryDownload(id: String) {
+        guard #available(iOS 14.5, *) else { return }
+        guard let record = ScrayDownloadCenter.shared.records.first(where: { $0.id == id }),
+              record.state == .failed,
+              let source = record.sourceURL,
+              let host = currentWebView else { return }
+
+        guard let dest = makeTempDestination(filename: record.filename) else {
+            showAlert(title: "Can't retry", message: "Couldn't open a temporary file.")
+            return
+        }
+
+        let job = ScrayDownloadJob(id: record.id, filename: record.filename)
+        job.totalBytes = record.total
+        job.fileURL = dest
+
+        // Flip the record before the async start: it's what stops a second tap
+        // on the same row queueing a duplicate transfer.
+        ScrayDownloadCenter.shared.retry(id: record.id)
+        jobs.append(job)
+        refreshDownloadBar()
+
+        host.startDownload(using: URLRequest(url: source)) { [weak self] download in
+            guard let self = self else { return }
+            download.delegate = self
+            let key = ObjectIdentifier(download)
+            job.httpKey = key
+            job.httpDownload = download
+            self.downloadDestinations[key] = dest
+            // Borrowing the resume path's "destination already decided" slot.
+            // The confirm prompt was answered when this was first started, and
+            // tapping Retry is the answer the second time round - asking again
+            // would be nonsense, and decideDestinationUsing would otherwise
+            // call begin() and add a duplicate row.
+            self.resumeDestinations[key] = dest
+            job.progressObs = self.makeProgressObserver(for: job, download: download)
+            self.refreshDownloadBar()
+        }
+    }
+
     fileprivate func cancelDownload(id: String) {
         guard let job = jobs.first(where: { $0.id == id }) else {
             // No live transfer — the record is all that's left of it.
@@ -1396,7 +1443,8 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
             job.httpKey = key
             job.httpDownload = download
             job.progressObs = self.makeProgressObserver(for: job, download: download)
-            ScrayDownloadCenter.shared.begin(id: job.id, filename: name, total: expected)
+            ScrayDownloadCenter.shared.begin(id: job.id, filename: name, total: expected,
+                                             source: download.originalRequest?.url)
             self.jobs.append(job)
             self.refreshDownloadBar()
             completionHandler(dest)

@@ -146,6 +146,7 @@ final class ScrayBrowserViewController: UIViewController,
     private var toastHide: DispatchWorkItem?
     private let moreButton = UIButton(type: .system)
     private var reloadButton = UIButton(type: .system)
+    private var homeButton = UIButton(type: .system)
 
     private var observations: [NSKeyValueObservation] = []
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
@@ -232,6 +233,10 @@ final class ScrayBrowserViewController: UIViewController,
         reloadButton.addTarget(self, action: #selector(reloadTapped), for: .touchUpInside)
         reloadButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
 
+        homeButton.setImage(UIImage(systemName: "house"), for: .normal)
+        homeButton.addTarget(self, action: #selector(homeTapped), for: .touchUpInside)
+        homeButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
+
         moreButton.setImage(UIImage(systemName: "ellipsis.circle"), for: .normal)
         moreButton.addTarget(self, action: #selector(moreTapped), for: .touchUpInside)
         moreButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
@@ -250,7 +255,7 @@ final class ScrayBrowserViewController: UIViewController,
         addressField.placeholder = "Search or enter address"
         addressField.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
-        let header = UIStackView(arrangedSubviews: [addressField, reloadButton, moreButton])
+        let header = UIStackView(arrangedSubviews: [addressField, homeButton, moreButton])
         header.axis = .horizontal
         header.alignment = .center
         header.spacing = 4
@@ -273,8 +278,10 @@ final class ScrayBrowserViewController: UIViewController,
                                    style: .plain, target: self, action: #selector(backTapped))
         forwardItem = UIBarButtonItem(image: UIImage(systemName: "chevron.right"),
                                       style: .plain, target: self, action: #selector(forwardTapped))
-        let homeItem = UIBarButtonItem(image: UIImage(systemName: "house"),
-                                       style: .plain, target: self, action: #selector(homeTapped))
+        // reloadButton stays a UIButton rather than becoming a plain bar item,
+        // because updateChrome() swaps its image to xmark while a page is
+        // loading - the same reason trayButton is a custom view.
+        let reloadItem = UIBarButtonItem(customView: reloadButton)
         tabsItem = UIBarButtonItem(title: "1 ⧉", style: .plain, target: self, action: #selector(tabsTapped))
         // A custom view rather than a plain item, because a bar button item
         // has nowhere to hang a badge.
@@ -285,7 +292,7 @@ final class ScrayBrowserViewController: UIViewController,
         }
         backItem.isEnabled = false
         forwardItem.isEnabled = false
-        toolbar.items = [closeItem, flex(), backItem, flex(), forwardItem, flex(), homeItem,
+        toolbar.items = [closeItem, flex(), backItem, flex(), forwardItem, flex(), reloadItem,
                          flex(), tabsItem, flex(), downloadsItem]
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 

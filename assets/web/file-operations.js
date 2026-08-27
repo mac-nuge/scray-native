@@ -1141,13 +1141,18 @@ function removeRowFromLists(oneDriveId) {
         .forEach(li => li.remove());
     // Leading "N. " is a bare text node at the front of the name span, so the
     // numbering goes stale as soon as a row is pulled out from under it.
-    const container = document.getElementById('playlist');
-    if (!container) return;
-    let n = 0;
-    container.querySelectorAll('li[data-video-id]').forEach(li => {
-        n++;
-        const first = li.querySelector('span')?.firstChild;
-        if (first && first.nodeType === 3) first.nodeValue = `${n}. `;
+    // The main grid renders into taggedVideosContainer, or panelTaggedList in
+    // landscape-mobile - #playlist is a different list, so the renumber never
+    // fired on the rows that needed it.
+    ['taggedVideosContainer', 'panelTaggedList', 'playlist'].forEach(id => {
+        const container = document.getElementById(id);
+        if (!container) return;
+        let n = 0;
+        container.querySelectorAll('li[data-video-id]').forEach(li => {
+            n++;
+            const first = li.querySelector('span')?.firstChild;
+            if (first && first.nodeType === 3) first.nodeValue = `${n}. `;
+        });
     });
 }
 window.removeRowFromLists = removeRowFromLists;

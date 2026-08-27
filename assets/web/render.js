@@ -40,7 +40,7 @@ nameSpan.style.wordBreak = "break-word";
 nameSpan.style.overflowWrap = "break-word";
 
 // Add clickable path
-const pathFragment = createClickablePath(video, true);
+const pathFragment = createClickablePath(video, true, true);
 pathFragment.childNodes.forEach(node => {
 if (node.nodeType === 1) {
   node.style.fontSize = "0.75rem";
@@ -328,7 +328,7 @@ nameSpan.style.wordBreak = "break-word";
 nameSpan.style.overflowWrap = "break-word";
 
 // Add clickable path
-const pathFragment = createClickablePath(video, true);
+const pathFragment = createClickablePath(video, true, true);
 pathFragment.childNodes.forEach(node => {
 if (node.nodeType === 1) {
   node.style.fontSize = "0.75rem";

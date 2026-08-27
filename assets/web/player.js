@@ -6383,7 +6383,16 @@ if (container) {
 const loadingOverlay = document.getElementById('plyr-loading-overlay');
 if (loadingOverlay) {
 window.currentLoadingFilename = video.filename || '';
-window.currentLoadingPath = video.path || '';
+// `path` is the iOS folder; the OneDrive address the catalogue holds lives on
+// `cataloguePath`. Catalogue first, iOS folder as a bracketed aside - and it
+// goes on window so the 'progress' handler's overlay rebuild reuses it.
+const pathParts = (typeof window.scrayResolvePathParts === 'function')
+  ? window.scrayResolvePathParts(video)
+  : { catalogue: (video.path || '').split('/').filter(Boolean), device: [] };
+window.currentLoadingPath = [
+  ...pathParts.catalogue,
+  ...(pathParts.device.length ? [`(${pathParts.device.join('/')}/)`] : [])
+].join(' / ');
 
 // ✅ If this play was triggered by one of the quick-action buttons (X,
 // H<, >, Xn), show a small label above the path/filename identifying
@@ -6398,10 +6407,10 @@ const playSourceLabel = window.currentLoadingLabel
     ? `<div style="font-size: 0.65rem; opacity: 0.9; margin-bottom: 4px; color: #ff9800; font-weight: bold;">${window.currentLoadingLabel}</div>`
     : '';
 
-if (video.path) {
+if (pathParts.catalogue.length || pathParts.device.length) {
     loadingOverlay.innerHTML = `
         ${playSourceLabel}
-        <div style="font-size: 0.65rem; opacity: 0.8; margin-bottom: 4px;">Loading from: ${video.path}</div>
+        <div style="font-size: 0.65rem; opacity: 0.8; margin-bottom: 4px;">Loading from: ${window.currentLoadingPath}</div>
         <div style="font-size: 0.9rem; font-weight: bold;">${window.currentLoadingFilename}</div>
     `;
 } else {
@@ -6466,11 +6475,23 @@ if (container) {
 
 videoInfoEl.innerHTML = ''; // Clear existing content
 
-// Parse path into folders
-if (video.path) {
-const folders = video.path.split('/').filter(Boolean);
+// Parse path into folders. Same resolution as the loading overlay above: the
+// OneDrive path leads, the iOS folder trails in grey brackets.
+const pathParts = (typeof window.scrayResolvePathParts === 'function')
+  ? window.scrayResolvePathParts(video)
+  : { catalogue: (video.path || '').split('/').filter(Boolean), device: [] };
+if (pathParts.catalogue.length || pathParts.device.length) {
+const scrayPathSep = window.scrayPathSep || ((text) => {
+  const s = document.createElement('span');
+  s.textContent = text; s.style.color = '#666'; return s;
+});
+const folders = [
+  ...pathParts.catalogue.map(name => ({ name, local: false })),
+  ...pathParts.device.map(name => ({ name, local: true }))
+];
 
-folders.forEach((folder, index) => {
+folders.forEach((entry, index) => {
+  const folder = entry.name;
   // Create clickable span for each folder
   const folderSpan = document.createElement('span');
   folderSpan.textContent = folder;
@@ -6478,6 +6499,14 @@ folders.forEach((folder, index) => {
   folderSpan.style.color = '#007bff';
   folderSpan.style.textDecoration = 'underline';
   folderSpan.title = `Click to filter by "${folder}"`;
+
+  // Grey italic for the iOS folder - context, not identity. Still clickable,
+  // because those folder names are tags in their own right.
+  if (entry.local) {
+    folderSpan.style.color = '#999';
+    folderSpan.style.fontStyle = 'italic';
+    folderSpan.title = `On this device - click to filter by "${folder}"`;
+  }
   
   folderSpan.addEventListener('click', async (e) => {
 e.stopPropagation();
@@ -6596,10 +6625,22 @@ if (searchBox) {
 }
 });
   
+  // Opening bracket for the case where the iOS folder is the whole path.
+  if (entry.local && index === 0) videoInfoEl.appendChild(scrayPathSep('('));
+
   videoInfoEl.appendChild(folderSpan);
   
   // Add separator
-  if (index < folders.length - 1) {
+  // Bare slashes inside the bracket, and it closes on a trailing one:
+  // 3MAC / USA / ecg / (folder/) name.mp4
+  const nextIsLocal = !!folders[index + 1] && folders[index + 1].local === true;
+  if (entry.local && !nextIsLocal) {
+    videoInfoEl.appendChild(scrayPathSep('/) '));
+  } else if (entry.local) {
+    videoInfoEl.appendChild(scrayPathSep('/'));
+  } else if (nextIsLocal) {
+    videoInfoEl.appendChild(scrayPathSep(' / ('));
+  } else if (index < folders.length - 1) {
     const separator = document.createElement('span');
     separator.textContent = ' / ';
     separator.style.color = '#666';
@@ -6607,11 +6648,15 @@ if (searchBox) {
   }
 });
 
-// Add separator before filename
+// Add separator before filename - not when the bracket just closed with one,
+// and not when there is no path in front of the name at all.
+if (folders.length && !folders[folders.length - 1].local) {
 const separator = document.createElement('span');
 separator.textContent = ' / ';
 separator.style.color = '#666';
 videoInfoEl.appendChild(separator);
+}
+
 }
 
 // Add filename with clickable bracket tags

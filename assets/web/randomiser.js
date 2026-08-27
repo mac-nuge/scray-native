@@ -1741,7 +1741,7 @@ return result;
 }
 
 function matchesSearchQuery(video, query) {
-const haystack = `${video.filename} ${video.path}`.toLowerCase();
+const haystack = `${video.filename} ${video.cataloguePath || ''} ${video.path}`.toLowerCase();
 
 // ✅ All exact phrases must match
 for (const phrase of query.phrases) {
@@ -2229,7 +2229,7 @@ const tokens = searchText.split(/\s+/).filter(Boolean);
 let videos = await getFilteredVideos(includeTags, excludeTags, minDurationMs, maxDurationMs);
 if (tokens.length > 0) {
  videos = videos.filter(video => {
-     const haystack = `${video.filename} ${video.path}`.toLowerCase();
+     const haystack = `${video.filename} ${video.cataloguePath || ''} ${video.path}`.toLowerCase();
      return tokens.every(token => haystack.includes(token));
  });
 }

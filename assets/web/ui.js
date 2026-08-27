@@ -277,16 +277,60 @@ window.showTagActionModal = showTagActionModal;
 // =========================================
 // Helper: Create clickable path with folder tags
 // =========================================
-function createClickablePath(video, includeFilename = true) {
+/**
+ * Which path does a row actually live at?
+ *
+ * On a local row `path` is the folder inside the iOS Files folder - usually
+ * empty, because most files sit at the top level. `cataloguePath` is the
+ * OneDrive path the catalogue holds: the address Picker shows, and the one
+ * carrying the useful structure. So the catalogue path leads and the iOS
+ * folder becomes a bracketed aside.
+ *
+ * typeof === 'string' rather than truthiness: the sync stamps "" for a file
+ * sitting at the catalogue root, and that is a real answer. Rows the sync has
+ * not reached yet have no property at all and keep the old behaviour.
+ *
+ * catalogue:false gives the old iOS-folder-only view, which is what the
+ * basket, history and random panels still ask for.
+ */
+function scrayResolvePathParts(video, { catalogue = true } = {}) {
+  const strip = (s) => (typeof s === 'string' && s.startsWith('*')) ? s.slice(1) : (s || '');
+  const split = (s) => strip(s).split('/').filter(Boolean);
+  const useCat = catalogue && !!video && typeof video.cataloguePath === 'string';
+  return {
+    catalogue: split(useCat ? video.cataloguePath : (video ? video.path : '')),
+    device:    useCat ? split(video.path) : []
+  };
+}
+window.scrayResolvePathParts = scrayResolvePathParts;
+
+/** Separator / bracket punctuation, shared by both breadcrumb renderers. */
+function scrayPathSep(text) {
+  const sep = document.createElement('span');
+  sep.textContent = text;
+  sep.style.color = '#666';
+  return sep;
+}
+window.scrayPathSep = scrayPathSep;
+
+function createClickablePath(video, includeFilename = true, useCataloguePath = false) {
 const container = document.createDocumentFragment();
 
 // Parse path into folders
-if (video.path) {
+const parts = scrayResolvePathParts(video, { catalogue: useCataloguePath });
+if (parts.catalogue.length || parts.device.length) {
 // Remove leading "*" if present (legacy format)
-const cleanPath = video.path.startsWith('*') ? video.path.substring(1) : video.path;
-const folders = cleanPath.split('/').filter(Boolean);
+// Path resolution (including the legacy leading "*") now lives in scrayResolvePathParts.
+// One list, flagged. OneDrive segments render as they always did; iOS segments
+// get the grey italic bracket treatment inside the same loop, so the click
+// handler below stays in one place instead of being duplicated.
+const folders = [
+  ...parts.catalogue.map(name => ({ name, local: false })),
+  ...parts.device.map(name => ({ name, local: true }))
+];
   
-  folders.forEach((folder, index) => {
+  folders.forEach((entry, index) => {
+    const folder = entry.name;
     // Create clickable span for each folder
     const folderSpan = document.createElement('span');
     folderSpan.textContent = folder;
@@ -294,6 +338,15 @@ const folders = cleanPath.split('/').filter(Boolean);
     folderSpan.style.color = '#007bff';
     folderSpan.style.textDecoration = 'underline';
     folderSpan.title = `Click to filter by "${folder}"`;
+
+    // The iOS folder is context, not identity - grey and italic so it reads as
+    // an aside beside the OneDrive path. Still clickable: scanning turns those
+    // folder names into tags too, so filtering on them has to keep working.
+    if (entry.local) {
+      folderSpan.style.color = '#999';
+      folderSpan.style.fontStyle = 'italic';
+      folderSpan.title = `On this device - click to filter by "${folder}"`;
+    }
     
     folderSpan.addEventListener('click', async (e) => {
 e.stopPropagation();
@@ -417,10 +470,23 @@ if (searchBox) {
     }
  });
     
+    // Opening bracket for the case where the iOS folder is the whole path and
+    // there is no OneDrive segment ahead of it to hang it off.
+    if (entry.local && index === 0) container.appendChild(scrayPathSep('('));
+
     container.appendChild(folderSpan);
     
     // Add separator
-    if (index < folders.length - 1 || includeFilename) {
+    // Inside the bracket the separator is a bare slash with no spaces, and the
+    // bracket closes on a trailing one: 3MAC / USA / ecg / (folder/) name.mp4
+    const nextIsLocal = !!folders[index + 1] && folders[index + 1].local === true;
+    if (entry.local && !nextIsLocal) {
+      container.appendChild(scrayPathSep(includeFilename ? '/) ' : '/)'));
+    } else if (entry.local) {
+      container.appendChild(scrayPathSep('/'));
+    } else if (nextIsLocal) {
+      container.appendChild(scrayPathSep(' / ('));
+    } else if (index < folders.length - 1 || includeFilename) {
       const separator = document.createElement('span');
       separator.textContent = ' / ';
       separator.style.color = '#666';
@@ -736,7 +802,7 @@ try {
 
    if (tokens.length > 0) {
        videos = videos.filter(video => {
-           const haystack = `${video.filename} ${video.path}`.toLowerCase();
+           const haystack = `${video.filename} ${video.cataloguePath || ''} ${video.path}`.toLowerCase();
            return tokens.every(token => haystack.includes(token));
        });
    }

@@ -188,7 +188,12 @@ async function scraySyncLibrary({ quiet = false } = {}) {
   for (const v of locals) {
     const k = v.videoKey || window.scrayVideoKey(v.filename);
     if (!k) continue;
-    (v.inCatalogue === true ? deltaKeys : freshKeys).add(k);
+    // A row that has never been handed a catalogue path needs the full pull,
+    // not a delta: its server row may not have changed since the cursor, so a
+    // delta would never deliver the path. typeof, not truthiness - "" means the
+    // file sits at the catalogue root and is already answered.
+    const hasCataloguePath = typeof v.cataloguePath === "string";
+    (v.inCatalogue === true && hasCataloguePath ? deltaKeys : freshKeys).add(k);
   }
   if (!freshKeys.size && !deltaKeys.size) return { pulled: 0, flagged: 0 };
 

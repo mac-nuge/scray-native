@@ -925,6 +925,32 @@ async function scrayApplyPulledRow(appRow, rawRow, bookmarksByKey = null) {
     sourcePatch[k] = v;
   }
 
+  // The device owns the physical file, but the catalogue owns the video's
+  // address: where it sits in OneDrive, and the tag axes Picker derives from
+  // that. Stored alongside `path` rather than over it - playback still resolves
+  // through the iOS relative path, so that field cannot move.
+  if (isLocal) {
+    const catPath = appRow.path || "";
+    sourcePatch.cataloguePath = catPath;   // "" is a real answer: catalogue root
+    if (catPath) {
+      const bracket = existing.bracketTags || [];
+      const levels = generateLevelFieldsFromPath(catPath);
+      if (bracket.length) {
+        levels.level_5 = levels.level_5
+          ? levels.level_5 + ';' + bracket.join(';')
+          : bracket.join(';');
+      }
+      // Clear the levels the catalogue path does not reach, or a deeper iOS
+      // path leaves a stale level_3 sitting in the dropdowns.
+      for (let i = 1; i <= 5; i++) sourcePatch[`level_${i}`] = levels[`level_${i}`] ?? null;
+      // Union, never replace: the iOS folder's own tag stays filterable.
+      sourcePatch.tags = [...new Set([
+        ...(existing.tags || []),
+        ...generateTagsFromPath(catPath)
+      ])];
+    }
+  }
+
   if (bookmarksByKey?.has(key)) metaPatch.bookmarks = bookmarksByKey.get(key);
 
   // Always stamp the join key and the flag, even when nothing else changes.

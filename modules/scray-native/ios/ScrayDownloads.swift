@@ -116,17 +116,21 @@ final class ScrayDownloadBar: UIView {
 
     @objc private func cancelTapped() { onCancel?() }
 
-    func update(filename: String, received: Int64, total: Int64, queued: Int) {
+    func update(filename: String, received: Int64, total: Int64, queued: Int, speed: String?) {
         nameLabel.text = queued > 0 ? "\(filename)  (+\(queued) more)" : filename
         let f = Self.formatter
         if total > 0 {
             let fraction = min(1.0, Double(received) / Double(total))
             progressView.setProgress(Float(fraction), animated: true)
-            detailLabel.text = "\(f.string(fromByteCount: received)) of \(f.string(fromByteCount: total))"
+            detailLabel.text = [
+                "\(f.string(fromByteCount: received)) of \(f.string(fromByteCount: total))",
+                speed
+            ].compactMap { $0 }.joined(separator: " · ")
         } else {
             // No Content-Length — show what's arrived rather than a fake bar.
             progressView.setProgress(0, animated: false)
-            detailLabel.text = f.string(fromByteCount: received)
+            detailLabel.text = [f.string(fromByteCount: received), speed]
+                .compactMap { $0 }.joined(separator: " · ")
         }
     }
 }

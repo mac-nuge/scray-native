@@ -314,6 +314,37 @@ async function pruneMissingLocalVideos(relativePaths, folderName) {
   return strays.length;
 }
 
+/**
+* Re-scan triggered from native rather than from the Refresh button.
+*
+* Debounced and serialised. scanLocalLibrary reads metadata for every file in
+* the folder, so two overlapping calls are two full passes over the library
+* for one folder's worth of change. A call arriving mid-scan is collapsed into
+* a single follow-up rather than queued one per caller.
+*/
+let _scrayRescanTimer = null;
+let _scrayRescanRunning = false;
+let _scrayRescanQueued = false;
+
+window.scrayRefreshLocalFolder = function () {
+  clearTimeout(_scrayRescanTimer);
+  _scrayRescanTimer = setTimeout(async () => {
+    if (_scrayRescanRunning) { _scrayRescanQueued = true; return; }
+    _scrayRescanRunning = true;
+    try {
+      await scanLocalLibrary();
+    } catch (err) {
+      console.warn("scrayRefreshLocalFolder failed:", err.message);
+    } finally {
+      _scrayRescanRunning = false;
+      if (_scrayRescanQueued) {
+        _scrayRescanQueued = false;
+        window.scrayRefreshLocalFolder();
+      }
+    }
+  }, 1200);
+};
+
 async function scanLocalLibrary(folderNameOverride) {
   const folderName = folderNameOverride || getActiveFolderName();
   console.log(`scanLocalLibrary: starting for "${folderName}"`);

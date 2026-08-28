@@ -2256,6 +2256,27 @@ if (!(isLandscape && isMobile)) {
 Video Stats Updater
 ========================================= */
 
+/**
+* Free space on the device, cached briefly. Returns null outside Native, where
+* there's no bridge — the stats line then reads exactly as it does today.
+*/
+let _scrayFreeSpace = { text: null, at: 0 };
+
+async function scrayFreeSpaceText() {
+  if (!window.ScrayBridge || typeof window.ScrayBridge.deviceStorage !== "function") return null;
+  const now = Date.now();
+  if (_scrayFreeSpace.text && now - _scrayFreeSpace.at < 15000) return _scrayFreeSpace.text;
+  try {
+    const s = await window.ScrayBridge.deviceStorage();
+    if (!s || s.freeBytes == null) return null;
+    _scrayFreeSpace = { text: `${formatFileSize(s.freeBytes)} free`, at: now };
+    return _scrayFreeSpace.text;
+  } catch (err) {
+    console.warn("deviceStorage failed:", err.message);
+    return null;
+  }
+}
+
 async function updateVideoStats(filteredList = null) {
 let listToMeasure = filteredList;
 
@@ -2273,7 +2294,11 @@ const totalSize  = listToMeasure.reduce((sum, v) => sum + (v.sizeBytes || 0), 0)
 
 const statsDiv = document.getElementById("videoStats");
 if (statsDiv) {
-   statsDiv.textContent = `Items: ${totalCount} | Total size: ${formatFileSize(totalSize)}`;
+   statsDiv.textContent = [
+     `Items: ${totalCount}`,
+     `Total size: ${formatFileSize(totalSize)}`,
+     await scrayFreeSpaceText()
+   ].filter(Boolean).join(" | ");
 }
 }
 

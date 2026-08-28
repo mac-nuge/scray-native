@@ -22,6 +22,74 @@ final class ScrayDownloadRecord {
     var state: State = .active
     var savedURL: URL?
 
+    // ---- Transfer rate -----------------------------------------------
+    // Sampled, not averaged over the whole transfer: the question is "how
+    // fast is it going now", and an all-time average still reads healthy
+    // on a connection that died ten seconds ago. Smoothed because the raw
+    // delta between two KVO ticks is far too jumpy to put on screen.
+
+    /// Bytes per second, smoothed. Zero until the first window closes.
+    private(set) var bytesPerSecond: Double = 0
+
+    private var sampleBytes: Int64 = 0
+    private var sampleAt: CFAbsoluteTime = 0
+
+    /// Long enough for the number to settle, short enough to notice a stall.
+    private static let sampleWindow: CFAbsoluteTime = 0.5
+
+    /// Called on every progress update; only samples once the window elapses.
+    func sample(received: Int64) {
+        let now = CFAbsoluteTimeGetCurrent()
+        if sampleAt == 0 { sampleAt = now; sampleBytes = received; return }
+
+        let elapsed = now - sampleAt
+        guard elapsed >= Self.sampleWindow else { return }
+
+        // A resumed transfer reads its count off the file on disk, which can
+        // go backwards if the destination was rebuilt. Never a negative rate.
+        let instant = Double(max(0, received - sampleBytes)) / elapsed
+        bytesPerSecond = bytesPerSecond == 0 ? instant
+                                             : bytesPerSecond * 0.6 + instant * 0.4
+        sampleBytes = received
+        sampleAt = now
+    }
+
+    /// A pause must not come back as one very slow half-minute.
+    func resetSampling() {
+        bytesPerSecond = 0
+        sampleBytes = received
+        sampleAt = 0
+    }
+
+    /// "4.2 MB/s", or nil before the first window closes.
+    var speedText: String? {
+        guard state == .active, bytesPerSecond > 0 else { return nil }
+        return Self.rateFormatter.string(fromByteCount: Int64(bytesPerSecond)) + "/s"
+    }
+
+    /// "2m 13s left". Needs both a known total and a rate to divide by.
+    var etaText: String? {
+        guard state == .active, bytesPerSecond > 0, total > 0, received < total else { return nil }
+        let seconds = Double(total - received) / bytesPerSecond
+        guard seconds.isFinite, seconds < 60 * 60 * 24 else { return nil }
+        return Self.etaFormatter.string(from: seconds).map { "\($0) left" }
+    }
+
+    private static let rateFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        f.allowsNonnumericFormatting = false
+        return f
+    }()
+
+    private static let etaFormatter: DateComponentsFormatter = {
+        let f = DateComponentsFormatter()
+        f.allowedUnits = [.hour, .minute, .second]
+        f.unitsStyle = .abbreviated
+        f.maximumUnitCount = 2
+        return f
+    }()
+
     /// Where the bytes came from, kept so a failed transfer can be re-issued.
     /// nil for the blob:/data: route: those URLs are page-scoped and usually
     /// revoked the moment the page moves on, so there is nothing to retry.
@@ -58,6 +126,13 @@ final class ScrayDownloadCenter {
 
     var activeCount: Int { records.filter { $0.state == .active }.count }
 
+    /// The bar above the toolbar is driven by ScrayDownloadJob, not by these
+    /// records, so it comes here for the rate rather than keeping a second
+    /// set of samples that would drift from the list's.
+    func speedText(id: String) -> String? {
+        records.first(where: { $0.id == id })?.speedText
+    }
+
     /// What the tray badge counts: finished and not yet cleared away.
     var completedCount: Int { records.filter { $0.state == .finished }.count }
 
@@ -76,6 +151,7 @@ final class ScrayDownloadCenter {
 
     func progress(id: String, received: Int64, total: Int64) {
         guard let r = records.first(where: { $0.id == id }), r.state == .active else { return }
+        r.sample(received: received)
         r.received = received
         if total > 0 { r.total = total }
         changed()
@@ -84,11 +160,13 @@ final class ScrayDownloadCenter {
     func pause(id: String) {
         guard let r = records.first(where: { $0.id == id }), r.state == .active else { return }
         r.state = .paused
+        r.resetSampling()
         changed()
     }
 
     func resume(id: String) {
         guard let r = records.first(where: { $0.id == id }), r.state == .paused else { return }
+        r.resetSampling()
         r.state = .active
         changed()
     }
@@ -115,6 +193,7 @@ final class ScrayDownloadCenter {
         guard let r = records.first(where: { $0.id == id }), r.state == .failed else { return }
         r.state = .active
         r.received = 0
+        r.resetSampling()
         r.message = nil
         changed()
     }
@@ -260,10 +339,15 @@ final class ScrayDownloadCell: UITableViewCell {
             bar.isHidden = false
             if r.total > 0 {
                 bar.setProgress(Float(min(1.0, Double(r.received) / Double(r.total))), animated: false)
-                detailLabel.text = "\(f.string(fromByteCount: r.received)) of \(f.string(fromByteCount: r.total))"
+                detailLabel.text = [
+                    "\(f.string(fromByteCount: r.received)) of \(f.string(fromByteCount: r.total))",
+                    r.speedText,
+                    r.etaText
+                ].compactMap { $0 }.joined(separator: " · ")
             } else {
                 bar.setProgress(0, animated: false)
-                detailLabel.text = f.string(fromByteCount: r.received)
+                detailLabel.text = [f.string(fromByteCount: r.received), r.speedText]
+                    .compactMap { $0 }.joined(separator: " · ")
             }
 
         case .paused:

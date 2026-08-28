@@ -22,6 +22,17 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
     /// through iOS. Weak — Expo owns the view's lifetime, not this reference.
     static weak var current: ScrayNativeView?
 
+    /// Re-scan the linked video folder. ScrayBrowser calls this once a
+    /// download has landed, so a file saved in the browser turns up in the
+    /// list without anyone having to hit Refresh.
+    func refreshLocalFolder() {
+        DispatchQueue.main.async {
+            self.webView.evaluateJavaScript(
+                "window.scrayRefreshLocalFolder && window.scrayRefreshLocalFolder();"
+            )
+        }
+    }
+
     /// Play a catalogue key. Called by ScrayBrowser after it dismisses itself,
     /// so the player is already on screen by the time this lands.
     func playVideo(key: String) {
@@ -222,6 +233,23 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
             }
             ScrayBrowser.shared.present(url: browserURL, home: browserHome)
             resolve(id: id, result: ["success": true])
+        case "deviceStorage":
+            // ForImportantUsage counts purgeable space, which is what iOS
+            // actually frees up when a write needs room. The raw free-bytes
+            // attribute can read tens of gigabytes lower and would look wrong
+            // next to what Settings says.
+            var storage: [String: Any] = [:]
+            if let values = try? URL(fileURLWithPath: NSHomeDirectory())
+                .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey,
+                                          .volumeTotalCapacityKey]) {
+                if let free = values.volumeAvailableCapacityForImportantUsage {
+                    storage["freeBytes"] = free
+                }
+                if let total = values.volumeTotalCapacity {
+                    storage["totalBytes"] = total
+                }
+            }
+            resolve(id: id, result: storage)
         case "debugBundle":
             let resourcePath = Bundle.main.resourcePath ?? "nil"
             let rootContents = (try? FileManager.default.contentsOfDirectory(atPath: resourcePath)) ?? []

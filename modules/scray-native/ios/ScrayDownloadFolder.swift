@@ -70,7 +70,11 @@ final class ScrayDownloadFolder: NSObject, UIDocumentPickerDelegate {
 
         let dest = Self.uniquified(folder.appendingPathComponent(fileURL.lastPathComponent))
         do {
-            try FileManager.default.copyItem(at: fileURL, to: dest)
+            // Same volume — which the app container and an On My iPhone folder
+            // usually are — makes this free. Cross-volume throws, and the copy
+            // below is the honest fallback.
+            do { try FileManager.default.moveItem(at: fileURL, to: dest) }
+            catch { try FileManager.default.copyItem(at: fileURL, to: dest) }
             return dest
         } catch {
             return nil

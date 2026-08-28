@@ -543,6 +543,21 @@ final class ScrayBrowserViewController: UIViewController,
     // MARK: - Actions
 
     @objc private func closeTapped()   { dismiss(animated: true) }
+
+    /// Set when a download actually lands somewhere. The rescan waits for
+    /// dismissal rather than firing per file: the main list is behind this
+    /// modal so nothing is visible until then, and scanLocalLibrary is a full
+    /// metadata pass over the folder.
+    fileprivate var libraryNeedsRefresh = false
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // This also fires when a document picker or share sheet goes up over
+        // the browser, which is not the browser going away.
+        guard isBeingDismissed, libraryNeedsRefresh else { return }
+        libraryNeedsRefresh = false
+        ScrayNativeView.current?.refreshLocalFolder()
+    }
     @objc private func homeTapped()    { openOrFocus(homeURL) }
     @objc private func backTapped()    { if currentWebView?.canGoBack == true { currentWebView?.goBack() } }
     @objc private func forwardTapped() { if currentWebView?.canGoForward == true { currentWebView?.goForward() } }
@@ -1061,7 +1076,8 @@ final class ScrayBrowserViewController: UIViewController,
         downloadBar.update(filename: job.filename,
                            received: job.receivedBytes,
                            total: job.totalBytes,
-                           queued: jobs.count - 1)
+                           queued: jobs.count - 1,
+                           speed: ScrayDownloadCenter.shared.speedText(id: job.id))
     }
 
     /// Badge counts finished-and-not-yet-cleared; the tint marks in-flight.
@@ -1293,11 +1309,27 @@ final class ScrayBrowserViewController: UIViewController,
     /// Straight into the chosen folder if there is one, otherwise the export
     /// sheet. A folder that's been moved or deleted since it was picked falls
     /// back to the sheet rather than dropping the file on the floor.
+    /// The copy into the Files folder is a real byte copy. On the main thread
+    /// a multi-gigabyte video freezes the app for its duration, and an
+    /// iCloud-backed folder turns it into an upload. Do it off the main queue
+    /// and come back only for the UI.
     fileprivate func deliver(fileURL: URL, jobID: String?) {
+        guard ScrayDownloadFolder.shared.hasFolder else {
+            deliverOnMain(fileURL: fileURL, jobID: jobID, saved: nil)
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let saved = ScrayDownloadFolder.shared.save(fileURL: fileURL)
+            self.deliverOnMain(fileURL: fileURL, jobID: jobID, saved: saved)
+        }
+    }
+
+    private func deliverOnMain(fileURL: URL, jobID: String?, saved: URL?) {
         DispatchQueue.main.async {
-            if let saved = ScrayDownloadFolder.shared.save(fileURL: fileURL) {
+            if let saved = saved {
                 try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
                 if let id = jobID { ScrayDownloadCenter.shared.finish(id: id, savedURL: saved) }
+                self.libraryNeedsRefresh = true
                 self.flash("Saved \(saved.lastPathComponent)")
                 return
             }
@@ -1376,6 +1408,7 @@ final class ScrayBrowserViewController: UIViewController,
             ScrayDownloadCenter.shared.finish(id: id, savedURL: urls.first)
             pendingExportJobID = nil
         }
+        libraryNeedsRefresh = true
         if let name = urls.first?.lastPathComponent { flash("Saved \(name)") }
         cleanupExports()
     }

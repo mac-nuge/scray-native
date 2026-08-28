@@ -28,6 +28,7 @@ window.ScrayBridge = {
   pickFolder: () => callNative('pickFolder'),
   listVideoFiles: () => callNative('listVideoFiles'),
   debugBundle: () => callNative('debugBundle'),
+  deviceStorage: () => callNative('deviceStorage'),
   getVideoDuration: (relativePath) => callNative('getVideoDuration', relativePath),
   getVideoMetadata: (relativePath) => callNative('getVideoMetadata', relativePath),
   exportCsv: (csvText, filename) => callNative('exportCsv', { csv: csvText, filename }),

@@ -4557,6 +4557,8 @@ function endVideoLoadHold() {
     clearTimeout(videoLoadHoldTimer);
     videoLoadHoldTimer = null;
     window.scrayVideoLoading = false;
+    // Deferred while the hold was on - settle on the real state now.
+    if (typeof updatePlayerStateClass === 'function') updatePlayerStateClass();
     document.body.classList.remove('scray-video-loading');
 }
 
@@ -4983,6 +4985,15 @@ function detectPlayerState() {
 }
 
 function updatePlayerStateClass() {
+    // While an FLS video is loading, the browser drops real fullscreen for a
+    // stretch of the load - so detectPlayerState() reports 'portrait-inline'
+    // and the body gets re-labelled mid-transition. That re-docks the player
+    // to its small inline box while .fullscreen-active is still hiding
+    // everything around it, which is the black screen. The exitfullscreen
+    // teardown is already deferred for exactly this reason (see
+    // handleExitFullscreenCleanup); this defers the body label that goes with
+    // it. endVideoLoadHold recomputes the state as soon as the load is done.
+    if (window.scrayVideoLoading && manualRotationActive) return;
     const stateClass = detectPlayerState();
     document.body.classList.remove(
         'portrait-fullscreen', 'portrait-inline', 'portrait-mini',

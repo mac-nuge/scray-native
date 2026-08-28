@@ -4555,6 +4555,20 @@ Stop, and the corner C button. Uses display:none rather than opacity so
 the player takes up no layout space at all and the dock math skips it. */
 body.player-idle #inlineVideoContainer,
 body.player-idle #currentVideoInfo,
+/* FLS is a full-screen rotated box, never a bottom-docked strip. The dock
+   rule further down guards with :not(.plyr--fullscreen), but that class sits
+   on .plyr rather than on the container, so it never matches - and a
+   computeBottomDock() run mid-FLS-load drops the container to z-index 2100.
+   That's a new stacking context, and it traps the rotated .plyr (z-index
+   2147483647) inside it, so nothing in the player paints at all: no video,
+   no controls, no loading card. Hence the black screen. Higher specificity
+   than the dock rule (1 id / 3 classes / 1 element vs 1 id / 3 classes), so
+   it wins regardless of source order. */
+body.manual-rotate-landscape #inlineVideoContainer.bottom-docked:not(.mini-player) {
+z-index: 2147483647 !important;
+background: transparent !important;
+}
+
 body.player-idle #bottomDockBackdrop {
     display: none !important;
 }

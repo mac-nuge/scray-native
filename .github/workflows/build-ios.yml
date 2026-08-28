@@ -18,6 +18,14 @@ jobs:
           mkdir -p modules/scray-native/ios
           echo "// Auto-generated at build time — do not edit or commit" > modules/scray-native/ios/BuildInfo.swift
           echo "enum BuildInfo { static let id = \"$(date -u +%Y%m%dT%H%M%SZ)-${{ github.sha }}\" }" >> modules/scray-native/ios/BuildInfo.swift
+      - name: Generate web scray-key.js
+        run: |
+          if [ -z "${{ secrets.SCRAY_API_KEY }}" ]; then
+            echo "::error::SCRAY_API_KEY repo secret is not set — the IPA would ship with no key"
+            exit 1
+          fi
+          echo "// Auto-generated at build time — do not edit or commit" > assets/web/scray-key.js
+          echo "window.SCRAY_API_KEY = \"${{ secrets.SCRAY_API_KEY }}\";" >> assets/web/scray-key.js
       - name: Generate web version.js
         run: |
           VERSION_TEXT="$(cat assets/web/VERSION 2>/dev/null | tr -d '\r\n')"

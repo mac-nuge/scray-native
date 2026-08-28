@@ -399,6 +399,10 @@ async function scanLocalLibrary(folderNameOverride) {
 
   await pruneMissingLocalVideos(relativePaths, folderName);
 
+  if (typeof window.scrayInvalidateFreeSpace === "function") {
+    window.scrayInvalidateFreeSpace();
+  }
+
   if (typeof renderFolderPills === "function") await renderFolderPills();
 
   if (typeof populateTagDropdowns === 'function') {

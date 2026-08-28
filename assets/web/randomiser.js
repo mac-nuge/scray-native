@@ -18,6 +18,11 @@ Object.defineProperty(window, 'filteredVideosGlobal', {
     configurable: true
 });
 let currentSortState = 'none'; // 'none', 'asc', 'desc'
+// The five sort toggles below call renderNextChunk(firstChunk), but firstChunk
+// was a const inside filterDisplayedByFilename() — out of scope there, so a
+// sort tap threw immediately after clearing the container and the list came
+// back empty. Hoisted here so the toggles get the depth currently on screen.
+let firstChunk = 25;
 // ✅ NEW: Add sort states for created and modified dates
 // ⚙️ DEFAULT SORT ON BOOT/REFRESH: newest created first. Set back to 'none'
 // for the old unsorted default, or 'asc' for oldest first.
@@ -2122,7 +2127,7 @@ if (currentSortState !== 'none') {
 const keepDepth = !!window.scrayKeepListDepth;
 const prevDepth = keepDepth ? (paginationState.currentEndIndex || 0) : 0;
 window.scrayKeepListDepth = false;
-const firstChunk = Math.max(25, Math.min(prevDepth, sortedVideos.length));
+firstChunk = Math.max(25, Math.min(prevDepth, sortedVideos.length));
 // Scroll has to come with it, or restoring the rows still lands you at
 // whatever offset the shorter list had.
 const scrollEl = document.scrollingElement || document.documentElement;
@@ -2190,6 +2195,9 @@ if (isLandscape && isMobile && paginationState.containerId === "panelTaggedList"
  // Normal rendering
  appendVideoList(chunk, paginationState.containerId);
  paginationState.currentEndIndex = nextEnd;
+ // Scrolling past the first chunk moves the real depth, and a sort should
+ // redraw everything that was on screen, not just the initial batch.
+ firstChunk = nextEnd;
 
  if (paginationState.currentEndIndex >= paginationState.allVideos.length) {
    document.getElementById("paginationControls").style.display = "none";
@@ -2261,6 +2269,12 @@ Video Stats Updater
 * there's no bridge — the stats line then reads exactly as it does today.
 */
 let _scrayFreeSpace = { text: null, at: 0 };
+
+/// Called by anything that adds or removes a file, so the next stats render
+/// asks native again rather than serving a figure from before the change.
+window.scrayInvalidateFreeSpace = function () {
+  _scrayFreeSpace = { text: null, at: 0 };
+};
 
 async function scrayFreeSpaceText() {
   if (!window.ScrayBridge || typeof window.ScrayBridge.deviceStorage !== "function") return null;

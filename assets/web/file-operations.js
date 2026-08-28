@@ -787,6 +787,9 @@ async function deleteLocalFile(video) {
    removeVideoFromMemory(relPath);
 
    console.log(`Local delete: ${relPath}`);
+   if (typeof window.scrayInvalidateFreeSpace === "function") {
+       window.scrayInvalidateFreeSpace();
+   }
    refreshAllLists();
    if (typeof renderFolderPills === "function") renderFolderPills();
 }

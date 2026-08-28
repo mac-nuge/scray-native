@@ -322,7 +322,10 @@ window.SCRAY_SYNC = {
   // which lets a per-device localStorage override win.
   PICKER_URL: "https://macnguyen.com/sp-staging-sql/",
   BROWSE_URL: "https://macnguyen.com/scray/browse.html",
-  API_KEY:  "d0ae361fdf8759771caf2c989b1bfec07c3fb24b5c4d11433e01fbeae666d7cb",
+  // Supplied by scray-key.js, generated at build time by the workflow from
+  // the SCRAY_API_KEY repo secret. Empty here means the build step did not
+  // run — every call will 401, which is the correct loud failure.
+  API_KEY:  (typeof window.SCRAY_API_KEY === "string" ? window.SCRAY_API_KEY : ""),
 
   // Distinguishes rows in sync_log and drives conflict messages.
   DEVICE_ID: (() => {

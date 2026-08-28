@@ -2,6 +2,7 @@
 
 # dependencies
 node_modules/
+assets/web/scray-key.js
 
 # Expo
 .expo/

@@ -3019,6 +3019,114 @@ window.showBookmarksModal = showBookmarksModal;
 window.saveBookmarks = saveBookmarks;
 window.showRenameModal = showRenameModal;
 window.showDeleteModal = showDeleteModal;
+window.showBulkDeleteModal = showBulkDeleteModal;
+
+/**
+* Show a bulk delete confirmation modal for a set of videos.
+* Loops the same deleteFile() the single X button uses, so local rows go to
+* ScrayBridge.deleteFile and OneDrive rows go to Graph, one at a time.
+*/
+async function showBulkDeleteModal(videos) {
+   const targets = (videos || []).filter(Boolean);
+   if (!targets.length) {
+       alert("No files selected to delete");
+       return;
+   }
+
+   // A basket can hold both kinds at once, so the warning has to name which
+   // half is unrecoverable rather than pick one message and hope.
+   const localCount = targets.filter(v => isLocalVideo(v)).length;
+   const cloudCount = targets.length - localCount;
+   let warningText;
+   if (localCount && cloudCount) {
+       warningText = `${localCount} local file${localCount === 1 ? '' : 's'} will be permanently deleted from this device (no recycle bin). ` +
+                     `${cloudCount} OneDrive file${cloudCount === 1 ? '' : 's'} will move to the OneDrive Recycle bin.`;
+   } else if (localCount) {
+       warningText = 'This permanently deletes these files from your device. There is no recycle bin.';
+   } else {
+       warningText = 'This will move these files to the OneDrive Recycle bin';
+   }
+
+   const modal = document.createElement('div');
+   modal.className = 'basket-json-modal';
+   modal.innerHTML = `
+   <div class="basket-json-modal-content">
+           <h3>Delete ${targets.length} File${targets.length === 1 ? '' : 's'}</h3>
+           <p class="file-operation-warning">${warningText}</p>
+           <div id="bulkDeleteList" style="max-height:180px;overflow-y:auto;text-align:left;margin:10px 0;padding:8px;background:rgba(0,0,0,0.25);border-radius:6px;font-size:0.75rem;line-height:1.5;"></div>
+           <p id="bulkDeleteStatus" style="min-height:1.2em;margin:6px 0;font-size:0.8rem;opacity:0.85;"></p>
+           <div class="file-operation-buttons">
+               <button id="confirmBulkDeleteBtn" class="modal-btn modal-btn-danger">Delete All</button>
+               <button id="cancelBulkDeleteBtn" class="modal-btn modal-btn-cancel">Cancel</button>
+           </div>
+       </div>
+   `;
+   document.body.appendChild(modal);
+
+   // textContent, not innerHTML - filenames are user data and routinely
+   // contain characters that would break out of the markup.
+   const listEl = modal.querySelector('#bulkDeleteList');
+   targets.forEach(v => {
+       const row = document.createElement('div');
+       row.textContent = (isLocalVideo(v) ? '📱 ' : '☁ ') + (v.filename || v.oneDriveId || '(unnamed)');
+       listEl.appendChild(row);
+   });
+
+   const statusEl = modal.querySelector('#bulkDeleteStatus');
+   const confirmBtn = modal.querySelector('#confirmBulkDeleteBtn');
+   const cancelBtn = modal.querySelector('#cancelBulkDeleteBtn');
+   let running = false;
+
+   // Backdrop and Cancel are both dead once the run starts - a half-finished
+   // loop with the modal gone gives no way to see which files failed.
+   const closeModal = () => { if (!running) modal.remove(); };
+   modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+   cancelBtn.addEventListener('click', closeModal);
+
+   confirmBtn.addEventListener('click', async () => {
+       if (running) return;
+       running = true;
+       confirmBtn.disabled = true;
+       cancelBtn.disabled = true;
+
+       const failures = [];
+       let done = 0;
+
+       // Sequential on purpose. deleteFile routes each row to either the
+       // native file layer or Graph and rewrites the in-memory lists after
+       // each one, so running them in parallel races those rewrites against
+       // each other and loses the per-file error.
+       for (const video of targets) {
+           confirmBtn.textContent = `Deleting ${done + 1}/${targets.length}...`;
+           statusEl.textContent = video.filename || '';
+           try {
+               await deleteFile(video);
+           } catch (err) {
+               console.error(`Bulk delete failed for ${video.filename}:`, err);
+               failures.push(`${video.filename || video.oneDriveId}: ${err.message}`);
+           }
+           done++;
+       }
+
+       // deleteFile already pulls each row out of basketVideos, but the ids
+       // linger in selectedBasketIds as phantom ticks. Drop the lot.
+       if (typeof window.clearBasketSelection === 'function') window.clearBasketSelection();
+       if (typeof window.renderBasket === 'function') window.renderBasket();
+       if (typeof window.updateBasketHighlights === 'function') window.updateBasketHighlights();
+
+       running = false;
+       modal.remove();
+
+       const okCount = targets.length - failures.length;
+       if (failures.length) {
+           alert(`Deleted ${okCount} of ${targets.length}.\n\nFailed:\n` +
+                 failures.slice(0, 10).join('\n') +
+                 (failures.length > 10 ? `\n...and ${failures.length - 10} more` : ''));
+       } else {
+           alert(`Successfully deleted ${okCount} file${okCount === 1 ? '' : 's'}`);
+       }
+   });
+}
 window.showMoveFileModal = showMoveFileModal;
 window.showRefreshFolderConfirmModal = showRefreshFolderConfirmModal;
 window.renameFile = renameFile;

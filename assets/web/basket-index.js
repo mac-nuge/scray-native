@@ -203,6 +203,19 @@ clonedTools.querySelector("#basketSelectAllBtn")?.addEventListener("click", () =
            {
               label: "TAG - Filter by Tags",
               onClick: () => window.showBasketTagSelector()
+          },
+          {
+             label: "DEL - Bulk Delete Selected",
+             color: "#f44336",
+             onClick: () => {
+                 if (!subset.length) {
+                     alert("No items selected to delete");
+                     return;
+                 }
+                 if (typeof window.showBulkDeleteModal === 'function') {
+                     window.showBulkDeleteModal(subset);
+                 }
+             }
           }
        ];
        

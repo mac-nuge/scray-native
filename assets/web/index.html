@@ -206,12 +206,48 @@
 <div id="lockOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #111; color: white; display: flex; align-items: center; justify-content: center; flex-direction: column; z-index: 99999;">
 <p id="lockOverlayVersion" style="font-size: 0.7rem; color: #888; margin-bottom: 10px; transform: translateX(-40px);"></p>
 <input id="lockPassword" type="password" placeholder="Password" style="padding: 10px; font-size: 1.2rem; border-radius: 5px; border: none; text-align: center;">
-<p id="lockError" style="color:red; display:none; margin-top: 10px;">Incorrect</p>
+<style>
+  #lockPinDots { display:flex; gap:12px; margin-top:18px; height:14px; align-items:center; }
+  #lockPinDots span { width:12px; height:12px; border-radius:50%; border:1px solid #555; box-sizing:border-box; }
+  #lockPinDots span.filled { background:#eee; border-color:#eee; }
+  #lockKeypad { display:grid; grid-template-columns:repeat(3, 72px); gap:12px; margin-top:16px; }
+  #lockKeypad button {
+    height:56px; font-size:1.4rem; font-family:inherit; color:#eee;
+    background:#222; border:1px solid #333; border-radius:12px; cursor:pointer;
+    user-select:none; -webkit-user-select:none; -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
+  }
+  #lockKeypad button:active { background:#333; }
+  #lockKeypad button.lock-key-alt { font-size:1.1rem; color:#888; }
+  #lockKeypad.lock-shake { animation: lockShake 0.35s ease; }
+  @keyframes lockShake {
+    0%,100% { transform: translateX(0); }
+    20%,60% { transform: translateX(-8px); }
+    40%,80% { transform: translateX(8px); }
+  }
+</style>
+<div id="lockPinDots"></div>
+<div id="lockKeypad">
+<button type="button" data-key="1">1</button>
+<button type="button" data-key="2">2</button>
+<button type="button" data-key="3">3</button>
+<button type="button" data-key="4">4</button>
+<button type="button" data-key="5">5</button>
+<button type="button" data-key="6">6</button>
+<button type="button" data-key="7">7</button>
+<button type="button" data-key="8">8</button>
+<button type="button" data-key="9">9</button>
+<button type="button" data-key="back" class="lock-key-alt" aria-label="Delete">&#9003;</button>
+<button type="button" data-key="0">0</button>
+<button type="button" data-key="clear" class="lock-key-alt" aria-label="Clear">&#10005;</button>
+</div>
+<p id="lockError" style="color:red; display:none; margin-top: 14px;">Incorrect</p>
 </div>
 
 <script>
 (function(){
   const CORRECT_PASSWORD = "Michael1";
+  const UNLOCK_CODE = "5555"; // ⚙️ on-screen keypad code (any length works)
   const inputEl = document.getElementById("lockPassword");
   const overlayEl = document.getElementById("lockOverlay");
   const errorEl = document.getElementById("lockError");
@@ -263,13 +299,64 @@
     }
   });
 
-  // Secret backdoor: tap/click 3 times within 1.5s anywhere on the lock
+  // Keypad unlock: enter UNLOCK_CODE on the on-screen digit pad. Dot count
+  // follows UNLOCK_CODE.length, so changing the code needs no markup change.
+  const keypadEl = document.getElementById("lockKeypad");
+  const dotsEl = document.getElementById("lockPinDots");
+  let pinEntry = "";
+
+  function renderPinDots() {
+    dotsEl.innerHTML = "";
+    for (let i = 0; i < UNLOCK_CODE.length; i++) {
+      const dot = document.createElement("span");
+      if (i < pinEntry.length) dot.className = "filled";
+      dotsEl.appendChild(dot);
+    }
+  }
+  renderPinDots();
+
+  function rejectPin() {
+    pinEntry = "";
+    renderPinDots();
+    errorEl.style.display = "block";
+    keypadEl.classList.remove("lock-shake");
+    void keypadEl.offsetWidth; // force reflow so the animation restarts
+    keypadEl.classList.add("lock-shake");
+  }
+
+  function pressPinKey(key) {
+    if (key === "clear") { pinEntry = ""; errorEl.style.display = "none"; renderPinDots(); return; }
+    if (key === "back") { pinEntry = pinEntry.slice(0, -1); errorEl.style.display = "none"; renderPinDots(); return; }
+    if (!/^[0-9]$/.test(key)) return;
+    errorEl.style.display = "none";
+    // A full-but-wrong entry that wasn't cleared yet starts over on next digit.
+    if (pinEntry.length >= UNLOCK_CODE.length) pinEntry = "";
+    pinEntry += key;
+    renderPinDots();
+    if (pinEntry.length < UNLOCK_CODE.length) return;
+    if (pinEntry === UNLOCK_CODE) {
+      pinEntry = "";
+      renderPinDots();
+      unlockApp();
+    } else {
+      // Short delay so the last dot registers visually before the shake.
+      setTimeout(rejectPin, 150);
+    }
+  }
+
+  keypadEl.addEventListener("click", function(e){
+    const btn = e.target.closest("button");
+    if (!btn || !keypadEl.contains(btn)) return;
+    pressPinKey(btn.dataset.key);
+  });
+
+  // DISABLED (was: secret backdoor - tap/click 3 times within 1.5s anywhere on the lock
   // screen (except the password input itself) to unlock
   let tapCount = 0;
   let tapResetTimer = null;
   overlayEl.style.cursor = "pointer";
   overlayEl.addEventListener("click", function(e){
-    if (e.target === inputEl) return; // don't hijack normal typing/focus clicks
+    return; // ⛔ triple-tap unlock disabled - the keypad is the only tap route in
     tapCount++;
     clearTimeout(tapResetTimer);
     if (tapCount >= 3) {

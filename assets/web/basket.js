@@ -1979,6 +1979,19 @@ document.getElementById("basketMoreBtn")?.addEventListener("click", (e) => {
         {
            label: "TAG - Filter by Tags",
            onClick: () => showBasketTagSelector()
+       },
+       {
+          label: "DEL - Bulk Delete Selected",
+          color: "#f44336",
+          onClick: () => {
+              if (!subset.length) {
+                  alert("No basket items selected to delete");
+                  return;
+              }
+              if (typeof window.showBulkDeleteModal === 'function') {
+                  window.showBulkDeleteModal(subset);
+              }
+          }
        }
     ];
     

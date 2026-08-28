@@ -5055,7 +5055,23 @@ if (buffered && buffered.length) {
 });
 
 window.plyrPlayer.on('playing', () => { loadingOverlay.style.display = 'none'; });
-window.plyrPlayer.on('error', () => { loadingOverlay.style.display = 'none'; });
+window.plyrPlayer.on('error', () => {
+    loadingOverlay.style.display = 'none';
+    // Local files skip refreshVideoBeforeUse entirely, so a row whose file is
+    // gone from disk failed SILENTLY — the scray-video:// request simply never
+    // resolved. Route it to the same overlay OneDrive 404s use, which now
+    // carries a "Remove from list" button for exactly this case.
+    // MEDIA_ERR_DECODE (3) is excluded: that's a real file the decoder can't
+    // handle (MKV, VC-1), and calling it "not found" would be a lie.
+    try {
+        const v = window.currentPlayingVideo;
+        const isLocal = v && (v.driveId === "local" || (v.accountKey || "").startsWith("local::"));
+        const code = window.plyrPlayer?.media?.error?.code;
+        if (isLocal && code !== 3 && typeof window.showFileNotFoundError === 'function') {
+            window.showFileNotFoundError(v);
+        }
+    } catch {}
+});
 
 // --- Mini-player + Gesture Logic ---
 let touchStartY = null;
@@ -5758,6 +5774,10 @@ overlay.addEventListener('click', (e) => {
 // Show file not found overlay
 // ========================
 function showFileNotFoundError(video = null) {
+   // A local file has no OneDrive to check, so the wording and the buttons
+   // both change: no recycle bin, and "remove from list" is the real fix.
+   const isLocalGhost = !!(video && (video.driveId === "local" ||
+                          (video.accountKey || "").startsWith("local::")));
    // ✅ On mobile, use fullscreen overlay for better visibility
    const isMobile = window.innerWidth <= 768;
 
@@ -5850,11 +5870,15 @@ function showFileNotFoundError(video = null) {
    }
    
    const errorText = document.createElement('div');
-   errorText.textContent = 'Video not found - possibly deleted';
+   errorText.textContent = isLocalGhost
+       ? 'File not found on this device'
+       : 'Video not found - possibly deleted';
    messageDiv.appendChild(errorText);
    
    const suggestionText = document.createElement('div');
-   suggestionText.textContent = 'Check OneDrive recycle bin';
+   suggestionText.textContent = isLocalGhost
+       ? 'It was moved or deleted outside the app. Refresh the folder, or remove this row.'
+       : 'Check OneDrive recycle bin';
    suggestionText.style.marginTop = '8px';
    messageDiv.appendChild(suggestionText);
    
@@ -5924,7 +5948,43 @@ function showFileNotFoundError(video = null) {
        overlay.style.display = 'none';
    });
    
-   buttonContainer.appendChild(recycleBinBtn);
+   // Ghost rows: the file is gone but the row survived — an interrupted
+   // scan, a delete done in the Files app, a stale catalogue entry. Always
+   // localOnly, so this can never queue a server tombstone (the exact bug
+   // that put live OneDrive files behind deleted = 1 in the first place).
+   const forgetBtn = document.createElement('button');
+   forgetBtn.textContent = 'Remove from list';
+   forgetBtn.style.cssText = `
+       background: rgba(0,0,0,0.25);
+       color: white;
+       border: 2px solid white;
+       padding: 12px 24px;
+       border-radius: 6px;
+       cursor: pointer;
+       font-size: 1rem;
+       pointer-events: auto;
+   `;
+   forgetBtn.addEventListener('click', async (e) => {
+       e.stopPropagation();
+       e.preventDefault();
+       const id = video && video.oneDriveId;
+       if (!id) { overlay.style.display = 'none'; return; }
+       forgetBtn.disabled = true;
+       forgetBtn.textContent = 'Removing...';
+       try {
+           await deleteVideoFromDB(id, { localOnly: true });
+           if (typeof removeVideoFromMemory === 'function') removeVideoFromMemory(id);
+           if (typeof window.removeRowFromLists === 'function') window.removeRowFromLists(id);
+           if (typeof refreshAllLists === 'function') refreshAllLists();
+           if (typeof renderFolderPills === 'function') renderFolderPills();
+       } catch (err) {
+           console.warn('Remove from list failed:', err);
+       }
+       overlay.style.display = 'none';
+   });
+
+   if (video && video.oneDriveId) buttonContainer.appendChild(forgetBtn);
+   if (!isLocalGhost) buttonContainer.appendChild(recycleBinBtn);
    buttonContainer.appendChild(dismissBtn);
    contentDiv.appendChild(buttonContainer);
 

@@ -111,7 +111,11 @@ function buildOp(oneDriveId, updates, baseSeq, defaults) {
     // Picker pushes immediately and Native drops them when offline.
     if (rawKey === "increment_views")    { (op.add ??= {}).view_count = (op.add?.view_count ?? 0) + 1; continue; }
     if (rawKey === "increment_f_tally")  { (op.add ??= {}).f_tally    = (op.add?.f_tally    ?? 0) + 1; continue; }
-    if (rawKey === "played_now") { (op.max ??= {}).last_played = new Date().toISOString(); continue; }
+    // A play is proof of life. If the row is tombstoned — a stale local
+    // delete, or a restore from the recycle bin — clear it server-side
+    // rather than leaving a video you just watched marked deleted = 1.
+    // api.php ignores the flag on a row that is already live.
+    if (rawKey === "played_now") { (op.max ??= {}).last_played = new Date().toISOString(); op.undelete = true; continue; }
 
     const key = toDbField(rawKey);
 

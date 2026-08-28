@@ -779,7 +779,11 @@ async function deleteLocalFile(video) {
 
    await ScrayBridge.deleteFile(relPath);
 
-   await deleteVideoFromDB(relPath);
+   // localOnly: this file left THIS DEVICE, not the catalogue. The row's
+   // video_key belongs to the matched OneDrive copy, which is still there —
+   // without the flag deleteVideoFromDB queues a server tombstone and the
+   // file comes back from the next scan already marked deleted = 1.
+   await deleteVideoFromDB(relPath, { localOnly: true });
    removeVideoFromMemory(relPath);
 
    console.log(`Local delete: ${relPath}`);

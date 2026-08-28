@@ -1196,6 +1196,10 @@ let isHorizontalDrag = false;
 let isDetermined = false;
 let pendingScrubTime = null; // ✅ latest scrub target, applied once per rAF
 let scrubRafScheduled = false;
+// True once a drag has been confirmed and window.scrayScrubSeek.begin() has
+// run, so stopScrub knows whether it owns a seek session to close.
+let scrubSessionActive = false;
+
 
 // ⚙️ FLS jog-scrub: a drag STARTING on the left-half frame-step zones seeks
 // at frame-step granularity instead of doing a normal proportional scrub.
@@ -1400,6 +1404,11 @@ jogActive = false;
 
 // ✅ Land on the exact frame on release - fastSeek during the drag is
 // intentionally imprecise for speed, so do one accurate seek now.
+if (scrubSessionActive) {
+    scrubSessionActive = false;
+    window.scrayScrubSeek.end(pendingScrubTime);
+    pendingScrubTime = null;
+}
 if (pendingScrubTime !== null) {
     // Null it FIRST so an early return or throw can't leave it armed for
     // the next gesture.
@@ -1485,6 +1494,12 @@ return;
 }
 
 // ✅ Execute scrubbing if active
+// Open a seek session the moment the drag is confirmed - not at touchstart,
+// or a plain tap would pause the video.
+if (scrubbing && !scrubSessionActive) {
+    scrubSessionActive = true;
+    window.scrayScrubSeek.begin();
+}
 if (!scrubbing) {
 return;
 }
@@ -1524,9 +1539,9 @@ if (jogEligible) {
             if (pendingScrubTime === null) return;
             const videoEl = window.plyrPlayer.media;
             if (videoEl && typeof videoEl.fastSeek === 'function') {
-                videoEl.fastSeek(pendingScrubTime);
+                window.scrayScrubSeek.request(pendingScrubTime);
             } else {
-                window.plyrPlayer.currentTime = pendingScrubTime;
+                window.scrayScrubSeek.request(pendingScrubTime);
             }
         });
     }
@@ -1594,9 +1609,9 @@ const rect = wrapper.getBoundingClientRect();
              const t = pendingScrubTime;
              const videoEl = window.plyrPlayer.media;
              if (videoEl && typeof videoEl.fastSeek === 'function') {
-                 videoEl.fastSeek(t);
+                 window.scrayScrubSeek.request(t);
              } else {
-                 window.plyrPlayer.currentTime = t;
+                 window.scrayScrubSeek.request(t);
              }
              showScrubFeedback(t);
          });
@@ -1616,6 +1631,21 @@ if (window.__anywhereScrubTouchEnd) {
 window.__anywhereScrubTouchEnd = stopScrub;
 window.addEventListener('touchend', stopScrub);
 wrapper.addEventListener('touchmove', scrubMove, { passive: false });
+// A cancelled touch never reaches stopScrub, which would leave the video
+// paused mid-drag with the seek session still open. Close it here, without
+// running any of stopScrub's swipe-gesture handling.
+wrapper.addEventListener('touchcancel', () => {
+    if (scrubSessionActive) {
+        scrubSessionActive = false;
+        window.scrayScrubSeek.end(pendingScrubTime);
+    }
+    pendingScrubTime = null;
+    scrubbing = false;
+    isHorizontalDrag = false;
+    isDetermined = false;
+    jogEligible = false;
+    jogActive = false;
+}, { passive: true });
 
 // LANDSCAPE MOBILE: Block ALL scrolling on controls area normally, BUT
 // while manual rotation is active, this area instead becomes a drag handle
@@ -2200,6 +2230,144 @@ function attachPlayNextButton() {
 // actual per-video frame rate isn't tracked). Adjust if your source
 // material commonly runs at a different frame rate.
 const FRAME_STEP_DURATION = 1 / 30;
+
+// ==========================================================
+// Unified scrub seek engine  (window.scrayScrubSeek)
+// ==========================================================
+// Every drag-to-seek path used to call fastSeek() from inside a
+// requestAnimationFrame throttle. Two problems with that:
+//   1. fastSeek() snaps to the nearest KEYFRAME. On a long-GOP encode those
+//      sit 5-10s apart, so the picture only changes when the finger crosses
+//      one - which is why some videos scrub smoothly and others barely move.
+//   2. rAF fires every ~16ms whether or not the previous seek finished. A
+//      seek on a large or remote file takes far longer than that, so each
+//      new seek ABORTS the one in flight before it ever paints. Dragging
+//      fast therefore shows FEWER frames, not more.
+// This engine issues ACCURATE seeks (exact frame, no keyframe snap) and only
+// issues the next one once the previous has completed, so the element runs
+// flat out at whatever rate it can actually sustain.
+//
+// ⚙️ Pause playback for the duration of a drag, resume on release. Seeking
+// a PLAYING element is far slower on iOS - the pipeline has to re-prime and
+// resume every time - so this is the single biggest responsiveness win, and
+// is why jog-scrub (paused by definition) already feels frame-by-frame.
+const SCRUB_PAUSE_WHILE_DRAGGING = true;
+// ⚙️ If 'seeked' never arrives (stalled segment) unblock after this many ms
+// so a drag can never freeze. Lower = re-issues sooner on a slow source.
+const SCRUB_SEEK_TIMEOUT_MS = 250;
+// ⚙️ Ignore requests closer than this to the last issued position - stops a
+// stationary finger burning seeks on sub-frame jitter.
+const SCRUB_MIN_DELTA_S = 0.015;
+
+window.scrayScrubSeek = (function () {
+    let target = null;        // latest requested position, not yet issued
+    let lastRequested = null; // latest requested position, ever
+    let lastIssued = null;
+    let inFlight = false;
+    let watchdog = null;
+    let resumeOnEnd = false;
+    let boundEl = null;
+
+    const media = () => (window.plyrPlayer && window.plyrPlayer.media) || null;
+
+    const clearWatchdog = () => {
+        if (watchdog) { clearTimeout(watchdog); watchdog = null; }
+    };
+
+    const onSettled = () => {
+        clearWatchdog();
+        inFlight = false;
+        pump();
+    };
+
+    // Plyr rebuilds the media element on every source change, so rebind
+    // rather than assuming the element we listened to is still the live one.
+    const bind = (el) => {
+        if (boundEl === el) return;
+        if (boundEl) {
+            boundEl.removeEventListener('seeked', onSettled);
+            boundEl.removeEventListener('error', onSettled);
+        }
+        boundEl = el;
+        if (boundEl) {
+            boundEl.addEventListener('seeked', onSettled);
+            boundEl.addEventListener('error', onSettled);
+        }
+    };
+
+    function pump() {
+        if (inFlight || target === null) return;
+        const el = media();
+        // readyState 0 = HAVE_NOTHING: writing currentTime there is what
+        // stalls the iOS media pipeline.
+        if (!el || el.readyState < 1) return;
+        const next = target;
+        target = null;
+        if (lastIssued !== null && Math.abs(next - lastIssued) < SCRUB_MIN_DELTA_S) return;
+        bind(el);
+        inFlight = true;
+        lastIssued = next;
+        watchdog = setTimeout(onSettled, SCRUB_SEEK_TIMEOUT_MS);
+        try {
+            // Accurate seek, deliberately NOT fastSeek.
+            el.currentTime = next;
+        } catch (err) {
+            onSettled();
+        }
+    }
+
+    return {
+        // Optional - request() works standalone. Call this when a drag is
+        // CONFIRMED, not on touchstart, or a plain tap would pause the video.
+        begin() {
+            target = null;
+            lastRequested = null;
+            lastIssued = null;
+            inFlight = false;
+            clearWatchdog();
+            resumeOnEnd = false;
+            if (!SCRUB_PAUSE_WHILE_DRAGGING) return;
+            try {
+                if (window.plyrPlayer && !window.plyrPlayer.paused) {
+                    resumeOnEnd = true;
+                    window.plyrPlayer.pause();
+                }
+            } catch (e) {}
+        },
+        request(seconds) {
+            if (typeof seconds !== 'number' || !isFinite(seconds)) return;
+            target = seconds;
+            lastRequested = seconds;
+            pump();
+        },
+        // Safe to call twice, and safe to call without a matching begin().
+        end(finalTime) {
+            clearWatchdog();
+            inFlight = false;
+            const landOn = (typeof finalTime === 'number' && isFinite(finalTime))
+                ? finalTime
+                : (target !== null ? target : lastRequested);
+            target = null;
+            lastIssued = null;
+            lastRequested = null;
+            // One last accurate seek so release always lands on the frame the
+            // finger was on, even if the pump skipped the final request.
+            try {
+                const el = media();
+                if (el && el.readyState > 0 && typeof landOn === 'number' && isFinite(landOn)) {
+                    window.plyrPlayer.currentTime = landOn;
+                }
+            } catch (e) {}
+            if (resumeOnEnd) {
+                resumeOnEnd = false;
+                try {
+                    const resumed = window.plyrPlayer && window.plyrPlayer.play();
+                    if (resumed && typeof resumed.catch === 'function') resumed.catch(() => {});
+                } catch (e) {}
+            }
+        }
+    };
+})();
 // ⚙️ Hold longer than this (ms) and it switches from a single tap-step
 // into continuous frame-by-frame "slow motion" stepping.
 const FRAME_HOLD_DELAY_MS = 250;
@@ -3716,7 +3884,7 @@ let desktopSeekRafScheduled = false;
 const applyDesktopVideoSeek = (seekTime, precise) => {
 const videoEl = window.plyrPlayer.media;
 if (!precise && videoEl && typeof videoEl.fastSeek === 'function') {
-videoEl.fastSeek(seekTime);
+window.scrayScrubSeek.request(seekTime);
 } else {
 window.plyrPlayer.currentTime = seekTime;
 }
@@ -3880,6 +4048,7 @@ if (!progressDragStarted) {
         : Math.abs(touch.clientX - progressTouchStartX);
     if (moved < PROGRESS_DRAG_THRESHOLD_PX) return;
     progressDragStarted = true;
+    window.scrayScrubSeek.begin();
 }
 
 // Axis-aware - see progressFractionFromPoint above. The old
@@ -3899,9 +4068,9 @@ mobileSeekRafScheduled = false;
 if (pendingMobileSeekTime === null) return;
 const videoEl = window.plyrPlayer.media;
 if (videoEl && typeof videoEl.fastSeek === 'function') {
-videoEl.fastSeek(pendingMobileSeekTime);
+window.scrayScrubSeek.request(pendingMobileSeekTime);
 } else {
-window.plyrPlayer.currentTime = pendingMobileSeekTime;
+window.scrayScrubSeek.request(pendingMobileSeekTime);
 }
 pendingMobileSeekTime = null;
 });
@@ -3912,8 +4081,8 @@ showPlayerFeedback(`${formatDuration(seekTime * 1000)}`, 'top-left');
 progressBar.addEventListener('touchend', (e) => {
 if (isSeeking) {
     // ✅ Land on the exact frame on release
-    if (pendingMobileSeekTime !== null) {
-        window.plyrPlayer.currentTime = pendingMobileSeekTime;
+    if (progressDragStarted) {
+        window.scrayScrubSeek.end(pendingMobileSeekTime);
         pendingMobileSeekTime = null;
     }
     console.log(`Seeked to ${formatDuration(window.plyrPlayer.currentTime * 1000)} via progress bar touch`);
@@ -3923,6 +4092,11 @@ progressDragStarted = false;
 });
 
 progressBar.addEventListener('touchcancel', () => {
+if (progressDragStarted) {
+    window.scrayScrubSeek.end();
+}
+pendingMobileSeekTime = null;
+progressDragStarted = false;
 isSeeking = false;
 });
 
@@ -4336,6 +4510,105 @@ if (timestamp) timestamp.style.opacity = '1';
 
 // Update on time change
 window.plyrPlayer.on('timeupdate', updatePermanentProgressBar);
+
+// =========================================================
+// TRANSITION HOLD - keep the loading overlay AND the control bar up for
+// the whole of a video change, not just the first couple of seconds.
+//
+// Three separate things were taking them away mid-load:
+//   1. Plyr auto-hides the controls ~2s after play() is called. `paused`
+//      goes false the instant play() is invoked, long before a large file
+//      has buffered, so the idle-hide timer runs during the load.
+//   2. Setting .source makes Plyr soft-destroy and rebuild .plyr__controls.
+//      Every button we add ourselves - X, H<, >, stop, rotate, bookmark and
+//      the rest - was only re-attached on 'loadedmetadata', which doesn't
+//      fire until the browser has enough of the file to know its duration.
+//      So for the whole first stretch of the load the bar is there but has
+//      none of the buttons you'd actually want to press.
+//   3. The FLS title bar and frame-step group fade with
+//      .plyr--hide-controls, so they went with the controls.
+//
+// While the hold is on, body carries .scray-video-loading and the CSS rules
+// added to style.css pin all of it open. Plyr's own timer still runs
+// underneath - we override the RESULT rather than fighting the timer, which
+// would flicker the bar every couple of seconds.
+// =========================================================
+
+// ⚙️ Hard ceiling (ms). If 'playing' never arrives - stalled source, a
+// format the decoder silently rejects - the hold releases anyway rather
+// than pinning the controls open for the rest of the session.
+const VIDEO_LOAD_HOLD_MAX_MS = 90000;
+let videoLoadHoldTimer = null;
+
+function scrayShowControlsNow() {
+    document.querySelector('.plyr')?.classList.remove('plyr--hide-controls');
+    try { window.plyrPlayer?.toggleControls?.(true); } catch (e) {}
+}
+
+function beginVideoLoadHold() {
+    window.scrayVideoLoading = true;
+    document.body.classList.add('scray-video-loading');
+    clearTimeout(videoLoadHoldTimer);
+    videoLoadHoldTimer = setTimeout(endVideoLoadHold, VIDEO_LOAD_HOLD_MAX_MS);
+    scrayShowControlsNow();
+}
+
+function endVideoLoadHold() {
+    clearTimeout(videoLoadHoldTimer);
+    videoLoadHoldTimer = null;
+    window.scrayVideoLoading = false;
+    document.body.classList.remove('scray-video-loading');
+}
+
+// Called from playVideoInline / resetVideoInline / showVideoError, which are
+// outside createPlayerElement's scope - hence the window handles.
+window.beginVideoLoadHold = beginVideoLoadHold;
+window.endVideoLoadHold = endVideoLoadHold;
+
+// Plyr has finished rebuilding the control bar by the time 'loadstart'
+// fires, so put the custom buttons back NOW instead of waiting for
+// 'loadedmetadata'. Every attach* function bails early if its button is
+// already present, so the existing 'loadedmetadata' pass stays harmless.
+window.plyrPlayer.on('loadstart', window.scrayRebuildPlayerControls = () => {
+    // Order matters. cleanupPlyrControls strips Plyr's built-in progress bar
+    // and time readouts, so doing it BEFORE the buttons go on means the bar
+    // is laid out once instead of rendering wide and then reflowing as each
+    // change lands - which is what the rapid rebuild flicker was.
+    cleanupPlyrControls();
+    attachStopButton();
+    attachPIPButton();
+    attachIOSFullscreenButton();
+    attachManualRotateButton();
+    attachFlsToMpfsButton();
+    attachScrollLockButton();
+    attachRandomVideoButton();
+    attachHistorySequenceButton();
+    attachPlayNextButton();
+    attachBasketQuickButton();
+    attachBookmarkQuickButton();
+    attachFrameStepButtons();
+    // The rebuilt bar comes back with none of FLS's inline rotation styles -
+    // including the z-index that lifts it above the reload mask - so it can
+    // look like it vanished. Re-style it the moment it exists.
+    if (manualRotationActive) applyManualRotationStyles();
+    scrayShowControlsNow();
+});
+
+// The new video is on screen - let everything behave normally again.
+// 'error' covers the load that never gets there.
+// ⚙️ How long the bar stays up AFTER playback actually starts. Releasing on
+// 'playing' made it vanish at the exact moment the picture appeared, which
+// read as a glitch; this lets it sit there and then fade on Plyr's own
+// 0.4s transition instead.
+const CONTROLS_LINGER_AFTER_PLAY_MS = 1000;
+
+window.plyrPlayer.on('playing', () => {
+    // Reusing the hold timer on purpose - beginVideoLoadHold clears it, so a
+    // new request during the linger cancels this cleanly.
+    clearTimeout(videoLoadHoldTimer);
+    videoLoadHoldTimer = setTimeout(endVideoLoadHold, CONTROLS_LINGER_AFTER_PLAY_MS);
+});
+window.plyrPlayer.on('error', endVideoLoadHold);
 
 // Recreate on source change (new video loaded)
 let _loadedMetadataFireCount = 0;
@@ -5554,6 +5827,9 @@ console.log("✅ Video info display created");
 // Show error overlay - red box on dark transparent background
 // ========================
 function showVideoError(message, video = null) {
+// A load that ends in an error is over - release the hold, or the
+// loading overlay stays pinned behind the error panel.
+window.endVideoLoadHold?.();
 // ✅ On mobile, use fullscreen overlay for better visibility
 const isMobile = window.innerWidth <= 768;
 
@@ -6375,10 +6651,99 @@ function endFullscreenReload() {
 window.beginFullscreenReload = beginFullscreenReload;
 window.endFullscreenReload = endFullscreenReload;
 
+// =========================================================
+// PLAY PREVIEW DELAY
+// Hold on the next video's title for a moment before actually loading it.
+// The point is the window it buys: nothing has been touched yet, so the
+// CURRENT control bar is still on screen, still carries X / H< / > and is
+// still tappable. Tap one again and this request is abandoned in favour of
+// the new one - no wasted fetch, no second teardown.
+//
+// This is deliberately BEFORE the source change rather than a longer hold
+// after it: once .source is set, Plyr tears the control bar down and
+// rebuilds it, and in FLS the rebuilt bar has to be re-styled before it
+// looks right again. Waiting first sidesteps that entirely.
+// =========================================================
+
+// ⚙️ Per-mode delay in ms. 0 disables it for that mode.
+const PLAY_PREVIEW_DELAY_FLS_MS  = 1000;  // forced landscape
+const PLAY_PREVIEW_DELAY_MPFS_MS = 1000;  // mobile portrait fullscreen
+const PLAY_PREVIEW_DELAY_MPB_MS  = 0;     // docked in-page - controls persist anyway
+
+function scrayPlayPreviewDelayMs() {
+    // Nothing playing yet means there's no bar to keep alive and nothing to
+    // decide against - the very first play should never be held up.
+    if (!window.plyrPlayer || !window.currentPlayingVideo) return 0;
+    if (manualRotationActive) return PLAY_PREVIEW_DELAY_FLS_MS;
+    if (window.plyrPlayer.fullscreen?.active) return PLAY_PREVIEW_DELAY_MPFS_MS;
+    return PLAY_PREVIEW_DELAY_MPB_MS;
+}
+
+// Just the label and the filename. The full path/percentage version lands a
+// moment later when playVideoInline's own overlay block runs; this only has
+// to answer "what am I about to watch".
+function scrayShowPreviewTitle(video) {
+    const ov = document.getElementById('plyr-loading-overlay');
+    if (!ov) return;
+    // Same path treatment the real loading overlay uses, so the text doesn't
+    // change shape a moment later when playVideoInline's own block runs.
+    const pathParts = (typeof window.scrayResolvePathParts === 'function')
+        ? window.scrayResolvePathParts(video)
+        : { catalogue: (video.path || '').split('/').filter(Boolean), device: [] };
+    const pathText = [
+        ...pathParts.catalogue,
+        ...(pathParts.device.length ? [`(${pathParts.device.join('/')}/)`] : [])
+    ].join(' / ');
+    const pathLine = (pathParts.catalogue.length || pathParts.device.length)
+        ? `<div style="font-size: 0.65rem; opacity: 0.8; margin-bottom: 4px;">Loading from: ${pathText}</div>`
+        : '';
+    // The OUTGOING video is still playing and still firing 'progress', and
+    // that handler rebuilds this overlay from these globals - point them at
+    // the new video now or the preview flickers back to the old filename.
+    // lastPlayLabel is read, not consumed; playVideoInline still clears it.
+    window.currentLoadingFilename = video.filename || '';
+    window.currentLoadingPath = pathText;
+    window.currentLoadingLabel = window.lastPlayLabel || null;
+    const label = window.lastPlayLabel
+        ? `<div style="font-size: 0.65rem; opacity: 0.9; margin-bottom: 4px; color: #ff9800; font-weight: bold;">${window.lastPlayLabel}</div>`
+        : '';
+    ov.innerHTML = `
+        ${label}
+        ${pathLine}
+        <div style="font-size: 0.9rem; font-weight: bold;">${video.filename || ''}</div>
+    `;
+    ov.style.display = 'block';
+    ov.style.background = 'rgba(0,0,0,0.7)';
+    ov.style.padding = '8px 16px';
+    ov.style.maxWidth = '90%';
+    ov.style.cursor = 'default';
+    ov.style.lineHeight = '1.3';
+    ov.style.whiteSpace = 'normal';
+    ov.style.wordBreak = 'break-word';
+    ov.onclick = null;
+}
+
 // ========================
 // Play video inline
 // ========================
 async function playVideoInline(video, listContext = null, index = null) {
+// ⚙️ PLAY PREVIEW DELAY - see scrayPlayPreviewDelayMs above.
+// The token is what makes tapping X / > again during the wait work: every
+// request takes the next number, and any request that wakes up to find a
+// higher number has been superseded and quietly drops out.
+const previewDelayMs = scrayPlayPreviewDelayMs();
+window.scrayPlayRequestToken = (window.scrayPlayRequestToken || 0) + 1;
+const playRequestToken = window.scrayPlayRequestToken;
+
+if (previewDelayMs > 0) {
+    scrayShowPreviewTitle(video);
+    window.beginVideoLoadHold?.();
+    await new Promise(resolve => setTimeout(resolve, previewDelayMs));
+    if (playRequestToken !== window.scrayPlayRequestToken) {
+        console.log('[player] preview superseded, abandoning:', video.filename);
+        return;
+    }
+}
 console.log("playVideoInline CALLED with video =", video);
 currentListContext = listContext;
 currentVideoIndex = index;
@@ -6438,6 +6803,10 @@ if (container) {
     });
 }
 }
+
+// Pin the overlay and the control bar open until the new video is
+// actually playing - see the TRANSITION HOLD block in createPlayerElement.
+window.beginVideoLoadHold?.();
 
 // Show loading overlay immediately
 const loadingOverlay = document.getElementById('plyr-loading-overlay');
@@ -7142,6 +7511,13 @@ if (video.driveId === "local" && typeof ScrayBridge !== 'undefined') {
     }
 }
 
+// Rebuild the control bar NOW, in the same turn Plyr tore it down and
+// re-injected it. Doing it here rather than waiting for 'loadstart' (a tick
+// later) or 'loadedmetadata' (much later) means the browser never paints an
+// intermediate version - no bare bar, no progress widget appearing and then
+// being stripped, no buttons popping in one reflow at a time.
+window.scrayRebuildPlayerControls?.();
+
 //  Setting .source rebuilds Plyr's internal video-wrapper/video
 // elements, which wipes their inline rotation styles immediately -
 // before playback even starts. Reapply right away so the loading
@@ -7389,6 +7765,10 @@ try {
     }
     
  // Hide loading overlay
+  // Bump the token so a preview window that's still counting down is
+  // abandoned rather than starting a video you've just stopped.
+  window.scrayPlayRequestToken = (window.scrayPlayRequestToken || 0) + 1;
+  window.endVideoLoadHold?.();
   const loadingOverlay = document.getElementById('plyr-loading-overlay');
   if (loadingOverlay) loadingOverlay.style.display = 'none';
   

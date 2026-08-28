@@ -1970,6 +1970,33 @@ body.portrait-fullscreen:not(.manual-rotate-landscape) .plyr-frame-step-group {
 display: none !important;
 }
 
+/* =========================================
+   VIDEO TRANSITION HOLD
+   body.scray-video-loading is set the moment a new video is requested and
+   cleared when it actually starts playing. Plyr's idle-hide timer still runs
+   underneath during that window - these override the result of it, the same
+   trick body.fls-filter-editing already uses further down.
+   ========================================= */
+body.scray-video-loading #plyr-loading-overlay {
+display: block !important;
+}
+
+body.scray-video-loading .plyr--hide-controls .plyr__controls {
+opacity: 1 !important;
+pointer-events: auto !important;
+/* Plyr slides the bar off the bottom as well as fading it. FLS is
+   unaffected: applyManualRotationStyles() sets its own inline !important
+   transform there, which outranks this. */
+transform: none !important;
+}
+
+body.scray-video-loading .plyr--hide-controls .fls-video-title,
+body.scray-video-loading .plyr--hide-controls .fls-filter-pill,
+body.scray-video-loading .plyr--hide-controls .plyr-frame-step-group {
+opacity: 1 !important;
+pointer-events: auto !important;
+}
+
 /* Fade out together with Plyr's own controls fade */
 .plyr--hide-controls .plyr-frame-step-group {
 opacity: 0;

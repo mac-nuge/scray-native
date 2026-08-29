@@ -17,15 +17,27 @@ function updateBasketHighlights() {
 }
 
 /**
-* Render a list of videos into a given container
-* Each video name/path is clickable to add it to the basket
+* Build one <li> for a video row: numbering, clickable path, score badge,
+* size/duration, the button group and the row-level click handlers.
+*
+* This block used to be pasted twice - once in renderVideoList, once in
+* appendVideoList - and the two copies had already drifted in whitespace and
+* comments. Both now call this, and so does the bookmarks page.
+*
+* @param {Object} video       - the video to render
+* @param {string} listContext - which list this row belongs to ('main',
+*                               'random', 'bookmarks'). Handed to
+*                               inlineVideoPlayer.play so next/previous walk
+*                               the right list.
+* @param {number} index       - 0-based position within that list
+* @param {Object} [options]
+*        onPlay - replaces the P button's action outright. The bookmarks page
+*                 uses this to start at the bookmark's timestamp.
+*        prefix - a Node inserted ahead of the row numbering. The bookmarks
+*                 page uses this for the note + timestamp.
+* @returns {HTMLLIElement}
 */
-function renderVideoList(videos, containerId) {
-const container = document.getElementById(containerId);
-if (!container) return;
-container.innerHTML = '';
-
-videos.forEach((video, index) => {
+function buildVideoRow(video, listContext, index, options = {}) {
    const li = document.createElement('li');
    li.style.marginBottom = "4px";
 
@@ -110,7 +122,9 @@ if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
       label: "P",
       title: "Play video",
       color: "#28a745",
-      onClick: () => inlineVideoPlayer.play(video, 'random', index)
+      onClick: () => (options.onPlay
+          ? options.onPlay()
+          : inlineVideoPlayer.play(video, listContext, index))
   },
   {
      label: "D",
@@ -289,296 +303,48 @@ li.addEventListener('click', async (e) => {
    }
 });
 
-container.appendChild(li);
-});
+ if (options.prefix) li.insertBefore(options.prefix, li.firstChild);
 
-updateBasketHighlights();
+ return li;
 }
+window.scrayBuildVideoRow = buildVideoRow;
 
+/**
+* Render a list of videos into a given container.
+* Each video name/path is clickable to add it to the basket.
+*/
+function renderVideoList(videos, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = '';
+
+  videos.forEach((video, index) => {
+    container.appendChild(buildVideoRow(video, 'random', index));
+  });
+
+  updateBasketHighlights();
+}
 window.renderVideoList = renderVideoList;
 
 /**
-* Append a chunk of videos to an existing container (for pagination)
-* Each video name/path is clickable to add it to the basket
+* Append a chunk of videos to an existing container (for pagination).
+*
+* The global index is snapshotted per row rather than read at click time:
+* paginationState.currentEndIndex keeps moving as further chunks load, so a
+* lazily-read index was stale for every row except the newest chunk.
 */
-
 function appendVideoList(videos, containerId) {
-const container = document.getElementById(containerId);
-if (!container) return;
+  const container = document.getElementById(containerId);
+  if (!container) return;
 
-videos.forEach((video, index) => {
-  const li = document.createElement('li');
-  li.style.marginBottom = "4px";
+  videos.forEach((video, index) => {
+    const globalIndex = paginationState.currentEndIndex + index;
+    container.appendChild(buildVideoRow(video, 'main', globalIndex));
+  });
 
-  const vidId = video.oneDriveId ?? video.idFromAPI ?? null;
-  li.dataset.videoId = vidId;
-
-  // ✅ Snapshot the global index NOW, into a local const the onClick
-  // closure below can capture - paginationState.currentEndIndex itself
-  // keeps changing as more chunks load, so reading it lazily inside the
-  // closure (at click time, not render time) was giving stale/wrong
-  // indexes for every row rendered before the most recent chunk.
-  const globalIndex = paginationState.currentEndIndex + index;
-
-// Display name/path
-const nameSpan = document.createElement("span");
-nameSpan.textContent = `${globalIndex + 1}. `;
-nameSpan.style.whiteSpace = "normal";
-nameSpan.style.wordBreak = "break-word";
-nameSpan.style.overflowWrap = "break-word";
-
-// Add clickable path
-const pathFragment = createClickablePath(video, true, true);
-pathFragment.childNodes.forEach(node => {
-if (node.nodeType === 1) {
-  node.style.fontSize = "0.75rem";
-  if (node.textContent === video.filename && 
-      (video.filename || '').split('.').pop().toLowerCase() !== 'mp4') {
-    node.style.color = '#be7b7bff';
-  }
+  updateBasketHighlights();
 }
-});
-nameSpan.appendChild(pathFragment);
-
-// Apply highlighting AFTER appending to DOM
-if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
-   applyHighlightingToElement(nameSpan, window.currentSearchTerms);
-}
-
- nameSpan.style.display = "inline";
-li.appendChild(nameSpan);
-
- // Score display (if available from Excel)
- const scoreSpan = document.createElement("span");
- scoreSpan.className = "list-score-badge";
- if (video.user_score !== undefined && video.user_score !== null) {
-   scoreSpan.textContent = ` [${video.user_score}]`;
-     scoreSpan.style.marginLeft = "4px";
-     scoreSpan.style.fontSize = "0.65rem";
-     scoreSpan.style.color = "#ff9800";
-     scoreSpan.style.fontWeight = "bold";
-     scoreSpan.style.display = "inline";
-     li.appendChild(scoreSpan);
- }
-
- // Flag videos on this device that have no row in the SQLite catalogue.
- if (video.inCatalogue === false) {
-     const notInCatSpan = document.createElement("span");
-     notInCatSpan.className = "not-in-catalogue-badge";
-     notInCatSpan.textContent = "⚠";
-     notInCatSpan.title = "Not in the SQLite catalogue — tap to check for a match";
-     notInCatSpan.style.cursor = "pointer";
-     notInCatSpan.style.padding = "4px 6px";
-     notInCatSpan.onclick = (e) => { e.stopPropagation(); window.scrayTryFingerprintMatch(video, notInCatSpan); };
-     li.appendChild(notInCatSpan);
- }
-
- // Size + Duration display (skip for "yet-to-upload" videos)
- const sizeDurSpan = document.createElement("span");
-  if (video.path === "yet-to-upload" || (Array.isArray(video.tags) && video.tags.includes("yet-to-upload"))) {
-      sizeDurSpan.textContent = "";
-  } else {
-      sizeDurSpan.textContent = ` [${formatFileSize(video.sizeBytes)}, ${formatDuration(video.durationMs)}]`;
-  }
-  sizeDurSpan.style.marginLeft = "6px";
-  sizeDurSpan.style.display = "inline";
-  li.appendChild(sizeDurSpan);
-
-// ✅ Check if yet-to-upload
-  const isYetToUpload = video.path === "yet-to-upload" || 
-                        (Array.isArray(video.tags) && video.tags.includes("yet-to-upload"));
-  
-  // ✅ Create compact button group
- const buttons = [
-  {
-      label: "P",
-      title: "Play video",
-      color: "#28a745",
-      onClick: () => inlineVideoPlayer.play(video, 'main', globalIndex)
-  },
-  {
-     label: "D",
-     title: "Download",
-     disabled: isYetToUpload,
-     onClick: async () => {
-         try {
-             let vid = video;
-             vid = await refreshVideoBeforeUse(vid);
-             if (vid && vid.downloadUrl) {
-                 window.location.href = vid.downloadUrl;
-             } else {
-                 showDownloadError("Missing or expired download URL", video);
-             }
-         } catch (err) {
-             console.error("Download failed", err);
-             showDownloadError(err.message || 'Download failed', video);
-         }
-     }
- },
- {
-   label: "★",
-   title: "Score video",
-   color: "#ffc107",
-   onClick: (e) => {
-       e.stopPropagation();
-       if (typeof window.showVideoScoringModal === 'function') {
-           window.showVideoScoringModal(video, e);
-       }
-   }
-},
-{
-  label: "B",
-  title: "Add to basket",
-  color: "#e91e63",
-  onClick: () => {
-      let oneDriveId = video.oneDriveId ?? video.idFromAPI ?? null;
-      let driveId = video.driveId ?? null;
-      if ((!oneDriveId || !driveId) && video.webUrl) {
-          try {
-              const u = new URL(video.webUrl);
-              const cidParam = u.searchParams.get("cid");
-              const idParam = u.searchParams.get("id");
-              if (cidParam) driveId = driveId || cidParam;
-              if (idParam) oneDriveId = oneDriveId || idParam;
-          } catch {}
-      }
-      const existingIndex = basketVideos.findIndex(v => v.oneDriveId === oneDriveId);
-      if (existingIndex >= 0) {
-          // remove from basket
-          basketVideos.splice(existingIndex, 1);
-          saveBasket();
-          renderBasket();
-      } else {
-          addToBasket({ ...video, oneDriveId, driveId });
-      }
-      updateBasketHighlights();
-  }
-},
-{
-   label: "BM",
-   title: "Bookmarks",
-   color: window.scrayHasBookmarks(video) ? "#6f42c1" : "#ece6f6",
-   textColor: window.scrayHasBookmarks(video) ? "white" : "#6f42c1",
-   onClick: (e) => {
-       e.stopPropagation();
-       if (typeof window.showBookmarksModal === 'function') {
-           window.showBookmarksModal(video);
-       }
-   }
- },
- {
-   label: "Move",
-   title: "Move file to different folder",
-   color: "#9c27b0",
-   disabled: isYetToUpload,
-   onClick: async () => {
-       if (typeof window.showMoveFileModal === 'function') {
-           await window.showMoveFileModal(video);
-       }
-   }
-},
-
-{
-label: "Refresh Data",
-title: "Pull the latest score, bookmarks and counters from the database",
-color: "#17a2b8",
-onClick: async (e) => {
-   e.stopPropagation();
-   try {
-       await window.refreshVideoFromDb(video);
-       await window.refreshAfterDbPull(video);
-   } catch (err) {
-       console.error('DB refresh failed:', err);
-       alert(`Refresh failed: ${err.message}`);
-   }
-}
-},
-
-{
-   label: "Open Link",
-   title: "Open in OneDrive",
-   disabled: !video.webUrl || isYetToUpload,
-   onClick: () => {
-       if (video.webUrl) window.open(video.webUrl, '_blank');
-   }
-},
-{
-   label: "Copy Name",
-   title: "Copy filename to clipboard",
-   onClick: (e) => {
-       const textToCopy = video.filename || '';
-       copyToClipboardWithFeedback(textToCopy, e);
-    }
-},
-{
-label: "F tally",
-title: "Increment F tally",
-color: "#17a2b8",
-onClick: async (e) => {
-    e.stopPropagation();
-    if (typeof window.showFTallyConfirmModal === 'function') {
-        await window.showFTallyConfirmModal(video, e);
-    } else {
-      alert('Excel Online not connected');
-    }
-}
-},
- {
-   label: "Stats",
-   title: "View stats",
-    color: "#17a2b8",
-    onClick: (e) => {
-        e.stopPropagation();
-        if (typeof window.showVideoStatsModal === 'function') {
-            window.showVideoStatsModal(video);
-        }
-    }
-},
-{
-    label: "X",
-    title: "Delete file",
-    color: "#f44336",
-    disabled: isYetToUpload,
-    onClick: async () => {
-        if (typeof window.showDeleteModal === 'function') {
-            await window.showDeleteModal(video);
-        }
-    }
-}
-];
-
-const btnContainer = createCompactButtonGroup(buttons, 5);
-li.appendChild(btnContainer);
-
-// ✅ Right-click context menu
-li.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    showContextMenu(buttons.slice(3), e); // Show overflow menu (buttons after first 3)
-});
-
-// ✅ Click anywhere on list item (except buttons and clickable tags) to open rename modal
-li.style.cursor = 'pointer';
-li.addEventListener('click', async (e) => {
-   // Don't trigger if clicking on buttons
-   if (e.target.closest('.compact-btn-group')) return;
-   if (e.target.closest('button')) return;
-   
-   // Don't trigger if clicking on clickable tags (folders or bracket tags)
-   if (e.target.style.textDecoration === 'underline') return;
-   
-   // Open rename modal
-   if (typeof window.showRenameModal === 'function') {
-       await window.showRenameModal(video);
-   }
-});
-
- // ▶ Finally append the list item to the container
- container.appendChild(li);
-});
-
-// ► Update basket highlights after rendering chunk
-updateBasketHighlights();
-}
+window.appendVideoList = appendVideoList;
 
 // Export for global use
 window.updateBasketHighlights = updateBasketHighlights;

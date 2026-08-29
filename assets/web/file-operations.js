@@ -2634,11 +2634,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             if (typeof window.toggleRandomPlaylistPanel === 'function') window.toggleRandomPlaylistPanel(false);
         }
         if (!window.currentPlayingVideo || window.currentPlayingVideo.oneDriveId !== video.oneDriveId) {
-            window.inlineVideoPlayer.play(video).then(() => {
-                setTimeout(() => {
-                    if (window.plyrPlayer) window.plyrPlayer.currentTime = time;
-                }, 800);
-            });
+            window.inlineVideoPlayer.play(video, null, null, time);
         } else if (window.plyrPlayer) {
             window.plyrPlayer.currentTime = time;
             window.plyrPlayer.play();

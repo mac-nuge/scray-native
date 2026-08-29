@@ -4611,6 +4611,7 @@ window.plyrPlayer.on('playing', () => {
     videoLoadHoldTimer = setTimeout(endVideoLoadHold, CONTROLS_LINGER_AFTER_PLAY_MS);
 });
 window.plyrPlayer.on('error', endVideoLoadHold);
+window.plyrPlayer.on('canplay', () => window.scrayApplyPendingStartAt?.('canplay'));
 
 // Recreate on source change (new video loaded)
 let _loadedMetadataFireCount = 0;
@@ -5475,6 +5476,11 @@ attachHistorySequenceButton(); //  Re-attach play-through-history button on new 
 attachPlayNextButton(); //  Re-attach play-next button on new video
 attachBasketQuickButton(); //  Re-attach basket quick-view button on new video
 attachBookmarkQuickButton(); //  Re-attach bookmark quick-add button on new video
+// Deferred start point (bookmark rows, and anything else that wants to open
+// part-way in). loadedmetadata is the earliest the duration is known, so it is
+// the first attempt - the helper handles the case where the media accepts the
+// seek and then snaps back because it is not seekable yet.
+window.scrayApplyPendingStartAt?.('loadedmetadata');
 attachFrameStepButtons(); // Re-attach frame-step buttons on new video
 // (frame-step columns removed)
 computeBottomDock(); // ✅ Player height may have changed for the new video
@@ -6737,7 +6743,94 @@ function scrayShowPreviewTitle(video) {
 // ========================
 // Play video inline
 // ========================
-async function playVideoInline(video, listContext = null, index = null) {
+/**
+* Apply window.scrayPendingStartAt to the player, then confirm it actually
+* took.
+*
+* Two things make this harder than one currentTime write:
+*   1. Plyr fires loadedmetadata on the rebuilt media element BEFORE the new
+*      source has loaded, so the first event reports duration 0 / readyState 0.
+*   2. A streamed source will accept a seek before it is seekable and then
+*      quietly snap back to 0.
+*
+* So: wait for a real duration AND readyState >= 1, then write, then confirm,
+* re-writing until it sticks. The pending value survives the wait, which is
+* what lets the second (real) loadedmetadata or canplay finish the job.
+*/
+window.scrayApplyPendingStartAt = function (reason) {
+    const target = window.scrayPendingStartAt;
+    const player = window.plyrPlayer;
+    if (target == null || !player) return;
+    if (window.scrayStartAtRunning) return; // one chain is enough
+    window.scrayStartAtRunning = true;
+
+    // ⚙️ How long to keep waiting for a seekable source, and how many times to
+    // re-write the seek once we have one. The write cap is what stops this
+    // fighting you if you scrub away while it is still trying.
+    const DEADLINE_MS = 20000;
+    const MAX_WRITES = 10;
+    const GAP_MS = 120;
+    const TOLERANCE_S = 1.5;
+
+    const startedAt = Date.now();
+    let writes = 0;
+    let logged = false;
+
+    const finish = (msg, level) => {
+        window.scrayPendingStartAt = null;
+        window.scrayStartAtRunning = false;
+        (level === 'warn' ? console.warn : console.log)('[player] start point: ' + msg);
+    };
+    const superseded = () => {
+        if (window.scrayPendingStartAt === target) return false;
+        window.scrayStartAtRunning = false;
+        return true;
+    };
+
+    const attempt = () => {
+        if (superseded()) return;
+        if (Date.now() - startedAt > DEADLINE_MS) {
+            return finish('gave up waiting for a seekable source', 'warn');
+        }
+
+        const duration = player.duration;
+        const ready = player.media ? player.media.readyState : 0;
+        if (!duration || !isFinite(duration) || ready < 1) {
+            return setTimeout(attempt, GAP_MS);
+        }
+
+        if (!logged) {
+            logged = true;
+            console.log(`[player] start point: source ready after ${Date.now() - startedAt}ms `
+                + `(duration ${duration.toFixed(1)}s, readyState ${ready}, armed by ${reason})`);
+        }
+
+        const safe = Math.min(target, Math.max(0, duration - 0.5));
+        player.currentTime = safe;
+        writes++;
+
+        setTimeout(() => {
+            if (superseded()) return;
+            const at = player.currentTime;
+            if (Math.abs(at - safe) <= TOLERANCE_S) {
+                return finish(`held at ${at.toFixed(2)}s after ${writes} write(s)`);
+            }
+            if (writes >= MAX_WRITES) {
+                return finish(`did not hold - wanted ${safe.toFixed(2)}s, sitting at ${at.toFixed(2)}s`, 'warn');
+            }
+            setTimeout(attempt, GAP_MS);
+        }, GAP_MS);
+    };
+
+    attempt();
+};
+
+async function playVideoInline(video, listContext = null, index = null, startAt = null) {
+// ⚙️ Where to start this video, in seconds. Stashed here and applied once on
+// 'loadedmetadata' below, then cleared - so it survives the load without
+// leaking into whatever plays next. Replaces the old
+// play().then(setTimeout(..., 800)) guess in the bookmark modal.
+window.scrayPendingStartAt = (typeof startAt === 'number' && startAt > 0) ? startAt : null;
 // ⚙️ PLAY PREVIEW DELAY - see scrayPlayPreviewDelayMs above.
 // The token is what makes tapping X / > again during the wait work: every
 // request takes the next number, and any request that wakes up to find a

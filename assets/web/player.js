@@ -961,6 +961,7 @@ if (currentListContext === 'random') return filteredVideosGlobal || [];
 if (currentListContext === 'main') return paginationState?.allVideos || [];
 if (currentListContext === 'basket') return basketVideos || [];
 if (currentListContext === 'history') return historyVideos || [];
+if (currentListContext === 'bookmarks') return window.scrayBookmarkVideos || [];
 return [];
 }
 
@@ -6830,7 +6831,13 @@ async function playVideoInline(video, listContext = null, index = null, startAt 
 // 'loadedmetadata' below, then cleared - so it survives the load without
 // leaking into whatever plays next. Replaces the old
 // play().then(setTimeout(..., 800)) guess in the bookmark modal.
-window.scrayPendingStartAt = (typeof startAt === 'number' && startAt > 0) ? startAt : null;
+// An explicit startAt wins; otherwise a video may carry its own, which is how
+// bookmark rows work - the clone in the list holds __bmStartAt, so P, > and 
+// all open at the bookmark without each caller having to pass it.
+const resolvedStartAt = (typeof startAt === 'number' && startAt > 0)
+    ? startAt
+    : (typeof video.__bmStartAt === 'number' && video.__bmStartAt > 0 ? video.__bmStartAt : null);
+window.scrayPendingStartAt = resolvedStartAt;
 // ⚙️ PLAY PREVIEW DELAY - see scrayPlayPreviewDelayMs above.
 // The token is what makes tapping X / > again during the wait work: every
 // request takes the next number, and any request that wakes up to find a

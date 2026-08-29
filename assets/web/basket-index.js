@@ -16,7 +16,15 @@ if (isOpening) {
    }
 }
 
+// Narrowing the list reflows the text and changes the document height, and the
+// browser rescales the scroll position to match - which reads as the page
+// jumping. Pin the offset from the top of the document across the reflow. rAF
+// so it runs after layout has settled; scrollTo clamps if the page got shorter.
+const scrollBefore = window.scrollY;
 panel.classList.toggle("basket-open", isOpening);
+requestAnimationFrame(() => {
+    if (window.scrollY !== scrollBefore) window.scrollTo(0, scrollBefore);
+});
 }
 // Export for global use
 window.toggleBasket = toggleBasket;

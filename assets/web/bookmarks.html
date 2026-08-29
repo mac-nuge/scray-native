@@ -1,0 +1,768 @@
+
+<html><head>
+  <meta charset="UTF-8">
+  <title>Native Bookmarks</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://alcdn.msauth.net/browser/2.38.1/js/msal-browser.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+
+<!-- Excel Online uses existing MSAL authentication -->
+
+  <script>
+  const cacheBustVer = Date.now();
+  // Load common styles first, then index-specific overrides
+  document.write(`<link rel="stylesheet" href="style.css?v=${cacheBustVer}">`);
+  document.write(`<link rel="stylesheet" href="style-index.css?v=${cacheBustVer}">`);
+  
+  const localScripts = [
+    "scray-key.js",
+    "keyboard-config.js",
+    "scray-config.js",
+    "scray-dbmode.js",
+    "catalog-match.js",
+    "db.js",
+    "scray-sync.js",
+    "scray-exclude.js",
+    "context-menu.js",
+    "local-scores-cache.js",
+    "file-operations.js",
+    "randomiser.js",
+    "ui.js",
+    "basket.js",
+    "basket-index.js",
+    "history.js",
+    "random-panel.js",
+    "render.js",
+    "scray-bridge.js",
+    "scray-sync-ui.js",
+    "local-library.js",
+    "player.js",
+    "disguise.js",
+    "settings.js",
+    "bookmarks-page.js"
+  ];
+  localScripts.forEach(src => {
+    document.write(`<script src="${src}?v=${cacheBustVer}"><\/script>`);
+  });
+  </script>
+
+  <script src="version.js"></script>
+
+  <script>
+    // ── Version resolution ────────────────────────────────────────────────
+    // Three independent streams:
+    //   web  — the VERSION file in this folder
+    //   dipa — dev IPA version   (ipa-versions.json -> CFBundleShortVersionString)
+    //   pipa — prd IPA version   (same source, production variant)
+    // The IPA identity arrives as window.SCRAY_NATIVE, injected by Swift at
+    // documentStart. It is absent in Picker and in a plain browser.
+
+    async function resolveWebVersion() {
+      try {
+        const res = await fetch('VERSION');
+        if (res.ok) {
+          const text = (await res.text()).trim();
+          if (text) return text;
+        }
+      } catch (err) {
+        // Expected in the offline IPA: the page is loaded from a file:// URL
+        // and WebKit refuses fetch() on the file scheme entirely.
+      }
+      if (typeof window.SCRAY_VERSION === 'string' && window.SCRAY_VERSION.trim()) {
+        return window.SCRAY_VERSION.trim();
+      }
+      throw new Error('No VERSION file and no window.SCRAY_VERSION');
+    }
+
+    // "10.0 disguise overlay" -> { number: "10.0", description: "disguise overlay" }
+    // "10.0-staging"          -> { number: "10.0", description: "staging" }
+    function splitWebVersion(text) {
+      const m = String(text).trim().match(/^v?([0-9][0-9.]*)\s*[-–—_:]?\s*(.*)$/);
+      if (!m) return { number: String(text).trim(), description: '' };
+      return { number: m[1], description: (m[2] || '').trim() };
+    }
+
+    // Picker / browser: "v10.0 disguise overlay"
+    // Dev IPA:          "dipa b42 web 10.0 disguise overlay"
+    // Prd IPA:          "pipa b42 web 10.0 disguise overlay"
+    function composeVersionLabel(versionText) {
+      const n = window.SCRAY_NATIVE;
+      if (!n || !n.build) return `v${versionText}`;
+      const { number, description } = splitWebVersion(versionText);
+      const prefix = n.variant === 'dev' ? 'dipa' : 'pipa';
+      return `${prefix} b${n.build} web ${number}${description ? ' ' + description : ''}`;
+    }
+
+    async function setAppVersionFromFile() {
+      try {
+        const versionText = await resolveWebVersion();
+        const label = composeVersionLabel(versionText);
+        // The <h1> is the app identity and is now owned by the markup, not by
+        // this script — we only read it so the document title matches.
+        const h1 = document.querySelector('h1');
+        const appName = (h1 && h1.textContent.trim()) || 'Universal';
+        if (window.SCRAY_NATIVE) {
+          console.log('[Scray] versions', {
+            ipa: `${window.SCRAY_NATIVE.variant} b${window.SCRAY_NATIVE.build}`,
+            shortVersion: window.SCRAY_NATIVE.version,
+            buildId: window.SCRAY_NATIVE.buildId,
+            web: versionText
+          });
+        }
+        document.title = `${appName} (${label})`;
+        const headerLine = document.getElementById('appVersionLine');
+        if (headerLine) headerLine.textContent = label;
+        document.getElementById('appVersion').textContent = label;
+        document.getElementById('lockOverlayVersion').textContent = label;
+        const versionLower = versionText.toLowerCase();
+
+        // Lock screen is always black now — environment colouring removed.
+        const lockOverlayEl = document.getElementById('lockOverlay');
+        if (lockOverlayEl) {
+          lockOverlayEl.style.background = '#111';
+        }
+        if (versionLower.includes('staging') || versionLower.includes('uat')) {
+          const banner = document.createElement('div');
+          banner.textContent = versionLower.includes('staging') ? 'STAGING ENVIRONMENT' : 'UAT ENVIRONMENT';
+          banner.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%;
+            background: ${versionLower.includes('staging') ? '#f4e1f5' : '#f7e2a6'};
+            color: white; font-weight: bold; text-align: left;
+            padding: 8px; font-size: 1.2rem; z-index: -2000;
+          `;
+          document.body.appendChild(banner);
+          document.body.style.paddingTop = '50px';
+        }
+      } catch (err) {
+        console.error('Error setting app version:', err);
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      setAppVersionFromFile();
+      const changelogLink = document.getElementById('changelogLink');
+      const overlay = document.getElementById('changelogOverlay');
+      const closeBtn = document.getElementById('changelogCloseBtn');
+      const changelogContent = document.getElementById('changelogContent');
+
+      changelogLink.addEventListener('click', async (e) => {
+        e.preventDefault();
+        changelogContent.textContent = 'Loading...';
+        try {
+          const res = await fetch('CHANGELOG.md');
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const mdText = await res.text();
+          marked.setOptions({ breaks: true });
+          changelogContent.innerHTML = marked.parse(mdText);
+        } catch (err) {
+          changelogContent.textContent = `Failed to load changelog: ${err.message}`;
+          console.error(err);
+        }
+        overlay.style.display = 'flex';
+      });
+
+      closeBtn.addEventListener('click', () => { overlay.style.display = 'none'; });
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.style.display = 'none';
+      });
+
+      // ✅ In-app browser. Native gets the real thing; anywhere else (dev
+      // server in Safari, Picker itself) falls back to a normal tab. Both
+      // buttons land in the same browser — Picker as a tab, DB console as
+      // another — so the home button stays pointed at Picker either way.
+      function openInAppBrowser(url) {
+        if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
+          window.ScrayBridge.openBrowser(url)
+            .catch(err => console.error('[browser] openBrowser failed:', err));
+        } else {
+          window.open(url, '_blank');
+        }
+      }
+
+      // Both the top-row "Picker" button and the corner "P" go through the
+      // same listener - one source of truth for the URL. Changing it lives in
+      // the Settings modal (footer), not on these buttons.
+      ['openPickerBtn', 'pickerCornerBtn'].forEach(id => {
+        document.getElementById(id)?.addEventListener('click', (e) => {
+          e.preventDefault();
+          openInAppBrowser(window.scrayPickerUrl());
+        });
+      });
+
+      document.getElementById('openBrowseBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        openInAppBrowser((window.SCRAY_SYNC && window.SCRAY_SYNC.BROWSE_URL)
+          || 'https://macnguyen.com/scray/browse.html');
+      });
+    });
+  </script>
+  <style>
+    /* Note cloud - same pill shape as the bookmark modal's quick notes.
+       ⚙️ Four rows of pills, then scroll. --bm-pill-h is one pill's height
+       (6px padding top and bottom, 1px border, ~14px line box). Nudge it if
+       the cloud clips a row or leaves a sliver of a fifth showing. */
+    .bm-note-cloud {
+      --bm-pill-h: 29px;
+      --bm-pill-gap: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--bm-pill-gap);
+      margin: 8px 0 4px;
+      max-height: calc(4 * var(--bm-pill-h) + 3 * var(--bm-pill-gap));
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .bm-note-cloud-sort { display: flex; gap: 6px; margin-top: 10px; }
+    .bm-note-pill {
+      flex: 0 0 auto; width: auto; margin: 0; padding: 6px 10px;
+      font-size: 0.75rem; line-height: 1.2; border: 1px solid #ccc;
+      border-radius: 4px; background: #f2f2f2; color: #333; cursor: pointer;
+      white-space: nowrap;
+    }
+    .bm-note-pill.is-on { background: #6f42c1; border-color: #6f42c1; color: #fff; }
+    .bm-note-pill .bm-note-count { opacity: 0.65; margin-left: 4px; }
+    /* Row prefix: note then timestamp, ahead of the usual video details.
+       No font-size here on purpose - the lock below owns it. */
+    .bm-row-note { font-weight: bold; color: #6f42c1; margin-right: 6px; }
+    .bm-row-note.is-empty { color: #999; font-weight: normal; font-style: italic; }
+    .bm-row-time { font-family: monospace; color: #555; margin-right: 6px; }
+
+    /* style.css locks the main list's font under `#playlist li,
+       #taggedVideosContainer li`, by ID. #bmList matches neither, so rows here
+       inherited the page default and only the spans that set their own size
+       came out small. Same lock, same 0.75rem. Flat, not blue - the blue panel
+       is #playlist's, and that stays the random list. */
+    #bmList { list-style: none; padding: 0; margin: 0; }
+    #bmList li {
+      padding: 6px 6px;
+      margin-bottom: 0;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    /* !important because buildVideoRow sets some sizes inline - the score
+       badge is 0.65rem - and inline styles otherwise win. Scoped to a/span so
+       the .compact-btn row keeps its own 0.65rem, exactly as on the main list. */
+    #bmList li,
+    #bmList li a,
+    #bmList li span {
+      font-size: 0.75rem !important;
+      line-height: 1.4 !important;
+    }
+  </style>
+</head>
+
+<body>
+
+<div id="lockOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #111; color: white; display: flex; align-items: center; justify-content: center; flex-direction: column; z-index: 99999;">
+<p id="lockOverlayVersion" style="font-size: 0.7rem; color: #888; margin-bottom: 10px; transform: translateX(-40px);"></p>
+<input id="lockPassword" type="password" placeholder="Password" style="padding: 10px; font-size: 1.2rem; border-radius: 5px; border: none; text-align: center;">
+<style>
+  #lockPinDots { display:flex; gap:12px; margin-top:18px; height:14px; align-items:center; }
+  #lockPinDots span { width:12px; height:12px; border-radius:50%; border:1px solid #555; box-sizing:border-box; }
+  #lockPinDots span.filled { background:#eee; border-color:#eee; }
+  #lockKeypad { display:grid; grid-template-columns:repeat(3, 72px); gap:12px; margin-top:16px; }
+  #lockKeypad button {
+    height:56px; font-size:1.4rem; font-family:inherit; color:#eee;
+    background:#222; border:1px solid #333; border-radius:12px; cursor:pointer;
+    user-select:none; -webkit-user-select:none; -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
+  }
+  #lockKeypad button:active { background:#333; }
+  #lockKeypad button.lock-key-alt { font-size:1.1rem; color:#888; }
+  #lockKeypad.lock-shake { animation: lockShake 0.35s ease; }
+  @keyframes lockShake {
+    0%,100% { transform: translateX(0); }
+    20%,60% { transform: translateX(-8px); }
+    40%,80% { transform: translateX(8px); }
+  }
+</style>
+<div id="lockPinDots"></div>
+<div id="lockKeypad">
+<button type="button" data-key="1">1</button>
+<button type="button" data-key="2">2</button>
+<button type="button" data-key="3">3</button>
+<button type="button" data-key="4">4</button>
+<button type="button" data-key="5">5</button>
+<button type="button" data-key="6">6</button>
+<button type="button" data-key="7">7</button>
+<button type="button" data-key="8">8</button>
+<button type="button" data-key="9">9</button>
+<button type="button" data-key="back" class="lock-key-alt" aria-label="Delete">&#9003;</button>
+<button type="button" data-key="0">0</button>
+<button type="button" data-key="clear" class="lock-key-alt" aria-label="Clear">&#10005;</button>
+</div>
+<p id="lockError" style="color:red; display:none; margin-top: 14px;">Incorrect</p>
+</div>
+
+<script>
+(function(){
+  const CORRECT_PASSWORD = "Michael1";
+  const UNLOCK_CODE = "5555"; // ⚙️ on-screen keypad code (any length works)
+  const inputEl = document.getElementById("lockPassword");
+  const overlayEl = document.getElementById("lockOverlay");
+  const errorEl = document.getElementById("lockError");
+  const versionTapEl = document.getElementById("lockOverlayVersion");
+  window.addEventListener('load', () => { inputEl.focus(); });
+
+  function unlockApp() {
+    overlayEl.style.display = "none";
+    inputEl.blur(); // dismiss keyboard so it can't shift the layout further
+
+    // Force the page open with the console (and account pills, which
+    // sit just above it) at the top of the screen, instead of wherever
+    // late-loading content (account pills, tag dropdown population,
+    // docked-player spacer) leaves the scroll position. Keep
+    // re-asserting for a few seconds since those async loads can keep
+    // shifting #topSpacer's height after unlock.
+    const scrollToConsole = () => {
+      const consoleEl = document.getElementById("inlineConsole");
+      if (consoleEl) {
+        // Pull back up by roughly the console's own height (plus a
+        // small extra nudge) so we don't scroll past it — leaves the
+        // buttons/pills above it visible too.
+        const SCROLL_EXTRA_NUDGE_PX = -40; // ⚙️ increase to scroll down more, decrease (or go negative) to scroll up more
+        const y = consoleEl.getBoundingClientRect().top + window.pageYOffset - consoleEl.offsetHeight + SCROLL_EXTRA_NUDGE_PX;
+        window.scrollTo(0, Math.max(0, y));
+      } else {
+        window.scrollTo(0, 0);
+      }
+    };
+    // TESTING: the re-assert schedule below yanks the page back for up to 3s
+    // after unlock, overriding any scroll made in that window. Keeping the
+    // initial positioning, dropping the retries.
+    scrollToConsole();
+    requestAnimationFrame(scrollToConsole);
+    // [50, 150, 300, 600, 1000, 2000, 3000].forEach(delay => {
+    //   setTimeout(scrollToConsole, delay);
+    // });
+  }
+
+  inputEl.addEventListener("input", function(){
+    if(inputEl.value === CORRECT_PASSWORD){
+      unlockApp();
+    }
+    else { errorEl.style.display = "none"; }
+  });
+  inputEl.addEventListener("keyup", function(){
+    if(inputEl.value.length >= CORRECT_PASSWORD.length && inputEl.value !== CORRECT_PASSWORD){
+      errorEl.style.display = "block";
+    }
+  });
+
+  // Keypad unlock: enter UNLOCK_CODE on the on-screen digit pad. Dot count
+  // follows UNLOCK_CODE.length, so changing the code needs no markup change.
+  const keypadEl = document.getElementById("lockKeypad");
+  const dotsEl = document.getElementById("lockPinDots");
+  let pinEntry = "";
+
+  function renderPinDots() {
+    dotsEl.innerHTML = "";
+    for (let i = 0; i < UNLOCK_CODE.length; i++) {
+      const dot = document.createElement("span");
+      if (i < pinEntry.length) dot.className = "filled";
+      dotsEl.appendChild(dot);
+    }
+  }
+  renderPinDots();
+
+  function rejectPin() {
+    pinEntry = "";
+    renderPinDots();
+    errorEl.style.display = "block";
+    keypadEl.classList.remove("lock-shake");
+    void keypadEl.offsetWidth; // force reflow so the animation restarts
+    keypadEl.classList.add("lock-shake");
+  }
+
+  function pressPinKey(key) {
+    if (key === "clear") { pinEntry = ""; errorEl.style.display = "none"; renderPinDots(); return; }
+    if (key === "back") { pinEntry = pinEntry.slice(0, -1); errorEl.style.display = "none"; renderPinDots(); return; }
+    if (!/^[0-9]$/.test(key)) return;
+    errorEl.style.display = "none";
+    // A full-but-wrong entry that wasn't cleared yet starts over on next digit.
+    if (pinEntry.length >= UNLOCK_CODE.length) pinEntry = "";
+    pinEntry += key;
+    renderPinDots();
+    if (pinEntry.length < UNLOCK_CODE.length) return;
+    if (pinEntry === UNLOCK_CODE) {
+      pinEntry = "";
+      renderPinDots();
+      unlockApp();
+    } else {
+      // Short delay so the last dot registers visually before the shake.
+      setTimeout(rejectPin, 150);
+    }
+  }
+
+  keypadEl.addEventListener("click", function(e){
+    const btn = e.target.closest("button");
+    if (!btn || !keypadEl.contains(btn)) return;
+    pressPinKey(btn.dataset.key);
+  });
+
+  // DISABLED (was: secret backdoor - tap/click 3 times within 1.5s anywhere on the lock
+  // screen (except the password input itself) to unlock
+  let tapCount = 0;
+  let tapResetTimer = null;
+  overlayEl.style.cursor = "pointer";
+  overlayEl.addEventListener("click", function(e){
+    return; // ⛔ triple-tap unlock disabled - the keypad is the only tap route in
+    tapCount++;
+    clearTimeout(tapResetTimer);
+    if (tapCount >= 3) {
+      tapCount = 0;
+      unlockApp();
+      return;
+    }
+    tapResetTimer = setTimeout(() => { tapCount = 0; }, 1500);
+  });
+})();
+</script>
+
+<div id="cornerButtons">
+<div class="corner-btn-row">
+<button id="pickerCornerBtn" class="burger-btn burger-btn-blue" title="Open Picker in the in-app browser">P</button>
+<button id="jumpSearchBtn" class="burger-btn" title="Jump to Search">F</button>
+<button id="playRandomFilteredBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video">X</button>
+<button id="playPreviousBtn" class="burger-btn burger-btn-pink" title="Play Previous in Current List">&lt;</button>
+<button id="playNextBtn" class="burger-btn burger-btn-pink" title="Play Next in Current List">&gt;</button>
+<button id="playHistorySequenceBtn" class="burger-btn burger-btn-pink" title="Play Through History">H</button>
+<button id="playRandomBasketBtn" class="burger-btn burger-btn-pink" title="Play Random from Basket">B</button>
+<button id="basketToggleBtn" class="burger-btn">B (<span id="basketCount">0</span>)</button>
+<button id="historyToggleBtn" class="burger-btn">H (<span id="historyCount">0</span>)</button>
+<button id="quickRandomBtn" class="burger-btn">R</button>
+<button id="clearBtnCorner" class="burger-btn" title="Stop Playback">C</button>
+</div>
+
+<button id="listBtnCorner" class="burger-btn" style="display:none">L</button>
+<button id="playRandomWeightedBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video (favours less-watched)" style="display:none">X<sup>n</sup></button>
+<button id="jumpRandomBtn" class="burger-btn" title="Jump to Random" style="display:none">R^</button>
+<button id="jumpTagsBtn" class="burger-btn" title="Jump to Tags" style="display:none">T</button>
+<!-- <button id="playNextBasketBtn" class="burger-btn burger-btn-pink" title="Play Next in Basket" style="display:none">B></button> -->
+<button id="playLastHistoryBtn" class="burger-btn burger-btn-pink" title="Play Last Played Video" style="display:none">H^</button>
+<button id="randomTagBtn" class="burger-btn burger-btn-pink" title="Select Random Tag (excludes level 1)" style="display:none">T</button>
+</div>
+
+<div id="floatingTagPillsBar" class="floating-tags"></div>
+
+<div id="basketPanel">
+<div class="basket-tools">
+<button id="basketLoadBtn" title="Pull latest basket from Excel (replaces local basket)">↓</button>
+<button id="basketSaveBtn" title="Push current basket to Excel (overwrites current basket)">↑</button>
+<button id="basketSelectAllBtn">ALL</button>
+<button id="basketRemoveBtn">REM</button>
+<button id="basketMoreBtn">...</button>
+</div>
+
+<input type="file" id="basketImportInput" accept=".json" style="display:none;">
+<ul id="basketList"></ul>
+</div>
+
+<div id="historyPanel">
+<div class="history-tools">
+ <button id="historySelectAllBtn">S.ALL</button>
+ <button id="historyMoreBtn">...</button>
+</div>
+<ul id="historyList"></ul>
+</div>
+
+<div id="randomPlaylistPanel">
+<!-- Random List Section -->
+<div id="panelRandomSection" style="display: none;">
+  <ul id="randomPlaylistPanelList"></ul>
+</div>
+
+<!-- Tagged List Section -->
+<div id="panelTaggedSection" style="display: none;">
+ <div class="panel-section-header">
+   <!-- Search bar at top - COMPACT -->
+  <div class="panel-search-wrapper" style="padding: 3px 6px; position: relative;">
+    <input type="text" id="panelSearchBox" placeholder="Filter" style="width: 100%; padding: 3px 24px 3px 4px; font-size: 0.65rem; border: 1px solid #ddd; border-radius: 3px; box-sizing: border-box; background-color: #ffe4e1; line-height: 1.2;">
+    <span id="panelSearchClearX" class="panel-clear-x" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; font-size: 0.85rem; color: #888; display: none;">×</span>
+  </div>
+   
+ <div id="panelVideoStats" style="font-size: 0.55rem; color: #555; padding: 2px 6px; font-weight: normal;"></div>
+    <div class="panel-sort-buttons" style="display: flex; gap: 4px; padding: 4px 6px;">
+     <button id="panelSortSizeBtn" class="panel-sort-btn" data-sort-state="none">Size</button>
+     <button id="panelSortCreatedBtn" class="panel-sort-btn" data-sort-state="none">Create</button>
+     <button id="panelSortModifiedBtn" class="panel-sort-btn" data-sort-state="none">Mod</button>
+     <button id="panelSortFilenameBtn" class="panel-sort-btn" data-sort-state="none">File</button>
+     <button id="panelSortScoreBtn" class="panel-sort-btn" data-sort-state="none">Score</button>
+   </div>
+  </div>
+  <ul id="panelTaggedList"></ul>
+  <div id="panelPaginationControls" style="display: none; padding: 6px; gap: 6px;">
+    <button class="panelPageSizeBtn" data-size="25">25</button>
+    <button class="panelPageSizeBtn" data-size="50">50</button>
+    <button class="panelPageSizeBtn" data-size="100">100</button>
+    <button class="panelPageSizeBtn" data-size="200">200</button>
+  </div>
+</div>
+</div>
+
+
+<!-- Layout switch removed - browser.html deprecated -->
+
+<div id="topSpacer"></div>
+<p id="appVersionLine"></p>
+<h1>Native Bookmarks</h1>
+
+<!-- ✅ Console FIRST -->
+<div id="inlineConsole"></div>
+<div id="inlineConsoleToolbar">
+<button id="inlineConsoleCopyBtn">copy</button>
+</div>
+
+<!-- ✅ Compact button row -->
+<div class="top-buttons-row">
+<button id="pickFolderBtn">Folder</button>
+<button id="rescanLibraryBtn">Refresh</button>
+<button id="openPickerBtn" title="Open Picker in the in-app browser">Picker</button>
+<button id="openBrowseBtn" title="Open the DB console in the in-app browser">DB</button>
+</div>
+
+<!-- ✅ Secondary compact row (mobile portrait only) -->
+<div id="secondaryButtonsRow">
+<button id="orientationToggleBtn" title="Cycle orientation filter">Orientation: All</button>
+<button id="mobileExportCsvBtn">Export CSV</button>
+</div>
+
+<!-- ✅ Folder pills (reuses the existing .account-pill styling) -->
+<div id="accountLoadButtons" style="margin: 10px 0;"></div>
+
+<br>
+
+<!-- Desktop sections (empty, will be populated by JS) -->
+<div id="desktopTopSection">
+  <div id="desktopLeftColumn"></div>
+  <div id="desktopVideoColumn"></div>
+  <div id="desktopBasketColumn"></div>
+</div>
+
+<div id="desktopControlsSection">
+  <div id="desktopTagDropdowns"></div>
+  <div id="desktopOtherControls"></div>
+</div>
+
+<!-- Original mobile elements (will be moved on desktop) -->
+<div id="mobileElements">
+  <div class="tag-container" id="includeTagsLevel1Container" style="display:none;"></div>
+  <div class="dropdown-row" style="display:none;">
+    <select id="tagFilterLevel1Select" multiple=""></select>
+    <button id="btnL1" class="dropdown-btn">L1</button>
+  </div>
+
+  <div class="tag-container" id="includeTagsLevel2Container" style="display:none;"></div>
+  <div class="dropdown-row" style="display:none;">
+    <select id="tagFilterLevel2Select" multiple=""></select>
+    <button id="btnL2" class="dropdown-btn">L2</button>
+  </div>
+
+  <div class="tag-container" id="includeTagsLevel3Container" style="display:none;"></div>
+  <div class="dropdown-row" style="display:none;">
+    <select id="tagFilterLevel3Select" multiple=""></select>
+    <button id="btnL3" class="dropdown-btn">L3</button>
+  </div>
+
+  <!-- The AT dropdown is kept in the DOM but hidden: randomiser.js populates
+       it at DOMContentLoaded and neither it nor desktop layout code is
+       null-guarded for this row. The note cloud below takes its place. -->
+  <div class="tag-container" id="includeTagsAllContainer" style="display:none;"></div>
+  <div class="dropdown-row" style="display:none;">
+    <select id="tagFilterAllSelect" multiple=""></select>
+    <button id="btnAT" class="dropdown-btn">AT</button>
+  </div>
+
+  <!-- Note cloud: one pill per distinct bookmark note, with its count. -->
+  <div class="bm-note-cloud-sort">
+    <button id="bmNoteSortAlphaBtn" class="sort-btn" title="Sort notes alphabetically">A-Z</button>
+    <button id="bmNoteSortCountBtn" class="sort-btn" title="Sort notes by number of bookmarks">Count</button>
+    <button id="bmNoteClearBtn" class="sort-btn" title="Clear note selection">Clear</button>
+  </div>
+  <div id="bmNoteCloud" class="bm-note-cloud"></div>
+
+  <br><br>
+
+  <button id="generateRandomByTagsBtn" style="display:none;">Random</button>
+  <button id="listAllByTagsBtn" style="display:none;">List</button>
+  <button id="clearFiltersBtn" style="display:none;">Clear</button>
+  
+  <br><br>
+
+ <ul id="playlist" style="margin-top: 10px;"></ul>
+
+<div id="searchFilterRow" style="display: flex; gap: 8px; align-items: center;">
+  <div class="search-wrapper" style="flex: 1;">
+    <input type="text" id="filenameSearchBox" placeholder="Filter" style="width:100%; padding:6px;">
+    <span id="clearSearchX" class="clear-x">×</span>
+  </div>
+  <button id="addFilteredToBasketBtn" class="add-filtered-basket-btn" style="display: none;">+B</button>
+</div>
+
+ <div class="sort-buttons-container">
+<button id="bmSortSizeBtn" class="sort-btn" title="Toggle sort by file size">Size</button>
+<button id="bmSortCreatedBtn" class="sort-btn" title="Toggle sort by date created">Create</button>
+<button id="bmSortModifiedBtn" class="sort-btn" title="Toggle sort by date modified">Mod</button>
+<button id="bmSortFilenameBtn" class="sort-btn" title="Toggle sort by filename">File</button>
+<button id="bmSortScoreBtn" class="sort-btn" title="Toggle sort by score">Score</button>
+<button id="bmSortTimeBtn" class="sort-btn" title="Toggle sort by bookmark timestamp">Time</button>
+<button id="bmSortNoteBtn" class="sort-btn" title="Toggle sort by note">Note</button>
+</div>
+
+ <div id="videoStats" style="margin-top:8px; font-size:0.85rem; color:#555;"></div>
+ <!-- Kept for randomiser.js, but never painted here. -->
+ <div id="taggedVideosContainer" style="margin-top: 10px; display:none;"></div>
+ <ul id="bmList" style="margin-top: 10px;"></ul>
+
+  <div id="paginationControls" style="margin-top: 10px; display: none; gap:10px; align-items:center;">
+    <button class="pageSizeBtn" data-size="25">25</button>
+    <button class="pageSizeBtn" data-size="50">50</button>
+    <button class="pageSizeBtn" data-size="100">100</button>
+    <button class="pageSizeBtn" data-size="200">200</button>
+  </div>  
+
+  <div class="randomRow">
+   <button id="toggleVideoPlayerBtn" class="desktop-only-btn">Hide Player</button>
+<label style="margin-left: 10px; font-size: 0.9rem;">
+<br>
+   <label for="randomCount">No. random videos</label>
+   <select id="randomCount"></select>
+ </div>
+
+ <br>
+
+  <div class="tag-container" id="excludeTagsContainer"></div>
+  <select id="excludeTagSelect" multiple="multiple"></select>
+
+  <br>
+
+<!-- ✅ ADD THESE NEW CONTROLS HERE -->
+<!-- Orientation Filter -->
+<div style="margin-top: 8px;" class="orientationRow">
+  <label for="orientationFilter">Orientation</label>
+  <select id="orientationFilter" style="width: 200px; padding: 8px;">
+    <option value="any">Any</option>
+    <option value="L">Landscape</option>
+    <option value="P">Portrait/Square</option>
+  </select>
+</div>
+
+<br>
+
+<!-- MIME Type Filter -->
+<div style="margin-top: 8px;" class="mimeTypeRow">
+  <label for="mimeTypeFilter">File Type</label>
+  <select id="mimeTypeFilter" multiple style="width: 200px; min-height: 60px;">
+    <!-- Populated dynamically -->
+  </select>
+</div>
+
+  <br>
+
+
+<!-- MP4 Only Filter -->
+<div style="margin-top: 8px;" class="mp4OnlyRow">
+ <label>
+   <input type="checkbox" id="filterMp4Only">
+   Show only MP4
+ </label>
+</div>
+
+ <br>
+
+<!-- Show Duplicates Filter -->
+<div style="margin-top: 8px;" class="duplicatesRow">
+<label>
+  <input type="checkbox" id="filterDuplicatesOnly">
+  Show only duplicates
+</label>
+</div>
+
+<br>
+
+<!-- ✅ Hidden, not deleted: the mobile portrait button row proxies clicks to
+     #exportCsvBtn and #bulkOperationsCsvInput, and the desktop layout code
+     still moves this <section> into #desktopOtherControls. -->
+<section style="display:none;">
+   <button id="exportCsvBtn">Export CSV</button><br>
+<button id="exportToExcelBtn">📊 Export to Excel</button>
+   <div style="margin-top: 8px;">
+     <label>Import metadata CSV</label>
+     <input type="file" id="bulkOperationsCsvInput" accept=".csv">
+   </div>
+ </section>
+
+<div id="bottomSpacer" style="height:0px;"></div>
+
+<div id="versionCorner" style="font-size: 0.85rem; text-align: right; margin-top: 40px; padding: 6px 10px calc(env(safe-area-inset-bottom, 0px) + 96px) 10px;"><span id="appVersion"></span> | <span id="dbModePill"></span> | <span id="syncStatus" style="cursor:pointer; text-decoration:underline dotted;" title="Tap to sync">⚪ not synced</span> | <a href="#" id="settingsLink">Settings</a> | <a href="#" id="changelogLink">Change Log</a> | <a href="#" id="clearCacheBtn" style="color: #999;">Clear Database</a> | <a href="https://excel.cloud.microsoft/open/onedrive/?docId=FC889D210229F431%21SD3D6F40D45714290BBFEEBBA760F157C&driveId=FC889D210229F431&wdOrigin=APPHOME-WEB.DIRECT%2CAPPHOME-WEB.JUMPBACKIN-OCDI&wdPreviousSession=5f06762c-3c19-4dc2-8e7c-d6a4ca5b55b6&wdPreviousSessionSrc=AppHomeWeb&ct=1769467854718" target="_blank">Excel db</a>
+</div>
+
+<div id="changelogOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 99999; align-items: center; justify-content: center;">
+  <div style="background: white; width: 90%; height: 90%; border-radius: 8px; overflow: auto; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,0.3); padding: 20px;">
+    <button id="changelogCloseBtn" style="position: absolute; top: 6px; right: 10px; background: red; color: white; border: none; padding: 4px 8px; cursor: pointer; border-radius: 4px; z-index: 1000;">×</button>
+    <div id="changelogContent">Loading...</div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+const inlineConsole = document.getElementById('inlineConsole');
+const copyBtn = document.getElementById('inlineConsoleCopyBtn');
+if (!inlineConsole) return;
+
+function formatArg(arg) {
+  if (arg instanceof Error) return arg.stack || `${arg.name}: ${arg.message}`;
+  if (typeof arg === 'object') {
+    try { return JSON.stringify(arg, null, 2); } 
+    catch (e) { return String(arg); }
+  }
+  return String(arg);
+}
+
+function appendToInlineConsole(args, type = 'log') {
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  entry.textContent = args.map(formatArg).join(' ');
+  inlineConsole.appendChild(entry);
+  inlineConsole.scrollTop = inlineConsole.scrollHeight;
+}
+
+const origLog = console.log;
+const origWarn = console.warn;
+const origError = console.error;
+
+console.log = (...args) => { origLog.apply(console, args); appendToInlineConsole(args, 'log'); };
+console.warn = (...args) => { origWarn.apply(console, args); appendToInlineConsole(args, 'warn'); };
+console.error = (...args) => { origError.apply(console, args); appendToInlineConsole(args, 'error'); };
+
+copyBtn?.addEventListener('click', (e) => {
+  const text = Array.from(inlineConsole.children).map(div => div.textContent).join('\n');
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    document.execCommand('copy');
+    copyBtn.textContent = 'Copied!';
+  } catch (err) {
+    copyBtn.textContent = 'Failed';
+  }
+  document.body.removeChild(textarea);
+  setTimeout(() => { copyBtn.textContent = 'copy'; }, 1500);
+});
+});
+</script>
+
+<script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+
+</body></html>

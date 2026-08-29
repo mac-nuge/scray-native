@@ -368,6 +368,21 @@
 #scrayDisguiseBody {
   display: flex; flex-direction: column; gap: 6px;
 }
+#scrayDisguiseNav {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding-bottom: 6px; margin-bottom: 2px;
+  border-bottom: 1px solid #e0e0e0;
+}
+.scray-disguise-nav-link {
+  flex: 1 1 auto; text-align: center;
+  padding: 4px 6px; margin: 0;
+  border: 1px solid #c9c9c9; border-radius: 6px;
+  background: #f2f2f2; color: #6b6b6b;
+  font: inherit; text-decoration: none; cursor: pointer;
+}
+.scray-disguise-nav-link.is-here {
+  background: #6b6b6b; border-color: #6b6b6b; color: #ffffff; cursor: default;
+}
 .scray-disguise-row {
   display: flex; align-items: center; gap: 8px;
 }
@@ -834,6 +849,27 @@
 
     const shotRow = makeRow('Shot', 'shot', renderShot);
     const pageRow = makeRow('Page', 'page', renderPage);
+    // ⚙️ NAV — the colour panel doubles as this app's navigation. Add a line
+    // to add a destination. The page you are already on renders as a plain
+    // label rather than a link.
+    const NAV_LINKS = [
+      { href: 'index.html',     label: 'Native' },
+      { href: 'bookmarks.html', label: 'Bookmarks' }
+    ];
+
+    const navWrap = document.createElement('div');
+    navWrap.id = 'scrayDisguiseNav';
+    const here = (location.pathname.split('/').pop() || 'index.html').toLowerCase();
+    NAV_LINKS.forEach(({ href, label }) => {
+      const isHere = href.toLowerCase() === here;
+      const el = document.createElement(isHere ? 'span' : 'a');
+      el.className = 'scray-disguise-nav-link' + (isHere ? ' is-here' : '');
+      el.textContent = label;
+      if (!isHere) el.href = href;
+      navWrap.appendChild(el);
+    });
+    bodyWrap.appendChild(navWrap);
+
     bodyWrap.appendChild(shotRow.row);
     bodyWrap.appendChild(pageRow.row);
     bodyWrap.appendChild(modeBtn);

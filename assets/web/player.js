@@ -2326,7 +2326,12 @@ window.scrayScrubSeek = (function () {
             lastIssued = null;
             inFlight = false;
             clearWatchdog();
-            resumeOnEnd = false;
+            // Preserve a resume that is already owed. A second begin()
+            // inside the same gesture would otherwise find the player paused
+            // - by the FIRST begin() - and conclude nothing needs resuming.
+            // Only carried over while the player is actually paused, so a
+            // leaked flag can't resume something the user stopped by hand.
+            resumeOnEnd = resumeOnEnd && !!(window.plyrPlayer && window.plyrPlayer.paused);
             if (!SCRUB_PAUSE_WHILE_DRAGGING) return;
             try {
                 if (window.plyrPlayer && !window.plyrPlayer.paused) {
@@ -5460,8 +5465,12 @@ container.addEventListener('touchend', onTouchEnd);
 
 
 // Anywhere scrubbing & stop button
+// enableAnywhereScrubbing() deliberately NOT called here - the 'ready'
+// handler further up already calls it. Running it twice attached a second
+// set of touchstart/touchmove scrub listeners to the same wrapper, and the
+// second one's scrayScrubSeek.begin() cleared the resume the first had just
+// armed - so the video stayed paused after a scrub.
 window.plyrPlayer.on('ready', () => {
-enableAnywhereScrubbing();
 attachStopButton();
 updatePlayerStateClass();
 });

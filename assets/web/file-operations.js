@@ -2490,6 +2490,184 @@ return new Promise((resolve) => {
  * true - the old modal spliced the live array as you went and couldn't
  * honour that.
  */
+/**
+* Attach a type-ahead list of existing bookmark notes to a text input.
+*
+* Used by the bookmark modal (both the new-bookmark field and the per-row note
+* editor) and by the bookmarks page's search box.
+*
+* The list is position:fixed and parented to <body> rather than to the input's
+* own container. #bmScroll clips overflow and the modal builds its own stacking
+* contexts, so an absolutely-positioned child would be cut off or buried.
+*
+* @param {HTMLInputElement} input
+* @param {Function} getNotes - () => string[] of candidate notes
+* @param {Object}   [opts]
+*        onPick(value)  - called after a suggestion is accepted
+*        maxItems       - how many suggestions to show (default 8)
+*        openOnFocus    - show the list on focus, before anything is typed
+*/
+function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
+    if (!input || input.dataset.scrayAc === '1') return;
+    input.dataset.scrayAc = '1';
+    input.setAttribute('autocomplete', 'off');
+
+    // ⚙️ How many suggestions to show at once.
+    const MAX_ITEMS = opts.maxItems || 8;
+
+    // The bookmarks modal sits at z-index 2147483647 - the 32-bit ceiling - so
+    // a sibling in <body> can never paint above it. Inside the modal instead,
+    // where it only has to beat the modal's own children. .basket-json-modal is
+    // position:fixed, so it is a positioned ancestor and absolute coordinates
+    // resolve against it; that also keeps the list attached when FLS counter-
+    // rotates the modal.
+    const modalHost = input.closest('.basket-json-modal');
+    // Outside a modal, anchor the list to the field's own container instead of
+    // the viewport. An absolutely-positioned child moves with the field as the
+    // page scrolls, with no scroll listener that can miss an event - which is
+    // what left the list stranded over the cloud search box.
+    const host = modalHost || input.parentElement || document.body;
+    const inModal = !!modalHost;
+    const anchored = !inModal && host !== document.body;
+    if (anchored && getComputedStyle(host).position === 'static') {
+        host.style.position = 'relative';
+    }
+
+    let list = null;
+    let items = [];
+    let active = -1;
+
+    const close = () => {
+        if (list) { list.remove(); list = null; }
+        items = [];
+        active = -1;
+    };
+
+    const place = () => {
+        if (!list) return;
+        const r = input.getBoundingClientRect();
+        // Always directly below the field being edited. When anchored, left,
+        // top and width come from CSS (top:100%) and track the field for free.
+        if (inModal) {
+            const h = host.getBoundingClientRect();
+            list.style.left = `${r.left - h.left}px`;
+            list.style.top = `${r.bottom - h.top + 2}px`;
+            list.style.width = `${r.width}px`;
+        } else if (!anchored) {
+            list.style.left = `${r.left}px`;
+            list.style.top = `${r.bottom + 2}px`;
+            list.style.width = `${r.width}px`;
+        }
+        // Shrink rather than flip above the field if the keyboard has eaten the
+        // space below - the list stays where you expect it either way.
+        const room = window.innerHeight - r.bottom - 12;
+        list.style.maxHeight = `${Math.max(90, Math.min(220, room))}px`;
+    };
+
+    const paint = () => {
+        if (!list) return;
+        Array.from(list.children).forEach((li, i) => {
+            li.style.background = (i === active) ? '#6f42c1' : '#fff';
+            li.style.color = (i === active) ? '#fff' : '#333';
+        });
+    };
+
+    const accept = (value) => {
+        input.value = value;
+        close();
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        if (typeof opts.onPick === 'function') opts.onPick(value);
+    };
+
+    const rank = (term) => {
+        const all = (getNotes() || []).filter(Boolean);
+        const seen = new Set();
+        const unique = all.filter(n => {
+            const k = n.toLowerCase();
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+        });
+        if (!term) return unique.slice(0, MAX_ITEMS);
+        const t = term.toLowerCase();
+        // Prefix matches first, then anything containing the term. An exact
+        // match is dropped - suggesting what is already typed is just noise.
+        const starts = unique.filter(n => n.toLowerCase().startsWith(t) && n.toLowerCase() !== t);
+        const contains = unique.filter(n => !n.toLowerCase().startsWith(t) && n.toLowerCase().includes(t));
+        return starts.concat(contains).slice(0, MAX_ITEMS);
+    };
+
+    const open = () => {
+        const matches = rank(input.value.trim());
+        if (!matches.length) { close(); return; }
+
+        if (!list) {
+            list = document.createElement('ul');
+            list.className = 'scray-note-ac';
+            const posCss = anchored
+                ? 'position: absolute; top: 100%; left: 0; right: 0; margin: 2px 0 0;'
+                : `position: ${inModal ? 'absolute' : 'fixed'}; margin: 0;`;
+            list.setAttribute('style',
+                posCss
+                + ' z-index: 2147483647; padding: 0; list-style: none;'
+                + ' overflow-y: auto; background: #fff; border: 1px solid #bbb;'
+                + ' border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.18);'
+                + ' font-size: 0.8rem;');
+            host.appendChild(list);
+        }
+
+        list.innerHTML = '';
+        items = matches;
+        active = -1;
+
+        matches.forEach((note, i) => {
+            const li = document.createElement('li');
+            li.textContent = note;
+            li.setAttribute('style',
+                'padding: 6px 8px; cursor: pointer; white-space: nowrap;'
+                + ' overflow: hidden; text-overflow: ellipsis;');
+            // mousedown, not click: click fires after blur, which has already
+            // torn the list down.
+            li.addEventListener('mousedown', (e) => { e.preventDefault(); accept(note); });
+            li.addEventListener('mouseenter', () => { active = i; paint(); });
+            list.appendChild(li);
+        });
+
+        place();
+        paint();
+    };
+
+    input.addEventListener('input', open);
+    input.addEventListener('focus', () => { if (opts.openOnFocus || input.value.trim()) open(); });
+    input.addEventListener('blur', () => setTimeout(close, 150));
+
+    input.addEventListener('keydown', (e) => {
+        if (!list || !items.length) return;
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            active += (e.key === 'ArrowDown' ? 1 : -1);
+            if (active < 0) active = items.length - 1;
+            if (active >= items.length) active = 0;
+            paint();
+            list.children[active]?.scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter' && active >= 0) {
+            // stopImmediatePropagation so the modal's own Enter-to-save handler
+            // doesn't fire on the keystroke that picks a suggestion.
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            accept(items[active]);
+        } else if (e.key === 'Escape') {
+            e.stopImmediatePropagation();
+            close();
+        }
+    });
+
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+}
+window.scrayAttachNoteAutocomplete = scrayAttachNoteAutocomplete;
+
 async function showBookmarksModal(video, autoAddTimestamp = false) {
     // Only ever one. The BM control, the now-playing BM button and the FLS
     // triple-tap zone can all fire in quick succession; without this they
@@ -2559,9 +2737,14 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     }
 
     let topNotes = [];
+    let allNotes = [];   // the full note vocabulary, for the autocomplete
     if (typeof window.getTopBookmarkNotes === 'function') {
         try {
-            topNotes = await window.getTopBookmarkNotes(30);
+            // 30 is plenty for the quick-note pills, but the autocomplete
+            // wants the long tail. getTopBookmarkNotes caches the full sorted
+            // list, so the pills just slice the front of it.
+            allNotes = await window.getTopBookmarkNotes(500);
+            topNotes = allNotes.slice(0, 30);
         } catch (err) {
             console.warn('Could not load top bookmark notes:', err);
         }
@@ -2859,6 +3042,11 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         });
 
         newNoteEl?.addEventListener('input', () => { newNote = newNoteEl.value; });
+        if (newNoteEl) {
+            window.scrayAttachNoteAutocomplete?.(newNoteEl, () => allNotes, {
+                onPick: (v) => { newNote = v; }
+            });
+        }
 
         // The timestamp on the new-bookmark row is the "commit this one now"
         // button - the only way to store a bookmark with no note at all.
@@ -2925,6 +3113,10 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             // modal. applyKeyboardInset() does our own version below, scoped
             // to #bmScroll, once the keyboard has finished opening.
             editEl.focus({ preventScroll: true });
+            // Attached before the Enter handler below so it is registered
+            // first and can stopImmediatePropagation on the keystroke that
+            // picks a suggestion, instead of that keystroke saving the row.
+            window.scrayAttachNoteAutocomplete?.(editEl, () => allNotes);
             editEl.addEventListener('blur', () => flushOpenEdit(false));
             editEl.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') { e.preventDefault(); flushOpenEdit(true); }

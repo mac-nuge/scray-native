@@ -218,6 +218,18 @@
       -webkit-overflow-scrolling: touch;
     }
     .bm-note-cloud-sort { display: flex; gap: 6px; margin-top: 10px; }
+    .bm-note-search-row { display: flex; gap: 6px; margin-top: 6px; }
+    #bmNoteSearch {
+      flex: 1 1 auto; min-width: 0; margin: 0;
+      padding: 6px 8px; font-size: 0.78rem;
+      border: 1px solid #ccc; border-radius: 4px;
+    }
+    #bmNoteSearchClear {
+      flex: 0 0 auto; width: auto; margin: 0;
+      padding: 6px 10px; font-size: 0.78rem; line-height: 1;
+      border: 1px solid #ccc; border-radius: 4px;
+      background: #f2f2f2; color: #666; cursor: pointer;
+    }
     .bm-note-pill {
       flex: 0 0 auto; width: auto; margin: 0; padding: 6px 10px;
       font-size: 0.75rem; line-height: 1.2; border: 1px solid #ccc;
@@ -585,6 +597,11 @@
     <button id="bmNoteSortAlphaBtn" class="sort-btn" title="Sort notes alphabetically">A-Z</button>
     <button id="bmNoteSortCountBtn" class="sort-btn" title="Sort notes by number of bookmarks">Count</button>
     <button id="bmNoteClearBtn" class="sort-btn" title="Clear note selection">Clear</button>
+  </div>
+  <!-- Narrows the cloud only. Row filtering stays with #filenameSearchBox. -->
+  <div class="bm-note-search-row">
+    <input type="text" id="bmNoteSearch" placeholder="Find a note..." autocomplete="off">
+    <button type="button" id="bmNoteSearchClear" title="Clear note search">&times;</button>
   </div>
   <div id="bmNoteCloud" class="bm-note-cloud"></div>
 

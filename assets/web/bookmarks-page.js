@@ -24,6 +24,12 @@
   // count if that dropdown has a value, otherwise this.
   const DEFAULT_RANDOM_COUNT = 25;
 
+  // ⚙️ How many recent picks X refuses to repeat before it will come round
+  // again. Matches randomiser.js's own window of 10.
+  const RECENT_MEMORY = 10;
+  let recentlyPlayed = [];
+  const entryKey = (e) => `${e.video.oneDriveId}@${e.time}`;
+
   // Every bookmark on the device, one entry per bookmark (not per video).
   let allEntries = [];
   // What's on screen right now, after note filter + search + sort.
@@ -32,6 +38,7 @@
   const selectedNotes = new Set();
 
   let noteSortMode = 'count';   // 'count' | 'alpha'
+  let noteSearchTerm = '';      // filters the cloud only, not the list
   let rowSort = { key: null, dir: 'none' };
 
   const NO_NOTE = '(no note)';
@@ -67,6 +74,14 @@
 
     allEntries = entries;
     console.log(`[bookmarks] ${entries.length} bookmark(s) across ${videos.length} video(s)`);
+  }
+
+  /** Every distinct note, most-used first. Feeds the cloud search autocomplete. */
+  function distinctNotes() {
+    const counts = noteCounts();
+    return Array.from(counts.keys())
+      .filter(n => n !== NO_NOTE)
+      .sort((a, b) => counts.get(b) - counts.get(a));
   }
 
   /** note -> count, over every entry (not just the visible ones). */
@@ -235,6 +250,15 @@
     const counts = noteCounts();
     let notes = Array.from(counts.keys());
 
+    // The search box narrows which pills are shown - it does not touch the
+    // list. A note you have already selected stays visible even when it no
+    // longer matches, so you can always see and undo the active filter.
+    const term = noteSearchTerm.trim().toLowerCase();
+    if (term) {
+      notes = notes.filter(n =>
+        n.toLowerCase().includes(term) || selectedNotes.has(n));
+    }
+
     if (noteSortMode === 'alpha') {
       notes.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     } else {
@@ -262,6 +286,13 @@
 
       cloud.appendChild(btn);
     });
+
+    if (!notes.length) {
+      const empty = document.createElement('span');
+      empty.style.cssText = 'font-size:0.75rem; color:#999; font-style:italic;';
+      empty.textContent = 'No notes match.';
+      cloud.appendChild(empty);
+    }
   }
 
   function refresh() {
@@ -374,6 +405,94 @@
     }, true);
   }
 
+  /**
+   * X plays a random bookmark rather than a random video.
+   *
+   * randomiser.js binds #playRandomFilteredBtn inside its own DOMContentLoaded
+   * handler, so the same capture-phase interception used for R applies here -
+   * it fires before any listener on the button itself, whichever order they
+   * were registered in.
+   *
+   * The pool is whatever the note cloud and search box currently allow, which
+   * mirrors the main page: X there picks from the filtered set, not from the
+   * list that happens to be on screen.
+   */
+  function takeOverPlayRandomButton() {
+    document.addEventListener('click', (e) => {
+      const btn = (e.target instanceof Element)
+        ? e.target.closest('#playRandomFilteredBtn')
+        : null;
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (typeof toggleBasket === 'function') toggleBasket(false);
+      if (typeof toggleHistory === 'function') toggleHistory(false);
+
+      applyFilters();
+      if (!visibleEntries.length) {
+        alert('No bookmarks match the current filter');
+        return;
+      }
+
+      // Skip anything played in the last few goes, but fall back to the whole
+      // pool rather than refusing once everything has been seen. Keyed on the
+      // bookmark, not the video, so two bookmarks in one file stay distinct.
+      const eligible = visibleEntries.filter(e2 => !recentlyPlayed.includes(entryKey(e2)));
+      const pool = eligible.length ? eligible : visibleEntries;
+
+      const entry = pool[Math.floor(Math.random() * pool.length)];
+      recentlyPlayed.unshift(entryKey(entry));
+      if (recentlyPlayed.length > RECENT_MEMORY) {
+        recentlyPlayed = recentlyPlayed.slice(0, RECENT_MEMORY);
+      }
+
+      // Index within the rendered list, so > and < carry on from here. The
+      // clone holds __bmStartAt, so it opens at the bookmark.
+      const index = visibleEntries.indexOf(entry);
+      window.lastPlayLabel = 'Random bookmark';
+      console.log(`[bookmarks] random: "${entry.note || 'no note'}" at `
+        + `${formatDuration(entry.time * 1000)} in ${entry.video.filename}`);
+      window.inlineVideoPlayer.play(entry.video, 'bookmarks', index < 0 ? 0 : index);
+
+      if (window.innerWidth <= 1024) {
+        setTimeout(() => {
+          document.getElementById('inlineVideoContainer')
+            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
+      }
+    }, true);
+  }
+
+  /**
+   * The cloud search field. Filters which note pills are shown; the row list
+   * is left to #filenameSearchBox. Autocomplete comes from the shared helper
+   * in file-operations.js, so it behaves the same as the note field in the
+   * bookmark modal.
+   */
+  function wireNoteSearch() {
+    const box = document.getElementById('bmNoteSearch');
+    if (!box) return;
+
+    box.addEventListener('input', () => {
+      noteSearchTerm = box.value;
+      renderNoteCloud();
+    });
+
+    const clear = document.getElementById('bmNoteSearchClear');
+    clear?.addEventListener('click', () => {
+      box.value = '';
+      noteSearchTerm = '';
+      renderNoteCloud();
+      box.focus();
+    });
+
+    window.scrayAttachNoteAutocomplete?.(box, distinctNotes, {
+      openOnFocus: true,
+      onPick: (v) => { noteSearchTerm = v; renderNoteCloud(); }
+    });
+  }
+
   function wireSearchBox() {
     const box = document.getElementById('filenameSearchBox');
     if (!box) return;
@@ -392,8 +511,10 @@
 
     wireSortButtons();
     wireNoteSortButtons();
+    wireNoteSearch();
     wireSearchBox();
     takeOverRandomButton();
+    takeOverPlayRandomButton();
 
     try {
       await loadEntries();

@@ -2716,6 +2716,107 @@ alert("Video player not available");
 // PLAY RANDOM FILTERED VIDEO (all screens)
 // =========================================
 document.addEventListener("DOMContentLoaded", () => {
+// =========================================
+// PLAY RANDOM FILTERED VIDEO AT A RANDOM TIME POINT - X^T (all screens)
+// =========================================
+// Picks exactly like X does, but instead of opening at 0:00 it drops you
+// somewhere in the middle. playVideoInline's 4th argument is a start point in
+// seconds; the existing scrayApplyPendingStartAt machinery waits for a
+// seekable source before writing it, so nothing extra is needed here.
+const playRandomTimeBtn = document.getElementById("playRandomTimeBtn");
+
+if (playRandomTimeBtn) {
+playRandomTimeBtn.addEventListener("click", async () => {
+
+// ⚙️ Where X^T is allowed to land, as a fraction of the video's length.
+// Keeps it clear of the opening and of the closing stretch.
+const START_MIN_FRACTION = 0.05;
+const START_MAX_FRACTION = 0.95;
+
+const isLandscape = window.matchMedia('(orientation: landscape)').matches;
+const isMobile = window.innerWidth <= 1024;
+
+if (typeof toggleBasket === 'function') toggleBasket(false);
+if (typeof toggleHistory === 'function') toggleHistory(false);
+if (!(isLandscape && isMobile)) {
+ if (typeof toggleRandomPlaylistPanel === 'function') toggleRandomPlaylistPanel(false);
+}
+
+const includeTags = Array.from(window.commonSelectedTags);
+const excludeTags = $('#excludeTagSelect').val() || [];
+const minDurationMs = getDurationMsFromInputs("minMinutes", "minSeconds");
+const maxDurationMs = getDurationMsFromInputs("maxMinutes", "maxSeconds");
+
+let videosToChooseFrom = await getFilteredVideos(includeTags, excludeTags, minDurationMs, maxDurationMs);
+
+const searchBoxTime = document.getElementById("filenameSearchBox");
+const searchTextTime = searchBoxTime?.value.trim() || '';
+if (searchTextTime.length > 0) {
+const queryTime = parseSearchQuery(searchTextTime);
+videosToChooseFrom = videosToChooseFrom.filter(video => matchesSearchQuery(video, queryTime));
+}
+
+if (!videosToChooseFrom || videosToChooseFrom.length === 0) {
+alert("No videos match current filters");
+return;
+}
+
+const eligibleTime = videosToChooseFrom.filter(v => {
+const vidId = v.oneDriveId ?? v.idFromAPI ?? null;
+return !recentlyPlayedVideos.includes(vidId);
+});
+let finalPoolTime = eligibleTime.length > 0 ? eligibleTime : videosToChooseFrom;
+
+if (finalPoolTime.length === 0) {
+alert("No videos available in database");
+return;
+}
+
+// Prefer videos whose length is already known - without a duration there is
+// no "45% of the way in" to aim for. If nothing in the pool has one, keep
+// the pool as-is and just open at the start.
+const timedPool = finalPoolTime.filter(v => Number(v.durationMs) > 0);
+if (timedPool.length > 0) finalPoolTime = timedPool;
+
+const randomVideo = finalPoolTime[Math.floor(Math.random() * finalPoolTime.length)];
+const actualIndex = videosToChooseFrom.findIndex(v => v.oneDriveId === randomVideo.oneDriveId);
+
+const durationSec = Number(randomVideo.durationMs) > 0 ? randomVideo.durationMs / 1000 : 0;
+const fraction = START_MIN_FRACTION + Math.random() * (START_MAX_FRACTION - START_MIN_FRACTION);
+const startAt = durationSec > 0 ? durationSec * fraction : null;
+
+const vidIdTime = randomVideo.oneDriveId ?? randomVideo.idFromAPI ?? null;
+if (vidIdTime) {
+recentlyPlayedVideos.unshift(vidIdTime);
+if (recentlyPlayedVideos.length > 10) {
+  recentlyPlayedVideos = recentlyPlayedVideos.slice(0, 10);
+}
+}
+
+if (window.inlineVideoPlayer && randomVideo) {
+console.log(`Playing random video at a random point: ${randomVideo.filename}`
+  + (startAt != null
+      ? ` - starting at ${Math.round(startAt)}s (${Math.round(fraction * 100)}% in)`
+      : ' - duration unknown, starting at 0'));
+window.lastPlayLabel = startAt != null
+  ? `Random @ ${Math.round(fraction * 100)}%`
+  : 'Random (no duration)';
+window.inlineVideoPlayer.play(randomVideo, 'main', actualIndex >= 0 ? actualIndex : 0, startAt);
+
+if (window.innerWidth <= 1024) {
+  setTimeout(() => {
+    const player = document.getElementById("inlineVideoContainer");
+    if (player) {
+      player.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, 300);
+}
+} else {
+alert("Video player not available");
+}
+});
+}
+
 const playRandomBtn = document.getElementById("playRandomFilteredBtn");
 
 if (playRandomBtn) {

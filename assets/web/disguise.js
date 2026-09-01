@@ -1,5 +1,10 @@
 // ===== disguise.js =====
 // Cosmetic overlay for Scray Picker (web) and Scray Native (WKWebView).
+//
+// NAMING: the control panel this file builds (#scrayDisguiseControl - colour
+// mode, Shot/Page sliders, nav links, preset slots, Assign, Jira Report) is
+// referred to as the FLOATING MENU. The scrayDisguise* ids are historical and
+// stay as they are; "Floating Menu" is the name to use in conversation.
 // Purely visual — no app logic is touched.
 //
 //  1. Recolours the page via backdrop-filter, cycling Colour -> Greyscale ->
@@ -455,10 +460,25 @@
   font-weight: 700;
 }
 
+/* Jira Report - same shape as the Assign button, deliberately not sharing its
+   rule so the .is-on inversion never applies to it. */
+#scrayDisguiseBugBtn {
+  width: 100%;
+  padding: 4px 6px;
+  margin: 0;
+  border: 1px solid #c9c9c9;
+  border-radius: 6px;
+  background: #f2f2f2;
+  color: #6b6b6b;
+  font: inherit;
+  cursor: pointer;
+}
+
 /* ---- Collapsed: handle plus any assigned presets, nothing else ---- */
 #scrayDisguiseControl.is-collapsed #scrayDisguiseBody,
 #scrayDisguiseControl.is-collapsed #scrayDisguisePresets,
-#scrayDisguiseControl.is-collapsed #scrayDisguiseAssignBtn {
+#scrayDisguiseControl.is-collapsed #scrayDisguiseAssignBtn,
+#scrayDisguiseControl.is-collapsed #scrayDisguiseBugBtn {
   display: none;
 }
 #scrayDisguiseControl.is-collapsed {
@@ -474,7 +494,18 @@
     right: calc(env(safe-area-inset-right, 0px) + 6px);
     padding: 6px 8px;
     font-size: 11px;
-    max-width: 46vw;
+    /* Widened from 46vw: the menu now carries an extra full-width button and
+       46vw wrapped "Jira Report" onto two lines in portrait. */
+    max-width: 62vw;
+    /* Landscape on a phone leaves ~390px of height, and the menu is anchored
+       to the BOTTOM and grows upward - so once the content is taller than the
+       screen the top silently runs off it. Capping the height and scrolling
+       means nothing can be clipped out of reach, however many rows get added
+       later. dvh second so it wins where supported and vh covers the rest. */
+    max-height: calc(100vh - env(safe-area-inset-bottom, 0px) - 20px);
+    max-height: calc(100dvh - env(safe-area-inset-bottom, 0px) - 20px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   /* Bottom-anchored, so the handle belongs at the bottom edge and the panel
      grows upward from it. */
@@ -493,7 +524,8 @@
     padding: 0;
   }
   #scrayDisguiseModeBtn,
-  #scrayDisguiseAssignBtn { padding: 6px; }
+  #scrayDisguiseAssignBtn,
+  #scrayDisguiseBugBtn { padding: 6px; }
   #scrayDisguiseHandle {
     min-height: 24px;
     font-size: 13px;
@@ -984,6 +1016,20 @@
     control.appendChild(bodyWrap);
     control.appendChild(presetWrap);
     control.appendChild(assignBtn);
+
+    // ---- Jira Report ----
+    // Guarded on scrayReportBug rather than assumed: a page that loads
+    // disguise.js without scray-bugreport.js gets no button at all, which is
+    // better than a button that silently does nothing.
+    if (typeof window.scrayReportBug === 'function') {
+      const bugBtn = document.createElement('button');
+      bugBtn.id = 'scrayDisguiseBugBtn';
+      bugBtn.type = 'button';
+      bugBtn.textContent = 'Jira Report';
+      bugBtn.title = 'File a bug or task on the SO board';
+      bugBtn.addEventListener('click', () => window.scrayReportBug());
+      control.appendChild(bugBtn);
+    }
 
     backRoot.appendChild(shot);
     root.appendChild(tint);

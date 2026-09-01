@@ -141,9 +141,34 @@ setTimeout(() => {
 * @param {number} visibleCount - Number of buttons to show before "..."
 * @returns {HTMLElement} - Button container element
 */
-function createCompactButtonGroup(buttons, visibleCount = 2) {
+function createCompactButtonGroup(buttons, visibleCount = 2, video = null) {
    const container = document.createElement('div');
    container.className = 'compact-btn-group';
+
+   // Stash belongs on every per-video menu and seven places build one, so it
+   // is injected here rather than repeated in each array.
+   //
+   // This MUTATES the caller's array deliberately. The contextmenu handlers
+   // read `buttons.slice(n)` at click time, so the entry has to land on the
+   // same object they are holding, not on a copy made in here.
+   if (video && !buttons.some(b => b && b.label === 'Stash')) {
+     const stashBtn = {
+       label: "Stash",
+       title: "Look up scene data and timestamps",
+       color: "#6c5ce7",
+       onClick: (e) => {
+         e.stopPropagation();
+         if (typeof window.showStashModal === 'function') {
+           window.showStashModal(video);
+         }
+       }
+     };
+     // Sit just above delete so X stays last - but never above the fold, or a
+     // button that used to be visible would get pushed into the overflow.
+     const xAt = buttons.findIndex(b => b && b.label === 'X');
+     if (xAt >= visibleCount) buttons.splice(xAt, 0, stashBtn);
+     else buttons.push(stashBtn);
+   }
    
    // Show first N buttons
    const visibleButtons = buttons.slice(0, visibleCount);

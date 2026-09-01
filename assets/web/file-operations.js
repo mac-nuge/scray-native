@@ -2955,8 +2955,11 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         } else {
             working.forEach((bm, idx) => {
                 const struck = bm.deleted ? 'opacity: 0.5; text-decoration: line-through;' : '';
+                // Imported marks are somebody else's reading of this video.
+                // Worth being able to tell at a glance which are yours.
+                const pillBorder = bm.source === 'stash' ? '#6c5ce7' : '#ccc';
                 html += `
-                <div class="bm-pill" style="display: inline-flex; flex: 0 0 auto; width: auto; max-width: 100%; align-items: stretch; border: 1px solid #ccc; border-radius: 4px; overflow: hidden; box-sizing: border-box; ${struck}">
+                <div class="bm-pill" style="display: inline-flex; flex: 0 0 auto; width: auto; max-width: 100%; align-items: stretch; border: 2px solid ${pillBorder}; border-radius: 4px; overflow: hidden; box-sizing: border-box; ${struck}">
                     <button type="button" class="bm-jump" data-index="${idx}" style="${PILL_BTN}border-right: 1px solid #ccc; background: ${timeBg}; color: ${fg}; font-family: monospace; font-size: 0.72rem; white-space: nowrap;">${formatDuration(bm.time * 1000)}</button>
                 `;
                 if (editingIndex === idx && mode === 'normal') {
@@ -3205,6 +3208,305 @@ async function saveBookmarks(video, existingTooltip = null) {
 // Export functions globally
 window.showBookmarksModal = showBookmarksModal;
 window.saveBookmarks = saveBookmarks;
+
+/**
+ * Stash lookup for one video: fingerprint, identify, fetch markers, offer them.
+ *
+ * Metadata is read-only. Only timestamps get an Add button, and nothing is
+ * written until you press it - the whole point of the on-demand design is that
+ * triage happens here rather than leaving suggested rows in the database.
+ */
+async function showStashModal(video) {
+    document.getElementById('stashModal')?.remove();
+    if (window.plyrPlayer && !window.plyrPlayer.paused) window.plyrPlayer.pause();
+
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const clock = (ms) => {
+        const t = Math.max(0, Math.round(ms / 1000));
+        const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+        return (h ? h + ':' + String(m).padStart(2, '0') : String(m))
+             + ':' + String(s).padStart(2, '0');
+    };
+
+    const modal = document.createElement('div');
+    modal.className = 'basket-json-modal';
+    modal.id = 'stashModal';
+    // Same opt-outs as the bookmarks modal: FLS rotates this class and the
+    // fullscreen player outranks the default overlay z-index.
+    modal.style.cssText = 'transform:none;padding:0;z-index:2147483647;';
+    modal.innerHTML =
+        '<div class="basket-json-modal-content" style="transform:none;max-width:640px;">' +
+          '<h3 style="margin-top:0;">Stash lookup</h3>' +
+          '<div id="stashBody">Looking up&hellip;</div>' +
+          '<div style="display:flex;gap:8px;margin-top:14px;">' +
+            '<button id="stashAddBtn" class="modal-btn modal-btn-primary" ' +
+                    'style="flex:1;background:#28a745;" disabled>Add timestamps</button>' +
+            '<button id="stashRecheckBtn" class="modal-btn modal-btn-secondary">Re-check</button>' +
+            '<button id="stashCloseBtn" class="modal-btn modal-btn-cancel">Close</button>' +
+          '</div>' +
+        '</div>';
+    document.body.appendChild(modal);
+
+    const body      = modal.querySelector('#stashBody');
+    const addBtn    = modal.querySelector('#stashAddBtn');
+    const close     = () => modal.remove();
+    modal.querySelector('#stashCloseBtn').addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+    let markers = [];
+
+    const refreshAddBtn = () => {
+        const n = modal.querySelectorAll('.stash-mk:checked').length;
+        addBtn.disabled = n === 0;
+        addBtn.textContent = n ? `Add ${n} timestamp${n === 1 ? '' : 's'}` : 'Add timestamps';
+    };
+
+    async function load(force) {
+        body.innerHTML = 'Looking up&hellip; <small style="opacity:.7">' +
+                         '(fingerprint, then StashDB, then timestamp.trade)</small>';
+        addBtn.disabled = true;
+        let r;
+        try {
+            r = await window.scrayApiCall('stash_scene', {
+                method: 'POST',
+                body: { video_key: window.scrayVideoKey(video.filename), force: !!force }
+            });
+        } catch (err) {
+            body.innerHTML = '<p style="color:#dc3545;">Lookup failed: ' + esc(err.message) + '</p>';
+            return;
+        }
+
+        markers = r.markers || [];
+        const sc = r.scene;
+        const notes = (r.notes || []).map(n => '<p style="opacity:.75;margin:4px 0;">' + esc(n) + '</p>').join('');
+
+        if (!r.stash_id) {
+            body.innerHTML = (notes || '<p>No match.</p>') +
+                '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(128,128,128,.3);">' +
+                  '<p style="margin:0 0 6px;">Found it on StashDB yourself? Paste the scene URL and this ' +
+                  'file&rsquo;s fingerprint gets attached to it &mdash; which also fixes it for anyone else ' +
+                  'with the same encode.</p>' +
+                  '<div style="display:flex;gap:6px;">' +
+                    '<input id="stashSubmitId" type="text" placeholder="https://stashdb.org/scenes/..." ' +
+                           'style="flex:1;padding:6px;border:1px solid #ccc;border-radius:4px;">' +
+                    '<button id="stashSubmitBtn" class="modal-btn modal-btn-secondary">Submit</button>' +
+                  '</div>' +
+                  '<div id="stashSubmitMsg" style="margin-top:6px;font-size:.9em;"></div>' +
+                  '<div style="margin-top:6px;font-size:.8em;opacity:.6;">Fingerprint: ' +
+                    esc(r.oshash || '(none)') + '</div>' +
+                '</div>';
+
+            const sBtn = modal.querySelector('#stashSubmitBtn');
+            const sMsg = modal.querySelector('#stashSubmitMsg');
+            sBtn.addEventListener('click', async () => {
+                const val = modal.querySelector('#stashSubmitId').value.trim();
+                if (!val) return;
+                sBtn.disabled = true;
+                sMsg.textContent = 'Submitting…';
+                try {
+                    await window.scrayApiCall('stash_submit', {
+                        method: 'POST',
+                        body: { video_key: window.scrayVideoKey(video.filename), stash_id: val }
+                    });
+                    sMsg.textContent = 'Submitted. Reloading…';
+                    // Deliberately load(false): the id is stored locally now, so
+                    // this works whether or not StashDB has reindexed yet.
+                    await load(false);
+                } catch (err) {
+                    sBtn.disabled = false;
+                    sMsg.innerHTML = '<span style="color:#dc3545;">' + esc(err.message) + '</span>';
+                }
+            });
+            return;
+        }
+
+        const row = (k, v) => v ? '<div style="margin:2px 0;"><strong>' + k + ':</strong> ' + esc(v) + '</div>' : '';
+
+        const chips = (arr, bg) => (arr || []).length
+            ? '<div style="display:flex;flex-wrap:wrap;gap:4px;margin:4px 0;">' +
+              arr.map(t => '<span style="background:' + bg + ';padding:2px 7px;border-radius:10px;' +
+                           'font-size:.78rem;white-space:nowrap;">' + esc(t) + '</span>').join('') +
+              '</div>'
+            : '';
+
+        const mins = (secs) => {
+            if (!secs) return '';
+            const m = Math.floor(secs / 60), s = secs % 60;
+            return m + 'm ' + String(s).padStart(2, '0') + 's';
+        };
+
+        // Their duration against yours. A big gap means the fingerprint matched
+        // a different cut - or the wrong scene entirely - and every marker
+        // below would land in the wrong place. Cheap check, saves confusion.
+        let durLine = '';
+        if (sc && sc.duration) {
+            const mineMs = video.durationMs || (video.duration ? video.duration * 1000 : 0);
+            const gap = mineMs ? Math.abs(sc.duration - Math.round(mineMs / 1000)) : 0;
+            durLine = '<div style="margin:2px 0;"><strong>Duration:</strong> ' + mins(sc.duration) +
+                (mineMs && gap > 60
+                    ? ' <span style="color:#dc3545;">(yours is ' + mins(Math.round(mineMs / 1000)) +
+                      ' &mdash; different cut?)</span>'
+                    : '') + '</div>';
+        }
+
+        const links = []
+            .concat(sc && sc.stash_url ? ['<a href="' + esc(sc.stash_url) + '" target="_blank" rel="noopener">StashDB</a>'] : [])
+            .concat(r.tt_url ? ['<a href="' + esc(r.tt_url) + '" target="_blank" rel="noopener">timestamp.trade</a>'] : [])
+            .concat((sc && sc.urls || []).slice(0, 2).map((u, i) =>
+                '<a href="' + esc(u) + '" target="_blank" rel="noopener">Official ' + (i + 1) + '</a>'));
+
+        const meta = sc ? (
+            (sc.cover ? '<div id="stashCoverWrap" ' +
+                        'style="position:relative;overflow:hidden;border-radius:6px;margin-bottom:8px;' +
+                        'cursor:pointer;user-select:none;-webkit-user-select:none;' +
+                        '-webkit-tap-highlight-color:transparent;">' +
+                          '<img id="stashCoverImg" src="' + esc(sc.cover) + '" alt="" loading="lazy" ' +
+                              'style="display:block;max-width:100%;filter:blur(32px);transform:scale(1.1);">' +
+                          '<div id="stashCoverVeil" style="position:absolute;inset:0;display:flex;' +
+                              'flex-direction:column;align-items:center;justify-content:center;gap:4px;' +
+                              'background:rgba(0,0,0,.72);color:#fff;text-align:center;padding:8px;">' +
+                            '<div style="font-weight:700;letter-spacing:.1em;font-size:.95rem;">(none)</div>' +
+                            '<div id="stashCoverHint" style="font-size:.78rem;opacity:.85;">' +
+                              'Tap 3 times to reveal</div>' +
+                          '</div>' +
+                        '</div>' : '') +
+            '<div style="font-size:1.1em;font-weight:600;margin-bottom:4px;">' +
+                esc(sc.title || '(untitled scene)') + '</div>' +
+            row('Studio', sc.studio) +
+            row('Released', (sc.release_date || '').slice(0, 10)) +
+            durLine +
+            row('Code', sc.code) +
+            row('Director', sc.director) +
+            ((sc.performers || []).length
+                ? '<div style="margin-top:6px;"><strong>Performers</strong></div>' + chips(sc.performers, '#efe9fb')
+                : '') +
+            ((sc.tags || []).length
+                ? '<div style="margin-top:6px;"><strong>Tags</strong> ' +
+                  '<span style="opacity:.6;font-size:.8rem;">(' + sc.tags.length + ')</span></div>' +
+                  chips(sc.tags, '#eef1f4')
+                : '') +
+            (sc.details
+                ? '<details style="margin-top:6px;"><summary style="cursor:pointer;">Synopsis</summary>' +
+                  '<div style="opacity:.85;margin-top:4px;">' + esc(sc.details) + '</div></details>'
+                : '') +
+            (links.length ? '<div style="margin-top:8px;display:flex;gap:12px;">' + links.join('') + '</div>' : '')
+        ) : '<div>Matched, but no scene detail returned.</div>';
+
+        // Distinguishes "StashDB has little on this scene" from "our query was
+        // refused and fell back", which otherwise look identical.
+        const degradedWarn = r.degraded
+            ? '<p style="color:#b8860b;margin:6px 0;">Detailed fields were refused by StashDB, so only the ' +
+              'title is shown. Check the PHP error log for the field name.</p>'
+            : '';
+
+        // A marker within 2s of an existing bookmark is treated as already
+        // present. Exact-millisecond agreement between two humans watching the
+        // same scene never happens, and UNIQUE(video_key, time_ms) would
+        // reject the near-miss anyway.
+        const existing = r.existing || [];
+        const dupe = (t) => existing.some(e => Math.abs(e - t) <= 2000);
+
+        const list = markers.length ? markers.map((m, i) => {
+            const d = dupe(m.time_ms);
+            return '<label style="display:flex;gap:8px;align-items:center;padding:3px 0;' +
+                   (d ? 'opacity:.45;' : '') + '">' +
+                   '<input type="checkbox" class="stash-mk" data-i="' + i + '"' +
+                   (d ? ' disabled' : ' checked') + '>' +
+                   '<span style="font-variant-numeric:tabular-nums;min-width:56px;">' +
+                   clock(m.time_ms) + '</span>' +
+                   '<span>' + esc(m.note || m.tag || '(untitled)') + '</span>' +
+                   (d ? '<span style="margin-left:auto;font-size:.85em;">already saved</span>' : '') +
+                   '</label>';
+        }).join('') : '<p style="opacity:.75;">No markers submitted for this scene yet.</p>';
+
+        body.innerHTML =
+            '<div style="border-bottom:1px solid rgba(128,128,128,.3);padding-bottom:10px;margin-bottom:10px;">' +
+              meta + '</div>' + degradedWarn + notes +
+            (markers.length ? '<div style="display:flex;gap:10px;margin-bottom:6px;">' +
+                '<a href="#" id="stashAll">Select all</a><a href="#" id="stashNone">None</a></div>' : '') +
+            '<div style="max-height:260px;overflow:auto;">' + list + '</div>';
+
+        modal.querySelector('#stashAll')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            modal.querySelectorAll('.stash-mk:not([disabled])').forEach(c => c.checked = true);
+            refreshAddBtn();
+        });
+        modal.querySelector('#stashNone')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            modal.querySelectorAll('.stash-mk').forEach(c => c.checked = false);
+            refreshAddBtn();
+        });
+        // Cover art comes straight from StashDB unblurred. Three deliberate
+        // taps means a stray tap on the Stash button can't put it on screen,
+        // and the taps have to be consecutive - one now and one in a minute
+        // must not add up to a reveal.
+        const coverWrap = modal.querySelector('#stashCoverWrap');
+        if (coverWrap) {
+            const NEEDED = 3;
+            const img   = coverWrap.querySelector('#stashCoverImg');
+            const veil  = coverWrap.querySelector('#stashCoverVeil');
+            const hint  = coverWrap.querySelector('#stashCoverHint');
+            const hide  = () => {
+                img.style.filter    = 'blur(32px)';
+                img.style.transform = 'scale(1.1)';
+                veil.style.display  = 'flex';
+                hint.textContent    = 'Tap 3 times to reveal';
+            };
+            let taps = 0, timer = null;
+            coverWrap.addEventListener('click', () => {
+                if (taps >= NEEDED) { taps = 0; hide(); return; }   // tap again to re-hide
+                taps++;
+                clearTimeout(timer);
+                timer = setTimeout(() => { taps = 0; hide(); }, 3000);
+                if (taps >= NEEDED) {
+                    clearTimeout(timer);
+                    img.style.filter    = 'none';
+                    img.style.transform = 'none';
+                    veil.style.display  = 'none';
+                } else {
+                    const left = NEEDED - taps;
+                    hint.textContent = left + ' more tap' + (left === 1 ? '' : 's');
+                }
+            });
+        }
+
+        modal.querySelectorAll('.stash-mk').forEach(c => c.addEventListener('change', refreshAddBtn));
+        refreshAddBtn();
+    }
+
+    modal.querySelector('#stashRecheckBtn').addEventListener('click', () => load(true));
+
+    addBtn.addEventListener('click', async () => {
+        const picked = [...modal.querySelectorAll('.stash-mk:checked')]
+            .map(c => markers[+c.dataset.i]).filter(Boolean);
+        if (!picked.length) return;
+
+        addBtn.disabled = true;
+        addBtn.textContent = 'Saving…';
+        try {
+            video.bookmarks = video.bookmarks || [];
+            // saveBookmarks works in SECONDS client-side and converts to
+            // time_ms itself. Pushing milliseconds here would put every
+            // imported mark 1000x too far in.
+            picked.forEach(m => video.bookmarks.push({
+                time: m.time_ms / 1000,
+                note: m.note || m.tag || '',
+                source: 'stash'
+            }));
+            video.bookmarks.sort((a, b) => a.time - b.time);
+            await window.saveBookmarks(video);
+            close();
+        } catch (err) {
+            addBtn.disabled = false;
+            addBtn.textContent = 'Add timestamps';
+            alert('Could not save: ' + err.message);
+        }
+    });
+
+    load(false);
+}
+window.showStashModal = showStashModal;
 window.showRenameModal = showRenameModal;
 window.showDeleteModal = showDeleteModal;
 window.showBulkDeleteModal = showBulkDeleteModal;

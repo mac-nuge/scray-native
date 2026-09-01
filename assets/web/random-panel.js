@@ -268,7 +268,7 @@ onClick: async (e) => {
  }
 ];
 
-const btnContainer = createCompactButtonGroup(buttons, 5);
+const btnContainer = createCompactButtonGroup(buttons, 5, video);
  li.appendChild(btnContainer);
  
  // ✅ Click anywhere on list item (except buttons and clickable tags) to open rename modal
@@ -554,7 +554,7 @@ onClick: async (e) => {
     }
   ];
    
-   const btnContainer = createCompactButtonGroup(buttons, 5);
+   const btnContainer = createCompactButtonGroup(buttons, 5, video);
    li.appendChild(btnContainer);
    
    // Click anywhere on list item (except buttons and clickable tags) to open rename modal
@@ -809,7 +809,7 @@ onClick: async (e) => {
     }
   ];
    
-   const btnContainer = createCompactButtonGroup(buttons, 5);
+   const btnContainer = createCompactButtonGroup(buttons, 5, video);
    li.appendChild(btnContainer);
    
    // Click anywhere on list item (except buttons and clickable tags) to open rename modal

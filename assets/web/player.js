@@ -4342,6 +4342,12 @@ video.bookmarks.forEach(bm => {
 
     const marker = document.createElement('div');
     marker.className = 'progress-bookmark-marker';
+    if (bm.source === 'stash') {
+        marker.classList.add('bookmark-from-stash');
+        // Inline, because the class rule owns background and specificity here
+        // is not worth a CSS file edit for one colour.
+        marker.style.background = '#6c5ce7';
+    }
     marker.style.left = `${percent}%`;
 
     progressBar.appendChild(marker);
@@ -7468,7 +7474,7 @@ onClick: async (e) => {
 }
 ];
 
-const btnContainer = createCompactButtonGroup(buttons, 5);
+const btnContainer = createCompactButtonGroup(buttons, 5, video);
 btnContainer.style.marginLeft = '8px';
 btnContainer.style.display = 'inline-flex';
 videoInfoEl.appendChild(btnContainer);

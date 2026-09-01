@@ -224,7 +224,7 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
             // Payload is either a bare URL string, or { url, home }. Both are
             // optional — no URL means "resume wherever the browser was left".
             var browserURL: String? = nil
-            var browserHome = "https://macnguyen.com/sp-staging-sql/"
+            var browserHome = Self.defaultBrowserHome
             if let s = payload as? String, !s.isEmpty {
                 browserURL = s
             } else if let d = payload as? [String: Any] {
@@ -262,6 +262,37 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
         default:
             reject(id: id, error: "Unknown action: \(action)")
         }
+    }
+
+    // MARK: - WKUIDelegate (new windows)
+
+    /// Where the browser's house button goes when a link opened it rather than
+    /// a deliberate trip. Same value the openBrowser bridge case falls back to.
+    private static let defaultBrowserHome = "https://macnguyen.com/sp-staging-sql/"
+
+    // Without this, WKWebView drops every target="_blank" link and every
+    // window.open on the floor - silently, with no error anywhere. That is why
+    // the Stash modal's StashDB links, "Open Link", "Excel db" and the report
+    // link all did nothing at all in Native while working fine in Picker.
+    //
+    // Returning nil and handing the URL to ScrayBrowser gives them somewhere to
+    // go, and deliberately the SAME somewhere: a link and a trip through the
+    // Picker button end up in one tab list, sharing one cookie jar. Which is
+    // what makes report.php ask for the password once rather than every time.
+    func webView(_ webView: WKWebView,
+                 createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+        // http(s) only. Anything else - mailto:, tel:, a custom scheme - is
+        // dropped exactly as it is today rather than shoved into a web view
+        // that cannot load it.
+        if let url = navigationAction.request.url,
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            ScrayBrowser.shared.present(url: url.absoluteString,
+                                        home: Self.defaultBrowserHome)
+        }
+        return nil
     }
 
     // MARK: - WKUIDelegate (JS dialogs)

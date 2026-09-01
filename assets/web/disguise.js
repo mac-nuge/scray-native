@@ -16,8 +16,8 @@
 //  3. Shot / Page opacity sliders, 10 preset slots, and a collapse handle.
 //     Desktop: presets also fire on Alt+0-9. Mobile: tap the numbered chips.
 //
-// Desktop shows an expanded panel top-right; mobile shows a collapsed handle
-// in the corner that expands on tap.
+// Both desktop and mobile show a collapsed handle in the corner that expands
+// on click; desktop sits top-right, mobile bottom-right and grows upward.
 
 (function () {
   'use strict';
@@ -281,7 +281,10 @@
       if (typeof saved.open === 'boolean') state.open = saved.open;
     } catch (e) { /* ignore malformed state */ }
   }
-  if (state.open === null) state.open = !isMobile();
+  // Collapsed by default on every viewport. Desktop used to open expanded,
+  // which parked a permanent white panel over the top-right corner. The
+  // saved value still wins, so a deliberate expand sticks across reloads.
+  if (state.open === null) state.open = false;
   if (MODES.indexOf(state.mode) === -1) state.mode = MODES[0];
 
   function save() {
@@ -484,6 +487,19 @@
 #scrayDisguiseControl.is-collapsed {
   padding: 4px 6px;
   gap: 0;
+}
+/* Collapsed, the handle IS the panel, so it needs a real target and room for
+   the three-character mode tag. The mobile block below restates both at thumb
+   size; same specificity, later in the sheet, so it still wins on phones. */
+#scrayDisguiseControl.is-collapsed #scrayDisguiseHandle {
+  min-width: 30px;
+  min-height: 20px;
+}
+#scrayDisguiseHandle.has-mode-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #6b6b6b;
 }
 
 /* ---- Compact layout for phones ---- */
@@ -853,9 +869,10 @@
       // Mobile anchors to the bottom and grows upward, so the caret has to
       // point the other way to still mean "this is where it will go".
       const upward = isMobile();
-      // Collapsed on mobile the button is the only thing on screen, so it
-      // carries the current mode rather than a caret.
-      const showModeTag = isMobile() && !state.open;
+      // Collapsed, the handle is the only thing on screen, so it carries the
+      // current mode rather than a caret. Desktop included now that it starts
+      // collapsed: a bare caret says nothing about what the tint is doing.
+      const showModeTag = !state.open;
       handle.textContent = showModeTag
         ? (MODE_LABEL_TINY[state.mode] || '')
         : (state.open ? (upward ? '▾' : '▴') : (upward ? '▴' : '▾'));
@@ -1121,7 +1138,7 @@
     // does whatever it was going to do in the app underneath.
     if (CLOSE_ON_OUTSIDE_TAP) {
       document.addEventListener('pointerdown', (e) => {
-        if (!state.open || !isMobile()) return;
+        if (!state.open) return;
         if (e.target && control.contains(e.target)) return;
         state.open = false;
         capturing = false;

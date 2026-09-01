@@ -357,7 +357,7 @@ onClick: async (e) => {
 }
 ];
 
-const btnContainer = createCompactButtonGroup(buttons, 4);
+const btnContainer = createCompactButtonGroup(buttons, 4, video);
 li.appendChild(btnContainer);
 
 // ✅ Right-click context menu

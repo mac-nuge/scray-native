@@ -277,7 +277,7 @@ onClick: async (e) => {
 }
 ];
 
-const btnContainer = createCompactButtonGroup(buttons, 5);
+const btnContainer = createCompactButtonGroup(buttons, 5, video);
 
 li.appendChild(btnContainer);
 

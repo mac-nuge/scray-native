@@ -418,6 +418,98 @@ console.log("scray-bugreport.js loaded");
     document.body.appendChild(btn);
   }
 
+  // -------------------------------------------------------------
+  // "send report" — the one-tap sibling of the console's copy button
+  // -------------------------------------------------------------
+  // Same payload a Jira ticket would carry, minus the ticket. It POSTs to
+  // api.php?action=save_report; the server bolts its own half on (db_mode,
+  // row counts, Graph token expiry, the PHP error log) and stores a report
+  // you can read back from report.php. Deliberately no dialog - by the time
+  // you want this, typing on a phone is the last thing you want to be doing.
+  const REPORT_PANEL_CHARS = 60000;
+
+  function reportOut(bar) {
+    let out = document.getElementById("scrayReportOut");
+    if (!out) {
+      out = document.createElement("span");
+      out.id = "scrayReportOut";
+      // The toolbar is justify-content:flex-end, so first child puts this to
+      // the LEFT of both buttons rather than shoving them off the edge.
+      out.style.cssText = "font-size:0.62rem;align-self:center;margin-right:8px;" +
+        "flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;";
+      bar.insertBefore(out, bar.firstChild);
+    }
+    return out;
+  }
+
+  async function sendConsoleReport(btn) {
+    const label = btn.textContent;
+    const out = reportOut(btn.parentNode);
+    btn.disabled = true;
+    btn.textContent = "sending…";
+    out.style.color = "#666";
+    out.textContent = "collecting…";
+    try {
+      const panelEl = document.getElementById("inlineConsole");
+      const panel = panelEl
+        ? redact(Array.from(panelEl.children).map((d) => d.textContent).join("\n")).slice(-REPORT_PANEL_CHARS)
+        : "";
+      const res = await call("save_report", {
+        note: "",
+        state: await snapshot(),
+        console: consoleLines(),
+        panel: panel,
+      });
+      btn.textContent = "sent ✓";
+      out.style.color = "#070";
+      out.textContent = "";
+      const a = document.createElement("a");
+      a.href = res.url; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = res.url; a.style.color = "inherit";
+      out.appendChild(a);
+      // Clipboard can be refused - insecure origin, or no user gesture left by
+      // the time the round trip finishes. The visible link is the fallback.
+      try { if (navigator.clipboard) navigator.clipboard.writeText(res.url); } catch { /* link is enough */ }
+      push("log", `[report] written to ${res.url}`);
+    } catch (err) {
+      btn.textContent = "failed";
+      out.style.color = "#c00";
+      out.textContent = String(err && err.message ? err.message : err);
+    } finally {
+      setTimeout(() => { btn.disabled = false; btn.textContent = label; }, 4000);
+    }
+  }
+
+  function mountConsoleReportBtn() {
+    const bar = document.getElementById("inlineConsoleToolbar");
+    if (!bar || document.getElementById("scrayConsoleReportBtn")) return;
+    const btn = document.createElement("button");
+    btn.id = "scrayConsoleReportBtn";
+    btn.type = "button";
+    btn.textContent = "send report";
+    btn.title = "Save a full diagnostics report and copy the link to report.php";
+    btn.addEventListener("click", () => sendConsoleReport(btn));
+    // Directly after copy. #inlineConsoleToolbar button already styles it, so
+    // there is no CSS to add.
+    const copy = document.getElementById("inlineConsoleCopyBtn");
+    if (copy && copy.parentNode === bar) bar.insertBefore(btn, copy.nextSibling);
+    else bar.appendChild(btn);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", mountConsoleReportBtn);
+  } else {
+    mountConsoleReportBtn();
+  }
+
+  // Re-mountable by hand, and callable without the button - useful from a
+  // keyboard binding or from Safari's console over the cable.
+  window.scrayMountConsoleReport = mountConsoleReportBtn;
+  window.scraySendReport = () => {
+    const b = document.getElementById("scrayConsoleReportBtn");
+    return b ? sendConsoleReport(b) : Promise.reject(new Error("send report button not mounted"));
+  };
+
   // No longer self-mounting: the entry point is the "Jira Report" button in
   // the Floating Menu (disguise.js), which calls window.scrayReportBug below.
   // mountButton is kept rather than deleted so the standalone floating button

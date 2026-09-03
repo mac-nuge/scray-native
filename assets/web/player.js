@@ -768,6 +768,10 @@ function clearFullscreenControlOffsets() {
 // rebuildVideoInfoDisplay, resetVideoInline, etc. - not just inside createPlayerElement)
 // ⚙️ MPB PLAYER - MAIN TUNING KNOB. Gap left above the video so its top
 // edge never sits under the browser address bar. Raise for more clearance.
+// Last known-good corner-button-derived dock base (px). See the guard inside
+// computeBottomDock for why this has to be remembered across calls.
+let lastGoodDockBasePx = 0;
+
 const MPB_VIDEO_TOP_BUFFER = 24;
 // ⚙️ Never shrink the video below this height, however tall the stack gets.
 const MPB_VIDEO_MIN_HEIGHT = 140;
@@ -880,8 +884,9 @@ function computeBottomDock() {
     }
 
     const videoInfo = document.getElementById('currentVideoInfo');
+    const cornerButtons = document.getElementById('cornerButtons');
 
-    const isMobilePortrait = window.innerWidth <= 768 && window.matchMedia('(orientation: portrait)').matches;
+    const isMobilePortrait = window.innerWidth <= 768 && window.matchMedia('(orientation: portrait)').matches;  
 
     const shouldDock = isMobilePortrait &&
         !window.plyrPlayer?.fullscreen?.active &&
@@ -912,12 +917,37 @@ function computeBottomDock() {
     if (backdrop) backdrop.classList.add('active');
 
     // ⚙️ TWEAK THIS NUMBER to raise/lower the video player + now-playing
-    // info bar as a unit. This is now a fixed, independent offset - it no
-    // longer reads the corner buttons' position, so it won't move when you
-    // adjust the corner buttons separately. Increase to raise the stack
-    // further off the bottom of the screen, decrease to lower it.
-    const baseBottomOffset = 100; // px from the bottom of the screen (up to lift)
-    let runningBottom = baseBottomOffset;
+    // info bar as a unit. Ported from Picker: read the corner buttons' ACTUAL
+    // on-screen position rather than hardcoding an offset, so the info bar
+    // keeps a consistent gap above them however their CSS changes.
+    //
+    // The measurement is only trustworthy when the corner buttons are
+    // genuinely laid out. Straight after exiting fullscreen they may still be
+    // display:none (body.fullscreen-active has only just come off and the
+    // reflow hasn't landed), so implausible reads are rejected and the last
+    // good one reused. gapAboveCornerButtons is the tuning knob now.
+    const gapAboveCornerButtons = 14; // clearance between corner buttons and info bar
+    const cornerRect = cornerButtons ? cornerButtons.getBoundingClientRect() : null;
+
+    // Any base beyond this fraction of the viewport is a bad read, not a
+    // genuinely tall button row.
+    const MAX_DOCK_BASE_FRACTION = 0.4;
+
+    let measuredDockBase = (cornerRect && cornerRect.height > 0)
+        ? (window.innerHeight - cornerRect.top) + gapAboveCornerButtons
+        : NaN;
+
+    if (!isFinite(measuredDockBase) ||
+        measuredDockBase <= 0 ||
+        measuredDockBase > window.innerHeight * MAX_DOCK_BASE_FRACTION) {
+        // Bad measurement - fall back to the last good one, or a sane
+        // default on the very first call.
+        measuredDockBase = lastGoodDockBasePx || 100;
+    } else {
+        lastGoodDockBasePx = measuredDockBase;
+    }
+
+    let runningBottom = measuredDockBase;
 
     const gapBetweenStackItems = 6; // small breathing room between info bar / player / filter bar
 
@@ -925,7 +955,7 @@ function computeBottomDock() {
     // MUST run BEFORE reading container.offsetHeight - fitting the video
     // shrinks the container, and the dock offsets below are derived from
     // that height. Measuring first would use the pre-fit (overflowing) value.
-    fitDockedVideoToStack(infoHeight, baseBottomOffset, gapBetweenStackItems);
+    fitDockedVideoToStack(infoHeight, measuredDockBase, gapBetweenStackItems);
 
     const playerHeight = container.offsetHeight;
 
@@ -4146,7 +4176,16 @@ bookmarkArmTimer = setTimeout(() => {
 // ⚙️ Markers whose centres sit closer than this (px along the bar) are a
 // cluster: one tap on any of them raises the whole group, because at this
 // spacing a fingertip can't pick out a single dot.
-const BOOKMARK_CLUSTER_PX = 26;
+// Expressed as a multiple of the marker's own width rather than a fixed
+// pixel count: markers only fan together when they overlap or sit within
+// about one marker-width of each other. Anything further apart is a
+// comfortable tap target on its own and keeps its own single tooltip.
+const BOOKMARK_CLUSTER_MARKER_WIDTHS = 2;
+const BOOKMARK_CLUSTER_FALLBACK_PX = 16;  // only if a marker can't be measured
+// ⚙️ Most chips the tooltip rail will ever show at once. Past this the chips
+// are too narrow to read, so a dense cluster shows only the tapped bookmark
+// and its nearest neighbours rather than the whole chain.
+const BOOKMARK_RAIL_MAX_CHIPS = 3;
 // ⚙️ Tooltip rail. Chips are equal width and share one row; the rail is
 // centred on the play button and floats just above the control bar.
 const CHIP_GAP_PX = 6;
@@ -4364,12 +4403,20 @@ const rect = progressBar.getBoundingClientRect();
 const rotated = (typeof manualRotationActive !== 'undefined' && manualRotationActive);
 const barLengthPx = (rotated ? rect.height : rect.width) || progressBar.offsetWidth || 0;
 
+// offsetWidth is pre-transform, so this reads the true 8px/10px marker
+// regardless of the FLS rotation, and picks up the mobile media query
+// without duplicating the breakpoint here.
+const markerWidthPx = entries[0].marker.offsetWidth || 0;
+const clusterPx = markerWidthPx
+    ? markerWidthPx * BOOKMARK_CLUSTER_MARKER_WIDTHS
+    : BOOKMARK_CLUSTER_FALLBACK_PX;
+
 const sorted = entries.slice().sort((a, b) => a.percent - b.percent);
 let group = [sorted[0]];
 const groups = [group];
 for (let i = 1; i < sorted.length; i++) {
     const gapPx = ((sorted[i].percent - sorted[i - 1].percent) / 100) * barLengthPx;
-    if (gapPx < BOOKMARK_CLUSTER_PX) {
+    if (gapPx < clusterPx) {
         group.push(sorted[i]);
     } else {
         group = [sorted[i]];
@@ -4395,8 +4442,15 @@ const raise = (entry) => {
     // A lone bookmark points at its own marker. A fanned cluster stays put
     // above the play button - it covers several markers, so there's no one
     // marker for it to sit over.
-    const solo = entry.cluster.length === 1 ? entry.percent : null;
-    showBookmarkRail(entry.cluster, jumpTo, solo);
+    // Keep the tapped bookmark plus its nearest neighbours by position along
+    // the bar, then restore time order so the chips read left-to-right.
+    const shown = entry.cluster
+        .slice()
+        .sort((a, b) => Math.abs(a.percent - entry.percent) - Math.abs(b.percent - entry.percent))
+        .slice(0, BOOKMARK_RAIL_MAX_CHIPS)
+        .sort((a, b) => a.percent - b.percent);
+    const solo = shown.length === 1 ? shown[0].percent : null;
+    showBookmarkRail(shown, jumpTo, solo);
     fadeTimer = setTimeout(hideBookmarkRail, RAIL_FADE_MS);
 };
 

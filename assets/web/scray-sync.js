@@ -532,7 +532,7 @@ async function scrayBmSync(video) {
 
   const res = await window.scrayApiCall("bookmarks_get", { params: { id: key } });
   const bookmarks = (res.bookmarks || [])
-    .map(b => ({ time: b.time_ms / 1000, note: b.note || "" }))
+    .map(b => ({ time: b.time_ms / 1000, note: b.note || "", source: b.source || "" }))
     .sort((a, b) => a.time - b.time);
 
   video.bookmarks = bookmarks;

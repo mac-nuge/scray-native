@@ -3496,6 +3496,37 @@ async function showStashModal(video) {
             }));
             video.bookmarks.sort((a, b) => a.time - b.time);
             await window.saveBookmarks(video);
+
+            // Stamp the source at the row level, AFTER the generic save, so
+            // this wins whatever that pushed. This is the only code in the
+            // app that knows these marks came from Stash, so it's the only
+            // code with any business asserting it — inferring it downstream
+            // from an in-memory array has proven unreliable.
+            //
+            // The server's ON CONFLICT branch also clears `deleted`, so a
+            // re-import repairs a row that was tombstoned while mislabelled
+            // rather than leaving a dead row behind a live one.
+            try {
+                const bmKey = video.videoKey ||
+                    (video.filename ? window.scrayVideoKey(video.filename) : null);
+                if (bmKey && video.inCatalogue !== false) {
+                    await window.scrayApiCall("bookmarks_push", {
+                        method: "POST",
+                        body: {
+                            video_key: bmKey,
+                            device: window.SCRAY_SYNC.DEVICE_ID,
+                            upsert: picked.map(m => ({
+                                time_ms: Math.round(m.time_ms),
+                                note: m.note || m.tag || '',
+                                source: 'stash'
+                            })),
+                            delete: []
+                        }
+                    });
+                }
+            } catch (err) {
+                console.error('[stash] source stamp failed:', err.message);
+            }
             close();
         } catch (err) {
             addBtn.disabled = false;

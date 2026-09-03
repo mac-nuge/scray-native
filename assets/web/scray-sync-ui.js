@@ -277,7 +277,7 @@ async function pullScoped(keys, since, received = null) {
     (res.bookmarks || []).forEach(b => {
       if (b.deleted) return;
       if (!bmByKey.has(b.video_key)) bmByKey.set(b.video_key, []);
-      bmByKey.get(b.video_key).push({ time: b.time_ms / 1000, note: b.note || "" });
+      bmByKey.get(b.video_key).push({ time: b.time_ms / 1000, note: b.note || "", source: b.source || "" });
     });
     bmByKey.forEach(list => list.sort((a, b) => a.time - b.time));
 

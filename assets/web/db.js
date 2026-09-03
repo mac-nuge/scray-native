@@ -325,6 +325,7 @@ async function saveVideoMeta(oneDriveId, metaUpdates, updatedBy = "app", opUpdat
             delete: removed,
           }
         });
+        console.log(`[bm] push payload`, local.map(b => [b.time, b.source]));
         console.log(`[bm] pushed ${local.length} bookmark(s)` +
                     (removed.length ? `, tombstoned ${removed.length}` : "") + ` for ${bmKey}`);
       }
@@ -1026,7 +1027,7 @@ async function refreshVideoFromDb(video, { silent = false } = {}) {
     f_tally: row.video.f_tally,
     notes: row.video.notes,
     last_played: row.video.last_played,
-    bookmarks: (bm.bookmarks || []).map(b => ({ time: b.time_ms / 1000, note: b.note || "" })),
+    bookmarks: (bm.bookmarks || []).map(b => ({ time: b.time_ms / 1000, note: b.note || "", source: b.source || "" })),
   };
 
   // "sync" so saveVideoMeta doesn't enqueue this straight back to the server.

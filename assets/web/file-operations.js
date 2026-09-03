@@ -2948,6 +2948,18 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         // one region; the list no longer caps itself, or it would be a
         // scroller inside a scroller.
         html += `<div style="${SCROLL_WRAP_STYLE}"><div id="bmScroll" style="${SCROLL_STYLE}">`;
+
+        if (topNotes.length > 0 && hasPlayhead) {
+            html += `
+                <div style="margin-bottom: 12px;">
+                    <div style="font-size: 0.7rem; color: #999; margin-bottom: 4px;">Quick notes (tap one to save a bookmark with it):</div>
+                    <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        ${topNotes.map((n, i) => `<button type="button" class="quick-note-btn modal-btn modal-btn-secondary" data-note-index="${i}" style="flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.75rem; margin: 0;">${esc(n)}</button>`).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
         html += `<div id="bookmarksList" style="display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; margin-bottom: 12px;">`;
 
         if (!working.length) {
@@ -2972,17 +2984,6 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         }
 
         html += `</div>`;
-
-        if (topNotes.length > 0 && hasPlayhead) {
-            html += `
-                <div style="margin-bottom: 12px;">
-                    <div style="font-size: 0.7rem; color: #999; margin-bottom: 4px;">Quick notes (tap one to save a bookmark with it):</div>
-                    <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px;">
-                        ${topNotes.map((n, i) => `<button type="button" class="quick-note-btn modal-btn modal-btn-secondary" data-note-index="${i}" style="flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.75rem; margin: 0;">${esc(n)}</button>`).join('')}
-                    </div>
-                </div>
-            `;
-        }
 
         html += `</div><div id="bmScrollThumb" style="position: absolute; right: 2px; top: 0; width: 4px; border-radius: 2px; background: rgba(0,0,0,0.25); pointer-events: none; display: none;"></div></div>`;   // #bmScroll + wrap
 

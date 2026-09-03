@@ -403,6 +403,9 @@ function endFullscreenFilterEdit(commit) {
 }
 
 window.syncFullscreenFilterPill = syncFullscreenFilterPill;
+// The F circle in the pause menu lives in attachFrameStepButtons, which has
+// no reach into this scope.
+window.startFullscreenFilterEdit = startFullscreenFilterEdit;
 
 window.ensureVideoTitleBar = ensureVideoTitleBar;
 window.syncVideoTitleBar = syncVideoTitleBar;
@@ -2647,6 +2650,94 @@ function attachFrameStepZoneHandlers(el, direction, tapState) {
     el.addEventListener('click', (e) => e.stopPropagation());
 }
 
+// Jump to the next bookmark after the playhead. Top-level and exported on
+// window on purpose: the FLS triple tap, the M> control button and anything
+// added later all need it, and none of them share a scope. The epsilon stops
+// a tap that lands exactly on a marker from re-selecting that same marker.
+// No wrap-around: at the last bookmark it says so and stays put.
+const NEXT_BOOKMARK_EPSILON_S = 0.35;
+
+function scrayNextBookmark() {
+    if (!window.plyrPlayer) return;
+    const v = window.currentPlayingVideo;
+    const times = (v && Array.isArray(v.bookmarks) ? v.bookmarks : [])
+        .map(bm => (bm && typeof bm.time === 'number') ? bm.time : null)
+        .filter(t => t !== null)
+        .sort((a, b) => a - b);
+
+    if (!times.length) {
+        showPlayerFeedback('No bookmarks', 'top-left');
+        return;
+    }
+
+    const from = window.plyrPlayer.currentTime + NEXT_BOOKMARK_EPSILON_S;
+    const next = times.find(t => t > from);
+    if (next === undefined) {
+        showPlayerFeedback('Last bookmark', 'top-left');
+        return;
+    }
+
+    window.plyrPlayer.currentTime = next;
+    flashBookmarkTooltip(next);
+}
+window.scrayNextBookmark = scrayNextBookmark;
+
+// ⚙️ How long the bookmark's own tooltip stays up after a jump.
+const NEXT_BOOKMARK_TOOLTIP_MS = 1000;
+
+// Reuses the marker rail so the chip looks and sits exactly like the one a
+// marker tap produces - same styling, same FLS rotation handling, no second
+// implementation to keep in step. The rail is identity-checked before being
+// torn down, so a rail the user opened in the meantime survives.
+function flashBookmarkTooltip(time) {
+    const v = window.currentPlayingVideo;
+    const bm = (v && Array.isArray(v.bookmarks) ? v.bookmarks : [])
+        .find(b => b && b.time === time);
+    if (!bm || typeof showBookmarkRail !== 'function') return;
+
+    const duration = window.plyrPlayer?.duration;
+    const percent = (duration && duration > 0)
+        ? Math.max(0, Math.min(100, (time / duration) * 100))
+        : null;
+
+    showBookmarkRail([{ bm }], () => hideBookmarkRail(), percent);
+
+    const rail = document.getElementById(RAIL_ID);
+    if (!rail) return;
+    setTimeout(() => {
+        if (document.getElementById(RAIL_ID) === rail) hideBookmarkRail();
+    }, NEXT_BOOKMARK_TOOLTIP_MS);
+}
+
+// Score picker for the pause-menu circle. .score-context-menu has no FLS
+// awareness of its own - it positions itself at raw event coordinates and
+// never rotates - so it gets centred and counter-rotated here.
+function scrayOpenScoreModal() {
+    const v = window.currentPlayingVideo;
+    if (!v || typeof window.showVideoScoringModal !== 'function') return;
+
+    window.showVideoScoringModal(v, {
+        clientX: window.innerWidth / 2,
+        clientY: window.innerHeight / 2
+    });
+
+    const menu = document.querySelector('.score-context-menu');
+    if (!menu) return;
+
+    const place = () => {
+        menu.style.top = '50%';
+        menu.style.left = '50%';
+        menu.style.transform = document.body.classList.contains('manual-rotate-landscape')
+            ? 'translate(-50%, -50%) rotate(90deg)'
+            : 'translate(-50%, -50%)';
+    };
+    place();
+    // showVideoScoringModal nudges left/top in its own setTimeout(0) when the
+    // menu overflows. Ours is queued after it, so ours wins.
+    setTimeout(place, 0);
+}
+window.scrayOpenScoreModal = scrayOpenScoreModal;
+
 function attachFrameStepButtons() {
     const isTouchDevice = ('ontouchstart' in window) ||
                           (navigator.maxTouchPoints > 0) ||
@@ -2658,10 +2749,10 @@ function attachFrameStepButtons() {
     if (!wrapper) return;
     if (wrapper.querySelector('.plyr-frame-step-group')) return; // prevent duplicates
 
-    // Simple tap-to-toggle play/pause. No hold behavior. Same
-    // stopPropagation treatment as the frame-step buttons so it never
-    // triggers the double-tap-to-seek/rotate gestures underneath.
-    function setupPlayPauseButton(btn) {
+    // Generic tap handler for the four modal circles. Same stopPropagation
+    // treatment the frame-step buttons get, so a tap on a circle never leaks
+    // through to the double/triple-tap gesture layer underneath.
+    function setupTapButton(btn, action) {
         btn.addEventListener('touchstart', (e) => {
             e.stopPropagation();
             e.preventDefault();
@@ -2670,11 +2761,7 @@ function attachFrameStepButtons() {
         btn.addEventListener('touchend', (e) => {
             e.stopPropagation();
             e.preventDefault();
-            if (!window.plyrPlayer) return;
-            window.plyrPlayer.togglePlay();
-            if (typeof showPlayerFeedback === 'function') {
-                showPlayerFeedback(window.plyrPlayer.paused ? '⏸ Paused' : '▶ Playing', 'top-left');
-            }
+            try { action(); } catch (err) { console.error('[pause-menu] action failed:', err); }
         }, { passive: false });
 
         btn.addEventListener('touchcancel', (e) => e.stopPropagation());
@@ -2684,25 +2771,90 @@ function attachFrameStepButtons() {
     const group = document.createElement('div');
     group.className = 'plyr-frame-step-group';
 
-    const playPauseBtn = document.createElement('button');
-    playPauseBtn.className = 'plyr-frame-step plyr-frame-playpause';
-    playPauseBtn.setAttribute('aria-label', 'Play/Pause');
-    setupPlayPauseButton(playPauseBtn);
+    const makeCircle = (cls, label, glyph) => {
+        const b = document.createElement('button');
+        b.className = 'plyr-frame-step ' + cls;
+        b.setAttribute('aria-label', label);
+        b.textContent = glyph;
+        return b;
+    };
 
-    const leftBtn = document.createElement('button');
-    leftBtn.className = 'plyr-frame-step plyr-frame-step-left';
-    leftBtn.setAttribute('aria-label', 'Previous frame');
+    // 1 - FLS filter. Opens the same inline edit the title-bar pill does, so
+    // there is one filter implementation rather than two.
+    const filterBtn = makeCircle('plyr-frame-filter', 'Filter', 'F');
+    setupTapButton(filterBtn, () => {
+        if (typeof window.startFullscreenFilterEdit === 'function') window.startFullscreenFilterEdit();
+    });
+
+    // 2 - basket modal (was the FLS top-left triple tap)
+    const basketBtn = makeCircle('plyr-frame-basket', 'Basket', 'B');
+    setupTapButton(basketBtn, () => {
+        if (typeof window.showPlayerBasketModal === 'function') window.showPlayerBasketModal();
+    });
+
+    // 3 - bookmark modal (took over the old orange play/pause circle)
+    const bookmarkBtn = makeCircle('plyr-frame-bookmark', 'Bookmarks', 'BM');
+    setupTapButton(bookmarkBtn, () => {
+        if (typeof window.showPlayerBookmarkModal === 'function') window.showPlayerBookmarkModal();
+    });
+
+    // 4 - score picker (was the FLS bottom-left triple tap)
+    const scoreBtn = makeCircle('plyr-frame-score', 'Score', '★');
+    setupTapButton(scoreBtn, () => {
+        if (typeof window.scrayOpenScoreModal === 'function') window.scrayOpenScoreModal();
+    });
+
+    // 5 - rename modal, the same one the FLS title bar opens
+    const renameBtn = makeCircle('plyr-frame-rename', 'Rename', 'RN');
+    setupTapButton(renameBtn, () => {
+        const v = window.currentPlayingVideo;
+        if (!v || typeof window.showRenameModal !== 'function') return;
+        Promise.resolve(window.showRenameModal(v))
+            .catch(err => console.error('[pause-menu] rename modal failed:', err));
+    });
+
+    // 6 / 7 - unchanged jog buttons, now carrying visible labels
+    const leftBtn = makeCircle('plyr-frame-step-left', 'Previous frame', '−');
     attachFrameStepHoldHandlers(leftBtn, -1);
 
-    const rightBtn = document.createElement('button');
-    rightBtn.className = 'plyr-frame-step plyr-frame-step-right';
-    rightBtn.setAttribute('aria-label', 'Next frame');
+    const rightBtn = makeCircle('plyr-frame-step-right', 'Next frame', '+');
     attachFrameStepHoldHandlers(rightBtn, 1);
 
-    group.appendChild(playPauseBtn);
+    group.appendChild(filterBtn);
+    group.appendChild(basketBtn);
+    group.appendChild(bookmarkBtn);
+    group.appendChild(scoreBtn);
+    group.appendChild(renameBtn);
     group.appendChild(leftBtn);
     group.appendChild(rightBtn);
     wrapper.appendChild(group);
+
+    // Dimension lines sitting directly above the circles, marking out which
+    // slice of the FLS picture does what on a double tap. Purely decorative -
+    // pointer-events:none in CSS - and the percentages below MUST stay in
+    // step with the landscape branch of handleDoubleTap: middle third is
+    // play/pause, then the right third splits into a minus sixth and a plus
+    // sixth. Change one, change the other.
+    if (!wrapper.querySelector('.fls-tap-guides')) {
+        const guides = document.createElement('div');
+        guides.className = 'fls-tap-guides';
+        [
+            ['33.333%', '33.333%'],
+            ['66.667%', '16.667%'],
+            ['83.333%', '16.667%']
+        ].forEach(([left, width]) => {
+            const seg = document.createElement('div');
+            seg.className = 'fls-tap-guide';
+            seg.style.left = left;
+            seg.style.width = width;
+            guides.appendChild(seg);
+        });
+        wrapper.appendChild(guides);
+    }
+
+    // The group is a pause menu now, so it needs the paused state to be
+    // correct the moment it is built - not only on the next play/pause event.
+    if (typeof window.scraySyncPausedClass === 'function') window.scraySyncPausedClass();
 
     console.log('Frame-step buttons attached');
 }
@@ -3220,10 +3372,14 @@ function attachBasketQuickButton() {
 
     const btn = document.createElement("button");
     btn.className = "plyr__control plyr-basket-quick";
-    btn.textContent = 'B';
-    btn.title = 'View basket';
+    // The basket moved to its own pause-menu circle, so this slot is free.
+    // Class name left alone deliberately: it is load-bearing across about
+    // eight selectors in style.css (sizing, FLS visibility, row ordering),
+    // and renaming it buys nothing behavioural.
+    btn.textContent = 'M>';
+    btn.title = 'Jump to next bookmark';
     btn.onclick = (e) => {
-        showPlayerBasketModal();
+        window.scrayNextBookmark?.();
         e.currentTarget.blur();
     };
 
@@ -4679,6 +4835,22 @@ window.plyrPlayer.on('playing', () => {
 window.plyrPlayer.on('error', endVideoLoadHold);
 window.plyrPlayer.on('canplay', () => window.scrayApplyPendingStartAt?.('canplay'));
 
+// Pause-menu gate. The six circles in .plyr-frame-step-group are only
+// available while the video is actually paused, so the paused state is
+// mirrored onto the body for CSS to key off. Nothing else's visibility
+// rules are touched - every other element keeps the rules it already had.
+function scraySyncPausedClass() {
+    const paused = !window.plyrPlayer || !!window.plyrPlayer.paused;
+    document.body.classList.toggle('scray-paused', paused);
+}
+window.scraySyncPausedClass = scraySyncPausedClass;
+// 'play' fires the instant togglePlay() is called, which is what makes the
+// circles vanish immediately rather than waiting for the first decoded frame.
+['play', 'playing', 'pause', 'ended', 'emptied', 'loadedmetadata'].forEach(evt => {
+    window.plyrPlayer.on(evt, scraySyncPausedClass);
+});
+scraySyncPausedClass();
+
 // Recreate on source change (new video loaded)
 let _loadedMetadataFireCount = 0;
 window.plyrPlayer.on('loadedmetadata', () => {
@@ -5658,33 +5830,19 @@ function setupDoubleTapHandler() {
              && window.innerWidth <= 1024
              && tX < tW / 3;
 
-         // ⚙️ Left third, split top-to-bottom AS SEEN IN LANDSCAPE (the
-         // remap above has already converted forced-rotation coordinates,
-         // so this is the same maths in both real and forced landscape):
-         //   top third    -> basket modal (what triple tap always did)
-         //   middle third -> bookmark modal
-         //   bottom third -> score picker
-         let flsZone = null;
-         if (inFlsLeftThird) {
-             const vFrac = tY / tH;
-             flsZone = vFrac < (1 / 3) ? 'basket'
-                     : vFrac < (2 / 3) ? 'bookmark'
-                     : 'score';
-         }
+         // ⚙️ The old top/middle/bottom split is gone - basket, bookmark
+         // and score all live on the pause-menu circles now. The whole left
+         // third is one zone, and a triple tap anywhere in it jumps to the
+         // next bookmark. tY/tH are left computed above deliberately: they
+         // cost nothing and re-splitting this zone later needs them back.
+         const flsZone = inFlsLeftThird ? 'nextbookmark' : null;
 
          const firedZone = window.scrayTrackTripleTap?.(flsZone);
          if (firedZone) {
              e.stopPropagation();
              e.preventDefault();
              lastTap = 0;
-             if (firedZone === 'score') {
-                 openScoreModalForCurrentVideo();
-             } else if (firedZone === 'bookmark') {
-                 if (typeof showPlayerBookmarkModal === 'function') showPlayerBookmarkModal();
-             } else {
-                 // Same modal the FLS title bar opens.
-                 if (typeof showPlayerBasketModal === 'function') showPlayerBasketModal();
-             }
+             window.scrayNextBookmark?.();
              return;
          }
      }

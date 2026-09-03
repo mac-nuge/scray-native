@@ -1925,12 +1925,16 @@ transition: opacity 0.3s ease;
 }
 
 .plyr-frame-step {
-width: 32px;
-height: 32px;
-min-width: 32px;
-min-height: 32px;
-max-width: 32px;
-max-height: 32px;
+/* ⚙️ Circle diameter. All six values move together - the min/max pair is
+   there to survive the global mobile `button { width: 100% }` rule.
+   48px is a comfortable thumb target; going much past this starts eating
+   into the picture, since seven circles at 48px + 8px gaps is already 384px. */
+width: 48px;
+height: 48px;
+min-width: 48px;
+min-height: 48px;
+max-width: 48px;
+max-height: 48px;
 border-radius: 50%;
 background: rgba(0, 0, 0, 0.18);
 border: none;
@@ -1939,6 +1943,35 @@ box-sizing: border-box;
 pointer-events: auto;
 -webkit-tap-highlight-color: transparent;
 touch-action: manipulation;
+/* Every circle carries a label now (B, bookmark, star, RN, -, +), so the
+   button needs to behave as a centring box rather than a bare dot. */
+display: flex;
+align-items: center;
+justify-content: center;
+/* ⚙️ Glyph opacity. The circles are a reference, not a call to action - they
+   should read as barely-there over the paused frame. */
+color: rgba(255, 255, 255, 0.4);
+font-family: inherit;
+font-size: 13px;
+font-weight: 600;
+line-height: 1;
+user-select: none;
+-webkit-user-select: none;
+}
+
+/* BM and RN are two glyphs in a round hole - a touch smaller than the
+   single-character labels so they don't touch the edges. */
+.plyr-frame-bookmark,
+.plyr-frame-rename {
+font-size: 15px;
+letter-spacing: -0.3px;
+}
+
+/* -/+ read better a shade larger than the letter labels. */
+.plyr-frame-step-left,
+.plyr-frame-step-right {
+font-size: 22px;
+font-weight: 500;
 }
 
 .plyr-frame-step:active {
@@ -1990,9 +2023,11 @@ pointer-events: auto !important;
 transform: none !important;
 }
 
+/* .plyr-frame-step-group deliberately dropped from this list: it is a pause
+   menu now, gated on body.scray-paused, and forcing it visible here would
+   also out-specify that gate. */
 body.scray-video-loading .plyr--hide-controls .fls-video-title,
-body.scray-video-loading .plyr--hide-controls .fls-filter-pill,
-body.scray-video-loading .plyr--hide-controls .plyr-frame-step-group {
+body.scray-video-loading .plyr--hide-controls .fls-filter-pill {
 opacity: 1 !important;
 pointer-events: auto !important;
 }
@@ -2007,8 +2042,24 @@ pointer-events: none;
    left, since controls sit centered near the bottom on narrow screens. */
 @media (max-width: 768px) and (orientation: portrait) {
 .plyr-frame-step-group {
-    right: 40px !important;
-    bottom: 50px !important;
+    right: 20px !important;
+    bottom: 62px !important;
+    gap: 5px !important;
+}
+/* ⚙️ Seven 38px circles is 314px - wider than a docked portrait player.
+   30px + 5px gaps brings the row to 240px, which clears a 360px viewport. */
+.plyr-frame-step-group .plyr-frame-step {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    max-width: 34px;
+    max-height: 34px;
+    font-size: 13px;
+}
+.plyr-frame-step-group .plyr-frame-bookmark,
+.plyr-frame-step-group .plyr-frame-rename {
+    font-size: 10px;
 }
 }
 
@@ -2016,18 +2067,90 @@ pointer-events: none;
    clear the custom control row (X, H<, B, BM, > etc) which sits centered
    near the bottom in this mode. Shifted an extra 80px left (2.5x circle
    width) from the previous value. */
+/* ⚙️ Six circles now (232px at 32px + 8px gaps) instead of three (112px),
+   growing leftward from this right anchor. Pulled in from 140px so the row
+   does not run into the FLS title strip on the left edge. */
 body.manual-rotate-landscape .plyr-frame-step-group {
-right: 140px !important;
-bottom: 70px !important;
+/* ⚙️ Seven 48px circles + 8px gaps = 384px, so at 170px the row runs from
+   170px to 554px in from the right edge - off the right margin, but still
+   sitting well right of centre on a ~844px FLS picture. */
+right: 170px !important;
+/* ⚙️ Raised clear of the control row. The guides no longer track this value
+   - they anchor to the top of the picture now - so this moves on its own. */
+bottom: 96px !important;
 }
 
-/* Play/pause circle - same size/shape as frame-step circles, orange tint */
-.plyr-frame-playpause {
-background: rgba(255, 140, 0, 0.18);
+/* The orange play/pause circle is gone - the bookmark circle took its slot,
+   and every circle now shares the same neutral tint from .plyr-frame-step.
+
+   PAUSE MENU GATE: the six circles exist only while the video is paused.
+   body.scray-paused is maintained by scraySyncPausedClass() in player.js.
+   Everything else keeps the visibility rules it already had - the display:none
+   rules above (desktop, mini-player, MPFS) still win over this, as they should. */
+body:not(.scray-paused) .plyr-frame-step-group {
+opacity: 0 !important;
+pointer-events: none !important;
 }
 
-.plyr-frame-playpause:active {
-background: rgba(255, 140, 0, 0.4);
+/* =========================================
+   FLS DOUBLE-TAP ZONE GUIDES
+   Dimension lines directly above the pause-menu circles showing which slice
+   of the picture is double-tap play/pause, back seek and forward seek. The
+   left third is left blank on purpose - it has no double-tap action, only
+   the triple-tap next-bookmark gesture.
+   These live inside .plyr__video-wrapper, which is inside the rotated FLS
+   container, so their left/width percentages sit in the SAME coordinate
+   space the tap-zone maths uses. Positions are set inline in player.js.
+   ========================================= */
+.fls-tap-guides {
+position: absolute;
+left: 0;
+right: 0;
+/* ⚙️ Tucked under the clock at the top of the picture. #plyr-uk-clock sits at
+   top:8px inside .plyr and is roughly 16px tall; this wrapper is inset a
+   further 3px inside that, so 26px clears it with a small gap. One value to
+   change if the clock ever moves - the circles no longer affect this. */
+top: 26px;
+bottom: auto;
+height: 14px;
+z-index: 89;
+pointer-events: none;
+display: none;
+opacity: 1;
+transition: opacity 0.3s ease;
+}
+
+/* FLS only - these describe the FLS gesture map specifically. */
+body.manual-rotate-landscape .fls-tap-guides {
+display: block;
+}
+
+/* Fades on Plyr's own controls fade, same as the main control row. */
+.plyr--hide-controls .fls-tap-guides {
+opacity: 0;
+}
+
+/* ⚙️ Bare dimension lines - no labels. The end ticks and the rule between
+   them share one alpha; change both together or the ticks pop out. */
+.fls-tap-guide {
+position: absolute;
+top: 0;
+height: 100%;
+box-sizing: border-box;
+border-left: 1px solid rgba(255, 255, 255, 0.22);
+border-right: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+/* The rule between the two end ticks. */
+.fls-tap-guide::before {
+content: '';
+position: absolute;
+left: 0;
+right: 0;
+top: 50%;
+height: 1px;
+margin-top: -0.5px;
+background: rgba(255, 255, 255, 0.22);
 }
 
 /* =========================================
@@ -2350,7 +2473,10 @@ user-select: text !important;
 }
 
 /* Quick-action buttons: random video (X), play-through-history (H<),
-   basket quick-view (B), bookmark quick-add (BM), and play-next (>) */
+   next-bookmark (M>), bookmark quick-add (BM), and play-next (>).
+   NOTE: the M> button still carries the class .plyr-basket-quick - it used to
+   be the basket "B" button, and the class is referenced by enough selectors
+   in this file that renaming it is a bigger job than it looks. */
 .plyr-random-video,
 .plyr-history-sequence,
 .plyr-play-next,
@@ -3366,6 +3492,19 @@ body.manual-rotate-landscape .basket-json-modal-content {
   width: 90vh;
   max-width: 90vh;
   max-height: 90vw;
+}
+
+/* ⚙️ FLS only: every modal reachable from the pause menu drops to 50% so the
+   paused frame underneath stays readable while scoring, bookmarking or
+   renaming. Applied to the whole overlay (backdrop + panel) as one unit, so
+   the backdrop dims proportionally too. .basket-json-modal covers both the
+   rename and bookmarks modals. */
+body.manual-rotate-landscape .basket-json-modal,
+body.manual-rotate-landscape #playerBasketModal,
+body.manual-rotate-landscape .score-context-menu {
+  /* ⚙️ 0.5 was too ghostly to read against a busy frame. Single knob for all
+     three FLS modals - drop it back toward 0.5 if the frame matters more. */
+  opacity: 0.75;
 }
 
 /* .file-operation-modal was referenced by several modals (clear

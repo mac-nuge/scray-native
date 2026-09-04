@@ -1991,15 +1991,16 @@ body.portrait-mini .plyr-frame-step-group {
 display: none !important;
 }
 
-/* ⚙️ Hide the three circle buttons (play/pause, frame back, frame forward)
-   in ordinary MP portrait fullscreen. FLS is deliberately EXCLUDED via
-   :not(.manual-rotate-landscape) - the device is still physically portrait
-   during forced landscape, so body.portrait-fullscreen is set then too, and
-   the circles must stay available there.
-   Keyed off body.portrait-fullscreen (set from updatePlayerStateClass in
-   player.js) rather than .plyr--fullscreen, because Plyr runs CSS-only
-   fallback fullscreen here and applies .plyr--fullscreen-fallback instead. */
-body.portrait-fullscreen:not(.manual-rotate-landscape) .plyr-frame-step-group {
+/* ⚙️ Hide the circle buttons in MPB - the docked in-page player. Seven
+   circles crowd a small box, and the pause menu belongs to the two
+   full-screen modes where there is room for it.
+   This used to hide them in MPFS instead; that was the wrong way round.
+   Keyed off body.portrait-inline (set from updatePlayerStateClass in
+   player.js). The full state set is portrait/landscape x
+   fullscreen/inline/mini - only the portrait inline case is excluded here,
+   since MPFS and FLS both want the menu and the mini players are already
+   covered above. */
+body.portrait-inline .plyr-frame-step-group {
 display: none !important;
 }
 
@@ -2087,6 +2088,17 @@ pointer-events: none !important;
 }
 }
 
+/* ⚙️ MPFS: the portrait media query above sets bottom:62px, which was tuned
+   for the docked MPB player and leaves the circles behind the fullscreen
+   control row. In fullscreen the controls sit at 6vh with the permanent
+   progress bar above them at 4vh, so the row's top edge lands near 100px on
+   an 812pt screen - 118px clears it with a margin.
+   Higher specificity than the media-query rule (three classes vs one), so it
+   wins regardless of source order; media queries add no specificity. */
+body.portrait-fullscreen:not(.manual-rotate-landscape) .plyr-frame-step-group {
+    bottom: 118px !important;
+}
+
 /* ⚙️ Forced landscape (manual rotate): raised and shifted left more, to
    clear the custom control row (X, H<, B, BM, > etc) which sits centered
    near the bottom in this mode. Shifted an extra 80px left (2.5x circle
@@ -2137,16 +2149,49 @@ left: 0;
 right: 0;
 top: 0;
 bottom: 0;
-z-index: 89;
+/* ⚙️ Stops short of the bottom of the picture on purpose. The segments only
+   run from top:26px to bottom:28% and the tiers sit at 33%/66%, so nothing is
+   drawn down there - and .plyr__controls carries no z-index of its own, which
+   means a full-height box at 89 paints straight over the control row. Better
+   not to be there at all than to rely on pointer-events to pass taps through. */
+bottom: 25%;
+/* Below .plyr-frame-step-group (90) and below the bookmark rail (71 inside
+   the controls). The guides are a backdrop annotation - nothing should ever
+   have to compete with them. */
+z-index: 45;
 pointer-events: none;
 display: none;
 opacity: 1;
 transition: opacity 0.3s ease;
 }
 
-/* FLS only - these describe the FLS gesture map specifically. */
-body.manual-rotate-landscape .fls-tap-guides {
+/* Belt and braces: pointer-events:none on the container already covers these
+   by inheritance, but a child re-enabling itself is the exact trap the circle
+   buttons fell into (.plyr-frame-step sets pointer-events:auto). Stated
+   explicitly so it can't happen here. */
+.fls-tap-guide,
+.mpfs-tap-guide,
+.fls-tap-tier,
+.mpfs-tap-tier {
+pointer-events: none !important;
+}
+
+/* Both fullscreen modes get guides. Which SET is drawn is settled further
+   down - each mode shows only the segments describing its own gesture map. */
+body.manual-rotate-landscape .fls-tap-guides,
+body.portrait-fullscreen:not(.manual-rotate-landscape) .fls-tap-guides {
 display: block;
+}
+
+/* ⚙️ In MPFS the container IS the gesture band - ceiling a third down, floor
+   just above the circles (118px offset + 34px tall). Bounding the container
+   rather than each segment means the tier lines' inline 33.333%/66.667% now
+   measure the BAND, so the JS that places them needs no MPFS special case.
+   These two values must match MPFS_BAND_TOP_FRAC and MPFS_BAND_BOTTOM_PX in
+   player.js, or the drawn grid and the live zones drift apart. */
+body.portrait-fullscreen:not(.manual-rotate-landscape) .fls-tap-guides {
+top: 33.333%;
+bottom: 152px;
 }
 
 /* Fades on Plyr's own controls fade, same as the main control row. */
@@ -2154,9 +2199,30 @@ display: block;
 opacity: 0;
 }
 
+/* Only the set matching the current mode is drawn. Both live in the DOM at
+   all times - see attachFrameStepButtons - so a mode change needs no rebuild,
+   just these four rules. */
+.fls-tap-guide,
+.fls-tap-tier,
+.mpfs-tap-guide,
+.mpfs-tap-tier {
+display: none;
+}
+
+body.manual-rotate-landscape .fls-tap-guide,
+body.manual-rotate-landscape .fls-tap-tier {
+display: block;
+}
+
+body.portrait-fullscreen:not(.manual-rotate-landscape) .mpfs-tap-guide,
+body.portrait-fullscreen:not(.manual-rotate-landscape) .mpfs-tap-tier {
+display: block;
+}
+
 /* ⚙️ Bare dimension lines - no labels. Every rule here shares one alpha;
    change them together or one set pops out from the rest. */
-.fls-tap-guide {
+.fls-tap-guide,
+.mpfs-tap-guide {
 position: absolute;
 /* ⚙️ Top edge tucks under the clock (#plyr-uk-clock is at top:8px inside
    .plyr and ~16px tall; this wrapper is inset a further 3px). */
@@ -2171,7 +2237,8 @@ border-right: 1px solid rgba(255, 255, 255, 0.22);
 }
 
 /* The rule joining the two end ticks, along the top of each segment. */
-.fls-tap-guide::before {
+.fls-tap-guide::before,
+.mpfs-tap-guide::before {
 content: '';
 position: absolute;
 left: 0;
@@ -2181,16 +2248,29 @@ height: 1px;
 background: rgba(255, 255, 255, 0.22);
 }
 
-/* Tier dividers. They span the seek third only (66.667% to the right edge) -
-   the play/pause third has no vertical sub-split, so drawing them across it
-   would suggest an interaction that isn't there. */
-.fls-tap-tier {
+/* Tier dividers, drawn across the seek zone only - the play/pause and
+   fullscreen zones have no vertical sub-split, and running the lines through
+   them would suggest an interaction that isn't there. The seek zone is the
+   right THIRD in FLS and the right HALF in MPFS, which is the only
+   difference between these two rules. */
+.fls-tap-tier,
+.mpfs-tap-tier {
 position: absolute;
-left: 66.667%;
 right: 0;
 height: 1px;
 margin-top: -0.5px;
 background: rgba(255, 255, 255, 0.22);
+}
+
+.fls-tap-tier { left: 66.667%; }
+.mpfs-tap-tier { left: 50%; }
+
+/* The shared segment rule insets from the top (to clear the FLS clock) and
+   stops short at the bottom. In MPFS neither applies: the container is
+   already the band, so the segments fill it edge to edge. */
+body.portrait-fullscreen:not(.manual-rotate-landscape) .mpfs-tap-guide {
+top: 0;
+bottom: 0;
 }
 
 /* =========================================
@@ -2607,15 +2687,23 @@ background: rgba(255, 255, 255, 0.3) !important;
 @media (max-width: 768px) and (orientation: portrait) {
 body:not(.manual-rotate-landscape) .plyr-random-video,
 body:not(.manual-rotate-landscape) .plyr-history-sequence,
-body:not(.manual-rotate-landscape) .plyr-play-next,
-body:not(.manual-rotate-landscape) .plyr-basket-quick {
+body:not(.manual-rotate-landscape) .plyr-play-next {
     display: none !important;
 }
 
-/* BM stays hidden in MPB inline - the now-playing strip's own BM button is
-   the way in there - but MPFS has neither that strip nor a triple-tap zone,
-   so the player control is how the bookmark modal is reached in that mode. */
-body:not(.manual-rotate-landscape):not(.portrait-fullscreen) .plyr-bookmark-quick {
+/* M> (still classed .plyr-basket-quick - see the note further up) now shows
+   in MPFS as well as FLS, so the two fullscreen modes have the same
+   next-bookmark control in the same slot. Hidden in MPB only, where the row
+   is too tight for it. */
+body:not(.manual-rotate-landscape):not(.portrait-fullscreen) .plyr-basket-quick {
+    display: none !important;
+}
+
+/* BM gives up its slot to M> in MPFS - the bookmark modal is on the pause-menu
+   circle there now, which it wasn't when this exception was written. In MPB
+   the now-playing strip's own BM button is the way in, so BM is hidden in
+   both. FLS hides it separately, further up. */
+body:not(.manual-rotate-landscape) .plyr-bookmark-quick {
     display: none !important;
 }
 
@@ -5051,8 +5139,11 @@ transform: translateX(-50%) scale(0.714);
 }
 
 /* No gap to print into in the mini players. */
+/* No room to print into in the mini players, and too cramped to read in the
+   docked MPB player. */
 body.landscape-mini .bookmark-marker-label,
-body.portrait-mini .bookmark-marker-label {
+body.portrait-mini .bookmark-marker-label,
+body.portrait-inline .bookmark-marker-label {
 display: none;
 }
 

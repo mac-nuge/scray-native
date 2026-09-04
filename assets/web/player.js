@@ -2930,37 +2930,62 @@ function attachFrameStepButtons() {
     group.appendChild(rightBtn);
     wrapper.appendChild(group);
 
-    // Dimension lines sitting directly above the circles, marking out which
-    // slice of the FLS picture does what on a double tap. Purely decorative -
-    // pointer-events:none in CSS - and the percentages below MUST stay in
-    // step with the landscape branch of handleDoubleTap: middle third is
-    // play/pause, then the right third splits into a minus sixth and a plus
-    // sixth. Change one, change the other.
+    // Dimension lines marking out which slice of the picture does what on a
+    // double tap. Purely decorative - pointer-events:none in CSS.
+    //
+    // BOTH zone maps are built into the DOM and CSS shows whichever matches
+    // the current mode. The alternative - rebuilding on every mode change -
+    // means finding a hook for each transition and getting the teardown
+    // right; two static sets and a class selector cost nothing by comparison.
+    //
+    // These percentages MUST stay in step with handleDoubleTap:
+    //   FLS  (landscape branch): middle third play/pause, right third splits
+    //        into a minus sixth and a plus sixth.
+    //   MPFS (portrait branch):  quarters - fullscreen, play/pause, minus,
+    //        plus.
+    // Change one, change the other.
     if (!wrapper.querySelector('.fls-tap-guides')) {
         const guides = document.createElement('div');
         guides.className = 'fls-tap-guides';
-        [
-            ['33.333%', '33.333%'],
-            ['66.667%', '16.667%'],
-            ['83.333%', '16.667%']
-        ].forEach(([left, width]) => {
+
+        const addSegments = (cls, spec) => spec.forEach(([left, width]) => {
             const seg = document.createElement('div');
-            seg.className = 'fls-tap-guide';
+            seg.className = cls;
             seg.style.left = left;
             seg.style.width = width;
             guides.appendChild(seg);
         });
 
-        // Horizontal rules across the seek third, marking the 30s / 10s / 3s
-        // tiers. They sit at exactly 1/3 and 2/3 of the FULL picture height
-        // because that is what handleDoubleTap's vFrac divides - which is why
+        // FLS: play/pause third, then the minus and plus sixths.
+        addSegments('fls-tap-guide', [
+            ['33.333%', '33.333%'],
+            ['66.667%', '16.667%'],
+            ['83.333%', '16.667%']
+        ]);
+
+        // MPFS: four quarters. Q1 is included even though it is an action
+        // rather than a seek - the boundary is worth seeing, since Q1 toggles
+        // fullscreen and is the one zone that changes mode on a mis-tap.
+        addSegments('mpfs-tap-guide', [
+            ['0%', '25%'],
+            ['25%', '25%'],
+            ['50%', '25%'],
+            ['75%', '25%']
+        ]);
+
+        // Horizontal rules marking the 30s / 10s / 3s tiers. They sit at
+        // exactly 1/3 and 2/3 of the FULL picture height because that is what
+        // handleDoubleTap's vFrac divides in both branches - which is why
         // .fls-tap-guides spans the whole wrapper rather than just the strip
-        // under the clock. Change these and change vFrac to match.
+        // under the clock. The two classes differ only in where they start:
+        // the seek zone is the right third in FLS, the right half in MPFS.
         ['33.333%', '66.667%'].forEach(top => {
-            const tier = document.createElement('div');
-            tier.className = 'fls-tap-tier';
-            tier.style.top = top;
-            guides.appendChild(tier);
+            ['fls-tap-tier', 'mpfs-tap-tier'].forEach(cls => {
+                const tier = document.createElement('div');
+                tier.className = cls;
+                tier.style.top = top;
+                guides.appendChild(tier);
+            });
         });
 
         wrapper.appendChild(guides);
@@ -6056,11 +6081,38 @@ if (false) {
     //   Q4 (75-100%) plus seeks  (+3 / +10 / +30, bottom to top)
     // The seek pair used to occupy the middle and right THIRDS; squeezing
     // them into the right half is what frees Q2 up.
+    // ⚙️ MPFS confines every double-tap gesture to a horizontal BAND: ceiling
+    // a third of the way down, floor just above the pause-menu circles.
+    // Outside the band a double tap does nothing at all. MPB keeps the full
+    // height - it has no circles and far less room to give away.
+    //
+    // MPFS_BAND_BOTTOM_PX MUST stay in step with style.css: it is the circles'
+    // bottom offset (118px) plus their height (34px), and the MPFS guide
+    // overlay is bounded by the same two numbers. Change one, change all three.
+    const MPFS_BAND_TOP_FRAC = 1 / 3;
+    const MPFS_BAND_BOTTOM_PX = 152;
+
+    // manualRotationActive is already false on this branch - FLS takes the
+    // landscape path above - so portrait-fullscreen alone identifies MPFS.
+    const inMpfs = document.body.classList.contains('portrait-fullscreen');
+
+    const bandTop = inMpfs ? effRect.height * MPFS_BAND_TOP_FRAC : 0;
+    const bandBottom = inMpfs
+        ? Math.max(bandTop + 1, effRect.height - MPFS_BAND_BOTTOM_PX)
+        : effRect.height;
+
+    if (effTapY < bandTop || effTapY > bandBottom) return;
+
     const q1 = effRect.width / 4;
     const q2 = effRect.width / 2;
     const q3 = (effRect.width / 4) * 3;
-    const topThird = effRect.height / 3;
-    const bottomThird = (effRect.height / 3) * 2;
+    // Tiers divide THE BAND, not the picture - move the band without this and
+    // the 30/10/3 boundaries stay behind. In MPB the band is the full height,
+    // so intoBand === effTapY and this reduces to what it was.
+    const bandH = bandBottom - bandTop;
+    const intoBand = effTapY - bandTop;
+    const topThird = bandH / 3;
+    const bottomThird = (bandH / 3) * 2;
     
     if (effTapX < q1) {
         // Left third toggles fullscreen. Which KIND of fullscreen depends on
@@ -6094,11 +6146,11 @@ if (false) {
         }
     } else if (effTapX > q3) {
         // Q4: plus seeks, 3 vertical sections (bottom to top: +3s, +10s, +30s)
-        if (effTapY > bottomThird) {
+        if (intoBand > bottomThird) {
             // Bottom section: +3s
             window.plyrPlayer.currentTime = Math.min(window.plyrPlayer.duration, window.plyrPlayer.currentTime + 3);
             showPlayerFeedback(`+3s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-right');
-        } else if (effTapY > topThird) {
+        } else if (intoBand > topThird) {
             // Middle section: +10s
             window.plyrPlayer.currentTime = Math.min(window.plyrPlayer.duration, window.plyrPlayer.currentTime + 10);
             showPlayerFeedback(`+10s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-right');
@@ -6109,11 +6161,11 @@ if (false) {
         }
     } else {
         // Q3: minus seeks, 3 vertical sections (bottom to top: -3s, -10s, -30s)
-        if (effTapY > bottomThird) {
+        if (intoBand > bottomThird) {
             // Bottom section: -3s
             window.plyrPlayer.currentTime = Math.max(0, window.plyrPlayer.currentTime - 3);
             showPlayerFeedback(`-3s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-left');
-        } else if (effTapY > topThird) {
+        } else if (intoBand > topThird) {
             // Middle section: -10s
             window.plyrPlayer.currentTime = Math.max(0, window.plyrPlayer.currentTime - 10);
             showPlayerFeedback(`-10s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-left');

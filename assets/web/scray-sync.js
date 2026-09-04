@@ -235,7 +235,14 @@ async function apiCall(action, { method = "GET", body = null, params = {} } = {}
       body: body ? JSON.stringify(body) : undefined,
       signal: ctl.signal,
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      // Every fail() in api.php puts a plain-English reason in `error`. Throwing
+      // the bare status discarded all of it and left genuinely different faults
+      // - a missing row, a bad payload, an unknown action - looking identical.
+      let reason = "";
+      try { reason = (await res.json()).error || ""; } catch { /* not JSON */ }
+      throw new Error(reason ? `HTTP ${res.status}: ${reason}` : `HTTP ${res.status}`);
+    }
     const json = await res.json();
     if (!json.ok) throw new Error(json.error || "api error");
     return json;

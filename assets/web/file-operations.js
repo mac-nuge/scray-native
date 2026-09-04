@@ -7,6 +7,53 @@
 /**
 * Show rename modal for a video
 */
+/**
+ * Split a filename into selectable chunks: runs of letters, runs of digits,
+ * runs of punctuation, and camelCase boundaries. Lifted out of showRenameModal
+ * so the stash modal's search-term builder breaks names exactly the way the
+ * rename word-selector does - two different splitters would be two different
+ * sets of chunks for the same file, which is worse than no builder at all.
+ *
+ * Returns [{ word, start, end, isSeparator }] in source order.
+ */
+window.scrayParseTextIntoWords = function (text) {
+    text = String(text ?? '');
+    const words = [];
+    let currentWord = '';
+    let startIndex = 0;
+    let currentType = null;                       // 'letter' | 'number' | 'special'
+
+    const typeOf = (c) => /[a-zA-Z]/.test(c) ? 'letter' : (/[0-9]/.test(c) ? 'number' : 'special');
+    const push = (end) => {
+        if (currentWord === '') return;
+        words.push({ word: currentWord, start: startIndex, end,
+                     isSeparator: currentType === 'special' });
+    };
+
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const charType = typeOf(char);
+        const prev = i > 0 ? text[i - 1] : null;
+
+        // lowercase -> uppercase inside a run of letters is a word boundary too,
+        // otherwise "LucyBelle" comes back as one unselectable lump.
+        const camel = prev && /[a-z]/.test(prev) && /[A-Z]/.test(char)
+                      && charType === 'letter' && currentType === 'letter';
+
+        if (currentType === null) {
+            currentType = charType; currentWord = char; startIndex = i;
+        } else if (charType === 'special' || currentType === 'special'
+                   || charType !== currentType || camel) {
+            push(i);
+            currentType = charType; currentWord = char; startIndex = i;
+        } else {
+            currentWord += char;
+        }
+    }
+    push(text.length);
+    return words;
+};
+
 async function showRenameModal(video) {
 const currentName = video.filename || '';
 const extension = currentName.includes('.') ? '.' + currentName.split('.').pop() : '';
@@ -112,6 +159,13 @@ tags.forEach(tag => {
 
 // Parse text into selectable words
 function parseTextIntoWords(text) {
+// Delegates to the shared top-level implementation, so the stash modal's
+// search-term builder and this word-selector can never drift apart. The
+// original body is left below it, unreachable and renamed, rather than
+// deleting sixty lines nothing else depends on - delete at leisure.
+return window.scrayParseTextIntoWords(text);
+}
+function parseTextIntoWordsOriginal(text) {
 const words = [];
 let currentWord = '';
 let startIndex = 0;
@@ -3333,16 +3387,17 @@ async function showStashModal(video) {
              + ':' + String(s).padStart(2, '0');
     };
 
-    // StashDB's own search page, seeded with the filename minus its extension
-    // and separators. This is what the "Search StashDB" button opens and what
-    // gets dropped into the URL box when no fingerprint match came back.
-    const searchTerm = String(video.filename || '')
+    // Seed for the search-term builder in the not-found panel. Separators are
+    // deliberately KEPT here - the word-selector needs them to break on, and it
+    // renders them greyed out for context. Only the extension and the usual
+    // encode noise come out, because neither is ever a useful search term.
+    const searchSeed = String(video.filename || '')
         .replace(/\.[^.]+$/, '')
-        .replace(/[._\-\[\]()+]+/g, ' ')
         .replace(/\b(?:\d{3,4}p|4k|x26[45]|h26[45]|hevc|aac|web-?dl|webrip|hdrip|bluray|xxx)\b/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();
-    const searchUrl = 'https://stashdb.org/search?q=' + encodeURIComponent(searchTerm);
+    const stashSearchUrl = (term) =>
+        'https://stashdb.org/search?q=' + encodeURIComponent(String(term || '').trim());
 
     // In Native this hands the URL to ScrayBrowser so it joins the same tab
     // list and cookie jar as the Picker/DB buttons. Everywhere else it is a
@@ -3409,14 +3464,38 @@ async function showStashModal(video) {
         const notes = (r.notes || []).map(n => '<p style="opacity:.75;margin:4px 0;">' + esc(n) + '</p>').join('');
 
         if (!r.stash_id) {
+            // No fingerprint means stash_scene found no OneDrive instance for
+            // this key, and stash_submit looks up the same row before it does
+            // anything - so it would 404 whatever URL you gave it. Local-only
+            // files land here. Say so rather than offering a dead button.
+            if (!r.oshash) {
+                body.innerHTML = (notes || '<p>No match.</p>') +
+                    '<p style="opacity:.8;margin-top:10px;">There is no OneDrive copy of this file on ' +
+                    'record, so it has no fingerprint on the server and there is nothing for a StashDB ' +
+                    'scene id to attach to. Submitting only works for catalogued files.</p>';
+                return;
+            }
             body.innerHTML = (notes || '<p>No match.</p>') +
                 '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(128,128,128,.3);">' +
                   '<p style="margin:0 0 6px;">Found it on StashDB yourself? Paste the scene URL and this ' +
                   'file&rsquo;s fingerprint gets attached to it &mdash; which also fixes it for anyone else ' +
                   'with the same encode.</p>' +
-                  '<button id="stashSearchBtn" class="modal-btn modal-btn-secondary" ' +
-                          'style="width:100%;margin:0 0 8px;">Search StashDB for &ldquo;' +
-                          esc(searchTerm || video.filename || '') + '&rdquo;</button>' +
+                  // The same tag pills and word-selector as the rename modal, so
+                  // picking search terms works the way picking filename parts
+                  // already does. Nothing is selected to start with.
+                  '<div style="margin:0 0 8px;">' +
+                    '<div id="stashSearchTags" style="display:flex;flex-wrap:wrap;gap:6px;' +
+                         'margin-bottom:6px;"></div>' +
+                    '<div id="stashSearchWords" class="word-selector-container" ' +
+                         'style="margin-bottom:6px;"></div>' +
+                    '<div style="display:flex;gap:6px;align-items:stretch;">' +
+                      '<input id="stashSearchTerm" type="text" placeholder="Tap words or tags above" ' +
+                             'style="flex:1 1 auto;min-width:0;width:auto;margin:0;padding:6px;' +
+                             'font-size:.85rem;border:1px solid #ccc;border-radius:4px;">' +
+                      '<button id="stashSearchBtn" class="modal-btn modal-btn-secondary" ' +
+                              'style="flex:0 0 auto;width:auto;margin:0;padding:6px 14px;">Search</button>' +
+                    '</div>' +
+                  '</div>' +
                   // width:auto beats the mobile `input { width:100% }` rule, which
                   // otherwise pushes the copy button clean off the row.
                   '<div style="display:flex;gap:6px;align-items:stretch;">' +
@@ -3435,11 +3514,69 @@ async function showStashModal(video) {
             const sMsg = modal.querySelector('#stashSubmitMsg');
             const sUrl = modal.querySelector('#stashSubmitId');
 
-            // The box is deliberately left alone here: once you have found the
-            // scene, the browser's own ⤴ button writes the real scene URL into
-            // it, and a pre-seeded search URL would only be in the way.
+            // --- search-term builder ---------------------------------------
+            const termBox = modal.querySelector('#stashSearchTerm');
+            const wordBox = modal.querySelector('#stashSearchWords');
+            const tagBox  = modal.querySelector('#stashSearchTags');
+            const seedWords   = window.scrayParseTextIntoWords(searchSeed);
+            const pickedWords = new Set();   // indices into seedWords
+            const pickedTags  = new Set();   // tag strings
+
+            // Filename parts first, in the order they appear in the name, then
+            // tags in the order shown - so the term reads the way the file is
+            // named rather than the order you happened to tap in.
+            const rebuildTerm = () => {
+                termBox.value = seedWords
+                    .map((w, i) => (pickedWords.has(i) && !w.isSeparator ? w.word : ''))
+                    .filter(Boolean)
+                    .concat([...pickedTags])
+                    .join(' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            };
+
+            seedWords.forEach((w, i) => {
+                const span = document.createElement('span');
+                span.textContent = w.word;
+                span.className = w.isSeparator ? 'word-selectable word-separator' : 'word-selectable';
+                // Separators are shown for context but carry nothing, so unlike
+                // the rename modal they are not selectable - there the
+                // punctuation IS part of what you are editing.
+                if (w.isSeparator) {
+                    span.style.cursor = 'default';
+                } else {
+                    span.addEventListener('click', () => {
+                        if (pickedWords.has(i)) { pickedWords.delete(i); span.classList.remove('word-selected'); }
+                        else { pickedWords.add(i); span.classList.add('word-selected'); }
+                        rebuildTerm();
+                    });
+                }
+                wordBox.appendChild(span);
+            });
+
+            const vidTags = video.tags || [];
+            if (!vidTags.length) {
+                tagBox.innerHTML = '<span style="color:#999;font-size:.75rem;font-style:italic;">' +
+                                   'No tags on this file</span>';
+            }
+            vidTags.forEach(tag => {
+                const pill = document.createElement('span');
+                pill.className = 'rename-tag-pill';
+                pill.textContent = tag;
+                pill.addEventListener('click', () => {
+                    if (pickedTags.has(tag)) { pickedTags.delete(tag); pill.style.background = ''; }
+                    else { pickedTags.add(tag); pill.style.background = '#28a745'; }
+                    rebuildTerm();
+                });
+                tagBox.appendChild(pill);
+            });
+
+            // Typed edits stand until the next tap - the box is a real input,
+            // not a read-only preview of the selection.
             modal.querySelector('#stashSearchBtn')?.addEventListener('click', () => {
-                openNative(searchUrl);
+                const term = termBox.value.trim();
+                if (!term) { termBox.focus(); return; }
+                openNative(stashSearchUrl(term));
             });
 
             // Filled by ScrayBrowser's ⤴ button, which only appears on

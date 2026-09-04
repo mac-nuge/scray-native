@@ -266,6 +266,15 @@ console.log("scray-bugreport.js loaded");
 #scrayBugStatus { font-size: 0.8rem; min-height: 1.2em; margin-top: 10px; }
 #scrayBugStatus.bad { color: #ff7a6b; }
 #scrayBugStatus.good { color: #7ddb8a; }
+#scrayBugTypeToggle { display: flex; gap: 8px; }
+#scrayBugTypeToggle button {
+  flex: 1 1 0; padding: 11px 8px; border-radius: 6px;
+  border: 1px solid #454545; background: #2a2a2a; color: #9a9a9a;
+  font-size: 0.92rem; font-family: inherit; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+#scrayBugTypeToggle button.on { background: #2d6cdf; border-color: #2d6cdf; color: #fff; font-weight: 600; }
 `;
     document.head.appendChild(el);
   }
@@ -292,11 +301,12 @@ console.log("scray-bugreport.js loaded");
       <div id="scrayBugPanel" role="dialog" aria-modal="true">
         <h2>Report an issue</h2>
         <div class="row">
-          <label for="scrayBugType">Type</label>
-          <select id="scrayBugType">
-            <option value="Bug">Bug — something is broken</option>
-            <option value="Task">Task — something to do or change</option>
-          </select>
+          <label>Type</label>
+          <div id="scrayBugTypeToggle" role="group" aria-label="Issue type">
+            <button type="button" class="on" data-type="Bug" aria-pressed="true">🐞 Bug</button>
+            <button type="button" data-type="Task" aria-pressed="false">✓ Task</button>
+          </div>
+          <input type="hidden" id="scrayBugType" value="Bug">
         </div>
         <div class="row">
           <label for="scrayBugSummary">Summary</label>
@@ -341,6 +351,18 @@ console.log("scray-bugreport.js loaded");
 
     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
     document.getElementById("scrayBugCancel").addEventListener("click", close);
+
+    const typeField = document.getElementById("scrayBugType");
+    document.getElementById("scrayBugTypeToggle").addEventListener("click", (e) => {
+      const hit = e.target.closest("button[data-type]");
+      if (!hit) return;
+      typeField.value = hit.dataset.type;
+      overlay.querySelectorAll("#scrayBugTypeToggle button").forEach((b) => {
+        const on = b === hit;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+    });
     // ui.js binds single-letter shortcuts on window and exempts input/textarea
     // but not <select>, so "t" in the type dropdown would cycle the tag
     // buttons behind the modal. Swallow everything at the panel instead.

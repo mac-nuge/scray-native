@@ -2685,23 +2685,47 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     // opts out inline (inline beats the class rule, no CSS change needed).
     // z-index has to be the ceiling too: the base 2147483000 loses to the
     // fullscreen player at 2147483647 in both MPFS and FLS.
-    // ⚙️ Base lift. The modal is vertically centred, so bottom padding pushes
-    // it up; this is the "sits a bit high" resting position.
-    const MODAL_LIFT_PX = 40;
+    // ⚙️ Base lift. Kept at 0: the panel is top-aligned at rest now, so
+    // bottom padding no longer moves it and a lift would only confuse the
+    // height maths in applyKeyboardInset.
+    const MODAL_LIFT_PX = 0;
+    // ⚙️ Top padding above the panel. Also the amount subtracted from the
+    // height budget below, since the panel starts below it.
+    const PANEL_TOP_PAD_PX = 20;
+    // ⚙️ Clear space left BELOW the panel, as a percentage of the visible
+    // viewport. The panel is top-aligned and runs from PANEL_TOP_PAD_PX down
+    // to this line, so the top of the screen is used in full and the bottom
+    // quarter stays visible. Referenced in CONTENT_STYLE and again in
+    // applyKeyboardInset, which writes an inline max-height that would
+    // otherwise override the CSS one.
+    const PANEL_BOTTOM_GAP_VH = 25;
     const OVERLAY_STYLE = `padding: 20px 20px ${20 + MODAL_LIFT_PX}px; z-index: 2147483647;`;
     // display:flex + overflow:hidden is the fix for the buttons vanishing
     // behind the keyboard. The panel used to be one scrolling box, so once it
     // was capped short the button row simply scrolled off the bottom of it.
     // Now the panel is a column, only the middle scrolls, and the buttons are
     // a fixed footer that cannot move.
-    const CONTENT_STYLE = 'max-width: 500px; width: 100%; transform: none; max-height: 90vh; '
+    const CONTENT_STYLE = `max-width: 500px; width: 100%; transform: none; `
+        + `max-height: calc(${100 - PANEL_BOTTOM_GAP_VH}vh - ${PANEL_TOP_PAD_PX}px); `
         + 'display: flex; flex-direction: column; overflow: hidden;';
     const FORM_STYLE = 'display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden;';
-    const SCROLL_STYLE = 'flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;';
+    // overscroll-behavior: contain stops a flick that reaches the end of one
+    // scroller from chaining out to the overlay and the page behind it, which
+    // is what was dragging the whole panel around.
+    const SCROLL_STYLE = 'flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;';
     // iOS/WKWebView ignores ::-webkit-scrollbar and scrollbar-width entirely,
     // so there's no way to make the native overlay bar more visible. #bmScroll
     // gets its own wrapper + a hand-drawn thumb (#bmScrollThumb) instead.
     const SCROLL_WRAP_STYLE = 'position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;';
+    const THUMB_STYLE = 'position: absolute; right: 2px; top: 0; width: 4px; border-radius: 2px; background: rgba(0,0,0,0.25); pointer-events: none; display: none;';
+    // ⚙️ Largest share of the scroller area the quick-note rail may take.
+    // 0.6 leaves the bookmark list 40%. Measured and applied in pixels after
+    // layout (see sizeQuickNotes below) rather than written as CSS: a
+    // percentage resolves against the form's height, which comes from flex
+    // layout rather than a specified value, and collapses to `none` in
+    // WKWebView - and a vh figure can't know how much of the panel the fixed
+    // header and button row have already taken.
+    const QUICK_NOTES_SHARE = 0.6;
 
     const modal = document.createElement('div');
     modal.className = 'basket-json-modal';
@@ -2859,12 +2883,19 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         // instead - taking the visible strip away from the fixed overlay.
         // Translating by offsetTop puts the overlay back over it. That's the
         // whole reason this was cut off in those two modes and not in MPB.
-        modal.style.transform = shift ? `translateY(${shift}px)` : 'none';
-        // Bottom-anchor while the keyboard's up: align-items: center would
-        // split the reserve evenly above and below, so only half of it would
-        // count as clearance and the rest would just push the panel upward.
-        modal.style.alignItems = kb > 0 ? 'flex-end' : 'center';
-        modal.style.paddingTop = kb > 0 ? KEYBOARD_GAP_PX + 'px' : '20px';
+        // Gated on kb > 0. This handler is bound to visualViewport's scroll
+        // event as well as resize, and offsetTop drifts during an ordinary
+        // rubber-band - so without the gate, scrolling the bookmark list
+        // translated the entire panel. The correction is only ever needed
+        // when the keyboard has taken the visual viewport away from us.
+        modal.style.transform = (kb > 0 && shift) ? `translateY(${shift}px)` : 'none';
+        // Top-anchored in EVERY state. The panel's top edge never moves; the
+        // keyboard is absorbed entirely by shortening the panel from the
+        // bottom (see the height budget below). Bottom-anchoring is what let
+        // the footer drift under the keys - the panel was being repositioned
+        // as well as resized, and the two corrections fought each other.
+        modal.style.alignItems = 'flex-start';
+        modal.style.paddingTop = PANEL_TOP_PAD_PX + 'px';
         modal.style.paddingBottom = kb > 0
             ? (kb + KEYBOARD_GAP_PX) + 'px'
             : (20 + MODAL_LIFT_PX) + 'px';
@@ -2876,10 +2907,23 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             // GAP below the top of the visible strip, so it fills that strip
             // rather than sitting in the middle of it. The 40 + MODAL_LIFT_PX
             // reserve only applies to the centred resting position.
+            // Both branches measure DOWN from the same fixed top edge, which
+            // is what keeps the panel anchored while the keyboard opens.
+            // At rest it runs to the PANEL_BOTTOM_GAP_VH line, leaving the
+            // bottom quarter clear. With the keyboard up, visH has already
+            // shrunk to the visible strip, so the budget is simply that strip
+            // less the top padding and a gap above the keys - the gap stops
+            // being the point and the buttons stay on screen.
             const usable = kb > 0
-                ? visH - (KEYBOARD_GAP_PX * 2)
-                : visH - 40 - MODAL_LIFT_PX;
-            panel.style.maxHeight = Math.max(180, usable) + 'px';
+                ? visH - PANEL_TOP_PAD_PX - KEYBOARD_GAP_PX
+                : (visH * (100 - PANEL_BOTTOM_GAP_VH)) / 100 - PANEL_TOP_PAD_PX;
+            // ⚙️ Floor is lower with the keyboard up: forcing 180px there
+            // would push the button row back under the keys, which is the
+            // exact failure this is meant to prevent.
+            panel.style.maxHeight = Math.max(kb > 0 ? 120 : 180, usable) + 'px';
+            // The panel just changed height, so the 60/40 split needs
+            // remeasuring against the new space.
+            modal.__sizeQuickNotes?.();
         }
         // The field being edited lives inside #bmScroll, its own scroll
         // context - WebKit's native focus scroll doesn't reach it (that's
@@ -2947,19 +2991,27 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         // Everything between the new-bookmark row and the buttons scrolls as
         // one region; the list no longer caps itself, or it would be a
         // scroller inside a scroller.
-        html += `<div style="${SCROLL_WRAP_STYLE}"><div id="bmScroll" style="${SCROLL_STYLE}">`;
-
+        // Two independent scrollers rather than one. The quick-note rail is
+        // capped and scrolls on its own; the bookmark list takes whatever
+        // height is left and scrolls on its own. Sharing one scroller meant a
+        // long tag list simply pushed the bookmarks out of sight.
+        // The label sits OUTSIDE the scroller - it shouldn't scroll away from
+        // the rail it describes.
         if (topNotes.length > 0 && hasPlayhead) {
             html += `
-                <div style="margin-bottom: 12px;">
-                    <div style="font-size: 0.7rem; color: #999; margin-bottom: 4px;">Quick notes (tap one to save a bookmark with it):</div>
-                    <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px;">
-                        ${topNotes.map((n, i) => `<button type="button" class="quick-note-btn modal-btn modal-btn-secondary" data-note-index="${i}" style="flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.75rem; margin: 0;">${esc(n)}</button>`).join('')}
+                <div style="flex: 0 0 auto; font-size: 0.7rem; color: #999; margin-bottom: 4px;">Quick notes (tap one to save a bookmark with it):</div>
+                <div id="qnWrap" style="${SCROLL_WRAP_STYLE} flex: 0 1 auto; margin-bottom: 12px;">
+                    <div id="qnScroll" style="${SCROLL_STYLE}">
+                        <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px;">
+                            ${topNotes.map((n, i) => `<button type="button" class="quick-note-btn modal-btn modal-btn-secondary" data-note-index="${i}" style="flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.75rem; margin: 0;">${esc(n)}</button>`).join('')}
+                        </div>
                     </div>
+                    <div id="qnScrollThumb" style="${THUMB_STYLE}"></div>
                 </div>
             `;
         }
 
+        html += `<div id="bmWrap" style="${SCROLL_WRAP_STYLE}"><div id="bmScroll" style="${SCROLL_STYLE}">`;
         html += `<div id="bookmarksList" style="display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; margin-bottom: 12px;">`;
 
         if (!working.length) {
@@ -2985,7 +3037,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
 
         html += `</div>`;
 
-        html += `</div><div id="bmScrollThumb" style="position: absolute; right: 2px; top: 0; width: 4px; border-radius: 2px; background: rgba(0,0,0,0.25); pointer-events: none; display: none;"></div></div>`;   // #bmScroll + wrap
+        html += `</div><div id="bmScrollThumb" style="${THUMB_STYLE}"></div></div>`;   // #bmScroll + wrap
 
         const pending = working.filter(b => b.deleted).length;
         html += `
@@ -3002,21 +3054,72 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
 
         const newNoteEl = modal.querySelector('#newBmNote');
 
-        // Hand-drawn scroll thumb for #bmScroll - see SCROLL_WRAP_STYLE.
-        const bmScroll = modal.querySelector('#bmScroll');
-        const bmScrollThumb = modal.querySelector('#bmScrollThumb');
-        const updateBmScrollThumb = () => {
-            if (!bmScroll || !bmScrollThumb) return;
-            const { scrollTop, scrollHeight, clientHeight } = bmScroll;
-            const overflowing = scrollHeight > clientHeight + 1;
-            bmScrollThumb.style.display = overflowing ? 'block' : 'none';
-            if (overflowing) {
-                bmScrollThumb.style.height = Math.max(24, clientHeight * clientHeight / scrollHeight) + 'px';
-                bmScrollThumb.style.top = (scrollTop * clientHeight / scrollHeight) + 'px';
-            }
+        // Hand-drawn scroll thumbs - see SCROLL_WRAP_STYLE. There are two
+        // independent scrollers now, so this is a factory rather than a
+        // one-off. The quick-note rail is absent when the video has no tags,
+        // hence the null-tolerance.
+        const wireScrollThumb = (scrollId, thumbId) => {
+            const scroller = modal.querySelector('#' + scrollId);
+            const thumb = modal.querySelector('#' + thumbId);
+            const update = () => {
+                if (!scroller || !thumb) return;
+                const { scrollTop, scrollHeight, clientHeight } = scroller;
+                const overflowing = scrollHeight > clientHeight + 1;
+                thumb.style.display = overflowing ? 'block' : 'none';
+                if (overflowing) {
+                    thumb.style.height = Math.max(24, clientHeight * clientHeight / scrollHeight) + 'px';
+                    thumb.style.top = (scrollTop * clientHeight / scrollHeight) + 'px';
+                }
+            };
+            scroller?.addEventListener('scroll', update, { passive: true });
+            update();
         };
-        bmScroll?.addEventListener('scroll', updateBmScrollThumb, { passive: true });
-        updateBmScrollThumb();
+        // The 60/40 split, resolved against real geometry. The two wraps are
+        // the only flexible children of the form, so whatever they measure
+        // between them IS the space available to divide - no need to guess at
+        // the height of the header, the new-bookmark row or the button strip.
+        // Runs before the thumbs are wired so they measure the settled sizes.
+        const sizeQuickNotes = () => {
+            const qnWrap = modal.querySelector('#qnWrap');
+            const bmWrap = modal.querySelector('#bmWrap');
+            const qnScroll = modal.querySelector('#qnScroll');
+            if (!qnWrap || !bmWrap) return;
+
+            // Neutralise the previous pass before measuring, or each run
+            // measures the last run's result and the rail ratchets away.
+            qnWrap.style.flex = '0 1 auto';
+            qnWrap.style.maxHeight = 'none';
+
+            // The two wraps are the only flexible children of the form, so
+            // whatever they occupy between them IS the space to divide. No
+            // guessing at the header, new-bookmark row or button strip.
+            const shared = qnWrap.clientHeight + bmWrap.clientHeight;
+            if (shared <= 0) return;
+
+            // scrollHeight is the rail's natural height, independent of how
+            // flex happens to have squeezed it this frame.
+            const natural = qnScroll ? qnScroll.scrollHeight : 0;
+            const target = Math.round(Math.min(natural, shared * QUICK_NOTES_SHARE));
+
+            // A fixed basis with no grow and no shrink: an allocation, not a
+            // ceiling. max-height was the previous attempt and did nothing -
+            // both wraps shrink in proportion to their content, so a long
+            // bookmark list had already pushed the rail below the cap before
+            // the cap was ever consulted. Taking it out of the flex
+            // negotiation entirely is the only way to hold the share.
+            qnWrap.style.flex = `0 0 ${target}px`;
+        };
+        // Exposed on the element so applyKeyboardInset - which lives outside
+        // this closure and resizes the panel - can re-run it.
+        modal.__sizeQuickNotes = sizeQuickNotes;
+        sizeQuickNotes();
+        // The first pass can read short: the panel's own max-height may not
+        // have been applied yet when the markup lands. One more on the next
+        // frame, once layout has settled.
+        requestAnimationFrame(() => { if (modal.isConnected) sizeQuickNotes(); });
+
+        wireScrollThumb('bmScroll', 'bmScrollThumb');
+        wireScrollThumb('qnScroll', 'qnScrollThumb');
 
         // Blur fires before click, so a re-render here would swap the Save
         // button out from under the tap that caused the blur and swallow it.

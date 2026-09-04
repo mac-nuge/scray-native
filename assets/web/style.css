@@ -2014,6 +2014,18 @@ body.scray-video-loading #plyr-loading-overlay {
 display: block !important;
 }
 
+/* Bookmark-jump tooltip. The chip rail lives inside .plyr__controls so it
+   picks up the FLS rotation for free - which also means it picks up the
+   controls' idle fade, and a bookmark jump is not a gesture that wakes them.
+   Hold the bar up for the second the chip is showing. FLS is unaffected by
+   the transform line: applyManualRotationStyles() writes its own inline
+   !important transform there, which outranks this. */
+body.scray-bookmark-flash .plyr--hide-controls .plyr__controls {
+opacity: 1 !important;
+pointer-events: auto !important;
+transform: none !important;
+}
+
 body.scray-video-loading .plyr--hide-controls .plyr__controls {
 opacity: 1 !important;
 pointer-events: auto !important;
@@ -2036,6 +2048,18 @@ pointer-events: auto !important;
 .plyr--hide-controls .plyr-frame-step-group {
 opacity: 0;
 pointer-events: none;
+}
+
+/* Disabling, not merely hiding. .plyr-frame-step sets pointer-events:auto on
+   each button, and a child can always re-enable itself over a parent's
+   pointer-events:none - so every group-level rule above hides the circles
+   without actually switching them off. These reach the buttons directly.
+   Any new state that hides the group needs a line here too; pauseMenuTappable()
+   in player.js is the backstop for ones that get missed. */
+body:not(.scray-paused) .plyr-frame-step-group .plyr-frame-step,
+body.scray-scrubbing .plyr-frame-step-group .plyr-frame-step,
+.plyr--hide-controls .plyr-frame-step-group .plyr-frame-step {
+pointer-events: none !important;
 }
 
 /* ⚙️ Mobile portrait: raised further above the controls bar, and shifted
@@ -2087,7 +2111,8 @@ bottom: 96px !important;
    body.scray-paused is maintained by scraySyncPausedClass() in player.js.
    Everything else keeps the visibility rules it already had - the display:none
    rules above (desktop, mini-player, MPFS) still win over this, as they should. */
-body:not(.scray-paused) .plyr-frame-step-group {
+body:not(.scray-paused) .plyr-frame-step-group,
+body.scray-scrubbing .plyr-frame-step-group {
 opacity: 0 !important;
 pointer-events: none !important;
 }
@@ -2102,17 +2127,16 @@ pointer-events: none !important;
    container, so their left/width percentages sit in the SAME coordinate
    space the tap-zone maths uses. Positions are set inline in player.js.
    ========================================= */
+/* Full-bleed over the picture. It has to be, because the tier dividers sit at
+   1/3 and 2/3 of the FULL height - the same fractions handleDoubleTap uses -
+   so a short strip at the top would have nothing to measure against. The
+   individual segments below inset themselves from the top. */
 .fls-tap-guides {
 position: absolute;
 left: 0;
 right: 0;
-/* ⚙️ Tucked under the clock at the top of the picture. #plyr-uk-clock sits at
-   top:8px inside .plyr and is roughly 16px tall; this wrapper is inset a
-   further 3px inside that, so 26px clears it with a small gap. One value to
-   change if the clock ever moves - the circles no longer affect this. */
-top: 26px;
-bottom: auto;
-height: 14px;
+top: 0;
+bottom: 0;
 z-index: 89;
 pointer-events: none;
 display: none;
@@ -2130,24 +2154,40 @@ display: block;
 opacity: 0;
 }
 
-/* ⚙️ Bare dimension lines - no labels. The end ticks and the rule between
-   them share one alpha; change both together or the ticks pop out. */
+/* ⚙️ Bare dimension lines - no labels. Every rule here shares one alpha;
+   change them together or one set pops out from the rest. */
 .fls-tap-guide {
 position: absolute;
-top: 0;
-height: 100%;
+/* ⚙️ Top edge tucks under the clock (#plyr-uk-clock is at top:8px inside
+   .plyr and ~16px tall; this wrapper is inset a further 3px). */
+top: 26px;
+/* ⚙️ How far the vertical ticks run down. 28% leaves them ending just below
+   the lower tier divider at 66.667%, so the grid reads as a grid without
+   running into the control row. */
+bottom: 28%;
 box-sizing: border-box;
 border-left: 1px solid rgba(255, 255, 255, 0.22);
 border-right: 1px solid rgba(255, 255, 255, 0.22);
 }
 
-/* The rule between the two end ticks. */
+/* The rule joining the two end ticks, along the top of each segment. */
 .fls-tap-guide::before {
 content: '';
 position: absolute;
 left: 0;
 right: 0;
-top: 50%;
+top: 0;
+height: 1px;
+background: rgba(255, 255, 255, 0.22);
+}
+
+/* Tier dividers. They span the seek third only (66.667% to the right edge) -
+   the play/pause third has no vertical sub-split, so drawing them across it
+   would suggest an interaction that isn't there. */
+.fls-tap-tier {
+position: absolute;
+left: 66.667%;
+right: 0;
 height: 1px;
 margin-top: -0.5px;
 background: rgba(255, 255, 255, 0.22);
@@ -4977,6 +5017,43 @@ opacity: 1;
     font-size: 0.6rem;
     max-width: 150px;
 }
+}
+
+/* =========================================
+BOOKMARK NOTE LABELS UNDER MARKERS
+========================================= */
+/* ⚙️ Two px under the elapsed/remaining timestamp, which is 0.7rem - small
+   enough to sit in the gap below the bar without crowding it. The element is
+   a child of .progress-bookmark-marker, so it rides the marker's left% and,
+   in FLS, the bar's 90deg rotation for free. */
+.bookmark-marker-label {
+position: absolute;
+top: calc(100% + 3px);
+left: 50%;
+transform: translateX(-50%);
+max-width: 72px;
+overflow: hidden;
+text-overflow: ellipsis;
+white-space: nowrap;
+text-align: center;
+font-size: calc(0.7rem - 3px);
+line-height: 1;
+color: #fff;
+text-shadow: 1px 1px 2px rgba(0,0,0,0.9);
+pointer-events: none;
+z-index: 59;   /* under the marker dot at 60, above the endcaps at 55 */
+}
+
+/* The marker's :hover rule scales the whole box, label included. 1/1.4
+   cancels it so the text stays put while the dot grows. */
+.progress-bookmark-marker:hover .bookmark-marker-label {
+transform: translateX(-50%) scale(0.714);
+}
+
+/* No gap to print into in the mini players. */
+body.landscape-mini .bookmark-marker-label,
+body.portrait-mini .bookmark-marker-label {
+display: none;
 }
 
 /* =========================================

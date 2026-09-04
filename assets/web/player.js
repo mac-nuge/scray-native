@@ -2354,6 +2354,13 @@ window.scrayScrubSeek = (function () {
         // Optional - request() works standalone. Call this when a drag is
         // CONFIRMED, not on touchstart, or a plain tap would pause the video.
         begin() {
+            // Every scrub path in the app opens a session here - anywhere-drag,
+            // FLS jog-scrub and the permanent progress bar alike - so this is
+            // the one place that knows a scrub is in progress. The circle
+            // buttons hide on it because SCRUB_PAUSE_WHILE_DRAGGING pauses the
+            // video mid-drag, which would otherwise pop them up over the frame
+            // you are trying to look at.
+            document.body.classList.add('scray-scrubbing');
             target = null;
             lastRequested = null;
             lastIssued = null;
@@ -2381,6 +2388,9 @@ window.scrayScrubSeek = (function () {
         },
         // Safe to call twice, and safe to call without a matching begin().
         end(finalTime) {
+            // Safe on an unmatched end() - removing a class that isn't there
+            // is a no-op, and touchcancel routes here too.
+            document.body.classList.remove('scray-scrubbing');
             clearWatchdog();
             inFlight = false;
             const landOn = (typeof finalTime === 'number' && isFinite(finalTime))
@@ -2458,6 +2468,20 @@ function stepFrame(direction, multiplier = 1) {
 // higher up on the video wrapper. Shared by the frame-step circle
 // buttons AND the column tap zones (single tap on the -3/+3 etc seek
 // columns, only active while player controls are visible).
+// The behavioural half of the pause-menu gate. CSS alone can't do this:
+// .plyr-frame-step sets pointer-events:auto, and a child can always re-enable
+// itself over a parent's pointer-events:none, so a hidden circle still takes
+// taps. Rather than duplicating the visibility rules in JS - and having to
+// keep two lists in step - this just asks the browser what the group's
+// computed style actually is. Whatever CSS says is invisible is untappable.
+function pauseMenuTappable(el) {
+    const group = el && el.closest ? el.closest('.plyr-frame-step-group') : null;
+    if (!group) return true;
+    const cs = getComputedStyle(group);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+    return parseFloat(cs.opacity || '1') > 0.05;
+}
+
 function attachFrameStepHoldHandlers(el, direction) {
     let holdTimeout = null;
     let holdInterval = null;
@@ -2475,6 +2499,7 @@ function attachFrameStepHoldHandlers(el, direction) {
     el.addEventListener('touchstart', (e) => {
         e.stopPropagation();
         e.preventDefault();
+        if (!pauseMenuTappable(el)) return;
         isHolding = false;
         holdTimeout = setTimeout(() => {
             isHolding = true;
@@ -2496,6 +2521,10 @@ function attachFrameStepHoldHandlers(el, direction) {
     el.addEventListener('touchend', (e) => {
         e.stopPropagation();
         e.preventDefault();
+        // Checked again on release, not just on press: touchstart bails
+        // before setting isHolding, so without this a tap on a hidden circle
+        // would still fall through to the single-step branch below.
+        if (!pauseMenuTappable(el)) { clearTimers(); return; }
         if (!isHolding) {
             stepFrame(direction);
         } else {
@@ -2660,52 +2689,123 @@ const NEXT_BOOKMARK_EPSILON_S = 0.35;
 function scrayNextBookmark() {
     if (!window.plyrPlayer) return;
     const v = window.currentPlayingVideo;
-    const times = (v && Array.isArray(v.bookmarks) ? v.bookmarks : [])
-        .map(bm => (bm && typeof bm.time === 'number') ? bm.time : null)
-        .filter(t => t !== null)
-        .sort((a, b) => a - b);
+    // Sort the bookmark OBJECTS, not a parallel array of times. The old
+    // version threw the object away and handed flashBookmarkTooltip a bare
+    // timestamp to look up again - a round trip that could fail, and did.
+    // filter() returns a new array, so sorting here can't reorder
+    // currentPlayingVideo.bookmarks underneath anyone else.
+    const sorted = (v && Array.isArray(v.bookmarks) ? v.bookmarks : [])
+        .filter(b => b && typeof b.time === 'number')
+        .sort((a, b) => a.time - b.time);
 
-    if (!times.length) {
+    if (!sorted.length) {
         showPlayerFeedback('No bookmarks', 'top-left');
         return;
     }
 
     const from = window.plyrPlayer.currentTime + NEXT_BOOKMARK_EPSILON_S;
-    const next = times.find(t => t > from);
-    if (next === undefined) {
+    const nextBm = sorted.find(b => b.time > from);
+    if (!nextBm) {
         showPlayerFeedback('Last bookmark', 'top-left');
         return;
     }
 
-    window.plyrPlayer.currentTime = next;
-    flashBookmarkTooltip(next);
+    window.plyrPlayer.currentTime = nextBm.time;
+    flashBookmarkTooltip(nextBm);
 }
 window.scrayNextBookmark = scrayNextBookmark;
 
-// ⚙️ How long the bookmark's own tooltip stays up after a jump.
-const NEXT_BOOKMARK_TOOLTIP_MS = 1000;
+// ⚙️ How long the bookmark's own tooltip stays up after a jump. 1000 proved
+// hard to catch by eye - the marker-tap rail sits for RAIL_FADE_MS (5000) by
+// comparison, which is why one felt present and the other did not.
+const NEXT_BOOKMARK_TOOLTIP_MS = 2500;
 
 // Reuses the marker rail so the chip looks and sits exactly like the one a
 // marker tap produces - same styling, same FLS rotation handling, no second
 // implementation to keep in step. The rail is identity-checked before being
 // torn down, so a rail the user opened in the meantime survives.
-function flashBookmarkTooltip(time) {
-    const v = window.currentPlayingVideo;
-    const bm = (v && Array.isArray(v.bookmarks) ? v.bookmarks : [])
-        .find(b => b && b.time === time);
-    if (!bm || typeof showBookmarkRail !== 'function') return;
+// Takes the bookmark OBJECT, not a timestamp. It used to re-find the bookmark
+// by `b.time === time` against currentPlayingVideo.bookmarks, and that lookup
+// failed every time - the rail was never reached. The caller already holds the
+// object, so there is nothing to look up.
+function flashBookmarkTooltip(bm) {
+    if (!bm || typeof bm.time !== 'number') {
+        console.log('[bm-flash] called without a bookmark');
+        return;
+    }
+    // Everything below goes through window on purpose. The rail and its
+    // helpers are declared inside createPlayerElement; this function is not.
+    // A bare identifier here resolves to nothing.
+    if (typeof window.showBookmarkRail !== 'function') {
+        console.log('[bm-flash] window.showBookmarkRail is ' + typeof window.showBookmarkRail);
+        return;
+    }
+    const time = bm.time;
+    const RAIL_ID = window.SCRAY_RAIL_ID;
+    const showBookmarkRail = window.showBookmarkRail;
+    const hideBookmarkRail = window.hideBookmarkRail;
+    const scrayShowControlsNow = window.scrayShowControlsNow;
 
-    const duration = window.plyrPlayer?.duration;
-    const percent = (duration && duration > 0)
-        ? Math.max(0, Math.min(100, (time / duration) * 100))
-        : null;
+    // The rail is a child of .plyr__controls - that's what gives it FLS
+    // rotation for free, but it also means the chip inherits the bar's idle
+    // fade, and neither a triple tap nor M> wakes it. scrayShowControlsNow()
+    // is the helper the video-load hold already uses for exactly this: it
+    // strips .plyr--hide-controls from .plyr AND tells Plyr, where
+    // toggleControls() alone leaves the class in place. Called BEFORE the
+    // rail is built, so the bar is already up when the chip lands.
+    if (typeof scrayShowControlsNow === 'function') scrayShowControlsNow();
+    document.body.classList.add('scray-bookmark-flash');
 
-    showBookmarkRail([{ bm }], () => hideBookmarkRail(), percent);
+    // Identical to a marker tap otherwise: same rail, same place above the
+    // play button, differing only in showing the note without its timestamp.
+    const rail = showBookmarkRail([{ bm }], () => hideBookmarkRail(), { noteOnly: true });
+    if (!rail) {
+        console.log('[bm-flash] showBookmarkRail returned null - no .plyr__controls found');
+        document.body.classList.remove('scray-bookmark-flash');
+        return;
+    }
+    console.log('[bm-flash] rail raised for', bm.note || formatDuration(time * 1000));
 
-    const rail = document.getElementById(RAIL_ID);
-    if (!rail) return;
+    // TEMPORARY DIAGNOSTIC - remove once this is settled.
+    // Measures every way a correctly-built chip can end up invisible, rather
+    // than guessing at them one at a time. Deferred a frame so layout has run.
+    requestAnimationFrame(() => {
+        const plyr = document.querySelector('.plyr');
+        const c = document.querySelector('.plyr__controls');
+        const r = document.getElementById(RAIL_ID);
+        console.log('[bm-flash] state ' + JSON.stringify({
+            railInDom: !!r,
+            railRect: r ? r.getBoundingClientRect().toJSON() : null,
+            railOpacity: r ? getComputedStyle(r).opacity : null,
+            chipCount: r ? r.children.length : 0,
+            chipText: r && r.firstChild ? r.firstChild.textContent : null,
+            controlsOpacity: c ? getComputedStyle(c).opacity : null,
+            controlsVisibility: c ? getComputedStyle(c).visibility : null,
+            controlsOverflow: c ? getComputedStyle(c).overflow : null,
+            controlsRect: c ? c.getBoundingClientRect().toJSON() : null,
+            hideControlsClass: !!plyr?.classList.contains('plyr--hide-controls'),
+            paused: window.plyrPlayer?.paused,
+            fls: document.body.classList.contains('manual-rotate-landscape')
+        }));
+    });
+
+    // Something else can tear the rail down mid-flash: renderBookmarkMarkers()
+    // opens with hideBookmarkRail(), and a background sync pull triggers it.
+    // Reinstate rather than lose the flash, and log it - if that log fires,
+    // the teardown is the real bug and belongs fixed at its source.
+    let checks = 0;
+    const guard = setInterval(() => {
+        if (++checks > 4) { clearInterval(guard); return; }
+        if (!document.getElementById(RAIL_ID)) {
+            console.log('[bm-flash] rail removed by something else - reinstating');
+            showBookmarkRail([{ bm }], () => hideBookmarkRail(), { noteOnly: true });
+        }
+    }, NEXT_BOOKMARK_TOOLTIP_MS / 5);
+
     setTimeout(() => {
-        if (document.getElementById(RAIL_ID) === rail) hideBookmarkRail();
+        clearInterval(guard);
+        hideBookmarkRail();
+        document.body.classList.remove('scray-bookmark-flash');
     }, NEXT_BOOKMARK_TOOLTIP_MS);
 }
 
@@ -2761,6 +2861,7 @@ function attachFrameStepButtons() {
         btn.addEventListener('touchend', (e) => {
             e.stopPropagation();
             e.preventDefault();
+            if (!pauseMenuTappable(btn)) return;
             try { action(); } catch (err) { console.error('[pause-menu] action failed:', err); }
         }, { passive: false });
 
@@ -2849,6 +2950,19 @@ function attachFrameStepButtons() {
             seg.style.width = width;
             guides.appendChild(seg);
         });
+
+        // Horizontal rules across the seek third, marking the 30s / 10s / 3s
+        // tiers. They sit at exactly 1/3 and 2/3 of the FULL picture height
+        // because that is what handleDoubleTap's vFrac divides - which is why
+        // .fls-tap-guides spans the whole wrapper rather than just the strip
+        // under the clock. Change these and change vFrac to match.
+        ['33.333%', '66.667%'].forEach(top => {
+            const tier = document.createElement('div');
+            tier.className = 'fls-tap-tier';
+            tier.style.top = top;
+            guides.appendChild(tier);
+        });
+
         wrapper.appendChild(guides);
     }
 
@@ -4345,9 +4459,16 @@ const BOOKMARK_RAIL_MAX_CHIPS = 3;
 // ⚙️ Tooltip rail. Chips are equal width and share one row; the rail is
 // centred on the play button and floats just above the control bar.
 const CHIP_GAP_PX = 6;
-const CHIP_PREFERRED_PX = 150;   // per chip, before the rail hits its cap
+// ⚙️ Per chip, before the rail hits its cap. This also governs how far LEFT
+// the rail can sit: anchorX is clamped to half the rail width plus the side
+// margin, so a wide rail is pinned away from the edge no matter what nudge
+// is applied below.
+const CHIP_PREFERRED_PX = 112;
 const RAIL_GAP_ABOVE_CONTROLS_PX = 10;
-const RAIL_SIDE_MARGIN_PX = 8;
+const RAIL_SIDE_MARGIN_PX = 4;
+// ⚙️ Shift from the play button's centre. Negative moves left. Only takes
+// effect while the clamp allows it - see CHIP_PREFERRED_PX.
+const RAIL_ANCHOR_NUDGE_PX = -28;
 const RAIL_FADE_MS = 5000;
 const RAIL_ID = 'bookmarkTooltipRail';
 
@@ -4361,6 +4482,14 @@ function hideBookmarkRail() {
     document.getElementById(RAIL_ID)?.remove();
 }
 window.hideBookmarkRail = hideBookmarkRail;
+// flashBookmarkTooltip and scrayNextBookmark live one scope UP, outside
+// createPlayerElement, so window is the only way they can reach any of this.
+// hideBookmarkRail was already exported for that reason; these three were not,
+// which is why the jump-to-bookmark flash silently did nothing - the bare
+// `showBookmarkRail` reference up there resolved to undefined, every time.
+window.showBookmarkRail = showBookmarkRail;
+window.scrayShowControlsNow = scrayShowControlsNow;
+window.SCRAY_RAIL_ID = RAIL_ID;
 
 /**
  * Offset of `el` inside `ancestor`, in the ancestor's own layout coordinates.
@@ -4387,11 +4516,15 @@ function localOffsetWithin(el, ancestor) {
  * so parenting to them means the rail needs no orientation handling of its
  * own, and both anchors below are expressible in their coordinate space.
  *
- * soloPercent: position along the bar (0-100) to sit above, or null to sit
- * above the play button. A single bookmark points at its own marker; a fanned
- * cluster doesn't, because it has no single marker to point at.
+ * The rail is ALWAYS parked above the play button. It used to follow a lone
+ * bookmark's own marker, but out at the right-hand end of the bar that put it
+ * straight over the pause-menu circles. A fixed home on the left is worth more
+ * than the pointing.
+ *
+ * opts.noteOnly: chip shows just the note, no timestamp. Used by the
+ * jump-to-next flash, where the time is not the interesting part.
  */
-function showBookmarkRail(group, onPick, soloPercent = null) {
+function showBookmarkRail(group, onPick, opts = {}) {
     hideBookmarkRail();
 
     const controls = document.querySelector('.plyr__controls');
@@ -4420,8 +4553,10 @@ function showBookmarkRail(group, onPick, soloPercent = null) {
         const chip = document.createElement('button');
         chip.type = 'button';
         chip.className = 'bookmark-tooltip-chip';
+        // Falls back to the timestamp when there is no note, so a chip is
+        // never blank - including in noteOnly mode.
         chip.textContent = entry.bm.note
-            ? `${formatDuration(entry.bm.time * 1000)} ${entry.bm.note}`
+            ? (opts.noteOnly ? entry.bm.note : `${formatDuration(entry.bm.time * 1000)} ${entry.bm.note}`)
             : formatDuration(entry.bm.time * 1000);
         chip.title = chip.textContent;
         // Equal widths come from flex-grow/shrink/basis against the rail's
@@ -4436,12 +4571,12 @@ function showBookmarkRail(group, onPick, soloPercent = null) {
             width: auto;
             min-width: 0;
             margin: 0;
-            padding: 6px 8px;
+            padding: 4px 6px;
             border: none;
             border-radius: 4px;
             background: rgba(0, 0, 0, 0.85);
             color: #fff;
-            font-size: 0.65rem;
+            font-size: 0.58rem;
             line-height: 1.25;
             text-align: center;
             white-space: nowrap;
@@ -4468,32 +4603,15 @@ function showBookmarkRail(group, onPick, soloPercent = null) {
     const railWidth = Math.min(wanted, maxWidth);
     rail.style.width = railWidth + 'px';
 
-    let anchorX = null;
-
-    if (soloPercent !== null) {
-        // Marker-anchored. The bar and the controls are separate elements, so
-        // the marker's position has to be re-expressed in the controls' frame.
-        // Comparing the two bounding boxes works in FLS as well as anywhere
-        // else: both elements carry the same 90deg rotation, so their length
-        // axes both map onto screen Y there and onto screen X otherwise.
-        const bar = document.querySelector('.permanent-progress-bar');
-        if (bar) {
-            const rotated = (typeof manualRotationActive !== 'undefined' && manualRotationActive);
-            const b = bar.getBoundingClientRect();
-            const c = controls.getBoundingClientRect();
-            const barLen = rotated ? b.height : b.width;
-            const delta = rotated ? (b.top - c.top) : (b.left - c.left);
-            if (barLen) anchorX = delta + (soloPercent / 100) * barLen;
-        }
-    }
-
-    if (anchorX === null) {
-        const playBtn = controls.querySelector('.plyr__control[data-plyr="play"]');
-        const off = playBtn ? localOffsetWithin(playBtn, controls) : null;
-        anchorX = off
-            ? off.x + playBtn.offsetWidth / 2
-            : controls.clientWidth / 2;   // no play button found - centre the bar
-    }
+    // Always over the play button - the marker-anchored branch is gone. Out at
+    // the right-hand end of the bar it collided with the pause-menu circles,
+    // and a rail that is always in the same place is easier to read anyway.
+    const playBtn = controls.querySelector('.plyr__control[data-plyr="play"]');
+    const off = playBtn ? localOffsetWithin(playBtn, controls) : null;
+    const anchorX = (off
+        ? off.x + playBtn.offsetWidth / 2
+        : controls.clientWidth / 2)   // no play button found - centre the bar
+        + RAIL_ANCHOR_NUDGE_PX;
 
     const half = railWidth / 2;
     const clamped = Math.max(
@@ -4583,6 +4701,20 @@ for (let i = 1; i < sorted.length; i++) {
 // a group of one, so the rail is built by exactly the same code path.
 groups.forEach(g => g.forEach(e => { e.cluster = g; }));
 
+// ⚙️ Note name printed under each marker, in the gap below the bar.
+// Every marker gets one, clustered included: overlapping labels are still
+// more use than missing ones, and the rail is there to read a dense cluster
+// properly. A child of the marker, so it inherits the marker's left% and, in
+// FLS, the bar's rotation - no extra maths.
+entries.forEach(entry => {
+    const note = (entry.bm.note || '').trim();
+    if (!note) return;
+    const label = document.createElement('span');
+    label.className = 'bookmark-marker-label';
+    label.textContent = note;
+    entry.marker.appendChild(label);
+});
+
 const jumpTo = (entry) => {
     hideBookmarkRail();
     if (window.plyrPlayer && !isNaN(entry.bm.time)) {
@@ -4605,8 +4737,7 @@ const raise = (entry) => {
         .sort((a, b) => Math.abs(a.percent - entry.percent) - Math.abs(b.percent - entry.percent))
         .slice(0, BOOKMARK_RAIL_MAX_CHIPS)
         .sort((a, b) => a.percent - b.percent);
-    const solo = shown.length === 1 ? shown[0].percent : null;
-    showBookmarkRail(shown, jumpTo, solo);
+    showBookmarkRail(shown, jumpTo);
     fadeTimer = setTimeout(hideBookmarkRail, RAIL_FADE_MS);
 };
 

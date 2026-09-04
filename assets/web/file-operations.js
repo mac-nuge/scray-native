@@ -3333,6 +3333,29 @@ async function showStashModal(video) {
              + ':' + String(s).padStart(2, '0');
     };
 
+    // StashDB's own search page, seeded with the filename minus its extension
+    // and separators. This is what the "Search StashDB" button opens and what
+    // gets dropped into the URL box when no fingerprint match came back.
+    const searchTerm = String(video.filename || '')
+        .replace(/\.[^.]+$/, '')
+        .replace(/[._\-\[\]()+]+/g, ' ')
+        .replace(/\b(?:\d{3,4}p|4k|x26[45]|h26[45]|hevc|aac|web-?dl|webrip|hdrip|bluray|xxx)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const searchUrl = 'https://stashdb.org/search?q=' + encodeURIComponent(searchTerm);
+
+    // In Native this hands the URL to ScrayBrowser so it joins the same tab
+    // list and cookie jar as the Picker/DB buttons. Everywhere else it is a
+    // plain new tab.
+    const openNative = (url) => {
+        if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
+            window.ScrayBridge.openBrowser(url)
+                .catch(err => console.error('[stash] openBrowser failed:', err));
+        } else {
+            window.open(url, '_blank');
+        }
+    };
+
     const modal = document.createElement('div');
     modal.className = 'basket-json-modal';
     modal.id = 'stashModal';
@@ -3354,7 +3377,7 @@ async function showStashModal(video) {
 
     const body      = modal.querySelector('#stashBody');
     const addBtn    = modal.querySelector('#stashAddBtn');
-    const close     = () => modal.remove();
+    const close     = () => { window.scrayStashUrlFromBrowser = null; modal.remove(); };
     modal.querySelector('#stashCloseBtn').addEventListener('click', close);
     modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
@@ -3391,10 +3414,17 @@ async function showStashModal(video) {
                   '<p style="margin:0 0 6px;">Found it on StashDB yourself? Paste the scene URL and this ' +
                   'file&rsquo;s fingerprint gets attached to it &mdash; which also fixes it for anyone else ' +
                   'with the same encode.</p>' +
-                  '<div style="display:flex;gap:6px;">' +
+                  '<button id="stashSearchBtn" class="modal-btn modal-btn-secondary" ' +
+                          'style="width:100%;margin:0 0 8px;">Search StashDB for &ldquo;' +
+                          esc(searchTerm || video.filename || '') + '&rdquo;</button>' +
+                  // width:auto beats the mobile `input { width:100% }` rule, which
+                  // otherwise pushes the copy button clean off the row.
+                  '<div style="display:flex;gap:6px;align-items:stretch;">' +
                     '<input id="stashSubmitId" type="text" placeholder="https://stashdb.org/scenes/..." ' +
-                           'style="flex:1;padding:6px;border:1px solid #ccc;border-radius:4px;">' +
-                    '<button id="stashSubmitBtn" class="modal-btn modal-btn-secondary">Submit</button>' +
+                           'style="flex:1 1 auto;min-width:0;width:auto;margin:0;padding:6px;' +
+                           'font-size:.85rem;border:1px solid #ccc;border-radius:4px;">' +
+                    '<button id="stashSubmitBtn" class="modal-btn modal-btn-secondary" ' +
+                            'style="flex:0 0 auto;width:auto;margin:0;padding:6px 14px;">Submit</button>' +
                   '</div>' +
                   '<div id="stashSubmitMsg" style="margin-top:6px;font-size:.9em;"></div>' +
                   '<div style="margin-top:6px;font-size:.8em;opacity:.6;">Fingerprint: ' +
@@ -3403,6 +3433,28 @@ async function showStashModal(video) {
 
             const sBtn = modal.querySelector('#stashSubmitBtn');
             const sMsg = modal.querySelector('#stashSubmitMsg');
+            const sUrl = modal.querySelector('#stashSubmitId');
+
+            // The box is deliberately left alone here: once you have found the
+            // scene, the browser's own ⤴ button writes the real scene URL into
+            // it, and a pre-seeded search URL would only be in the way.
+            modal.querySelector('#stashSearchBtn')?.addEventListener('click', () => {
+                openNative(searchUrl);
+            });
+
+            // Filled by ScrayBrowser's ⤴ button, which only appears on
+            // stashdb.org: it dismisses the browser and hands the scene URL
+            // straight back here, so there is no clipboard hop at all. The
+            // detached-input check matters because load() rebuilds this panel on
+            // every Re-check, and the stale closure would otherwise survive and
+            // write into an input that is no longer on screen.
+            window.scrayStashUrlFromBrowser = (url) => {
+                if (!document.body.contains(sUrl)) return false;
+                sUrl.value = String(url || '').trim();
+                sMsg.textContent = 'URL received from the browser \u2014 press Submit.';
+                sUrl.scrollIntoView({ block: 'nearest' });
+                return true;
+            };
             sBtn.addEventListener('click', async () => {
                 const val = modal.querySelector('#stashSubmitId').value.trim();
                 if (!val) return;
@@ -3511,16 +3563,24 @@ async function showStashModal(video) {
         const existing = r.existing || [];
         const dupe = (t) => existing.some(e => Math.abs(e - t) <= 2000);
 
+        // The mobile media query sets `button, select, input { width:100%;
+        // padding:12px }`, which inflates the checkbox to the full row width and
+        // shoves the time and note off the right-hand edge. The inline width and
+        // padding below beat it (that rule carries no !important), and the note
+        // now wraps instead of overflowing.
         const list = markers.length ? markers.map((m, i) => {
             const d = dupe(m.time_ms);
-            return '<label style="display:flex;gap:8px;align-items:center;padding:3px 0;' +
-                   (d ? 'opacity:.45;' : '') + '">' +
+            return '<label style="display:flex;gap:6px;align-items:flex-start;padding:4px 0;' +
+                   'font-size:.85rem;line-height:1.35;' + (d ? 'opacity:.45;' : '') + '">' +
                    '<input type="checkbox" class="stash-mk" data-i="' + i + '"' +
-                   (d ? ' disabled' : ' checked') + '>' +
-                   '<span style="font-variant-numeric:tabular-nums;min-width:56px;">' +
-                   clock(m.time_ms) + '</span>' +
-                   '<span>' + esc(m.note || m.tag || '(untitled)') + '</span>' +
-                   (d ? '<span style="margin-left:auto;font-size:.85em;">already saved</span>' : '') +
+                   (d ? ' disabled' : ' checked') +
+                   ' style="width:auto;min-width:0;flex:0 0 auto;padding:0;margin:2px 0 0;">' +
+                   '<span style="font-variant-numeric:tabular-nums;flex:0 0 auto;' +
+                   'white-space:nowrap;opacity:.8;">' + clock(m.time_ms) + '</span>' +
+                   '<span style="flex:1 1 auto;min-width:0;overflow-wrap:anywhere;' +
+                   'word-break:break-word;">' + esc(m.note || m.tag || '(untitled)') + '</span>' +
+                   (d ? '<span style="flex:0 0 auto;font-size:.8em;white-space:nowrap;' +
+                        'opacity:.8;">saved</span>' : '') +
                    '</label>';
         }).join('') : '<p style="opacity:.75;">No markers submitted for this scene yet.</p>';
 

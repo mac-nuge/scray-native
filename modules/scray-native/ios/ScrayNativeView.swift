@@ -35,6 +35,20 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
 
     /// Play a catalogue key. Called by ScrayBrowser after it dismisses itself,
     /// so the player is already on screen by the time this lands.
+    /// Hand a StashDB scene URL to an open stash modal. Called by ScrayBrowser
+    /// after it has dismissed itself, so the modal is back on screen by the
+    /// time this lands. A no-op if no stash modal is open.
+    func deliverStashURL(_ url: String) {
+        let escaped = url
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        DispatchQueue.main.async {
+            self.webView.evaluateJavaScript(
+                "window.scrayStashUrlFromBrowser && window.scrayStashUrlFromBrowser('\(escaped)');"
+            )
+        }
+    }
+
     func playVideo(key: String) {
         let escaped = key
             .replacingOccurrences(of: "\\", with: "\\\\")

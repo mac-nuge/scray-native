@@ -146,6 +146,9 @@ final class ScrayBrowserViewController: UIViewController,
     private var toastHide: DispatchWorkItem?
     private let moreButton = UIButton(type: .system)
     private var reloadButton = UIButton(type: .system)
+    /// StashDB only — see refreshChrome(). Hands the scene URL back to the
+    /// stash modal that is still open behind this browser.
+    private var stashButton = UIButton(type: .system)
     private var homeButton = UIButton(type: .system)
 
     private var observations: [NSKeyValueObservation] = []
@@ -241,6 +244,14 @@ final class ScrayBrowserViewController: UIViewController,
         moreButton.addTarget(self, action: #selector(moreTapped), for: .touchUpInside)
         moreButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
 
+        // Hidden everywhere except stashdb.org, so it reads as "this page is
+        // the one Scray is waiting for" rather than as general chrome.
+        stashButton.setImage(UIImage(systemName: "arrow.turn.right.up"), for: .normal)
+        stashButton.tintColor = .systemGreen
+        stashButton.addTarget(self, action: #selector(stashTapped), for: .touchUpInside)
+        stashButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        stashButton.isHidden = true
+
         addressField.font = .systemFont(ofSize: 13)
         addressField.backgroundColor = .secondarySystemBackground
         addressField.layer.cornerRadius = 9
@@ -255,7 +266,7 @@ final class ScrayBrowserViewController: UIViewController,
         addressField.placeholder = "Search or enter address"
         addressField.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
-        let header = UIStackView(arrangedSubviews: [addressField, homeButton, moreButton])
+        let header = UIStackView(arrangedSubviews: [addressField, stashButton, homeButton, moreButton])
         header.axis = .horizontal
         header.alignment = .center
         header.spacing = 4
@@ -491,6 +502,11 @@ final class ScrayBrowserViewController: UIViewController,
         tabsItem.title = "\(tabs.count) ⧉"
         backItem.isEnabled = currentWebView?.canGoBack ?? false
         forwardItem.isEnabled = currentWebView?.canGoForward ?? false
+        // Deliberately above the isFirstResponder guard below: the button's
+        // visibility has nothing to do with whether the address bar is being
+        // edited, and hiding it mid-edit would be a nasty surprise.
+        let stashHost = (currentTab?.displayURL?.host ?? "").lowercased()
+        stashButton.isHidden = !(stashHost == "stashdb.org" || stashHost.hasSuffix(".stashdb.org"))
         guard !addressField.isFirstResponder else { return }
         addressField.text = compactAddress(currentTab?.displayURL)
     }
@@ -567,6 +583,17 @@ final class ScrayBrowserViewController: UIViewController,
         guard let wv = currentWebView else { return }
         if wv.isLoading { wv.stopLoading() } else if wv.url != nil { wv.reload() }
         else { wv.load(URLRequest(url: homeURL)) }
+    }
+
+    /// StashDB only. Dismiss first, then deliver — same reasoning as the
+    /// scraynative:// branch in decidePolicyFor: the stash modal is behind
+    /// this full-screen browser, so writing into it before dismissal would
+    /// update something nobody can see.
+    @objc private func stashTapped() {
+        guard let url = currentTab?.displayURL?.absoluteString, !url.isEmpty else { return }
+        dismiss(animated: true) {
+            ScrayNativeView.current?.deliverStashURL(url)
+        }
     }
 
     @objc private func safariTapped() {

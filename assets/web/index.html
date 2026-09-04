@@ -186,17 +186,41 @@
       // Both the top-row "Picker" button and the corner "P" go through the
       // same listener - one source of truth for the URL. Changing it lives in
       // the Settings modal (footer), not on these buttons.
-      ['openPickerBtn', 'pickerCornerBtn'].forEach(id => {
-        document.getElementById(id)?.addEventListener('click', (e) => {
-          e.preventDefault();
+      // Only the top-row "Picker" button still goes straight to Picker. The
+      // corner "P" resumes instead - same behaviour as the new "Browser"
+      // button, so either one lands you back on whatever you were reading.
+      document.getElementById('openPickerBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        openInAppBrowser(window.scrayPickerUrl());
+      });
+
+      document.getElementById('pickerCornerBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
+          window.ScrayBridge.openBrowser()
+            .catch(err => console.error('[browser] openBrowser failed:', err));
+        } else {
           openInAppBrowser(window.scrayPickerUrl());
-        });
+        }
       });
 
       document.getElementById('openBrowseBtn')?.addEventListener('click', (e) => {
         e.preventDefault();
         openInAppBrowser((window.SCRAY_SYNC && window.SCRAY_SYNC.BROWSE_URL)
           || 'https://macnguyen.com/scray/browse.html');
+      });
+
+      // Passing no URL at all is what the bridge reads as "resume wherever the
+      // browser was left" - same tab list, same page, same cookie jar. Outside
+      // Native there is nothing to resume, so that case falls back to home.
+      document.getElementById('openBrowserBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
+          window.ScrayBridge.openBrowser()
+            .catch(err => console.error('[browser] openBrowser failed:', err));
+        } else {
+          openInAppBrowser(window.scrayPickerUrl());
+        }
       });
     });
   </script>
@@ -471,6 +495,7 @@
 <button id="rescanLibraryBtn">Refresh</button>
 <button id="openPickerBtn" title="Open Picker in the in-app browser">Picker</button>
 <button id="openBrowseBtn" title="Open the DB console in the in-app browser">DB</button>
+<button id="openBrowserBtn" title="Re-open the in-app browser where you left it">Browser</button>
 </div>
 
 <!-- ✅ Secondary compact row (mobile portrait only) -->

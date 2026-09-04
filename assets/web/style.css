@@ -2021,6 +2021,18 @@ display: block !important;
    Hold the bar up for the second the chip is showing. FLS is unaffected by
    the transform line: applyManualRotationStyles() writes its own inline
    !important transform there, which outranks this. */
+/* ⚙️ FLS and real landscape fullscreen run the control bar at opacity 0.5.
+   The overrides that keep the bar up for a bookmark chip forced it to 1,
+   which made a jump visibly brighten the row. These match each mode's own
+   base instead, so nothing changes appearance. Extra class each, so they
+   out-specify the two rules below regardless of source order. */
+body.manual-rotate-landscape.scray-bookmark-flash .plyr--hide-controls .plyr__controls,
+body.landscape-fullscreen.scray-bookmark-flash .plyr--hide-controls .plyr__controls,
+body.manual-rotate-landscape .plyr--hide-controls .plyr__controls:has(#bookmarkTooltipRail),
+body.landscape-fullscreen .plyr--hide-controls .plyr__controls:has(#bookmarkTooltipRail) {
+opacity: 0.5 !important;
+}
+
 body.scray-bookmark-flash .plyr--hide-controls .plyr__controls {
 opacity: 1 !important;
 pointer-events: auto !important;
@@ -2491,6 +2503,30 @@ cursor: pointer;
    landscape rotation for free - but that also means Plyr's idle fade would
    take the tooltips with it, a second after you asked to see them. Keep the
    bar awake for as long as a rail is up. */
+/* ⚙️ FLS and real landscape fullscreen run the control bar at opacity 0.5
+   (see body.manual-rotate-landscape .plyr__controls). The two overrides that
+   keep the bar up for a bookmark chip forced it to 1, which made a jump
+   visibly brighten the row - two different transparencies for the same bar.
+   These match each mode's own base instead, so nothing changes appearance. */
+body.manual-rotate-landscape.scray-bookmark-flash .plyr--hide-controls .plyr__controls,
+body.landscape-fullscreen.scray-bookmark-flash .plyr--hide-controls .plyr__controls,
+body.manual-rotate-landscape .plyr--hide-controls .plyr__controls:has(#bookmarkTooltipRail),
+body.landscape-fullscreen .plyr--hide-controls .plyr__controls:has(#bookmarkTooltipRail) {
+opacity: 0.5 !important;
+}
+
+/* The chip rail lives inside .plyr__controls, and Plyr fades that bar with
+   opacity. Any opacity below 1 makes the bar a stacking context, which traps
+   the rail's own z-index inside it - so raising the rail does nothing. The bar
+   carries no z-index of its own, leaving the pause-menu circles (90, in
+   .plyr__video-wrapper) painting over the chips. In MPFS a three-chip rail is
+   348px wide and the circle row is 268px, so they overlap almost completely:
+   the leftmost chip works and the other two are dead.
+   Lift the whole bar above the circles, but only while it is holding a rail. */
+.plyr__controls:has(#bookmarkTooltipRail) {
+z-index: 96 !important;
+}
+
 .plyr--hide-controls .plyr__controls:has(#bookmarkTooltipRail) {
   opacity: 1 !important;
   pointer-events: auto !important;

@@ -2715,6 +2715,10 @@ function scrayNextBookmark() {
 }
 window.scrayNextBookmark = scrayNextBookmark;
 
+// ⚙️ How long the chip takes to fade once its time is up. Set as an inline
+// transition on the rail, so this value and that transition are the same
+// number by construction.
+const NEXT_BOOKMARK_FADE_MS = 400;
 // ⚙️ How long the bookmark's own tooltip stays up after a jump. 1000 proved
 // hard to catch by eye - the marker-tap rail sits for RAIL_FADE_MS (5000) by
 // comparison, which is why one felt present and the other did not.
@@ -2804,8 +2808,10 @@ function flashBookmarkTooltip(bm) {
 
     setTimeout(() => {
         clearInterval(guard);
-        hideBookmarkRail();
-        document.body.classList.remove('scray-bookmark-flash');
+
+        // Same dismissal the marker-tap rail uses - fade, remove, then hand
+        // the control bar back. Shared so the two paths can't drift apart.
+        window.scrayDismissBookmarkRail?.();
     }, NEXT_BOOKMARK_TOOLTIP_MS);
 }
 
@@ -4516,6 +4522,42 @@ window.showBookmarkRail = showBookmarkRail;
 window.scrayShowControlsNow = scrayShowControlsNow;
 window.SCRAY_RAIL_ID = RAIL_ID;
 
+// ⚙️ How long the rail takes to fade before it is removed.
+const RAIL_DISMISS_FADE_MS = 400;
+
+/**
+ * Fade the rail out, remove it, then hand the control bar back to Plyr.
+ *
+ * The handing-back is the part that was missing. style.css pins
+ * .plyr__controls at full opacity while a rail is inside it
+ * (:has(#bookmarkTooltipRail)), and whatever raised the bar in the first
+ * place - scrayShowControlsNow(), or a tap on the progress bar - leaves
+ * Plyr's idle timer waiting on pointer activity that never comes. Removing
+ * the rail is not enough on its own; the bar has to be told.
+ *
+ * Both entry points funnel through here - the marker-tap rail's fade timer
+ * and the jump-to-bookmark flash - so they can't drift apart again.
+ */
+function dismissBookmarkRail() {
+    const rail = document.getElementById(RAIL_ID);
+    const finish = () => {
+        // Identity-checked: a rail raised in the meantime is a different
+        // element and should survive.
+        if (!rail || document.getElementById(RAIL_ID) === rail) hideBookmarkRail();
+        document.body.classList.remove('scray-bookmark-flash');
+        // Only while playing - a paused player is meant to keep its controls.
+        if (window.plyrPlayer && !window.plyrPlayer.paused) {
+            document.querySelector('.plyr')?.classList.add('plyr--hide-controls');
+            try { window.plyrPlayer.toggleControls?.(false); } catch (e) {}
+        }
+    };
+    if (!rail) { finish(); return; }
+    rail.style.transition = `opacity ${RAIL_DISMISS_FADE_MS}ms ease`;
+    rail.style.opacity = '0';
+    setTimeout(finish, RAIL_DISMISS_FADE_MS);
+}
+window.scrayDismissBookmarkRail = dismissBookmarkRail;
+
 /**
  * Offset of `el` inside `ancestor`, in the ancestor's own layout coordinates.
  *
@@ -4570,7 +4612,7 @@ function showBookmarkRail(group, onPick, opts = {}) {
         margin-bottom: ${RAIL_GAP_ABOVE_CONTROLS_PX}px;
         display: flex;
         gap: ${CHIP_GAP_PX}px;
-        z-index: 71;
+        z-index: 95;   /* above .plyr-frame-step-group (90) - in MPFS the circles overlap the rail's row */
         pointer-events: auto;
     `;
 
@@ -4611,12 +4653,25 @@ function showBookmarkRail(group, onPick, opts = {}) {
         `;
         chip.addEventListener('mousedown', (e) => e.stopPropagation());
         chip.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
-        chip.addEventListener('click', (e) => {
+
+        // Act on touchend rather than waiting for the synthesised click.
+        // handleDoubleTap is bound to .plyr, and it calls preventDefault() as
+        // soon as two taps land inside 300ms - then, since the MPFS band was
+        // added, returns without doing anything because the chip sits below
+        // the band's floor. iOS drops the click and the chip reads as dead.
+        // dataset.firing is the desktop-click vs iOS-touchend guard the bin
+        // button in file-operations.js already uses.
+        const pick = (e) => {
             e.stopPropagation();
             e.preventDefault();
+            if (chip.dataset.firing === '1') return;
+            chip.dataset.firing = '1';
+            setTimeout(() => { delete chip.dataset.firing; }, 400);
             hideBookmarkRail();
             onPick(entry);
-        });
+        };
+        chip.addEventListener('touchend', pick, { passive: false });
+        chip.addEventListener('click', pick);
         rail.appendChild(chip);
     });
 
@@ -4645,6 +4700,23 @@ function showBookmarkRail(group, onPick, opts = {}) {
     );
     rail.style.left = clamped + 'px';
     rail.style.transform = 'translateX(-50%)';
+
+    // TEMPORARY DIAGNOSTIC - remove once MPFS chip taps are settled.
+    // Asks the browser what is actually on top at the chip's own centre,
+    // rather than reasoning about z-index and geometry from the outside.
+    setTimeout(() => {
+        const b = rail.getBoundingClientRect();
+        const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        console.log('[rail] ' + JSON.stringify({
+            rect: b.toJSON(),
+            topEl: top ? (top.tagName + '|' + String(top.className || '').slice(0, 70)) : null,
+            topIsChip: !!(top && top.closest && top.closest('#' + RAIL_ID)),
+            controlsPE: getComputedStyle(controls).pointerEvents,
+            controlsOpacity: getComputedStyle(controls).opacity,
+            hideControls: !!document.querySelector('.plyr')?.classList.contains('plyr--hide-controls'),
+            body: document.body.className
+        }));
+    }, 0);
 
     return rail;
 }
@@ -4763,7 +4835,7 @@ const raise = (entry) => {
         .slice(0, BOOKMARK_RAIL_MAX_CHIPS)
         .sort((a, b) => a.percent - b.percent);
     showBookmarkRail(shown, jumpTo);
-    fadeTimer = setTimeout(hideBookmarkRail, RAIL_FADE_MS);
+    fadeTimer = setTimeout(dismissBookmarkRail, RAIL_FADE_MS);
 };
 
 entries.forEach(entry => {

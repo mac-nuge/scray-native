@@ -2628,6 +2628,52 @@ user-select: text !important;
 -webkit-touch-callout: default !important;
 }
 
+/* Modals and overlays are for READING - scene titles, performer names,
+   error text, changelog entries, JSON dumps - so the page-wide lock above
+   is the wrong trade here. None of these sit under the player's gesture
+   handlers, which is what that lock exists to protect.
+
+   Deliberately NO descendant `*`. user-select inherits, so naming the
+   container is enough to reach every bit of text inside it, while any
+   child that declares its own value - .word-selector-container,
+   .tag-selection-item, .rename-tag-pill - keeps it, because a direct
+   declaration always beats an inherited one regardless of !important.
+   That is what leaves the tap-to-select-words UIs working. */
+.basket-json-modal,
+.file-operation-modal,
+.score-modal-overlay,
+.tag-selection-overlay,
+.search-pill-popup,
+[role="dialog"],
+#scrayBugOverlay,
+#scraySettingsOverlay,
+#playerBasketModal,
+#changelogOverlay,
+#folderPopup,
+#searchPillPopup,
+#video-error-overlay,
+#download-error-overlay {
+-webkit-user-select: text !important;
+-moz-user-select: text !important;
+-ms-user-select: text !important;
+user-select: text !important;
+-webkit-touch-callout: default !important;
+}
+
+/* ...but not the controls. A button inside those containers would inherit
+   the rule above and its label would become selectable, so a long press on
+   "Close" would start a selection instead of reading as a press. Naming
+   the button directly beats the inherited value. */
+button,
+.modal-btn,
+[role="button"] {
+-webkit-user-select: none !important;
+-moz-user-select: none !important;
+-ms-user-select: none !important;
+user-select: none !important;
+-webkit-touch-callout: none !important;
+}
+
 /* Quick-action buttons: random video (X), play-through-history (H<),
    next-bookmark (M>), bookmark quick-add (BM), and play-next (>).
    NOTE: the M> button still carries the class .plyr-basket-quick - it used to
@@ -5596,6 +5642,76 @@ right: 110px !important; /* ⚙️ FORCED_LANDSCAPE_CLOCK_EXTRA = 30px added to 
 body.landscape-mini #plyr-uk-clock,
 body.portrait-mini #plyr-uk-clock {
 display: none;
+}
+
+/* =========================================
+ZOOM % BADGE (sits immediately inboard of the clock)
+`top` and `right` are written from JS - see scrayZoomUpdateBadge in player.js -
+because the clock's own `right` differs between FLS (110px) and MPFS (80px) and
+the badge has to track whichever is live. Everything else lives here.
+========================================= */
+#plyr-zoom-badge {
+position: absolute;
+display: none;
+background: rgba(0, 0, 0, 0.6);
+color: #7ec8ff; /* ⚙️ distinct from the clock's white so it reads at a glance */
+padding: 4px 8px;
+border-radius: 3px;
+font-size: 0.65rem;
+font-family: 'Courier New', monospace;
+font-weight: bold;
+letter-spacing: 0.5px;
+white-space: nowrap;
+pointer-events: auto;
+cursor: pointer;
+z-index: 99998;
+transition: background 0.15s ease;
+}
+
+#plyr-zoom-badge.visible {
+display: block;
+}
+
+#plyr-zoom-badge:active {
+background: rgba(0, 0, 0, 0.85);
+}
+
+/* Hide in mini-player modes, same as the clock */
+body.landscape-mini #plyr-zoom-badge,
+body.portrait-mini #plyr-zoom-badge {
+display: none;
+}
+
+/* The pinch needs the raw touch stream. `touch-action: manipulation` (set
+   globally further up) still lets the browser claim a two-finger gesture as a
+   pan or a page zoom, which cancels the touch sequence mid-pinch.
+   FLS and MPFS are fullscreen with nothing behind them to scroll, so they take
+   `none` unconditionally. MPB is the docked in-page player and the list scrolls
+   THROUGH it, so there it gets `pan-y` at rest - one-finger scroll survives,
+   the browser's own pinch does not - and `none` only once actually zoomed. */
+body.manual-rotate-landscape .plyr__video-wrapper,
+body.manual-rotate-landscape .plyr__video-wrapper video,
+body.portrait-fullscreen .plyr__video-wrapper,
+body.portrait-fullscreen .plyr__video-wrapper video,
+body.landscape-fullscreen .plyr__video-wrapper,
+body.landscape-fullscreen .plyr__video-wrapper video,
+body.scray-zoomed .plyr__video-wrapper,
+body.scray-zoomed .plyr__video-wrapper video {
+touch-action: none !important;
+}
+
+body.portrait-inline:not(.scray-zoomed) .plyr__video-wrapper,
+body.portrait-inline:not(.scray-zoomed) .plyr__video-wrapper video {
+touch-action: pan-y !important;
+}
+
+/* Whatever the mode, the magnified frame is cropped by the wrapper instead of
+   spilling out over the controls. Only while zoomed, so the resting layout is
+   left exactly as it was. Plyr's own stylesheet already sets this on
+   .plyr__video-wrapper, but the app overrides overflow in several fullscreen
+   rules, so it is worth being explicit rather than relying on the cascade. */
+body.scray-zoomed .plyr__video-wrapper {
+overflow: hidden !important;
 }
 
 /* =========================================

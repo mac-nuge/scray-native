@@ -438,6 +438,341 @@ function setImportantStyles(el, styles) {
     });
 }
 
+// =========================================
+// ⚙️ FLS PINCH-ZOOM  (two fingers: pinch to zoom, drag to pan)
+// =========================================
+// Gated to FLS for now via scrayZoomModeActive() - that one function is the
+// whole switch, so opening it up to MPFS/MPB later is a one-line change.
+//
+// The transform goes on the VIDEO element, not the wrapper: the wrapper is
+// what carries overflow:hidden, and that is what crops the magnified frame
+// instead of letting it spill out over the controls. applyManualRotationStyles
+// writes that same transform property (it used to hard-code 'none'), so the
+// zoom has to own it - hence scrayZoomTransformValue() being called from there.
+//
+// FLS rotates the whole container 90deg, so the video's local coordinate space
+// is turned 90deg relative to the screen. Every finger measurement therefore
+// goes through scrayZoomScreenToLocal* before it reaches the pan/anchor maths.
+// The pinch SPREAD is a distance, which rotation doesn't change, so that one
+// needs no conversion.
+const ZOOM_MIN = 1;          // ⚙️ 1 = fit-to-frame, i.e. not zoomed
+const ZOOM_MAX = 8;          // ⚙️ hard ceiling
+const ZOOM_SNAP_OUT = 1.04;  // ⚙️ pinch back below this and it snaps to 1
+const ZOOM_BADGE_GAP_PX = 6; // ⚙️ gap between the clock and the % badge
+
+let zoomScale = 1;
+let zoomTx = 0;  // local px, applied BEFORE the scale (see transform order)
+let zoomTy = 0;
+let zoomPinchActive = false;
+let zoomPinchStartDist = 0;
+let zoomPinchStartScale = 1;
+let zoomPanLastLocal = null;
+let zoomRafPending = false;
+
+function scrayZoomModeActive() {
+    // Every player surface except the mini-player: FLS, MPFS, MPB and real
+    // device landscape all zoom the same way, the only difference being the
+    // 90deg coordinate flip that scrayZoomScreenToLocalDelta handles.
+    // The mini-player is out because it is a thumbnail, and its flick-to-
+    // corner gesture would be fighting the pan the whole time.
+    return !document.getElementById('inlineVideoContainer')?.classList.contains('mini-player');
+}
+
+// Which surface is live. FLS is checked first because body.portrait-fullscreen
+// is set during FLS too - the same trap every MPFS CSS rule has to dodge.
+function scrayZoomModeKey() {
+    if (document.body && document.body.classList.contains('manual-rotate-landscape')) return 'FLS';
+    return window.currentPlayerState || 'unknown';
+}
+// Deliberately left null rather than seeded here: player.js is document.write'd
+// from <head>, so document.body does not exist yet at eval time and calling
+// scrayZoomModeKey() now throws - which takes this whole file's IIFE down with
+// it and leaves no player at all. null just means "no mode recorded yet", and
+// the first updatePlayerStateClass() fills it in.
+let zoomModeKey = null;
+
+// A zoom can't survive a change of surface: the box it was clamped against is
+// gone, and the badge is pinned to the old mode's clock position. Dropping
+// back to 100% is both simpler and more predictable than trying to carry it.
+window.scrayZoomOnModeChange = function () {
+    const key = scrayZoomModeKey();
+    if (key === zoomModeKey) return;
+    zoomModeKey = key;
+    scrayZoomReset();
+};
+
+// Deliberately NOT getManualRotationFullscreenElement(): that one console.logs
+// its result whenever a fullscreen mode is expected, and this runs on every
+// touchmove. Same resolution order, no logging, and the result is cached for
+// the duration of a gesture (isConnected catches Plyr rebuilding the wrapper).
+let zoomTargetCache = null;
+function scrayZoomTargets(refresh) {
+    if (!refresh && zoomTargetCache
+        && zoomTargetCache.wrapper.isConnected && zoomTargetCache.video.isConnected) {
+        return zoomTargetCache;
+    }
+    const container = document.fullscreenElement
+        || document.webkitFullscreenElement
+        || document.querySelector('.plyr--fullscreen-fallback')
+        || document.querySelector('.plyr--fullscreen')
+        || document.querySelector('#inlineVideoContainer .plyr')
+        || document.querySelector('.plyr');
+    if (!container) return null;
+    const wrapper = container.querySelector('.plyr__video-wrapper');
+    const video = container.querySelector('video');
+    if (!wrapper || !video) return null;
+    zoomTargetCache = { container, wrapper, video };
+    return zoomTargetCache;
+}
+
+// 'none' rather than 'scale(1)' at rest so the un-zoomed FLS layout is
+// byte-for-byte what it was before this existed.
+function scrayZoomTransformValue() {
+    if (zoomScale <= 1 && !zoomTx && !zoomTy) return 'none';
+    return 'translate(' + zoomTx.toFixed(2) + 'px, ' + zoomTy.toFixed(2) + 'px) scale(' + zoomScale.toFixed(4) + ')';
+}
+
+function scrayZoomApply() {
+    const t = scrayZoomTargets();
+    if (t) {
+        t.video.style.setProperty('transform', scrayZoomTransformValue(), 'important');
+        t.video.style.setProperty('transform-origin', 'center center', 'important');
+    }
+    // Drives the crop and touch-action rules in style.css. Set on the body
+    // rather than the wrapper because the wrapper is rebuilt on every source
+    // change and the body is not.
+    document.body.classList.toggle('scray-zoomed', zoomScale > 1);
+    // Outside the `if` on purpose: a reset fired when no player is in
+    // the DOM still has to clear a badge left over from the last one.
+    scrayZoomUpdateBadge();
+}
+
+function scrayZoomScheduleApply() {
+    if (zoomRafPending) return;
+    zoomRafPending = true;
+    requestAnimationFrame(() => {
+        zoomRafPending = false;
+        scrayZoomApply();
+    });
+}
+
+// Keep the picture covering the viewport: pan is only allowed as far as the
+// magnified frame's own edge, and is pinned to centre on any axis where the
+// frame is still smaller than the box. object-fit:contain means the thing
+// being clamped is the letterboxed PICTURE, not the element box - which is
+// why the intrinsic dimensions are needed here.
+function scrayZoomClampPan() {
+    const t = scrayZoomTargets();
+    if (!t) { zoomTx = 0; zoomTy = 0; return; }
+    // Two different boxes, and in MPB they are NOT the same one: the wrapper
+    // is what crops, but the picture is letterboxed inside the VIDEO element,
+    // which the docked layout centres inside a taller wrapper. FLS and MPFS
+    // happen to have them coincide, which is why one box was enough before.
+    const W = t.wrapper.clientWidth || 1;
+    const H = t.wrapper.clientHeight || 1;
+    const boxW = t.video.clientWidth || W;
+    const boxH = t.video.clientHeight || H;
+    const ar = (t.video.videoWidth && t.video.videoHeight)
+        ? (t.video.videoWidth / t.video.videoHeight)
+        : (boxW / boxH);
+    let baseW = boxW, baseH = boxW / ar;
+    if (baseH > boxH) { baseH = boxH; baseW = boxH * ar; }
+    const maxTx = Math.max(0, (baseW * zoomScale - W) / 2);
+    const maxTy = Math.max(0, (baseH * zoomScale - H) / 2);
+    zoomTx = Math.max(-maxTx, Math.min(maxTx, zoomTx));
+    zoomTy = Math.max(-maxTy, Math.min(maxTy, zoomTy));
+}
+
+function scrayZoomReset(opts) {
+    const wasZoomed = zoomScale > 1;
+    zoomScale = 1;
+    zoomTx = 0;
+    zoomTy = 0;
+    scrayZoomApply();
+    if (wasZoomed && opts && opts.feedback) showPlayerFeedback('Zoom 100%', 'top-left');
+}
+window.scrayZoomReset = scrayZoomReset;
+
+// The badge lives beside the clock, in the same absolutely-positioned layer,
+// so it inherits the container's FLS rotation for free - no counter-rotation
+// maths, exactly like the clock itself.
+function scrayZoomBadge() {
+    const clock = document.getElementById('plyr-uk-clock');
+    if (!clock || !clock.parentElement) return null;
+    let badge = document.getElementById('plyr-zoom-badge');
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'plyr-zoom-badge';
+        badge.title = 'Tap to reset zoom';
+        badge.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            scrayZoomReset({ feedback: true });
+        });
+    }
+    // Plyr rebuilds its container on source changes and the clock gets
+    // re-homed with it, so re-parent every time rather than only on create.
+    if (badge.parentElement !== clock.parentElement) clock.parentElement.appendChild(badge);
+    return badge;
+}
+
+function scrayZoomUpdateBadge() {
+    const badge = scrayZoomBadge();
+    if (!badge) return;
+    if (zoomScale <= 1) {
+        badge.classList.remove('visible');
+        return;
+    }
+    badge.textContent = Math.round(zoomScale * 100) + '%';
+    // Shadow the clock rather than restating its rules per mode. The three
+    // surfaces disagree on all of it: MPB has the clock absolute at right 60px
+    // inside .plyr, FLS absolute at 110px, and MPFS fixed against the viewport
+    // at 12px with a higher z-index, because .plyr's own box collapses there.
+    // Reading the computed values back means one code path covers all three.
+    const clock = document.getElementById('plyr-uk-clock');
+    const cs = window.getComputedStyle(clock);
+    const clockRight = parseFloat(cs.right) || 0;
+    badge.style.position = cs.position;
+    badge.style.zIndex = cs.zIndex;
+    badge.style.top = cs.top;
+    badge.style.left = 'auto';
+    badge.style.bottom = 'auto';
+    badge.style.right = (clockRight + clock.offsetWidth + ZOOM_BADGE_GAP_PX) + 'px';
+    badge.classList.add('visible');
+}
+
+function scrayZoomTouchDist(a, b) {
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+// FLS's rotate(90deg) maps a local (x, y) onto screen (-y, x); inverting that
+// gives local = (screenY, -screenX). ⚙️ If panning comes out mirrored, this is
+// the one place to flip it.
+function scrayZoomScreenToLocalDelta(dx, dy) {
+    return manualRotationActive ? { x: dy, y: -dx } : { x: dx, y: dy };
+}
+
+// Absolute screen point -> local px measured from the wrapper's centre. The
+// centre survives the rotation untouched, because rotate(90deg) spins the box
+// about exactly that point - so the bounding box's centre is still the
+// element's centre, and no un-rotating of the rect is needed.
+function scrayZoomScreenToLocalPoint(sx, sy) {
+    const t = scrayZoomTargets();
+    if (!t) return { x: 0, y: 0 };
+    const r = t.wrapper.getBoundingClientRect();
+    return scrayZoomScreenToLocalDelta(sx - (r.left + r.width / 2), sy - (r.top + r.height / 2));
+}
+
+function scrayZoomTouchStart(e) {
+    if (!scrayZoomModeActive()) return;
+    if (!e.touches || e.touches.length < 2) return;
+    const t = scrayZoomTargets(true);
+    if (!t || !t.container.contains(e.target)) return;
+    // Anything that runs its own gesture keeps it: the controls bar (which
+    // carries the pause-menu circles), the permanent progress bar, the
+    // scrubbar markers.
+    if (e.target.closest && (e.target.closest('.plyr__controls') || e.target.closest('#permanentProgressBar'))) return;
+
+    zoomPinchActive = true;
+    window.scrayZoomGestureActive = true;
+    zoomPinchStartDist = scrayZoomTouchDist(e.touches[0], e.touches[1]);
+    zoomPinchStartScale = zoomScale;
+    const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    zoomPanLastLocal = scrayZoomScreenToLocalPoint(midX, midY);
+    e.stopPropagation();
+    e.preventDefault();
+}
+
+function scrayZoomTouchMove(e) {
+    if (!zoomPinchActive) return;
+    if (!e.touches || e.touches.length < 2) return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    const dist = scrayZoomTouchDist(e.touches[0], e.touches[1]);
+    const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    const mid = scrayZoomScreenToLocalPoint(midX, midY);
+
+    // 1 - pan, from how far the midpoint itself travelled.
+    if (zoomPanLastLocal) {
+        zoomTx += mid.x - zoomPanLastLocal.x;
+        zoomTy += mid.y - zoomPanLastLocal.y;
+    }
+    zoomPanLastLocal = mid;
+
+    // 2 - scale, anchored so whatever frame detail sits under the midpoint
+    // stays under it. With transform: translate(t) scale(s), a content point p
+    // lands at t + s*p, so holding p fixed across a scale change means
+    // t' = mid - ((mid - t) / s) * s'.
+    if (zoomPinchStartDist > 10 && dist > 10) {
+        const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomPinchStartScale * (dist / zoomPinchStartDist)));
+        if (zoomScale > 0) {
+            zoomTx = mid.x - ((mid.x - zoomTx) / zoomScale) * next;
+            zoomTy = mid.y - ((mid.y - zoomTy) / zoomScale) * next;
+        }
+        zoomScale = next;
+    }
+
+    scrayZoomClampPan();
+    scrayZoomScheduleApply();
+}
+
+function scrayZoomTouchEnd(e) {
+    const remaining = (e.touches && e.touches.length) || 0;
+    if (!zoomPinchActive && !window.scrayZoomGestureActive) return;
+    if (remaining >= 2) return; // still a pinch, just a third finger leaving
+
+    if (zoomPinchActive) {
+        zoomPinchActive = false;
+        zoomPanLastLocal = null;
+        if (zoomScale <= ZOOM_SNAP_OUT) {
+            scrayZoomReset();
+        } else {
+            scrayZoomClampPan();
+            scrayZoomApply();
+        }
+    }
+
+    if (remaining > 0) {
+        // A finger is still down. Stay latched, or the leftover contact gets
+        // picked up as a fresh one-finger scrub the moment it moves - using
+        // the startX/startY of a touch that began the pinch.
+        window.scrayZoomSuppressUntil = Date.now() + 2000;
+        return;
+    }
+
+    window.scrayZoomGestureActive = false;
+    // Both fingers fire a touchend the tap handlers would otherwise count
+    // as taps. 400ms clears the 300ms double-tap window.
+    window.scrayZoomSuppressUntil = Date.now() + 400;
+}
+
+// One shared test for "a pinch is happening, or just did" - the scrub and
+// tap handlers all consult this rather than counting touches themselves.
+window.scrayZoomBlocksGestures = function () {
+    return !!window.scrayZoomGestureActive || Date.now() < (window.scrayZoomSuppressUntil || 0);
+};
+
+// Capture phase on document, so these run BEFORE the wrapper's bubble-phase
+// scrub listeners and can stopPropagation them away. On document rather than
+// the wrapper because Plyr throws the wrapper away on every source change,
+// and the install guard means this only ever attaches once.
+if (!window.__scrayZoomInstalled) {
+    window.__scrayZoomInstalled = true;
+    document.addEventListener('touchstart', scrayZoomTouchStart, { passive: false, capture: true });
+    document.addEventListener('touchmove', scrayZoomTouchMove, { passive: false, capture: true });
+    document.addEventListener('touchend', scrayZoomTouchEnd, { passive: false, capture: true });
+    document.addEventListener('touchcancel', scrayZoomTouchEnd, { passive: false, capture: true });
+    // The address bar showing/hiding resizes the box under a live zoom, which
+    // can leave the pan outside its limits. No-op at 100%.
+    window.addEventListener('resize', () => {
+        if (zoomScale <= 1) return;
+        scrayZoomClampPan();
+        scrayZoomApply();
+    });
+}
+
 function applyManualRotationStyles() {
     const targets = getManualRotationTargets();
     if (!targets || !targets.container) {
@@ -494,6 +829,9 @@ function applyManualRotationStyles() {
         overflow: 'hidden'
     });
 
+    // Zoom pan limits depend on the box size, which is what has just
+    // changed - re-clamp before the transform is written back out.
+    scrayZoomClampPan();
     setImportantStyles(video, {
         position: 'static',
         width: '100%',
@@ -502,7 +840,7 @@ function applyManualRotationStyles() {
         'max-height': '100%',
         'min-width': '0',
         'min-height': '0',
-        transform: 'none',
+        transform: scrayZoomTransformValue(),
         'object-fit': 'contain',
         margin: '0',
         padding: '0'
@@ -663,6 +1001,10 @@ if (manualRotationActive) {
 }  
 
 function resetManualRotation() {
+    // Leaving FLS drops the zoom. removeManualRotationStyles() strips the
+    // transform property either way, so keeping the state would only desync
+    // the badge from what is actually on screen.
+    window.scrayZoomReset?.();
     if (manualRotationActive) {
         window.removeEventListener('resize', manualRotationResizeHandler);
         removeManualRotationStyles();
@@ -1260,7 +1602,30 @@ const showScrubFeedback = (newTime) => {
 showPlayerFeedback(formatDuration(newTime * 1000), 'top-left');
 };
 
+// Shared bail-out for the pinch-zoom handover. Everything a live scrub owns is
+// closure-local to this function, so the zoom module can't reach in - it raises
+// window.scrayZoomBlocksGestures() instead and this does the teardown.
+const cancelScrubForZoom = () => {
+    if (scrubSessionActive) {
+        scrubSessionActive = false;
+        window.scrayScrubSeek.end();
+    }
+    pendingScrubTime = null;
+    scrubbing = false;
+    isHorizontalDrag = false;
+    isDetermined = false;
+    jogEligible = false;
+    jogActive = false;
+};
+
 const startScrub = (e) => {
+// A second finger down means a pinch-zoom, not a scrub. Bail before any jog or
+// seek state is armed, and tear down whatever the FIRST finger already started
+// - the zoom module owns the gesture from here.
+if ((e.touches && e.touches.length > 1) || window.scrayZoomBlocksGestures?.()) {
+    cancelScrubForZoom();
+    return;
+}
 // ✅ Only block in mini-player
 const isMiniPlayer = document.getElementById('inlineVideoContainer')?.classList.contains('mini-player');
 
@@ -1461,6 +1826,12 @@ if (pendingScrubTime !== null) {
 };
 
 const scrubMove = (e) => {
+// Same guard as startScrub: a pinch can begin mid-drag, and the leftover
+// finger keeps firing touchmove after the second one lifts.
+if ((e.touches && e.touches.length > 1) || window.scrayZoomBlocksGestures?.()) {
+    cancelScrubForZoom();
+    return;
+}
 if (window.frameStepHolding) {
 return;
 }
@@ -5468,6 +5839,10 @@ function updatePlayerStateClass() {
     );
     if (stateClass) document.body.classList.add(stateClass);
     window.currentPlayerState = stateClass;
+    // Every surface change funnels through here - fullscreen enter and exit,
+    // orientation, FLS on and off - so this is the one place that catches all
+    // of them for the zoom. No-op unless the mode actually changed.
+    window.scrayZoomOnModeChange?.();
     // console.log('Player state:', stateClass);
 
     // Entering fullscreen mid-video doesn't re-run rebuildVideoInfoDisplay,
@@ -5492,7 +5867,19 @@ document.addEventListener('selectionchange', () => {
     if (!el) return;
     // Anchored on a page-level ancestor, not the player - checking for the
     // player subtree here was the reason the long-press case got through.
-    if (el.closest('input, textarea, [contenteditable="true"], #inlineConsole, .allow-select')) return;
+    // This list must stay in step with the selectable-surface block in
+    // style.css. The CSS decides whether a selection can START; this decides
+    // whether it is allowed to SURVIVE. A container named in one and not the
+    // other gives you a selection that appears and is wiped a frame later,
+    // which is exactly how the modals behaved before this line was widened.
+    if (el.closest(
+        'input, textarea, [contenteditable="true"], #inlineConsole, .allow-select, ' +
+        '.basket-json-modal, .file-operation-modal, .score-modal-overlay, ' +
+        '.tag-selection-overlay, .search-pill-popup, [role="dialog"], ' +
+        '#scrayBugOverlay, #scraySettingsOverlay, #playerBasketModal, ' +
+        '#changelogOverlay, #folderPopup, #searchPillPopup, ' +
+        '#video-error-overlay, #download-error-overlay'
+    )) return;
     sel.removeAllRanges();
 });
 
@@ -5950,6 +6337,9 @@ attachBookmarkQuickButton(); //  Re-attach bookmark quick-add button on new vide
 // part-way in). loadedmetadata is the earliest the duration is known, so it is
 // the first attempt - the helper handles the case where the media accepts the
 // seek and then snaps back because it is not seekable yet.
+// A new source starts at 100%. Carrying a zoom across into a differently
+// shaped video would land the viewport somewhere arbitrary.
+window.scrayZoomReset?.();
 window.scrayApplyPendingStartAt?.('loadedmetadata');
 attachFrameStepButtons(); // Re-attach frame-step buttons on new video
 // (frame-step columns removed)
@@ -6036,6 +6426,13 @@ function setupDoubleTapHandler() {
  
  // Handler function that can be attached to any element
  const handleDoubleTap = function(e) {
+     // Lifting two pinch fingers fires two touchends in quick succession.
+     // Neither is a tap, and neither should feed the double/triple counters.
+     if (window.scrayZoomBlocksGestures?.()) {
+         lastTap = 0;
+         tripleCount = 0;
+         return;
+     }
      const isMiniPlayer = document.getElementById('inlineVideoContainer')?.classList.contains('mini-player');
      
      // Skip if mini-player

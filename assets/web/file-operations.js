@@ -3404,6 +3404,11 @@ async function showStashModal(video) {
         .replace(/\b(?:\d{3,4}p|4k|x26[45]|h26[45]|hevc|aac|web-?dl|webrip|hdrip|bluray|xxx)\b/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+    // What the "Filename" button sends: the whole name, minus only the
+    // extension. Distinct from searchSeed, which also strips encode noise -
+    // the point of that button is that nothing else has been second-guessed.
+    const searchFullName = String(video.filename || '').replace(/\.[^.]+$/, '').trim();
+
     const stashSearchUrl = (term) =>
         'https://stashdb.org/search?q=' + encodeURIComponent(String(term || '').trim());
 
@@ -3501,7 +3506,11 @@ async function showStashModal(video) {
                              'style="flex:1 1 auto;min-width:0;width:auto;margin:0;padding:6px;' +
                              'font-size:.85rem;border:1px solid #ccc;border-radius:4px;">' +
                       '<button id="stashSearchBtn" class="modal-btn modal-btn-secondary" ' +
-                              'style="flex:0 0 auto;width:auto;margin:0;padding:6px 14px;">Search</button>' +
+                              'title="Search StashDB for whatever is in the box" ' +
+                              'style="flex:0 0 auto;width:auto;margin:0;padding:6px 10px;">Search</button>' +
+                      '<button id="stashSearchRawBtn" class="modal-btn modal-btn-secondary" ' +
+                              'title="Search for the whole filename: ' + esc(searchFullName) + '" ' +
+                              'style="flex:0 0 auto;width:auto;margin:0;padding:6px 10px;">Filename</button>' +
                     '</div>' +
                   '</div>' +
                   // width:auto beats the mobile `input { width:100% }` rule, which
@@ -3585,6 +3594,18 @@ async function showStashModal(video) {
                 const term = termBox.value.trim();
                 if (!term) { termBox.focus(); return; }
                 openNative(stashSearchUrl(term));
+            });
+
+            // Escape hatch for when picking words is more faff than it is worth:
+            // throw the whole filename at StashDB and let its search sort it
+            // out. The box is filled in too, so the term is there to trim by
+            // hand and re-run rather than vanishing into the browser.
+            // (Swap video.filename for searchSeed here to send the tidied form
+            // instead - extension and encode noise already stripped.)
+            modal.querySelector('#stashSearchRawBtn')?.addEventListener('click', () => {
+                if (!searchFullName) return;
+                termBox.value = searchFullName;
+                openNative(stashSearchUrl(searchFullName));
             });
 
             // Filled by ScrayBrowser's ⤴ button, which only appears on

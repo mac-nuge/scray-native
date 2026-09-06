@@ -3465,7 +3465,7 @@ async function showStashModal(video) {
         try {
             r = await window.scrayApiCall('stash_scene', {
                 method: 'POST',
-                body: { video_key: window.scrayVideoKey(video.filename), force: !!force }
+                body: { video_key: video.videoKey || window.scrayVideoKey(video.filename), force: !!force }
             });
         } catch (err) {
             body.innerHTML = '<p style="color:#dc3545;">Lookup failed: ' + esc(err.message) + '</p>';
@@ -3629,7 +3629,7 @@ async function showStashModal(video) {
                 try {
                     await window.scrayApiCall('stash_submit', {
                         method: 'POST',
-                        body: { video_key: window.scrayVideoKey(video.filename), stash_id: val }
+                        body: { video_key: video.videoKey || window.scrayVideoKey(video.filename), stash_id: val }
                     });
                     sMsg.textContent = 'Submitted. Reloading…';
                     // Deliberately load(false): the id is stored locally now, so

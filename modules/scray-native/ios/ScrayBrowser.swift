@@ -126,6 +126,12 @@ final class ScrayBrowserViewController: UIViewController,
     private var currentTab: ScrayBrowserTab? { tabs.indices.contains(currentIndex) ? tabs[currentIndex] : nil }
     private var currentWebView: WKWebView? { currentTab?.webView }
 
+    /// The tab that asked for a StashDB search via scraynative://newtab.
+    /// The return-arrow button hands the scene URL back to this tab rather
+    /// than dismissing, because when Picker is the requester the modal
+    /// waiting for that URL lives inside this browser, not behind it.
+    private weak var stashRequester: WKWebView?
+
     private var webConfig: WKWebViewConfiguration!
     private let messageProxy = ScrayBrowserMessageProxy()
 
@@ -591,9 +597,30 @@ final class ScrayBrowserViewController: UIViewController,
     /// update something nobody can see.
     @objc private func stashTapped() {
         guard let url = currentTab?.displayURL?.absoluteString, !url.isEmpty else { return }
+
+        // Picker asked for this search from a tab in here, so the modal waiting
+        // for the URL is one tab away rather than behind the browser. Switch to
+        // it and inject; dismissing would hide the thing being filled in.
+        if let requester = stashRequester,
+           let idx = tabs.firstIndex(where: { $0.webView === requester }) {
+            stashRequester = nil
+            selectTab(idx)
+            requester.evaluateJavaScript(Self.stashDeliveryJS(url))
+            return
+        }
+
         dismiss(animated: true) {
             ScrayNativeView.current?.deliverStashURL(url)
         }
+    }
+
+    /// Single-quoted so the URL's own & and ? need no escaping; only the two
+    /// characters that could close or extend that literal are handled.
+    private static func stashDeliveryJS(_ url: String) -> String {
+        let escaped = url
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        return "window.scrayStashUrlFromBrowser && window.scrayStashUrlFromBrowser('\(escaped)');"
     }
 
     @objc private func safariTapped() {
@@ -687,8 +714,28 @@ final class ScrayBrowserViewController: UIViewController,
         // the player. Dismiss first, then hand the key to the main web view.
         if scheme == "scraynative" {
             decisionHandler(.cancel)
-            let key = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "key" })?.value
+            let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            let query = { (name: String) -> String? in
+                comps?.queryItems?.first(where: { $0.name == name })?.value
+            }
+
+            // scraynative://newtab?url=… — Picker's stash search, running in a
+            // tab of this browser. It cannot just call window.open: a scripted
+            // open is not a link activation, so createWebViewWith below routes
+            // it to the MSAL popup sheet and you end up with a browser nested
+            // inside the browser. This opens a real tab and stays put.
+            if (url.host ?? "").lowercased() == "newtab" {
+                guard let target = query("url").flatMap({ URL(string: $0) }) else { return }
+                stashRequester = webView
+                addTab(url: target, select: true)
+                return
+            }
+
+            // Picker's "N" button. Handled in-process, NOT via the generic
+            // UIApplication.shared.open below: opening our own scheme relaunches
+            // us behind this modal, so the browser would still be full-screen over
+            // the player. Dismiss first, then hand the key to the main web view.
+            let key = query("key")
             dismiss(animated: true) {
                 if let key, !key.isEmpty {
                     ScrayNativeView.current?.playVideo(key: key)

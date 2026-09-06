@@ -170,6 +170,15 @@ function createCompactButtonGroup(buttons, visibleCount = 2, video = null) {
      else buttons.push(stashBtn);
    }
    
+   // ⚙️ BM colour is decided here, not at the seven call sites. Each of them
+   // still passes its own ternary; this overwrites it, so "purple when
+   // bookmarked, grey when not" only has to be right in one file. Done
+   // before the slice so an overflowed BM gets the same treatment.
+   if (video && typeof window.scrayApplyBookmarkButtonColour === 'function') {
+       const bmSpec = buttons.find(b => b && b.label === 'BM');
+       if (bmSpec) window.scrayApplyBookmarkButtonColour(bmSpec, video);
+   }
+
    // Show first N buttons
    const visibleButtons = buttons.slice(0, visibleCount);
    const hiddenButtons = buttons.slice(visibleCount);
@@ -178,6 +187,15 @@ visibleButtons.forEach(btn => {
       const element = document.createElement('button');
       element.textContent = btn.label;
       element.className = 'compact-btn';
+
+      // BM has to be findable after the fact - its colour tracks a value
+      // that changes while the row is still on screen.
+      // scrayRefreshBookmarkButtons() restyles these in place.
+      if (btn.label === 'BM') {
+          element.classList.add('scray-bm-btn');
+          element._scrayBtnSpec = btn;
+          element._scrayVideo = video;
+      }
       
       // Force consistent styling
       element.style.display = 'flex';

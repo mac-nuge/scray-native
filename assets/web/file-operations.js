@@ -3328,6 +3328,14 @@ async function saveBookmarks(video, existingTooltip = null) {
     if (typeof updateVideoInMemory === 'function') {
         updateVideoInMemory(video.oneDriveId, { bookmarks: video.bookmarks });
     }
+
+    // The single choke point for bookmark changes - both the modal commit and
+    // the stash import land here - so this is the one place that needs to
+    // repaint the BM buttons. Runs before the awaits below so the button
+    // flips immediately rather than after the DB round trip.
+    if (typeof window.scrayRefreshBookmarkButtons === 'function') {
+        window.scrayRefreshBookmarkButtons(video);
+    }
     if (typeof updateVideoInDB === 'function') {
         await updateVideoInDB(video.oneDriveId, { bookmarks: video.bookmarks });
     }

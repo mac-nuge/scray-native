@@ -88,12 +88,80 @@ async function getCachedVideoBookmarks(forceRefresh = false) {
  * come from getAllVideos and carry it) and falls back to the cache, since
  * basket and history entries are stored separately and often don't.
  */
+/* ⚙️ The two BM states in one place. Seven call sites used to hard-code
+   "#6f42c1" / "#ece6f6" inline; they all go through
+   scrayApplyBookmarkButtonColour() now, so changing a shade means changing
+   it here only. Off is a disabled-looking grey rather than a pale purple. */
+const SCRAY_BM_COLOURS = {
+    on:  { bg: '#6f42c1', fg: '#ffffff' },
+    off: { bg: '#e0e0e0', fg: '#9e9e9e' }
+};
+window.SCRAY_BM_COLOURS = SCRAY_BM_COLOURS;
+
 function scrayHasBookmarks(video) {
     if (!video) return false;
-    if (Array.isArray(video.bookmarks)) return video.bookmarks.length > 0;
-    return cachedVideoBookmarks.has(video.oneDriveId);
+    const own = video.bookmarks;
+    if (Array.isArray(own)) return own.length > 0;
+    // Sync rows and server payloads carry it as a JSON string; the old
+    // Array.isArray test fell straight past those to the cache.
+    if (typeof own === 'string' && own.trim()) {
+        try {
+            const parsed = JSON.parse(own);
+            return Array.isArray(parsed) && parsed.length > 0;
+        } catch { /* malformed - fall through to the cache */ }
+    }
+    // .has() was the bug: queueExcelUpdate left an empty array behind when
+    // the last bookmark was deleted, so the key survived and the button
+    // stayed purple. Read the value and check its length.
+    const cached = cachedVideoBookmarks.get(video.oneDriveId);
+    return Array.isArray(cached) ? cached.length > 0 : false;
 }
 window.scrayHasBookmarks = scrayHasBookmarks;
+
+/**
+ * Stamp the on/off colours onto a BM button spec. Called once by
+ * createCompactButtonGroup before it splits visible from overflow, so the
+ * caller's inline ternary no longer decides anything.
+ */
+function scrayApplyBookmarkButtonColour(spec, video) {
+    if (!spec) return spec;
+    const state = scrayHasBookmarks(video) ? SCRAY_BM_COLOURS.on : SCRAY_BM_COLOURS.off;
+    spec.color = state.bg;
+    spec.textColor = state.fg;
+    return spec;
+}
+window.scrayApplyBookmarkButtonColour = scrayApplyBookmarkButtonColour;
+
+/**
+ * Restyle every BM button currently on screen. Anything that adds or removes
+ * a bookmark has to call this, or the button keeps its build-time colour
+ * until the next full re-render.
+ *
+ * `changed` is the video that was just edited. Basket, history and the
+ * now-playing strip each hold their own copy of the same video, so the fresh
+ * array is pushed across by oneDriveId rather than trusting object identity.
+ */
+function scrayRefreshBookmarkButtons(changed = null) {
+    const id = changed ? (changed.oneDriveId ?? null) : null;
+    const list = Array.isArray(changed?.bookmarks) ? changed.bookmarks : null;
+
+    document.querySelectorAll('.scray-bm-btn').forEach(el => {
+        const v = el._scrayVideo;
+        if (!v) return;
+        if (id && list && v.oneDriveId === id) v.bookmarks = list;
+
+        const state = scrayHasBookmarks(v) ? SCRAY_BM_COLOURS.on : SCRAY_BM_COLOURS.off;
+        el.style.background = state.bg;
+        el.style.color = state.fg;
+        // The mouseleave handler restores from the spec object, so that has
+        // to move too or a hover would repaint the old colour.
+        if (el._scrayBtnSpec) {
+            el._scrayBtnSpec.color = state.bg;
+            el._scrayBtnSpec.textColor = state.fg;
+        }
+    });
+}
+window.scrayRefreshBookmarkButtons = scrayRefreshBookmarkButtons;
 
 // ✅ Local persistence: the same update shape excel-sheets.js uses, but
 // written to videoMeta instead of Graph. Without this, view_count,
@@ -113,7 +181,18 @@ async function queueExcelUpdate(video, updates) {
         const parsed = typeof updates.bookmarks === "string"
             ? JSON.parse(updates.bookmarks)
             : updates.bookmarks;
-        cachedVideoBookmarks.set(video.oneDriveId, parsed);
+        // Deleting the last bookmark has to REMOVE the key, not store an
+        // empty array - loadCachesFromMeta only ever sets non-empty entries,
+        // so an empty one here was a state the cache could not otherwise
+        // reach, and scrayHasBookmarks read it as "yes".
+        if (Array.isArray(parsed) && parsed.length) {
+            cachedVideoBookmarks.set(video.oneDriveId, parsed);
+        } else {
+            cachedVideoBookmarks.delete(video.oneDriveId);
+        }
+        // Keep the in-memory object in step. user_score does this two blocks
+        // up; bookmarks never did, which left grid rows stale.
+        video.bookmarks = Array.isArray(parsed) ? parsed : [];
         metaUpdates.bookmarks = parsed;
     }
 

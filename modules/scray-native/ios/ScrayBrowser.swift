@@ -161,6 +161,10 @@ final class ScrayBrowserViewController: UIViewController,
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
     private var jobs: [ScrayDownloadJob] = []
     private let downloadBar = ScrayDownloadBar()
+    private let downloadPill = ScrayDownloadPill()
+    /// Bar folded down to the pill. Cleared once the queue empties, so a
+    /// minimise only ever applies to the downloads it was tapped for.
+    private var downloadBarMinimised = false
     private var exportingTempFiles: [URL] = []
     private var pendingExportJobID: String?
     /// WKDownload keys we cancelled ourselves in order to pause, so the
@@ -315,7 +319,19 @@ final class ScrayBrowserViewController: UIViewController,
 
         downloadBar.translatesAutoresizingMaskIntoConstraints = false
         downloadBar.isHidden = true
-        downloadBar.onCancel = { [weak self] in self?.cancelActiveDownload() }
+        // The corner button minimises rather than cancels — the bar covers
+        // the page's own bottom-corner controls, and getting at them shouldn't
+        // cost you the transfer. Cancelling is still in the downloads list.
+        downloadBar.onMinimise = { [weak self] in
+            guard let self = self else { return }
+            self.downloadBarMinimised = true
+            self.refreshDownloadBar()
+        }
+        downloadPill.onTap = { [weak self] in
+            guard let self = self else { return }
+            self.downloadBarMinimised = false
+            self.refreshDownloadBar()
+        }
         // Tapping the bar opens the full list, same as the tray button.
         downloadBar.addGestureRecognizer(
             UITapGestureRecognizer(target: self, action: #selector(downloadsTapped)))
@@ -324,6 +340,7 @@ final class ScrayBrowserViewController: UIViewController,
         view.addSubview(progressView)
         view.addSubview(webContainer)
         view.addSubview(downloadBar)
+        view.addSubview(downloadPill)
         view.addSubview(toolbar)
 
         toastView.translatesAutoresizingMaskIntoConstraints = false
@@ -356,6 +373,12 @@ final class ScrayBrowserViewController: UIViewController,
             downloadBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             downloadBar.bottomAnchor.constraint(equalTo: toolbar.topAnchor),
             downloadBar.heightAnchor.constraint(equalToConstant: 52),
+
+            // Top-right, just under the address bar: clear of the page's
+            // corner buttons at bottom-left and of the tray button and its
+            // toast at bottom-right.
+            downloadPill.topAnchor.constraint(equalTo: progressView.bottomAnchor, constant: 10),
+            downloadPill.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
 
             toastBottom,
             toastView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
@@ -1142,9 +1165,24 @@ final class ScrayBrowserViewController: UIViewController,
 
         guard let job = jobs.first else {
             downloadBar.isHidden = true
+            downloadPill.isHidden = true
+            downloadBarMinimised = false
             toastBottom.constant = -6
             return
         }
+
+        if downloadBarMinimised {
+            downloadBar.isHidden = true
+            downloadPill.isHidden = false
+            toastBottom.constant = -6
+            downloadPill.update(received: job.receivedBytes,
+                                total: job.totalBytes,
+                                queued: jobs.count - 1,
+                                paused: job.isPaused)
+            return
+        }
+
+        downloadPill.isHidden = true
         downloadBar.isHidden = false
         toastBottom.constant = -58   // clear the progress bar
         downloadBar.update(filename: job.filename,

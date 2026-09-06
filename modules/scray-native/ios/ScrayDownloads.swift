@@ -46,7 +46,13 @@ final class ScrayDownloadJob {
 
 final class ScrayDownloadBar: UIView {
 
+    /// Kept for callers that want a hard stop; the bar itself no longer
+    /// calls it.
     var onCancel: (() -> Void)?
+    /// The corner button folds the bar down to a pill instead of killing the
+    /// transfer. Cancelling lives in the downloads list, where it can't be
+    /// hit while reaching for whatever the bar is covering.
+    var onMinimise: (() -> Void)?
 
     private let nameLabel = UILabel()
     private let detailLabel = UILabel()
@@ -74,11 +80,12 @@ final class ScrayDownloadBar: UIView {
         detailLabel.font = .systemFont(ofSize: 10)
         detailLabel.textColor = .secondaryLabel
 
-        let cancelButton = UIButton(type: .system)
-        cancelButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
-        cancelButton.tintColor = .tertiaryLabel
-        cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
-        cancelButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        let minimiseButton = UIButton(type: .system)
+        minimiseButton.setImage(UIImage(systemName: "chevron.down.circle.fill"), for: .normal)
+        minimiseButton.tintColor = .tertiaryLabel
+        minimiseButton.accessibilityLabel = "Minimise download"
+        minimiseButton.addTarget(self, action: #selector(minimiseTapped), for: .touchUpInside)
+        minimiseButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
 
         progressView.progressTintColor = UIColor(red: 1.0, green: 0.596, blue: 0.0, alpha: 1.0) // #ff9800
 
@@ -86,7 +93,7 @@ final class ScrayDownloadBar: UIView {
         text.axis = .vertical
         text.spacing = 1
 
-        let row = UIStackView(arrangedSubviews: [text, cancelButton])
+        let row = UIStackView(arrangedSubviews: [text, minimiseButton])
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 8
@@ -114,7 +121,7 @@ final class ScrayDownloadBar: UIView {
         ])
     }
 
-    @objc private func cancelTapped() { onCancel?() }
+    @objc private func minimiseTapped() { onMinimise?() }
 
     func update(filename: String, received: Int64, total: Int64, queued: Int, speed: String?) {
         nameLabel.text = queued > 0 ? "\(filename)  (+\(queued) more)" : filename
@@ -133,6 +140,157 @@ final class ScrayDownloadBar: UIView {
                 .compactMap { $0 }.joined(separator: " · ")
         }
     }
+}
+
+// ============================================================================
+// The minimised form of the bar: a small clock-face ring that keeps ticking
+// while the transfer runs, so whatever the bar was covering is reachable
+// without stopping anything. Tapping it puts the bar back.
+// ============================================================================
+
+final class ScrayDownloadPill: UIView {
+
+    var onTap: (() -> Void)?
+
+    private let track = CAShapeLayer()
+    private let arc = CAShapeLayer()
+    private let arrowView = UIImageView()
+    private let countLabel = UILabel()
+
+    private static let diameter: CGFloat = 34
+    private static let ringInset: CGFloat = 4
+    private static let tint = UIColor(red: 1.0, green: 0.596, blue: 0.0, alpha: 1.0) // #ff9800
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        build()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    private func build() {
+        isHidden = true
+        translatesAutoresizingMaskIntoConstraints = false
+        backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.95)
+        layer.cornerRadius = Self.diameter / 2
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.18
+        layer.shadowRadius = 4
+        layer.shadowOffset = CGSize(width: 0, height: 1)
+
+        track.fillColor = UIColor.clear.cgColor
+        track.strokeColor = UIColor.tertiaryLabel.cgColor
+        track.lineWidth = 3
+        layer.addSublayer(track)
+
+        arc.fillColor = UIColor.clear.cgColor
+        arc.strokeColor = Self.tint.cgColor
+        arc.lineWidth = 3
+        arc.lineCap = .round
+        arc.strokeEnd = 0
+        layer.addSublayer(arc)
+
+        arrowView.image = UIImage(systemName: "arrow.down",
+                                  withConfiguration: UIImage.SymbolConfiguration(pointSize: 11,
+                                                                                 weight: .bold))
+        arrowView.tintColor = Self.tint
+        arrowView.contentMode = .center
+        arrowView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(arrowView)
+
+        countLabel.font = .systemFont(ofSize: 11, weight: .bold)
+        countLabel.textColor = Self.tint
+        countLabel.textAlignment = .center
+        countLabel.isHidden = true
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(countLabel)
+
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: Self.diameter),
+            heightAnchor.constraint(equalToConstant: Self.diameter),
+
+            arrowView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            arrowView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            countLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            countLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+
+        isAccessibilityElement = true
+        accessibilityLabel = "Download in progress"
+        accessibilityHint = "Shows the download bar again"
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let centre = CGPoint(x: bounds.midX, y: bounds.midY)
+        let radius = (bounds.width - Self.ringInset * 2 - arc.lineWidth) / 2
+        guard radius > 0 else { return }
+
+        // Twelve o'clock, filling clockwise - reads as a clock hand rather
+        // than an arbitrary arc.
+        let path = UIBezierPath(arcCenter: centre,
+                                radius: radius,
+                                startAngle: -.pi / 2,
+                                endAngle: .pi * 1.5,
+                                clockwise: true).cgPath
+
+        // bounds/position rather than frame: the arc carries a rotation
+        // transform while spinning, and setting frame through a transform is
+        // undefined.
+        track.bounds = bounds
+        track.position = centre
+        track.path = path
+        arc.bounds = bounds
+        arc.position = centre
+        arc.path = path
+    }
+
+    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        track.strokeColor = UIColor.tertiaryLabel.resolvedColor(with: traitCollection).cgColor
+    }
+
+    func update(received: Int64, total: Int64, queued: Int, paused: Bool) {
+        arc.strokeColor = paused ? UIColor.systemGray.cgColor : Self.tint.cgColor
+
+        if total > 0 {
+            stopSpin()
+            let fraction = min(1.0, max(0.0, Double(received) / Double(total)))
+            arc.strokeEnd = CGFloat(fraction)
+        } else {
+            // No Content-Length. A quarter arc going round is honest about not
+            // knowing; a filling ring would be a guess.
+            arc.strokeEnd = 0.25
+            if paused { stopSpin() } else { startSpin() }
+        }
+
+        let showCount = queued > 0
+        countLabel.text = showCount ? "\(queued + 1)" : nil
+        countLabel.isHidden = !showCount
+        arrowView.isHidden = showCount
+    }
+
+    /// Re-added on every update rather than tracked with a flag: Core Animation
+    /// drops the animation when the app backgrounds, and the next progress tick
+    /// is what puts it back.
+    private func startSpin() {
+        guard arc.animation(forKey: "spin") == nil else { return }
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = CGFloat.pi * 2
+        spin.duration = 1.1
+        spin.repeatCount = .infinity
+        spin.isRemovedOnCompletion = false
+        arc.add(spin, forKey: "spin")
+    }
+
+    private func stopSpin() {
+        arc.removeAnimation(forKey: "spin")
+    }
+
+    @objc private func tapped() { onTap?() }
 }
 
 // ============================================================================

@@ -142,6 +142,210 @@ console.log("scray-bugreport.js loaded");
     try { const v = fn(); return v === undefined ? fallback : v; } catch { return fallback; }
   }
 
+  // -------------------------------------------------------------
+  // DOM snapshot
+  // -------------------------------------------------------------
+  // "What was on screen?" is the one question the console never answers, and
+  // it is usually the first one asked. Two answers here, cheap and expensive:
+  //
+  //   uiLayers()    - a handful of lines naming every panel, modal and overlay
+  //                   currently painted, in z-order. Small enough to ride
+  //                   inside the state object, so it shows in the ticket body.
+  //   domSnapshot() - the whole document serialised to HTML and attached as a
+  //                   file. Script bodies elided, long lists pruned, and live
+  //                   field values written back as attributes, because
+  //                   outerHTML serialises attributes and nothing else - a
+  //                   typed-in search box is empty in a naive dump.
+  //
+  // There is no screenshot API reachable from JS inside a WKWebView, and
+  // html2canvas re-renders rather than captures, which is worse than useless
+  // for a bug about how something looks. Native can do it properly with
+  // WKWebView.takeSnapshot.
+
+  // ⚙️ ADJUSTABLE
+  const MAX_DOM_CHARS = 400000;  // ceiling on the serialised HTML
+  const PRUNE_KEEP    = 15;      // children kept per long list once over budget
+  const UI_MAX_DEPTH  = 4;       // how deep below <html> to look for overlays
+  const PRUNE_LISTS   = [
+    "playlist", "basketList", "historyList", "panelTaggedList",
+    "randomPlaylistPanelList", "inlineConsole",
+  ];
+
+  /** tag#id.class - enough to find the thing again, short enough to read. */
+  function describeEl(el) {
+    if (!el || el.nodeType !== 1) return null;
+    const cls = typeof el.className === "string" ? el.className.trim() : "";
+    return el.tagName.toLowerCase()
+      + (el.id ? "#" + el.id : "")
+      + (cls ? "." + cls.split(/\s+/).slice(0, 3).join(".") : "");
+  }
+
+  /** Painted AND inside the viewport. display:none is not the only way to hide. */
+  function onScreen(el, cs) {
+    if (cs.display === "none" || cs.visibility === "hidden") return false;
+    if (parseFloat(cs.opacity || "1") < 0.05) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 2 && r.height > 2
+      && r.bottom > 0 && r.right > 0
+      && r.top < window.innerHeight && r.left < window.innerWidth;
+  }
+
+  /**
+   * Only the top few levels are walked. Every modal in this app is appended to
+   * <body> or to <html>, so depth pays for nothing below that - and a full
+   * getComputedStyle sweep of a rendered 7,000-row list would take seconds.
+   */
+  function uiLayers() {
+    const found = [];
+    const seen  = new Set();
+
+    (function walk(parent, depth) {
+      for (const el of Array.from(parent.children || [])) {
+        if (seen.has(el)) continue;
+        seen.add(el);
+        if (/^(HEAD|SCRIPT|STYLE|LINK|META|TITLE)$/.test(el.tagName)) continue;
+
+        let cs;
+        try { cs = getComputedStyle(el); } catch { continue; }
+        const vis = onScreen(el, cs);
+
+        if (vis && /^(fixed|absolute|sticky)$/.test(cs.position)) {
+          const r = el.getBoundingClientRect();
+          const z = parseInt(cs.zIndex, 10) || 0;
+          found.push({
+            z,
+            text: `z${z} ${describeEl(el)} [${cs.position}] `
+              + `${Math.round(r.width)}x${Math.round(r.height)} `
+              + `@${Math.round(r.left)},${Math.round(r.top)}`,
+          });
+        }
+        if (vis && depth < UI_MAX_DEPTH) walk(el, depth + 1);
+      }
+    })(document.documentElement, 0);
+
+    found.sort((a, b) => b.z - a.z);
+    const out = found.slice(0, 24).map((f) => f.text);
+
+    // Whatever is under the middle of the screen is, by definition, the thing
+    // in the way. Catches anything the walk was too shallow to reach.
+    const stack = safe(() => Array.from(document.elementsFromPoint(
+      Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2)
+    )).slice(0, 6).map(describeEl).filter(Boolean), []);
+    if (stack.length) out.push("under centre: " + stack.join(" < "));
+
+    return out;
+  }
+
+  /**
+   * Must be called BEFORE the report overlay is appended, or the snapshot is
+   * of the bug reporter rather than of whatever it was opened about.
+   * Never throws: a failed snapshot returns a comment and the ticket still
+   * gets filed.
+   */
+  function domSnapshot() {
+    try {
+      const clone = document.documentElement.cloneNode(true);
+
+      // Our own furniture is not evidence.
+      ["scrayBugOverlay", "scrayBugStyles"].forEach((id) => {
+        const el = clone.querySelector("#" + id);
+        if (el) el.remove();
+      });
+
+      // Index matching is safe: the clone is a deep copy of the same tree
+      // taken microseconds ago, so the same selector yields the same nodes in
+      // the same order. Bail out entirely if the counts ever disagree.
+      const liveF = document.querySelectorAll("input, textarea, select");
+      const cloF  = clone.querySelectorAll("input, textarea, select");
+      if (liveF.length === cloF.length) {
+        for (let i = 0; i < liveF.length; i++) {
+          const a = liveF[i], b = cloF[i];
+          if (a.type === "password") { b.setAttribute("value", "[REDACTED]"); continue; }
+          if (a.type === "checkbox" || a.type === "radio") {
+            if (a.checked) b.setAttribute("checked", "");
+            else b.removeAttribute("checked");
+            continue;
+          }
+          if (a.tagName === "SELECT") {
+            Array.from(b.options || []).forEach((o, j) => {
+              if (a.options[j] && a.options[j].selected) o.setAttribute("selected", "");
+              else o.removeAttribute("selected");
+            });
+            continue;
+          }
+          if (a.tagName === "TEXTAREA") b.textContent = a.value;
+          else b.setAttribute("value", a.value);
+        }
+      }
+
+      // currentTime and paused are properties too, and they are the whole
+      // point of a player bug.
+      const liveM = document.querySelectorAll("video, audio");
+      const cloM  = clone.querySelectorAll("video, audio");
+      if (liveM.length === cloM.length) {
+        for (let i = 0; i < liveM.length; i++) {
+          cloM[i].setAttribute("data-scray-time",   String(Math.round(liveM[i].currentTime || 0)));
+          cloM[i].setAttribute("data-scray-paused", String(!!liveM[i].paused));
+          cloM[i].setAttribute("data-scray-ready",  String(liveM[i].readyState));
+        }
+      }
+
+      // Scroll offsets, and the true child count before any pruning below.
+      PRUNE_LISTS.forEach((id) => {
+        const a = document.getElementById(id);
+        const b = clone.querySelector("#" + id);
+        if (!a || !b) return;
+        b.setAttribute("data-scray-scroll",   String(Math.round(a.scrollTop || 0)));
+        b.setAttribute("data-scray-children", String(a.children.length));
+      });
+
+      // The bundle is already in git; re-sending it in every ticket is not.
+      Array.from(clone.querySelectorAll("script")).forEach((s) => {
+        const n = (s.textContent || "").length;
+        if (n > 200) s.textContent = `/* ${n} chars elided */`;
+      });
+      Array.from(clone.querySelectorAll("style")).forEach((s) => {
+        const n = (s.textContent || "").length;
+        if (n > 20000) s.textContent = `/* ${n} chars elided */`;
+      });
+
+      // Absolute hrefs so the file is at least half-readable if you open it.
+      Array.from(clone.querySelectorAll('link[rel~="stylesheet"]')).forEach((l) => {
+        const href = l.getAttribute("href");
+        if (!href) return;
+        try { l.setAttribute("href", new URL(href, location.href).href); } catch { /* leave it */ }
+      });
+
+      let html = "<!DOCTYPE html>\n" + clone.outerHTML;
+
+      // Prune before truncating: losing the tail of the video list is a much
+      // smaller loss than losing whichever modal was appended after it.
+      if (html.length > MAX_DOM_CHARS) {
+        PRUNE_LISTS.forEach((id) => {
+          const el = clone.querySelector("#" + id);
+          if (!el) return;
+          const kids = Array.from(el.children);
+          if (kids.length <= PRUNE_KEEP) return;
+          kids.slice(PRUNE_KEEP).forEach((k) => k.remove());
+          el.appendChild(document.createComment(
+            ` scray: ${kids.length - PRUNE_KEEP} more children pruned `
+          ));
+        });
+        html = "<!DOCTYPE html>\n" + clone.outerHTML;
+      }
+
+      // Same treatment as the console lines: src attributes are full of
+      // tempauth tokens, and a ticket gets forwarded.
+      html = redact(html);
+      if (html.length > MAX_DOM_CHARS) {
+        html = html.slice(0, MAX_DOM_CHARS) + `\n<!-- scray: truncated at ${MAX_DOM_CHARS} chars -->`;
+      }
+      return html;
+    } catch (err) {
+      return `<!-- scray: dom snapshot failed: ${err && err.message} -->`;
+    }
+  }
+
   async function snapshot() {
     const v = safe(() => window.currentPlayingVideo);
     const player = safe(() => window.inlineVideoPlayer);
@@ -185,6 +389,9 @@ console.log("scray-bugreport.js loaded");
         source:     player ? safe(() => scrubUrl(player.source || (player.media && player.media.currentSrc))) : null,
       } : null,
       scray_local_keys: safe(() => Object.keys(localStorage).filter((k) => /^scray/i.test(k)), []),
+      ui_layers:    safe(uiLayers, []),
+      focused:      safe(() => describeEl(document.activeElement)),
+      scroll_y:     safe(() => Math.round(window.scrollY || 0)),
     };
   }
 
@@ -292,6 +499,7 @@ console.log("scray-bugreport.js loaded");
     open = true;
     injectStyles();
 
+    const dom   = domSnapshot();
     const state = await snapshot();
     const lines = consoleLines();
 
@@ -320,7 +528,8 @@ console.log("scray-bugreport.js loaded");
           <div class="check">
             <input type="checkbox" id="scrayBugIncl" checked>
             <label for="scrayBugIncl" style="font-weight:normal;margin:0;">
-              Attach app state and the last ${lines.length} console line${lines.length === 1 ? "" : "s"}
+              Attach app state, a ${Math.round(dom.length / 1024)} KB DOM snapshot
+              and the last ${lines.length} console line${lines.length === 1 ? "" : "s"}
             </label>
           </div>
           <details>
@@ -343,7 +552,10 @@ console.log("scray-bugreport.js loaded");
     // textContent, not innerHTML: console output is arbitrary text and will
     // contain angle brackets sooner or later.
     document.getElementById("scrayBugPreview").textContent =
-      JSON.stringify(state, null, 2) + "\n\n--- console ---\n" + lines.join("\n");
+      JSON.stringify(state, null, 2)
+      + "\n\n--- console ---\n" + lines.join("\n")
+      + `\n\n--- dom (${dom.length} chars, attached as a file) ---\n`
+      + dom.slice(0, 4000) + (dom.length > 4000 ? "\n…" : "");
 
     const status  = document.getElementById("scrayBugStatus");
     const sendBtn = document.getElementById("scrayBugSend");
@@ -392,6 +604,7 @@ console.log("scray-bugreport.js loaded");
           details: redact(document.getElementById("scrayBugDetails").value.trim()),
           state:   include ? state : null,
           console: include ? lines : null,
+          dom:     include ? dom   : null,
         });
         status.className = "good";
         status.textContent = `Filed as ${res.key}. ${res.attached ? "State attached." : ""}`;

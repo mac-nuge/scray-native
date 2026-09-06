@@ -151,9 +151,9 @@ function createCompactButtonGroup(buttons, visibleCount = 2, video = null) {
    // This MUTATES the caller's array deliberately. The contextmenu handlers
    // read `buttons.slice(n)` at click time, so the entry has to land on the
    // same object they are holding, not on a copy made in here.
-   if (video && !buttons.some(b => b && b.label === 'Stash')) {
+   if (video && !buttons.some(b => b && b.label === 'S')) {
      const stashBtn = {
-       label: "Stash",
+       label: "S",
        title: "Look up scene data and timestamps",
        color: "#6c5ce7",
        onClick: (e) => {
@@ -163,11 +163,31 @@ function createCompactButtonGroup(buttons, visibleCount = 2, video = null) {
          }
        }
      };
-     // Sit just above delete so X stays last - but never above the fold, or a
-     // button that used to be visible would get pushed into the overflow.
-     const xAt = buttons.findIndex(b => b && b.label === 'X');
-     if (xAt >= visibleCount) buttons.splice(xAt, 0, stashBtn);
-     else buttons.push(stashBtn);
+
+     // S and B trade places: S takes the basket's slot in the visible row and
+     // B drops back to where S used to sit, just above delete. B is overwritten
+     // in place rather than spliced out and back in, so the second move cannot
+     // be thrown off by an index the first one has already shifted.
+     const bAt = buttons.findIndex(b => b && b.label === 'B');
+     if (bAt >= 0) {
+       const basketBtn = buttons[bAt];
+       // Renamed here rather than at the seven call sites that declare it.
+       // Nothing reads the "B" text - the pink row highlight comes from the
+       // li's dataset.videoId - and out in the overflow menu there is room to
+       // spell it out.
+       basketBtn.label = "Add to Basket";
+       buttons[bAt] = stashBtn;
+       const xAt = buttons.findIndex(b => b && b.label === 'X');
+       if (xAt >= 0) buttons.splice(xAt, 0, basketBtn);
+       else buttons.push(basketBtn);
+     } else {
+       // No basket on this menu, so there is nothing to trade with. Sit just
+       // above delete so X stays last - but never above the fold, or a button
+       // that used to be visible would get pushed into the overflow.
+       const xAt = buttons.findIndex(b => b && b.label === 'X');
+       if (xAt >= visibleCount) buttons.splice(xAt, 0, stashBtn);
+       else buttons.push(stashBtn);
+     }
    }
    
    // ⚙️ BM colour is decided here, not at the seven call sites. Each of them

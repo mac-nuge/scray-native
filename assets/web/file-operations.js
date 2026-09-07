@@ -3627,11 +3627,16 @@ async function showStashModal(video) {
                 sBtn.disabled = true;
                 sMsg.textContent = 'Submitting…';
                 try {
-                    await window.scrayApiCall('stash_submit', {
+                    const sRes = await window.scrayApiCall('stash_submit', {
                         method: 'POST',
                         body: { video_key: video.videoKey || window.scrayVideoKey(video.filename), stash_id: val }
                     });
-                    sMsg.textContent = 'Submitted. Reloading…';
+                    // A local store with a failed upstream submit is a partial
+                    // success, not a success. Saying "Submitted" for both hides
+                    // the case where StashDB never heard about the fingerprint.
+                    sMsg.textContent = sRes && sRes.note
+                        ? sRes.note
+                        : 'Submitted. Reloading…';
                     // Deliberately load(false): the id is stored locally now, so
                     // this works whether or not StashDB has reindexed yet.
                     await load(false);

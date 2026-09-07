@@ -2160,13 +2160,16 @@ position: absolute;
 left: 0;
 right: 0;
 top: 0;
+/* ⚙️ MUST be the full picture height. The tier dividers are children of this
+   box with top:33.333%/66.667%, and handleDoubleTap measures vFrac against the
+   full height - so any inset here scales the drawn lines away from the live
+   boundaries. A `bottom: 25%` here put them at 25%/50% of the picture, which
+   parked the lower line in the middle of the -10/+10 band instead of on its
+   edge. Nothing is drawn below 72% anyway (segments stop at bottom:28%, the
+   lower tier is at 66.667%), and the box is transparent with
+   pointer-events:none, so it cannot paint over or steal taps from the
+   control row. */
 bottom: 0;
-/* ⚙️ Stops short of the bottom of the picture on purpose. The segments only
-   run from top:26px to bottom:28% and the tiers sit at 33%/66%, so nothing is
-   drawn down there - and .plyr__controls carries no z-index of its own, which
-   means a full-height box at 89 paints straight over the control row. Better
-   not to be there at all than to rely on pointer-events to pass taps through. */
-bottom: 25%;
 /* Below .plyr-frame-step-group (90) and below the bookmark rail (71 inside
    the controls). The guides are a backdrop annotation - nothing should ever
    have to compete with them. */

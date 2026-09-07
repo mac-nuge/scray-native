@@ -773,6 +773,137 @@ if (!window.__scrayZoomInstalled) {
     });
 }
 
+// =========================================
+// ⚙️ MPFS: one-finger drag along the controls bar pans the zoomed video
+// =========================================
+// In MPFS the picture is letterboxed into a portrait box, so a zoomed frame
+// has far more horizontal range than there is screen to two-finger pan
+// across - the pinch fingers run out of room long before the picture does.
+// The controls bar is dead space the rest of the time, so a single-finger
+// horizontal drag along it slides the PICTURE sideways instead.
+//
+// Deliberately MPFS-only: FLS has a whole rotated screen to pan across, and
+// MPB's bar is too short to be worth the click suppression this needs.
+
+const MPFS_CONTROLS_PAN_GAIN = 1;             // ⚙️ px of pan per px of finger
+const MPFS_CONTROLS_PAN_COMMIT_PX = 8;        // ⚙️ drag this far before it commits
+const MPFS_CONTROLS_PAN_CLICK_BLOCK_MS = 400; // ⚙️ swallow the trailing click
+
+let mpfsPanArmed = false;
+let mpfsPanActive = false;
+let mpfsPanStartX = 0;
+let mpfsPanStartY = 0;
+let mpfsPanLastX = 0;
+let mpfsPanClickBlockUntil = 0;
+
+function mpfsControlsPanEligible() {
+    if (zoomScale <= 1) return false;        // nothing to pan at 100%
+    if (zoomPinchActive) return false;       // the pinch owns the gesture
+    if (manualRotationActive) return false;  // FLS, not MPFS
+    if (!window.plyrPlayer?.fullscreen?.active) return false;
+    return window.matchMedia('(orientation: portrait)').matches;
+}
+
+function mpfsControlsPanStart(e) {
+    mpfsPanArmed = false;
+    mpfsPanActive = false;
+    if (!e.touches || e.touches.length !== 1) return;
+    if (!mpfsControlsPanEligible()) return;
+
+    const target = e.target;
+    if (!target || !target.closest) return;
+    // The controls bar only...
+    if (!target.closest('.plyr__controls')) return;
+    // ...and never the two things that already own a horizontal drag.
+    if (target.closest('.plyr__progress')) return;
+    if (target.closest('#permanentProgressBar')) return;
+
+    mpfsPanStartX = e.touches[0].clientX;
+    mpfsPanStartY = e.touches[0].clientY;
+    mpfsPanLastX = mpfsPanStartX;
+    mpfsPanArmed = true;
+}
+
+function mpfsControlsPanMove(e) {
+    if (!mpfsPanArmed) return;
+    if (!e.touches || e.touches.length !== 1 || !mpfsControlsPanEligible()) {
+        mpfsPanArmed = false;
+        mpfsPanActive = false;
+        return;
+    }
+
+    const x = e.touches[0].clientX;
+
+    if (!mpfsPanActive) {
+        const dx = Math.abs(x - mpfsPanStartX);
+        const dy = Math.abs(e.touches[0].clientY - mpfsPanStartY);
+        // Commit only on a clearly horizontal drag. A tap has to stay a tap so
+        // the buttons keep working, and a vertical drag is the exit swipe.
+        if (dx < MPFS_CONTROLS_PAN_COMMIT_PX || dx <= dy) return;
+        mpfsPanActive = true;
+        // Measure from the commit point, not the touchdown, or the picture
+        // jumps by the whole threshold the instant it engages.
+        mpfsPanLastX = x;
+    }
+
+    // Owned from here - keep Plyr's own bar handlers out of it.
+    e.stopPropagation();
+    if (e.cancelable) e.preventDefault();
+
+    const delta = (x - mpfsPanLastX) * MPFS_CONTROLS_PAN_GAIN;
+    mpfsPanLastX = x;
+    // Same conversion the pinch pan uses. Identity in MPFS, but going through
+    // it keeps one definition of "which way is sideways" if this is ever
+    // opened up to FLS.
+    zoomTx += scrayZoomScreenToLocalDelta(delta, 0).x;
+    scrayZoomClampPan();
+    scrayZoomScheduleApply();
+}
+
+function mpfsControlsPanEnd() {
+    if (mpfsPanActive) {
+        // A touchend on a button still synthesises a click, and preventDefault
+        // on touchmove is not reliable about suppressing it inside Plyr's bar -
+        // so a pan that finished over Play would toggle playback.
+        mpfsPanClickBlockUntil = Date.now() + MPFS_CONTROLS_PAN_CLICK_BLOCK_MS;
+    }
+    mpfsPanArmed = false;
+    mpfsPanActive = false;
+}
+
+if (!window.__scrayMpfsControlsPanInstalled) {
+    window.__scrayMpfsControlsPanInstalled = true;
+
+    // touch-action is injected here rather than added to style.css because the
+    // gesture and the rule that makes it possible are one thing, and this way a
+    // single patch covers both bundles. The global `manipulation` still lets the
+    // browser claim a one-finger horizontal drag on the bar and cancel the touch
+    // sequence mid-drag. Keyed on .scray-zoomed so the bar is untouched at 100%,
+    // and :not(.manual-rotate-landscape) because FLS carries
+    // body.portrait-fullscreen too. The progress bar keeps today's behaviour.
+    const panStyle = document.createElement('style');
+    panStyle.id = 'scray-mpfs-controls-pan-style';
+    panStyle.textContent =
+        'body.scray-zoomed.portrait-fullscreen:not(.manual-rotate-landscape) .plyr__controls{touch-action:none !important;}' +
+        'body.scray-zoomed.portrait-fullscreen:not(.manual-rotate-landscape) .plyr__controls .plyr__progress{touch-action:manipulation !important;}';
+    (document.head || document.documentElement).appendChild(panStyle);
+
+    // Capture phase on document, for the same reasons the zoom module is: it
+    // has to beat Plyr's own bubble-phase bar listeners, and the bar is thrown
+    // away and rebuilt on every source change. Registered AFTER the zoom
+    // module, so scrayZoomTouchStart still gets first refusal on two fingers.
+    document.addEventListener('touchstart', mpfsControlsPanStart, { passive: false, capture: true });
+    document.addEventListener('touchmove', mpfsControlsPanMove, { passive: false, capture: true });
+    document.addEventListener('touchend', mpfsControlsPanEnd, { passive: false, capture: true });
+    document.addEventListener('touchcancel', mpfsControlsPanEnd, { passive: false, capture: true });
+    document.addEventListener('click', (ev) => {
+        if (Date.now() >= mpfsPanClickBlockUntil) return;
+        mpfsPanClickBlockUntil = 0; // one-shot
+        ev.stopPropagation();
+        ev.preventDefault();
+    }, true);
+}
+
 function applyManualRotationStyles() {
     const targets = getManualRotationTargets();
     if (!targets || !targets.container) {
@@ -1749,7 +1880,20 @@ const stopScrub = (e) => {
 // differs between the two since FLS rotates the video 90° relative to
 // the physical screen. MPFS has its own swipe-up
 // handler in setupMpfsSwipeExit().
-if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouches[0]) {
+// A pinch-zoom or two-finger pan must never be read as a swipe. The zoom
+// module runs on document capture and stopPropagation()s its own touchstart
+// and touchmove, so scrubMove's cancelScrubForZoom() never gets a chance to
+// clear isDetermined - the stale startX/startY from the FIRST finger then
+// survives all the way to here, and the spread reads as one big swipe.
+// Two independent tests, because either can be true without the other:
+//   - scrayZoomBlocksGestures(): a pinch is live, or ended within the
+//     suppression window (covers the second finger lifting).
+//   - e.touches.length: another finger is still down, so this touchend is
+//     not the end of the gesture at all.
+const zoomBlocksSwipe = !!window.scrayZoomBlocksGestures?.() ||
+    !!(e && e.touches && e.touches.length > 0);
+
+if (!zoomBlocksSwipe && isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouches[0]) {
     const SWIPE_EXIT_THRESHOLD_PX = 60; // ⚙️ adjust sensitivity here
 
     if (manualRotationActive) {
@@ -1763,9 +1907,6 @@ if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouch
                 window.plyrPlayer.fullscreen.exit();
             }
             showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
-        } else if (deltaXPhysical > SWIPE_EXIT_THRESHOLD_PX) {
-            // Swipe up (FLS) - stop playback.
-            triggerSwipeStopVideo();
         }
     } else if (isForcedOrRealLandscapeMobile() && window.plyrPlayer.fullscreen.active) {
         // Genuine device landscape: no rotation involved, so a real
@@ -1775,19 +1916,6 @@ if (isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouch
         if (deltaYPhysical > SWIPE_EXIT_THRESHOLD_PX) {
             window.plyrPlayer.fullscreen.exit();
             showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
-        } else if (deltaYPhysical < -SWIPE_EXIT_THRESHOLD_PX) {
-            // Swipe up (landscape) - stop playback. Changed alongside FLS
-            // and MPFS: leaving the random path live here would keep the same
-            // teardown-inside-a-touch-handler crash in one mode.
-            triggerSwipeStopVideo();
-        }
-    } else if (window.plyrPlayer.fullscreen.active) {
-        // MPFS: a physical upward swipe stops
-        // playback, mirroring the FLS/landscape "swipe up" gesture.
-        const endY = e.changedTouches[0].clientY;
-        const deltaYPhysical = endY - startY; // negative = swiped up (physical)
-        if (deltaYPhysical < -SWIPE_EXIT_THRESHOLD_PX) {
-            triggerSwipeStopVideo();
         }
     }
 }
@@ -2152,6 +2280,10 @@ function setupMpfsSwipeExit() {
         if (!isMpfs()) return;
         if (e.touches.length !== 1) return;
 
+        // Don't even arm tracking in the tail of a pinch: the last finger of
+        // a two-finger gesture can land a fresh single-touch touchstart.
+        if (window.scrayZoomBlocksGestures?.()) return;
+
         const touch = e.touches[0];
         const target = touch.target;
 
@@ -2173,6 +2305,12 @@ function setupMpfsSwipeExit() {
         // Re-check: something else may have exited fullscreen mid-gesture
         if (!window.plyrPlayer?.fullscreen?.active) return;
 
+        // Same pinch guard as stopScrub. touchstart only rejects a gesture
+        // that STARTS with two fingers - a second finger landing mid-drag
+        // leaves tracking true, and the pan then lands here as a swipe.
+        if (window.scrayZoomBlocksGestures?.()) return;
+        if (e.touches && e.touches.length > 0) return;
+
         const touch = e.changedTouches?.[0];
         if (!touch) return;
 
@@ -2184,18 +2322,6 @@ function setupMpfsSwipeExit() {
             window.plyrPlayer.fullscreen.exit();
             showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
             console.log('Portrait fullscreen exited via swipe down');
-        } else if (deltaY < -PORTRAIT_FS_SWIPE_EXIT_THRESHOLD_PX &&
-            deltaX < PORTRAIT_FS_SWIPE_MAX_HORIZONTAL_PX) {
-            // Swipe up (MPFS) - stop playback.
-            //
-            // Note this is a SECOND handler for the same gesture: stopScrub
-            // has its own MPFS swipe-up branch, so both fire on one swipe. That
-            // was harmless-ish for random (a cooldown swallowed the second
-            // call) but it is very likely why the crash outlived the deferral
-            // fix - two independent paths both tearing the player down.
-            // Pausing twice is idempotent, so it's harmless now.
-            triggerSwipeStopVideo();
-            console.log('Portrait fullscreen: stopped via swipe up');
         }
     }, { passive: true });
 

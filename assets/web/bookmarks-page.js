@@ -104,6 +104,26 @@
 
   // ---------------------------------------------------------------- filter + sort
 
+  /**
+   * The FLS player's Xb button asks here before falling back to the whole
+   * mirror. Returns the currently filtered bookmarks when a note pill or the
+   * filename search box is armed, and null when neither is - null meaning
+   * "no opinion", so Xb behaves on an unfiltered page exactly as it does on
+   * the main page.
+   *
+   * applyFilters() is re-run rather than trusting the last paint, for the same
+   * reason takeOverPlayRandomButton does it: the search box can have been
+   * typed into without a repaint having happened yet.
+   */
+  window.scrayFilteredBookmarkEntries = function () {
+    const searchEl = document.getElementById('filenameSearchBox');
+    const term = (searchEl?.value || '').trim();
+    if (!selectedNotes.size && !term) return null;
+
+    applyFilters();
+    return visibleEntries.map(e => ({ video: e.video, time: e.time, note: e.note }));
+  };
+
   function applyFilters() {
     const searchEl = document.getElementById('filenameSearchBox');
     const term = (searchEl?.value || '').trim().toLowerCase();

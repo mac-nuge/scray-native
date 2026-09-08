@@ -2697,6 +2697,143 @@ function attachRandomVideoButton() {
     console.log('Random video button attached');
 }
 
+// =========================================
+// Xb - PLAY A RANDOM BOOKMARK
+// =========================================
+// Picks a random BOOKMARK, not a random video: one entry per marker, so a file
+// with ten markers is ten times as likely to come up as a file with one. That's
+// the same weighting bookmarks-page.js uses for its own X.
+//
+// The pool is the whole local mirror, EXCEPT on the bookmarks page: that page
+// exposes window.scrayFilteredBookmarkEntries(), which hands back its currently
+// filtered set when a note pill or the search box is armed, and null when
+// neither is. So Xb there picks from what you are actually looking at.
+//
+// The main page's tag filters are deliberately NOT consulted - they choose a
+// FILE, not a moment, and there is no bookmark filter there to respect.
+const RANDOM_BOOKMARK_RECENT_MEMORY = 15; // how many picks back Xb won't repeat
+let scrayRecentRandomBookmarks = [];
+
+async function scrayPlayRandomBookmark() {
+    if (!window.inlineVideoPlayer) return;
+
+    // Bookmarks page with a filter armed: use exactly the set it is showing.
+    // null means either that we are not on that page, or that nothing is
+    // armed there - both fall through to the whole-mirror path below.
+    let entries = null;
+    if (typeof window.scrayFilteredBookmarkEntries === 'function') {
+        try {
+            entries = window.scrayFilteredBookmarkEntries();
+        } catch (err) {
+            console.warn('[Xb] bookmark filter hook failed, using the whole mirror:', err);
+            entries = null;
+        }
+        if (entries && !entries.length) {
+            showPlayerFeedback('No bookmarks match filter', 'top-left');
+            return;
+        }
+    }
+
+    if (!entries) {
+        if (typeof window.getAllVideos !== 'function') {
+            showPlayerFeedback('Bookmarks unavailable', 'top-left');
+            return;
+        }
+
+        let videos;
+        try {
+            videos = await window.getAllVideos();
+        } catch (err) {
+            console.warn('[Xb] could not read the local mirror:', err);
+            showPlayerFeedback('Bookmarks unavailable', 'top-left');
+            return;
+        }
+
+        entries = [];
+        (videos || []).forEach(video => {
+            if (!Array.isArray(video.bookmarks)) return;
+            video.bookmarks.forEach(bm => {
+                if (!bm || typeof bm.time !== 'number' || bm.time <= 0) return;
+                entries.push({ video, time: bm.time, note: (bm.note || '').trim() });
+            });
+        });
+    }
+
+    if (!entries.length) {
+        showPlayerFeedback('No bookmarks', 'top-left');
+        return;
+    }
+
+    // Keyed on video AND time, so two markers in one file stay distinct. Falls
+    // back to the whole pool once everything has been seen, rather than
+    // refusing to play anything.
+    const keyOf = (e) => `${e.video.oneDriveId ?? e.video.idFromAPI ?? e.video.filename}@${e.time}`;
+    const eligible = entries.filter(e => !scrayRecentRandomBookmarks.includes(keyOf(e)));
+    const pool = eligible.length ? eligible : entries;
+
+    const entry = pool[Math.floor(Math.random() * pool.length)];
+    scrayRecentRandomBookmarks.unshift(keyOf(entry));
+    if (scrayRecentRandomBookmarks.length > RANDOM_BOOKMARK_RECENT_MEMORY) {
+        scrayRecentRandomBookmarks = scrayRecentRandomBookmarks.slice(0, RANDOM_BOOKMARK_RECENT_MEMORY);
+    }
+
+    // A shallow clone carrying __bmStartAt, exactly as bookmarks-page.js builds
+    // its rows. playVideoInline reads __bmStartAt off the video itself, so the
+    // file opens at the marker with no second seek path to keep in step.
+    const clone = Object.assign({}, entry.video, {
+        __bmStartAt: entry.time,
+        __bmNote: entry.note
+    });
+
+    // Line the index up with the main list so > and < carry on from the right
+    // place. Not found (the file may be off the current page) still plays - it
+    // just means > starts from the top of the list.
+    const mainList = (window.paginationState && window.paginationState.allVideos) || [];
+    const idx = mainList.findIndex(v => v.oneDriveId === entry.video.oneDriveId);
+
+    window.lastPlayLabel = 'Random bookmark';
+    console.log(`[Xb] "${entry.note || 'no note'}" at ${entry.time.toFixed(1)}s in ${entry.video.filename}`);
+    showPlayerFeedback('🔖 Random bookmark', 'top-left');
+    window.inlineVideoPlayer.play(clone, 'main', idx >= 0 ? idx : 0);
+}
+window.scrayPlayRandomBookmark = scrayPlayRandomBookmark;
+
+function attachRandomBookmarkButton() {
+    const controls = document.querySelector('.plyr__controls');
+    if (!controls) return;
+    if (controls.querySelector('.plyr-random-bookmark')) return; // prevent duplicates
+
+    const isTouchDevice = ('ontouchstart' in window) ||
+                          (navigator.maxTouchPoints > 0) ||
+                          (navigator.msMaxTouchPoints > 0);
+    const isDesktop = window.innerWidth >= 769 && window.innerHeight >= 600 && !isTouchDevice;
+    if (isDesktop) return;
+
+    const btn = document.createElement("button");
+    btn.className = "plyr__control plyr-random-bookmark";
+    btn.textContent = 'Xb';
+    btn.title = 'Play a random bookmark';
+    btn.onclick = (e) => {
+        // Not awaited - the await inside unwinds this handler before the Plyr
+        // instance (and this very button) is torn down and rebuilt, which is
+        // the clean stack a normal .click() gets.
+        scrayPlayRandomBookmark().catch(err => console.warn('[Xb] failed:', err));
+        e.currentTarget.blur();
+    };
+
+    // Inserted before the fullscreen control like every other quick action.
+    // attachRandomVideoButton() runs first at all three call sites, so X
+    // already holds the slot ahead of this one and Xb lands directly after it.
+    const fullscreenBtn = controls.querySelector('[data-plyr="fullscreen"]');
+    if (fullscreenBtn) {
+        controls.insertBefore(btn, fullscreenBtn);
+    } else {
+        controls.appendChild(btn);
+    }
+
+    console.log('Random bookmark button attached');
+}
+
 function attachHistorySequenceButton() {
     const controls = document.querySelector('.plyr__controls');
     if (!controls) return;
@@ -5540,6 +5677,7 @@ window.plyrPlayer.on('loadstart', window.scrayRebuildPlayerControls = () => {
     attachFlsToMpfsButton();
     attachScrollLockButton();
     attachRandomVideoButton();
+    attachRandomBookmarkButton();
     attachHistorySequenceButton();
     attachPlayNextButton();
     attachBasketQuickButton();
@@ -5919,6 +6057,7 @@ attachManualRotateButton(); // Add manual rotate-to-landscape button
 attachFlsToMpfsButton(); // Add FLS -> MPB-fullscreen button (FLS only)
 attachScrollLockButton(); // Add scroll-lock button (manual rotation only)
 attachRandomVideoButton(); //  Add random-video quick-action button
+attachRandomBookmarkButton(); //  Add random-bookmark quick-action button
 attachHistorySequenceButton(); //  Add play-through-history quick-action button
 attachPlayNextButton(); //  Add play-next quick-action button
 attachBasketQuickButton(); //  Add basket quick-view button
@@ -6464,6 +6603,7 @@ attachManualRotateButton(); // Re-attach manual rotate button on new video
 attachFlsToMpfsButton(); // Re-attach FLS -> MPFS button on new video
 attachScrollLockButton(); // Re-attach scroll-lock button on new video
 attachRandomVideoButton(); //  Re-attach random-video button on new video
+attachRandomBookmarkButton(); //  Re-attach random-bookmark button on new video
 attachHistorySequenceButton(); //  Re-attach play-through-history button on new video
 attachPlayNextButton(); //  Re-attach play-next button on new video
 attachBasketQuickButton(); //  Re-attach basket quick-view button on new video

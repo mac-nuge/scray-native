@@ -2712,6 +2712,48 @@ background: rgba(255, 255, 255, 0.2) !important;
 background: rgba(255, 255, 255, 0.3) !important;
 }
 
+/* Xb - random bookmark. Matches the other quick-action buttons, but hidden by
+   default and revealed only in the two landscape fullscreen modes, so it never
+   appears in MPB or MPFS where the control row has no slot spare. */
+.plyr-random-bookmark {
+min-width: 40px !important;
+min-height: 50px !important;
+font-size: 0.85rem !important;
+font-weight: bold;
+flex: 0 0 auto;
+background: transparent !important;
+color: #fff;
+display: none !important;
+}
+
+body.manual-rotate-landscape .plyr-random-bookmark,
+body.landscape-fullscreen .plyr-random-bookmark {
+display: inline-flex !important;
+align-items: center;
+justify-content: center;
+min-width: 32px !important;
+min-height: 32px !important;
+font-size: 0.75rem !important;
+padding: 1px !important;
+}
+
+.plyr-random-bookmark:hover {
+background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.plyr-random-bookmark:active {
+background: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Desktop keeps it hidden even in landscape - the quick-action row is a
+   mobile-only affordance. */
+@media (min-width: 769px) {
+body.manual-rotate-landscape .plyr-random-bookmark,
+body.landscape-fullscreen .plyr-random-bookmark {
+    display: none !important;
+}
+}
+
 /* Desktop: hide quick-action buttons completely */
 @media (min-width: 769px) {
 .plyr-random-video,

@@ -493,3 +493,237 @@ window.scrayMapName = function (kind, raw) {
     load(true);
   });
 })();
+
+/* =========================================
+   STASH DISPLAY NAMES
+   =========================================
+
+   For a video StashDB has matched, the useful name is not the filename - it
+   is who made it, who is in it and what it is called. This module holds that
+   mapping for the whole catalogue so any list can render it synchronously,
+   with no join and no per-row request.
+
+   Same shape as scrayNameMap above, and for the same reasons: localStorage
+   first so the very FIRST render after a cold start is already right, and a
+   signature sent with the refresh so an unchanged catalogue costs one tiny
+   response instead of a few thousand entries.
+
+   Rows arrive as fixed-position arrays, which is what makes holding several
+   thousand of them in localStorage reasonable:
+
+     [ studio, "female performers, comma separated", title,
+       stash duration in seconds, marker count ]
+
+   Unmatched videos are simply absent. Every reader below returns null for
+   them, which is how the old filename rendering stays the fallback.
+
+   Lives here rather than in a new file so neither app's script list changes
+   and Native needs no bundle rebuild to pick it up.
+   ========================================= */
+window.scrayStashNames = (function () {
+  const CACHE_KEY = "scray_stash_names_v1";
+  const TTL_MS    = 10 * 60 * 1000;
+
+  let rows     = {};
+  let sig      = null;
+  let loadedAt = 0;
+  let inFlight = null;
+
+  try {
+    const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+    if (cached && cached.rows) {
+      rows     = cached.rows;
+      sig      = cached.sig || null;
+      loadedAt = cached.at || 0;
+    }
+  } catch { /* corrupt cache is the same as no cache */ }
+
+  /**
+   * The stored key wins over the filename. Native adopts a fingerprint-matched
+   * key that deliberately differs from the local filename, so deriving the key
+   * from the name would miss exactly the rows that were hardest to match.
+   */
+  function keyFor(video) {
+    if (!video) return "";
+    if (video.videoKey) return video.videoKey;
+    if (typeof window.scrayKeyFor === "function") {
+      const k = window.scrayKeyFor(video);
+      if (k) return k;
+    }
+    return window.scrayVideoKey(video.filename);
+  }
+
+  /**
+   * The parts a list needs, already mapped and lower-cased. Returns null when
+   * this video has no match, or when the match carries nothing worth showing -
+   * a scene row with no studio, no cast and no title is not a better name than
+   * the filename, so callers fall back rather than render three separators.
+   */
+  function parts(video) {
+    const k = keyFor(video);
+    if (!k) return null;
+    const r = rows[k];
+    if (!r) return null;
+
+    // Studio goes through the same display-name dictionary as everywhere else
+    // that PRINTS a studio, so a rename in namemap.html reaches the lists.
+    const studio = String(
+      window.scrayMapName ? window.scrayMapName("studio", r[0] || "") : (r[0] || "")
+    ).trim().toLowerCase();
+    const performers = String(r[1] || "").trim().toLowerCase();
+    const title      = String(r[2] || "").trim().toLowerCase();
+
+    if (!studio && !performers && !title) return null;
+
+    return {
+      studio,
+      // Split as well as joined: the list renders one clickable span per
+      // performer, and re-splitting a joined string at the call site would
+      // put the comma handling in six places instead of one.
+      performerList: performers ? performers.split(",").map(s => s.trim()).filter(Boolean) : [],
+      performers,
+      title,
+      durationSec: (typeof r[3] === "number" && r[3] > 0) ? r[3] : null,
+      markers: r[4] || 0
+    };
+  }
+
+  /** Flat text for the search haystack. Empty string when unmatched. */
+  function text(video) {
+    const p = parts(video);
+    if (!p) return "";
+    return [p.studio, p.performers, p.title].filter(Boolean).join(" ");
+  }
+
+  function has(video) { return parts(video) !== null; }
+
+  async function refresh(force) {
+    if (!force && Date.now() - loadedAt < TTL_MS) return rows;
+    if (inFlight) return inFlight;
+    if (typeof window.scrayApiCall !== "function") return rows;
+
+    inFlight = (async () => {
+      try {
+        // The signature is ALWAYS sent when we have one, force or not. It is
+        // derived from the data, so if anything changed the server sends the
+        // new table anyway - discarding it on a forced refresh would just
+        // re-download several thousand unchanged rows on every cold boot.
+        // `force` only bypasses the TTL check above.
+        const r = await window.scrayApiCall("stash_names", { params: sig ? { sig } : {} });
+        if (!r.unchanged) {
+          rows     = r.rows || {};
+          sig      = r.sig || null;
+          try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), sig, rows }));
+          } catch { /* over quota - the in-memory copy still works this session */ }
+          // Lists already on screen were drawn from the old copy. Repaint them
+          // rather than leaving half the catalogue showing filenames until the
+          // next filter change.
+          if (typeof window.refreshAllLists === "function") {
+            try { window.refreshAllLists(); } catch { /* not every page has lists */ }
+          }
+          console.log(`✅ stash names — ${Object.keys(rows).length} matched video(s)`);
+        }
+        loadedAt = Date.now();
+      } catch (err) {
+        // Keep whatever is cached. A missing dictionary means filenames, which
+        // is a worse label, not a broken list.
+        console.warn("[stash-names] refresh failed, keeping cached copy:", err.message);
+      } finally {
+        inFlight = null;
+      }
+      return rows;
+    })();
+    return inFlight;
+  }
+
+  return { parts, text, has, keyFor, refresh, dump: () => rows };
+})();
+
+/**
+ * The duration a list should PRINT for this video.
+ *
+ * StashDB's number describes the scene; ours describes the file, and the file
+ * usually carries an intro, a trailer or an encoder's rounding. For a matched
+ * video the scene's own runtime is the more honest answer, so it wins.
+ * Unmatched videos are unaffected.
+ */
+window.scrayDisplayDurationMs = function (video) {
+  const p = window.scrayStashNames.parts(video);
+  if (p && p.durationSec) return p.durationSec * 1000;
+  return video ? video.durationMs : null;
+};
+
+/**
+ * Add one term to the filter and re-run it.
+ *
+ * Appends rather than replaces, so tapping a studio and then a performer
+ * narrows instead of starting over. Terms containing spaces are quoted:
+ * parseSearchQuery splits on whitespace, so an unquoted "jane doe" would
+ * become two independent AND terms and quietly match the wrong rows.
+ *
+ * A term already in the box is a no-op - re-tapping the same performer across
+ * three rows should not stack three copies of the same word.
+ */
+window.scrayAddSearchTerm = function (term) {
+  const clean = String(term || "").trim();
+  if (!clean) return;
+
+  const box = document.getElementById("filenameSearchBox");
+  if (!box) return;
+
+  const token   = /\s/.test(clean) ? `"${clean}"` : clean;
+  const current = box.value.trim();
+  if (current && (current === token || current.includes(token))) return;
+
+  const next = current ? `${current} ${token}` : token;
+  box.value = next;
+
+  const clearX = document.getElementById("clearSearchX");
+  if (clearX) clearX.style.display = "block";
+
+  const panelBox = document.getElementById("panelSearchBox");
+  if (panelBox) {
+    panelBox.value = next;
+    const panelClearX = document.getElementById("panelSearchClearX");
+    if (panelClearX) panelClearX.style.display = "block";
+  }
+
+  // Never scroll the page or pop the landscape panel: this is reachable from
+  // inside the fullscreen player as well as from a list row.
+  window.skipSearchScroll   = true;
+  window.skipPanelAutoOpen  = true;
+  if (typeof filterDisplayedByFilename === "function") filterDisplayedByFilename();
+};
+
+/* ---- when the name table gets re-fetched ---------------------------------
+   Deliberately the same three triggers as the display-name dictionary above,
+   and deliberately a separate timer: a bulk stash run finishing is exactly
+   the case where names change without anything else on the page moving.
+--------------------------------------------------------------------------- */
+(function () {
+  // ⚙️ ADJUSTABLE: how stale the copy must be before returning to the app is
+  //    worth a round trip.
+  const FOREGROUND_MIN_MS = 60 * 1000;
+  let lastLoad = 0;
+
+  const load = (force) => {
+    lastLoad = Date.now();
+    try { window.scrayStashNames.refresh(force); } catch (err) {
+      console.warn("[stash-names] refresh threw:", err.message);
+    }
+  };
+
+  // Deferred well past boot: this is the largest of the three dictionaries and
+  // the lists paint correctly from the localStorage copy without it. Same
+  // reasoning as the 2.5s delay on Picker's stash-state fetch.
+  setTimeout(() => load(true), 2500);
+
+  window.addEventListener("scray-sync-done", () => load(false));
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (Date.now() - lastLoad < FOREGROUND_MIN_MS) return;
+    load(true);
+  });
+})();

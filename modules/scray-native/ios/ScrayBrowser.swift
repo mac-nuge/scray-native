@@ -456,6 +456,34 @@ final class ScrayBrowserViewController: UIViewController,
         selectTab(min(index, tabs.count - 1))
     }
 
+    /// Close a batch picked in the tab list. Indices are into the list as the
+    /// user saw it, so they are removed high-to-low — deleting low-first would
+    /// shift everything after it and close the wrong rows.
+    private func closeTabs(_ indices: [Int]) {
+        let valid = indices.filter { tabs.indices.contains($0) }
+        guard !valid.isEmpty else { return }
+
+        // If the tab currently on screen survives the cull, stay on it rather
+        // than jumping somewhere arbitrary.
+        let survivor = valid.contains(currentIndex) ? nil : currentTab
+
+        for i in valid.sorted(by: >) {
+            let tab = tabs.remove(at: i)
+            tab.webView.stopLoading()
+            tab.webView.removeFromSuperview()
+        }
+
+        if tabs.isEmpty {
+            addTab(url: homeURL, select: true)
+            return
+        }
+        if let survivor = survivor, let idx = tabs.firstIndex(where: { $0 === survivor }) {
+            selectTab(idx)
+        } else {
+            selectTab(min(valid.min() ?? 0, tabs.count - 1))
+        }
+    }
+
     /// If a tab is already sitting on this target, go to it rather than
     /// opening a duplicate — tapping "Picker" twice should not give you two
     /// Pickers.
@@ -714,6 +742,7 @@ final class ScrayBrowserViewController: UIViewController,
             self?.dismiss(animated: true)
         }
         list.onClose = { [weak self] idx in self?.closeTab(idx) }
+        list.onCloseMany = { [weak self] rows in self?.closeTabs(rows) }
         list.onNew = { [weak self] in
             self?.dismiss(animated: true) {
                 self?.newTabTapped()
@@ -1638,29 +1667,113 @@ final class ScrayTabListViewController: UITableViewController {
     var selectedIndex: (() -> Int)?
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
+    var onCloseMany: (([Int]) -> Void)?
     var onNew: (() -> Void)?
 
     private var items: [(String, String)] = []
 
+    /// Multi-select mode: rows tick instead of switching tabs.
+    private var picking = false
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Tabs"
-        navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done,
-                                                           target: self, action: #selector(doneTapped))
-        navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .add,
-                                                            target: self, action: #selector(newTapped))
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "tab")
+        tableView.allowsMultipleSelectionDuringEditing = true
         reload()
     }
 
     private func reload() {
         items = provider?() ?? []
-        title = items.count == 1 ? "1 Tab" : "\(items.count) Tabs"
         tableView.reloadData()
+        refreshChrome()
+    }
+
+    /// Title and buttons depend on the mode, and while picking on how many
+    /// rows are ticked, so this also runs on every selection change.
+    private func refreshChrome() {
+        if picking {
+            let n = tableView.indexPathsForSelectedRows?.count ?? 0
+            title = n == 0 ? "Select Tabs" : "\(n) Selected"
+
+            navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .cancel,
+                                                               target: self, action: #selector(cancelPickingTapped))
+            let allOn = n > 0 && n == items.count
+            navigationItem.rightBarButtonItems = [
+                UIBarButtonItem(title: allOn ? "None" : "All", style: .plain,
+                                target: self, action: #selector(toggleAllTapped))
+            ]
+
+            let close = UIBarButtonItem(title: n == 0 ? "Close" : "Close \(n)",
+                                        style: .plain, target: self, action: #selector(closeSelectedTapped))
+            close.tintColor = .systemRed
+            close.isEnabled = n > 0
+            toolbarItems = [flexSpace(), close, flexSpace()]
+            navigationController?.setToolbarHidden(false, animated: true)
+        } else {
+            title = items.count == 1 ? "1 Tab" : "\(items.count) Tabs"
+
+            navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done,
+                                                               target: self, action: #selector(doneTapped))
+            let select = UIBarButtonItem(title: "Select", style: .plain,
+                                         target: self, action: #selector(startPickingTapped))
+            select.isEnabled = !items.isEmpty
+            navigationItem.rightBarButtonItems = [
+                UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(newTapped)),
+                select
+            ]
+            navigationController?.setToolbarHidden(true, animated: true)
+        }
+    }
+
+    private func flexSpace() -> UIBarButtonItem {
+        UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
     }
 
     @objc private func doneTapped() { dismiss(animated: true) }
     @objc private func newTapped()  { onNew?() }
+
+    @objc private func startPickingTapped() {
+        picking = true
+        tableView.setEditing(true, animated: true)
+        refreshChrome()
+    }
+
+    @objc private func cancelPickingTapped() {
+        picking = false
+        tableView.setEditing(false, animated: true)
+        refreshChrome()
+    }
+
+    @objc private func toggleAllTapped() {
+        let selected = tableView.indexPathsForSelectedRows ?? []
+        if selected.count == items.count {
+            for ip in selected { tableView.deselectRow(at: ip, animated: false) }
+        } else {
+            for row in items.indices {
+                tableView.selectRow(at: IndexPath(row: row, section: 0),
+                                    animated: false, scrollPosition: .none)
+            }
+        }
+        refreshChrome()
+    }
+
+    @objc private func closeSelectedTapped() {
+        let rows = (tableView.indexPathsForSelectedRows ?? []).map { $0.row }
+        guard !rows.isEmpty else { return }
+        let closingEverything = rows.count == items.count
+
+        onCloseMany?(rows)
+        picking = false
+        tableView.setEditing(false, animated: false)
+
+        // Closing the lot leaves the browser on a fresh home tab, so there is
+        // nothing left to pick from — drop straight back to the page.
+        if closingEverything {
+            dismiss(animated: true)
+            return
+        }
+        reload()
+    }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         items.count
@@ -1679,8 +1792,13 @@ final class ScrayTabListViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        if picking { refreshChrome(); return }
         tableView.deselectRow(at: indexPath, animated: true)
         onSelect?(indexPath.row)
+    }
+
+    override func tableView(_ tableView: UITableView, didDeselectRowAt indexPath: IndexPath) {
+        if picking { refreshChrome() }
     }
 
     override func tableView(_ tableView: UITableView,

@@ -544,9 +544,20 @@
   </div>
 
   <div class="tag-container" id="includeTagsAllContainer"></div>
-  <div class="dropdown-row">
+  <!-- The select stays in the DOM, hidden. fillSelect, bindDropdownWithCascade
+       and clearAllFilters all bind to it, so removing it is a far wider change
+       than hiding it - and the cascade still keeps the L1/L2/L3 sets honest. -->
+  <div class="dropdown-row" style="display:none;">
     <select id="tagFilterAllSelect" multiple=""></select>
-    <button id="btnAT" class="dropdown-btn">AT</button>
+  </div>
+
+  <!-- Four filter classes, four clouds. AT is catalogue tags; the other three
+       come from the StashDB name table. -->
+  <div class="tag-cloud-btn-row">
+    <button id="btnAT"   class="dropdown-btn" title="All catalogue tags">AT</button>
+    <button id="btnSTU"  class="dropdown-btn" title="Studios">STU</button>
+    <button id="btnPERF" class="dropdown-btn" title="Performers">PERF</button>
+    <button id="btnSTAG" class="dropdown-btn" title="StashDB tags">STAG</button>
   </div>
 
   <br><br>

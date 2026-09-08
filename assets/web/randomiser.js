@@ -546,6 +546,337 @@ document.body.appendChild(overlay);
 window.showExcludeTagsModal = showExcludeTagsModal;
 
 /* =========================================
+   FACET TAG FILTERS - studios, performers, stash tags
+   =========================================
+
+   Three more classes of include filter, kept in their own sets rather than
+   folded into commonSelectedTags. They are not catalogue tags: nothing in
+   rec.tags will ever hold them, they come from the StashDB name table, and a
+   pill has to know its class in order to colour itself and to know which list
+   to remove itself from.
+
+   window.scrayTagIntersect flips every include filter - catalogue tags and all
+   three facet classes together - from ANY to ALL. One switch rather than one
+   per class: "show me the overlap" is a single question.
+   ========================================= */
+window.scrayFacetFilters = window.scrayFacetFilters || {
+   studio:    new Set(),
+   performer: new Set(),
+   stashtag:  new Set()
+};
+window.scrayTagIntersect = !!window.scrayTagIntersect;
+
+// Label and pill class per filter class, in the order the button row and the
+// pills bar render them.
+window.SCRAY_FACET_META = {
+   tag:       { label: 'Tags',       pill: 'floating-tag-include'   },
+   studio:    { label: 'Studios',    pill: 'floating-tag-studio'    },
+   performer: { label: 'Performers', pill: 'floating-tag-performer' },
+   stashtag:  { label: 'Stash tags', pill: 'floating-tag-stashtag'  }
+};
+
+/** Which Set holds a given class. 'tag' is the pre-existing global. */
+function scrayFacetSet(kind) {
+   return kind === 'tag'
+       ? window.commonSelectedTags
+       : (window.scrayFacetFilters || {})[kind];
+}
+window.scrayFacetSet = scrayFacetSet;
+
+/**
+ * The values one video offers for one class. Everything from parts() is
+ * already lower-cased at source, so this compares by plain equality rather
+ * than case-folding every row on every keystroke.
+ *
+ * 'performer' deliberately returns the WHOLE cast. performerList is the
+ * display list and stays female-only so row names do not change, but
+ * filtering by a male performer has to actually find him.
+ */
+function scrayFacetValues(video, kind) {
+   if (kind === 'tag') return Array.isArray(video && video.tags) ? video.tags : [];
+   const p = window.scrayStashNames && window.scrayStashNames.parts(video);
+   if (!p) return [];
+   if (kind === 'studio')    return p.studio ? [p.studio] : [];
+   if (kind === 'performer') return p.performerListAll || p.performerList || [];
+   if (kind === 'stashtag')  return p.stashTagList || [];
+   return [];
+}
+window.scrayFacetValues = scrayFacetValues;
+
+/**
+ * Add one term to a class and re-run the filter.
+ *
+ * This is what the list-row chips and the stash modal call. It replaces the
+ * old behaviour of pushing the name into the search box: a search term matches
+ * anywhere in the haystack, so tapping a studio also dragged in every scene
+ * whose TITLE happened to contain the word.
+ *
+ * Adding, not toggling. It is reachable from a list row, from the stash modal
+ * and from the cloud, and re-tapping the same performer across three rows must
+ * not switch the filter back off. The cloud toggles for itself, where the
+ * current state is visible.
+ */
+window.scrayAddTagFilter = function (kind, name) {
+   const set = scrayFacetSet(kind);
+   if (!set) return false;
+   // Catalogue tags keep their original case - they are compared against
+   // rec.tags, which is not normalised. Facet values are lower-cased at source
+   // in parts(), so they are lower-cased here to match.
+   const raw   = String(name == null ? '' : name).trim();
+   const clean = kind === 'tag' ? raw : raw.toLowerCase();
+   if (!clean || set.has(clean)) return false;
+   set.add(clean);
+   if (typeof refreshFiltersFromCommonSet === 'function') refreshFiltersFromCommonSet();
+   return true;
+};
+
+window.scrayRemoveTagFilter = function (kind, name) {
+   const set = scrayFacetSet(kind);
+   if (!set) return;
+   const raw = String(name == null ? '' : name).trim();
+   set.delete(kind === 'tag' ? raw : raw.toLowerCase());
+   if (typeof refreshFiltersFromCommonSet === 'function') refreshFiltersFromCommonSet();
+};
+
+/** How many terms are selected across every class. */
+function scrayTotalFilterTerms() {
+   return ['tag', 'studio', 'performer', 'stashtag'].reduce((n, k) => {
+       const s = scrayFacetSet(k);
+       return n + (s ? s.size : 0);
+   }, 0);
+}
+window.scrayTotalFilterTerms = scrayTotalFilterTerms;
+
+/**
+ * value -> how many videos in the catalogue carry it, for one class.
+ *
+ * Counted over the WHOLE catalogue rather than the current result set. A cloud
+ * that only showed what is already visible could never widen a filter, and
+ * with intersect on it would empty itself after the first pick.
+ */
+async function scrayFacetCounts(kind, genderMode) {
+   const videos = await getAllVideos();
+   const counts = new Map();
+   videos.forEach(v => {
+       let values;
+       if (kind === 'performer') {
+           const p = window.scrayStashNames && window.scrayStashNames.parts(v);
+           if (!p) return;
+           values = genderMode === 'female' ? (p.performerListF || [])
+                  : genderMode === 'male'   ? (p.performerListM || [])
+                  : (p.performerListAll || []);
+       } else {
+           values = scrayFacetValues(v, kind);
+       }
+       // A scene listing the same tag twice must not count its video twice.
+       new Set(values).forEach(val => {
+           if (!val) return;
+           counts.set(val, (counts.get(val) || 0) + 1);
+       });
+   });
+   return counts;
+}
+window.scrayFacetCounts = scrayFacetCounts;
+
+// Remembered across opens within a session, not persisted: these are "how am I
+// reading this list right now" settings, not filters.
+let scrayCloudGender = 'all';
+let scrayCloudSort   = 'count';
+
+/**
+ * The big picker that replaced the AT dropdown.
+ *
+ * One button per value with its count. Tapping toggles it and the modal STAYS
+ * OPEN, which is the whole reason it exists: select2 closed on every pick, so
+ * adding six performers meant six round trips through the dropdown.
+ */
+async function showTagCloudModal(kind) {
+   const meta = window.SCRAY_FACET_META[kind];
+   const set  = scrayFacetSet(kind);
+   if (!meta || !set) return;
+
+   const overlay = document.createElement('div');
+   overlay.className = 'tag-selection-overlay';
+
+   const content = document.createElement('div');
+   content.className = 'tag-selection-content scray-cloud-content';
+   overlay.appendChild(content);
+
+   const title = document.createElement('h3');
+   title.textContent = meta.label;
+   content.appendChild(title);
+
+   const controls = document.createElement('div');
+   controls.className = 'scray-cloud-controls';
+   content.appendChild(controls);
+
+   // Narrows the CLOUD only, never the list behind it. With several hundred
+   // performers a flat wall of pills is unusable without it.
+   const search = document.createElement('input');
+   search.type = 'search';
+   search.className = 'scray-cloud-search';
+   search.placeholder = 'Narrow this list\u2026';
+   controls.appendChild(search);
+
+   const btnRow = document.createElement('div');
+   btnRow.className = 'scray-cloud-btnrow';
+   controls.appendChild(btnRow);
+
+   const grid = document.createElement('div');
+   grid.className = 'tag-selection-grid scray-cloud-grid';
+   content.appendChild(grid);
+
+   let counts = new Map();
+   let term   = '';
+
+   const close = () => {
+       document.removeEventListener('keydown', escHandler);
+       if (overlay.parentNode) document.body.removeChild(overlay);
+   };
+   const escHandler = (e) => { if (e.key === 'Escape') close(); };
+
+   function mkToggle(label, on, fn) {
+       const b = document.createElement('button');
+       b.type = 'button';
+       b.className = 'scray-cloud-toggle' + (on ? ' is-on' : '');
+       b.textContent = label;
+       b.addEventListener('click', fn);
+       btnRow.appendChild(b);
+       return b;
+   }
+
+   function renderControls() {
+       btnRow.innerHTML = '';
+
+       // Female / Male / All. Performers only - no other class has a gender.
+       // "All" includes the codes StashDB reports that are neither F nor M, so
+       // nobody is unreachable.
+       if (kind === 'performer') {
+           [['Female', 'female'], ['Male', 'male'], ['All', 'all']].forEach(pair => {
+               mkToggle(pair[0], scrayCloudGender === pair[1], async () => {
+                   scrayCloudGender = pair[1];
+                   await rebuild();
+               });
+           });
+       }
+
+       mkToggle(scrayCloudSort === 'count' ? 'Sort: count' : 'Sort: A\u2013Z', false, () => {
+           scrayCloudSort = scrayCloudSort === 'count' ? 'alpha' : 'count';
+           renderControls();
+           renderGrid();
+       });
+
+       // The intersect switch. Global rather than per-class, and offered in
+       // every cloud so it is reachable from whichever one happens to be open.
+       mkToggle('Tag intersect', window.scrayTagIntersect, () => {
+           window.scrayTagIntersect = !window.scrayTagIntersect;
+           if (typeof refreshFiltersFromCommonSet === 'function') refreshFiltersFromCommonSet();
+           renderControls();
+       });
+   }
+
+   function syncTitle(shown) {
+       title.textContent = meta.label + ' \u2014 ' + set.size + ' selected, ' + shown + ' shown';
+   }
+
+   function renderGrid() {
+       grid.innerHTML = '';
+       let names = Array.from(counts.keys());
+
+       // A selected value stays visible even once it stops matching the search
+       // box, so the way to undo a pick is never hidden behind clearing the
+       // box first.
+       if (term) names = names.filter(n => n.toLowerCase().includes(term) || set.has(n));
+
+       names.sort(scrayCloudSort === 'alpha'
+           ? (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })
+           : (a, b) => (counts.get(b) - counts.get(a)) || a.localeCompare(b));
+
+       syncTitle(names.length);
+
+       if (!names.length) {
+           const empty = document.createElement('span');
+           empty.className = 'scray-cloud-empty';
+           empty.textContent = 'Nothing matches.';
+           grid.appendChild(empty);
+           return;
+       }
+
+       names.forEach(name => {
+           const btn = document.createElement('button');
+           btn.type = 'button';
+           btn.className = 'tag-selection-item scray-cloud-item scray-cloud-' + kind +
+                           (set.has(name) ? ' is-on' : '');
+           btn.title = name;
+           btn.textContent = name;
+
+           const c = document.createElement('span');
+           c.className = 'scray-cloud-count';
+           c.textContent = '(' + counts.get(name) + ')';
+           btn.appendChild(c);
+
+           btn.addEventListener('click', () => {
+               // Toggle here, unlike the row chips: inside the cloud the
+               // current state is on screen, so a second tap plainly means
+               // "undo that one".
+               if (set.has(name)) set.delete(name); else set.add(name);
+               btn.classList.toggle('is-on', set.has(name));
+               syncTitle(names.length);
+               if (typeof refreshFiltersFromCommonSet === 'function') refreshFiltersFromCommonSet();
+           });
+
+           grid.appendChild(btn);
+       });
+   }
+
+   async function rebuild() {
+       counts = await scrayFacetCounts(kind, scrayCloudGender);
+       renderControls();
+       renderGrid();
+   }
+
+   search.addEventListener('input', () => {
+       term = search.value.trim().toLowerCase();
+       renderGrid();
+   });
+
+   const footer = document.createElement('div');
+   footer.className = 'scray-cloud-footer';
+
+   const clearBtn = document.createElement('button');
+   clearBtn.className = 'tag-selection-close';
+   clearBtn.style.background = '#f44336';
+   clearBtn.style.flex = '1';
+   clearBtn.textContent = 'Clear ' + meta.label.toLowerCase();
+   clearBtn.addEventListener('click', () => {
+       set.clear();
+       if (typeof refreshFiltersFromCommonSet === 'function') refreshFiltersFromCommonSet();
+       renderGrid();
+   });
+   footer.appendChild(clearBtn);
+
+   const closeBtn = document.createElement('button');
+   closeBtn.className = 'tag-selection-close';
+   closeBtn.style.flex = '1';
+   closeBtn.textContent = 'Close';
+   closeBtn.addEventListener('click', close);
+   footer.appendChild(closeBtn);
+
+   content.appendChild(footer);
+
+   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+   document.addEventListener('keydown', escHandler);
+   document.body.appendChild(overlay);
+
+   // Painted empty first, then filled: counting runs over the whole catalogue
+   // and on a large library that is long enough to look like a dead tap.
+   grid.innerHTML = '<span class="scray-cloud-empty">Counting\u2026</span>';
+   renderControls();
+   await rebuild();
+}
+window.showTagCloudModal = showTagCloudModal;
+
+/* =========================================
 Dynamic bottom spacer to keep search bar at top
 ========================================= */
 function adjustBottomSpacer(bufferPx = 80) {
@@ -881,6 +1212,43 @@ Array.from(window.commonSelectedTags).forEach(tag => {
    });
    container.appendChild(pill);
 });
+
+// Facet pills - studios, performers and stash tags, each in its own colour so
+// a bar carrying a dozen terms still reads as three groups instead of one
+// undifferentiated wall. Rendered in class order rather than selection order,
+// for the same reason.
+['studio', 'performer', 'stashtag'].forEach(kind => {
+   const set  = (window.scrayFacetFilters || {})[kind];
+   const meta = (window.SCRAY_FACET_META  || {})[kind];
+   if (!set || !meta) return;
+   Array.from(set).forEach(val => {
+       const fPill = document.createElement("span");
+       fPill.className = "floating-tag-pill " + meta.pill;
+       fPill.textContent = val;
+       fPill.title = "Click to remove this filter";
+       fPill.addEventListener("click", () => {
+           window.scrayRemoveTagFilter(kind, val);
+       });
+       container.appendChild(fPill);
+   });
+});
+
+// The intersect switch, mirrored out of the cloud modal so it can be flipped
+// without opening one. Hidden below two terms: with nothing or one thing
+// selected ANY and ALL return the same rows, so the pill would be advertising
+// a distinction that does not exist yet.
+if (typeof window.scrayTotalFilterTerms === 'function' && window.scrayTotalFilterTerms() > 1) {
+   const ixPill = document.createElement("span");
+   ixPill.className = "floating-tag-pill " +
+       (window.scrayTagIntersect ? "floating-tag-intersect" : "floating-tag-intersect-off");
+   ixPill.textContent = window.scrayTagIntersect ? "\u2229 Intersect" : "\u222A Additive";
+   ixPill.title = "Tap to switch between matching ANY selected term and ALL of them";
+   ixPill.addEventListener("click", () => {
+       window.scrayTagIntersect = !window.scrayTagIntersect;
+       refreshFiltersFromCommonSet();
+   });
+   container.appendChild(ixPill);
+}
 
 // ✅ Search filter pill - PINK (only shown when search is active)
 const searchBox = document.getElementById("filenameSearchBox");
@@ -1611,9 +1979,43 @@ if (Array.isArray(includeTags) && includeTags.length > 0) {
 includeAll = Array.from(window.commonSelectedTags); // unified selection
 }
 
-// Filter by include tags, if any
-if (includeAll.length > 0) {
-   videos = videos.filter(rec => Array.isArray(rec.tags) && rec.tags.some(t => includeAll.includes(t)));
+// Filter by include tags, if any.
+//
+// Two modes. Additive - the default - keeps a video carrying ANY selected
+// term. Intersect keeps only videos carrying EVERY one. The switch spans all
+// four classes at once, because "show me the overlap" is one question and not
+// four.
+const facetPicks = ['studio', 'performer', 'stashtag']
+   .map(kind => [kind, Array.from((window.scrayFacetFilters || {})[kind] || [])])
+   .filter(pair => pair[1].length > 0);
+
+if (includeAll.length > 0 || facetPicks.length > 0) {
+   const intersect = !!window.scrayTagIntersect;
+   videos = videos.filter(rec => {
+       const tags    = Array.isArray(rec.tags) ? rec.tags : [];
+       const tagHits = includeAll.filter(t => tags.includes(t)).length;
+
+       // parts() is resolved ONCE per record rather than once per class: it
+       // splits three comma-separated strings on every call, and this runs
+       // over the whole catalogue on every keystroke.
+       let facetHits = 0, facetTotal = 0;
+       if (facetPicks.length) {
+           const p = window.scrayStashNames ? window.scrayStashNames.parts(rec) : null;
+           facetPicks.forEach(pair => {
+               const kind = pair[0], list = pair[1];
+               facetTotal += list.length;
+               if (!p) return;
+               const have = kind === 'studio'    ? (p.studio ? [p.studio] : [])
+                          : kind === 'performer' ? (p.performerListAll || p.performerList || [])
+                          : (p.stashTagList || []);
+               list.forEach(val => { if (have.includes(val)) facetHits++; });
+           });
+       }
+
+       return intersect
+           ? (tagHits === includeAll.length && facetHits === facetTotal)
+           : (tagHits > 0 || facetHits > 0);
+   });
 }
 
 // Filter by exclude tags, if passed
@@ -1830,7 +2232,11 @@ const addFilteredBtn = document.getElementById("addFilteredToBasketBtn");
 if (addFilteredBtn) {
    // Check if any filters are active
    const hasSearchText = searchText.length > 0;
-   const hasIncludeTags = window.commonSelectedTags.size > 0;
+   // Counts all four classes, not just catalogue tags - otherwise a list
+   // filtered to one performer looks unfiltered and the +B button hides.
+   const hasIncludeTags = (typeof window.scrayTotalFilterTerms === 'function')
+       ? window.scrayTotalFilterTerms() > 0
+       : window.commonSelectedTags.size > 0;
    const hasExcludeTags = excludeTags.length > 0;
    const hasFilters = hasSearchText || hasIncludeTags || hasExcludeTags;
    
@@ -1879,10 +2285,18 @@ if (window.inlineVideoPlayer) {
     window.inlineVideoPlayer.stop();
 }
 
-// Also clear the global common tags set
+// Also clear the global common tags set, and the three facet classes beside
+// it. Intersect goes back to off too: it is a filter mode, and leaving it
+// armed after a Clear makes the next single tag look like it matched nothing.
 if (window.commonSelectedTags) {
   window.commonSelectedTags.clear();
 }
+if (window.scrayFacetFilters) {
+  ['studio', 'performer', 'stashtag'].forEach(k => {
+      if (window.scrayFacetFilters[k]) window.scrayFacetFilters[k].clear();
+  });
+}
+window.scrayTagIntersect = false;
 
 // Reset all filters – clear level-based include dropdowns
 $('#tagFilterLevel1Select').val(null).trigger('change');

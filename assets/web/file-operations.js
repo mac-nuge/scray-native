@@ -3674,10 +3674,18 @@ async function showStashModal(video) {
 
         const row = (k, v) => v ? '<div style="margin:2px 0;"><strong>' + k + ':</strong> ' + esc(v) + '</div>' : '';
 
-        const chips = (arr, bg) => (arr || []).length
+        // `kind`, when given, turns each chip into a filter button. The click
+        // is bound after body.innerHTML below rather than inline, so the whole
+        // set goes away with the panel - load() rebuilds this on every
+        // Re-check, and inline handlers would be a fresh leak each time.
+        const chips = (arr, bg, kind) => (arr || []).length
             ? '<div style="display:flex;flex-wrap:wrap;gap:4px;margin:4px 0;">' +
-              arr.map(t => '<span style="background:' + bg + ';padding:2px 7px;border-radius:10px;' +
-                           'font-size:.78rem;white-space:nowrap;">' + esc(t) + '</span>').join('') +
+              arr.map(t => '<span' +
+                           (kind ? ' class="stash-facet-chip" data-facet="' + kind +
+                                   '" data-val="' + esc(String(t)) + '"' : '') +
+                           ' style="background:' + bg + ';padding:2px 7px;border-radius:10px;' +
+                           'font-size:.78rem;white-space:nowrap;' +
+                           (kind ? 'cursor:pointer;' : '') + '">' + esc(t) + '</span>').join('') +
               '</div>'
             : '';
 
@@ -3730,12 +3738,14 @@ async function showStashModal(video) {
             row('Code', sc.code) +
             row('Director', sc.director) +
             ((sc.performers || []).length
-                ? '<div style="margin-top:6px;"><strong>Performers</strong></div>' + chips(sc.performers, '#efe9fb')
+                ? '<div style="margin-top:6px;"><strong>Performers</strong> ' +
+                  '<span style="opacity:.6;font-size:.8rem;">(tap to filter)</span></div>' +
+                  chips(sc.performers, '#efe9fb', 'performer')
                 : '') +
             ((sc.tags || []).length
                 ? '<div style="margin-top:6px;"><strong>Tags</strong> ' +
-                  '<span style="opacity:.6;font-size:.8rem;">(' + sc.tags.length + ')</span></div>' +
-                  chips(sc.tags, '#eef1f4')
+                  '<span style="opacity:.6;font-size:.8rem;">(' + sc.tags.length + ', tap to filter)</span></div>' +
+                  chips(sc.tags, '#eef1f4', 'stashtag')
                 : '') +
             (sc.details
                 ? '<details style="margin-top:6px;"><summary style="cursor:pointer;">Synopsis</summary>' +
@@ -3795,6 +3805,19 @@ async function showStashModal(video) {
             e.preventDefault();
             modal.querySelectorAll('.stash-mk').forEach(c => c.checked = false);
             refreshAddBtn();
+        });
+
+        // Performer and tag chips are filter buttons. Deliberately does NOT
+        // close the modal - the point is to add several in a row - and the
+        // chip dims itself so a second tap on one already in the filter still
+        // reads as acknowledged rather than as a dead control.
+        body.querySelectorAll('.stash-facet-chip').forEach(el => {
+            el.addEventListener('click', () => {
+                if (typeof window.scrayAddTagFilter !== 'function') return;
+                window.scrayAddTagFilter(el.dataset.facet, el.dataset.val || el.textContent);
+                el.style.outline = '2px solid #6c5ce7';
+                el.style.opacity = '0.7';
+            });
         });
         // Cover art comes straight from StashDB unblurred. Three deliberate
         // taps means a stray tap on the Stash button can't put it on screen,

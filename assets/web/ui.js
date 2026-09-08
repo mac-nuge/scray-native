@@ -336,7 +336,7 @@ if (stashParts) {
     s.style.color = '#666';
     return s;
   };
-  const chip = (label) => {
+  const chip = (label, kind) => {
     const span = document.createElement('span');
     span.textContent = label;
     span.style.cursor = 'pointer';
@@ -352,7 +352,16 @@ if (stashParts) {
     span.title = `Click to filter by "${label}"`;
     span.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (typeof window.scrayAddSearchTerm === 'function') window.scrayAddSearchTerm(label);
+      // A facet filter, not a search term. The old behaviour pushed the name
+      // into the search box, where it matched anywhere in the haystack - so
+      // tapping a studio also dragged in every scene whose TITLE happened to
+      // contain the word. scrayAddTagFilter compares against that one field
+      // and paints a floating pill like every other filter.
+      //
+      // The fallback keeps any page that loads ui.js without randomiser.js
+      // behaving the way it always did rather than doing nothing at all.
+      if (typeof window.scrayAddTagFilter === 'function') window.scrayAddTagFilter(kind, label);
+      else if (typeof window.scrayAddSearchTerm === 'function') window.scrayAddSearchTerm(label);
     });
     return span;
   };
@@ -360,12 +369,12 @@ if (stashParts) {
   // Built as groups so the " / " separators land BETWEEN the three sections
   // and never around a section that turned out to be empty.
   const groups = [];
-  if (stashParts.studio) groups.push([chip(stashParts.studio)]);
+  if (stashParts.studio) groups.push([chip(stashParts.studio, 'studio')]);
   if (stashParts.performerList.length) {
     const cast = [];
     stashParts.performerList.forEach((name, i) => {
       if (i) cast.push(sep(', '));
-      cast.push(chip(name));
+      cast.push(chip(name, 'performer'));
     });
     groups.push(cast);
   }
@@ -2075,8 +2084,17 @@ const dropdowns = [
  { btn: 'btnL1', select: 'tagFilterLevel1Select' },
  { btn: 'btnL2', select: 'tagFilterLevel2Select' },
  { btn: 'btnL3', select: 'tagFilterLevel3Select' },
- { btn: 'btnAT', select: 'tagFilterAllSelect' },
 ];
+
+// AT no longer opens a select2 - it opens the tag cloud, along with the three
+// facet buttons beside it. Bound here rather than in the dropdowns loop below,
+// because that loop calls select2('open') and these have no select behind them.
+[['btnAT', 'tag'], ['btnSTU', 'studio'], ['btnPERF', 'performer'], ['btnSTAG', 'stashtag']]
+  .forEach(pair => {
+      document.getElementById(pair[0])?.addEventListener('click', () => {
+          if (typeof window.showTagCloudModal === 'function') window.showTagCloudModal(pair[1]);
+      });
+  });
 
 function openOnly(selectId) {
  // Close all other dropdowns

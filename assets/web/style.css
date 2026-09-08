@@ -267,6 +267,15 @@ display: inline-flex;
 align-items: center;
 }
 .floating-tag-include { background-color: #007bff; color: white; }
+/* One colour per filter class, so a bar carrying tags, a studio and three
+   performers reads as groups rather than one blue wall. Performer purple is
+   the same hue the row chips and the S button already use for
+   StashDB-sourced text. */
+.floating-tag-studio        { background-color: #0f8b6c; color: white; }
+.floating-tag-performer     { background-color: #6c5ce7; color: white; }
+.floating-tag-stashtag      { background-color: #b8860b; color: white; }
+.floating-tag-intersect     { background-color: #222;    color: white; }
+.floating-tag-intersect-off { background-color: #bbb;    color: #222;  }
 .floating-tag-exclude { background-color: #f94144; color: white; }
 .floating-tag-search { background-color: hsl(330, 100%, 84%); color: #333; }
 
@@ -4013,6 +4022,85 @@ transform: translateY(0);
 .tag-selection-item-exclude {
 background: #f94144 !important;
 }
+
+/* =========================================
+TAG CLOUD MODAL
+=========================================
+Replaces the AT select2 dropdown. Taller than the exclude modal because it is
+the primary way tags are picked now, and the performer cloud runs to several
+hundred entries. Every rule here sets width/margin/padding explicitly: the
+mobile media query later in this file sets `button, select, input
+{ width:100%; padding:12px }`, which would otherwise stack every pill into its
+own full-width row. */
+.scray-cloud-content {
+max-width: 720px;
+max-height: 88vh;
+display: flex;
+flex-direction: column;
+}
+.scray-cloud-controls { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.scray-cloud-search {
+width: 100%;
+box-sizing: border-box;
+margin: 0;
+padding: 8px 10px;
+font-size: 0.85rem;
+border: 1px solid #ccc;
+border-radius: 4px;
+}
+.scray-cloud-btnrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.scray-cloud-toggle {
+width: auto;
+flex: 0 0 auto;
+margin: 0;
+padding: 5px 10px;
+font-size: 0.75rem;
+line-height: 1;
+border: 1px solid #ccc;
+border-radius: 12px;
+background: #f2f2f2;
+color: #444;
+cursor: pointer;
+}
+.scray-cloud-toggle.is-on { background: #007bff; border-color: #007bff; color: #fff; }
+
+/* ⚙️ The cloud is the only part that grows with the catalogue - the controls
+   and the footer sit outside it, so this is where the scroll belongs. */
+.scray-cloud-grid {
+flex: 1 1 auto;
+overflow-y: auto;
+-webkit-overflow-scrolling: touch;
+align-content: flex-start;
+margin-bottom: 0;
+}
+.scray-cloud-item {
+width: auto;
+margin: 0;
+border: none;
+padding: 8px 12px;
+display: inline-flex;
+align-items: center;
+gap: 5px;
+background: #e9edf2;
+color: #333;
+}
+.scray-cloud-item:hover { background: #d8dee6; color: #333; }
+.scray-cloud-count { opacity: 0.6; font-size: 0.72rem; }
+
+/* Selected chips take their class colour, so the cloud and the pills bar agree
+   at a glance about which class a term came from. */
+.scray-cloud-item.is-on      { background: #007bff; color: #fff; }
+.scray-cloud-studio.is-on    { background: #0f8b6c; color: #fff; }
+.scray-cloud-performer.is-on { background: #6c5ce7; color: #fff; }
+.scray-cloud-stashtag.is-on  { background: #b8860b; color: #fff; }
+.scray-cloud-item.is-on .scray-cloud-count { opacity: 0.85; }
+
+.scray-cloud-empty { font-size: 0.75rem; color: #999; font-style: italic; }
+.scray-cloud-footer { display: flex; gap: 10px; width: 100%; margin-top: 12px; }
+
+/* The four buttons that replaced the AT dropdown row. */
+.tag-cloud-btn-row { display: flex; gap: 6px; margin: 6px 0; }
+.tag-cloud-btn-row .dropdown-btn { flex: 1 1 0; width: auto; margin: 0; }
 
 .tag-selection-item-exclude:hover {
 background: #dc3545 !important;

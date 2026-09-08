@@ -575,12 +575,48 @@ window.scrayStashNames = (function () {
 
     if (!studio && !performers && !title) return null;
 
+    // [5] arrives as "M:john roe, NB:alex ray" - the cast MINUS the women,
+    // each name carrying its StashDB gender code. [6] is the scene's tag list.
+    // Both are absent from a row cached before the server started sending
+    // them, which is why every reader here survives an empty string rather
+    // than assuming a seven-entry array.
+    const femaleList = performers
+        ? performers.split(",").map(s => s.trim()).filter(Boolean)
+        : [];
+
+    const maleList  = [];
+    const otherList = [];
+    String(r[5] || "").trim().toLowerCase().split(",").forEach(entry => {
+      const bit = entry.trim();
+      if (!bit) return;
+      // indexOf rather than split(":"): a gender code is never longer than two
+      // characters, but a performer name is free text and may carry a colon of
+      // its own.
+      const at   = bit.indexOf(":");
+      const code = at === -1 ? "?" : bit.slice(0, at).trim();
+      const name = (at === -1 ? bit : bit.slice(at + 1)).trim();
+      if (!name) return;
+      if (code === "m" || code === "tm") maleList.push(name);
+      else otherList.push(name);
+    });
+
+    const stashTagList = String(r[6] || "").trim().toLowerCase()
+        .split(",").map(s => s.trim()).filter(Boolean);
+
     return {
       studio,
       // Split as well as joined: the list renders one clickable span per
       // performer, and re-splitting a joined string at the call site would
       // put the comma handling in six places instead of one.
-      performerList: performers ? performers.split(",").map(s => s.trim()).filter(Boolean) : [],
+      //
+      // performerList stays FEMALE-ONLY. It is what names every row in every
+      // list, and widening it here would silently rewrite the display text of
+      // the whole catalogue. The filter cloud asks for performerListAll.
+      performerList: femaleList,
+      performerListF: femaleList,
+      performerListM: maleList,
+      performerListAll: femaleList.concat(maleList, otherList),
+      stashTagList,
       performers,
       title,
       durationSec: (typeof r[3] === "number" && r[3] > 0) ? r[3] : null,

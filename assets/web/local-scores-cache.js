@@ -118,6 +118,160 @@ function scrayHasBookmarks(video) {
 }
 window.scrayHasBookmarks = scrayHasBookmarks;
 
+/* ⚙️ StashDB match state, ported from Picker's excel-sheets.js so the Stash
+   filter toggle has something to filter against. Same shape as the BM block
+   above: one place decides "has this file been matched", everything else asks.
+
+   The matched set comes from stash_matches on the server, cached in
+   localStorage so the FIRST render after a cold start is already right. A
+   signature (count + newest updated_at) rides along with the refresh, so an
+   unchanged catalogue costs one tiny response instead of a 3,000-entry array.
+
+   scrayApplyStashButtonColour and scrayRefreshStashButtons are included but
+   nothing calls them yet - Native's S button is still hard-coded purple in
+   context-menu.js. Wiring them up is a separate, one-line job. */
+const SCRAY_STASH_COLOURS = {
+    on:  { bg: '#6c5ce7', fg: '#ffffff' },
+    off: { bg: '#e0e0e0', fg: '#9e9e9e' }
+};
+window.SCRAY_STASH_COLOURS = SCRAY_STASH_COLOURS;
+
+const SCRAY_STASH_CACHE_KEY = 'scray_stash_state_v1';
+let scrayStashMatched = null;      // Set<video_key>, null until first hydrate
+let scrayStashMarked  = null;      // Set<video_key> that also have timestamps
+let scrayStashSig     = null;
+let scrayStashInFlight = null;
+
+/**
+ * Native never defined window.scrayKeyFor - only Picker did - so the stored
+ * key is the one that counts here: Native adopts a fingerprint-matched
+ * videoKey that deliberately differs from the local filename, and deriving
+ * from the filename instead would miss every adopted row.
+ */
+function scrayStashKeyFor(video) {
+    if (!video) return '';
+    if (typeof window.scrayKeyFor === 'function') return window.scrayKeyFor(video) || '';
+    if (video.videoKey) return video.videoKey;
+    return typeof window.scrayVideoKey === 'function'
+        ? window.scrayVideoKey(video.filename)
+        : String(video.filename || '').trim().toLowerCase();
+}
+
+function scrayStashHydrateFromCache() {
+    if (scrayStashMatched) return;
+    try {
+        const raw = localStorage.getItem(SCRAY_STASH_CACHE_KEY);
+        if (!raw) return;
+        const j = JSON.parse(raw);
+        scrayStashMatched = new Set(j.matched || []);
+        scrayStashMarked  = new Set(j.with_markers || []);
+        scrayStashSig     = j.sig || null;
+    } catch { /* corrupt cache is the same as no cache */ }
+}
+
+function scrayHasStashMatch(video) {
+    if (!scrayStashMatched) return false;
+    const k = scrayStashKeyFor(video);
+    return k !== '' && scrayStashMatched.has(k);
+}
+window.scrayHasStashMatch = scrayHasStashMatch;
+
+function scrayHasStashMarkers(video) {
+    if (!scrayStashMarked) return false;
+    const k = scrayStashKeyFor(video);
+    return k !== '' && scrayStashMarked.has(k);
+}
+window.scrayHasStashMarkers = scrayHasStashMarkers;
+
+/**
+ * Pull the matched-key list. Cheap when nothing has changed: the server
+ * compares the signature and answers `unchanged` without sending the list.
+ * Concurrent callers share one request rather than each starting their own.
+ */
+async function scrayLoadStashState(force = false) {
+    scrayStashHydrateFromCache();
+    if (scrayStashInFlight) return scrayStashInFlight;
+    if (typeof window.scrayApiCall !== 'function') return null;
+
+    scrayStashInFlight = (async () => {
+        try {
+            const params = (!force && scrayStashSig) ? { sig: scrayStashSig } : {};
+            const r = await window.scrayApiCall('stash_state', { params });
+            if (r.unchanged) return r.sig;
+
+            scrayStashMatched = new Set(r.matched || []);
+            scrayStashMarked  = new Set(r.with_markers || []);
+            scrayStashSig     = r.sig || null;
+            try {
+                localStorage.setItem(SCRAY_STASH_CACHE_KEY, JSON.stringify({
+                    sig: scrayStashSig,
+                    matched: [...scrayStashMatched],
+                    with_markers: [...scrayStashMarked]
+                }));
+            } catch { /* over quota - the in-memory set still works this session */ }
+
+            scrayRefreshStashButtons();
+            console.log(`✅ stash state — ${scrayStashMatched.size} matched, ${scrayStashMarked.size} with timestamps`);
+            return scrayStashSig;
+        } catch (err) {
+            console.warn('stash state refresh failed:', err && err.message);
+            return null;
+        } finally {
+            scrayStashInFlight = null;
+        }
+    })();
+    return scrayStashInFlight;
+}
+window.scrayLoadStashState = scrayLoadStashState;
+
+/** Mark one key locally, so the button turns purple the moment the modal
+ *  reports a hit rather than after the next full refresh. */
+function scrayNoteStashMatch(video, matched = true, hasMarkers = false) {
+    scrayStashHydrateFromCache();
+    if (!scrayStashMatched) { scrayStashMatched = new Set(); scrayStashMarked = new Set(); }
+    const k = scrayStashKeyFor(video);
+    if (!k) return;
+    if (matched) scrayStashMatched.add(k); else scrayStashMatched.delete(k);
+    if (hasMarkers) scrayStashMarked.add(k); else scrayStashMarked.delete(k);
+    scrayRefreshStashButtons();
+}
+window.scrayNoteStashMatch = scrayNoteStashMatch;
+
+function scrayApplyStashButtonColour(spec, video) {
+    if (!spec) return spec;
+    const hit = scrayHasStashMatch(video);
+    const state = hit ? SCRAY_STASH_COLOURS.on : SCRAY_STASH_COLOURS.off;
+    spec.color = state.bg;
+    spec.textColor = state.fg;
+    spec.title = hit
+        ? 'Scene data and timestamps' + (scrayHasStashMarkers(video) ? ' (timestamps available)' : '')
+        : 'Not matched on StashDB yet — tap to look it up';
+    return spec;
+}
+window.scrayApplyStashButtonColour = scrayApplyStashButtonColour;
+
+function scrayRefreshStashButtons() {
+    document.querySelectorAll('.scray-stash-btn').forEach(el => {
+        const v = el._scrayVideo;
+        if (!v) return;
+        const state = scrayHasStashMatch(v) ? SCRAY_STASH_COLOURS.on : SCRAY_STASH_COLOURS.off;
+        el.style.background = state.bg;
+        el.style.color = state.fg;
+        // The mouseleave handler restores from the spec object, so that has
+        // to move too or a hover would repaint the old colour.
+        if (el._scrayBtnSpec) {
+            el._scrayBtnSpec.color = state.bg;
+            el._scrayBtnSpec.textColor = state.fg;
+        }
+    });
+}
+window.scrayRefreshStashButtons = scrayRefreshStashButtons;
+
+// Cache first, so the toggle is usable immediately after a warm start;
+// network second, deferred so it never competes with boot.
+scrayStashHydrateFromCache();
+setTimeout(() => { scrayLoadStashState().catch(() => {}); }, 2500);
+
 /**
  * Stamp the on/off colours onto a BM button spec. Called once by
  * createCompactButtonGroup before it splits visible from overflow, so the

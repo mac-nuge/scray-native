@@ -2592,9 +2592,9 @@ searchBox.addEventListener("keydown", (e) => {
   // button's own dataset, like the offline toggle - there is no filter-panel
   // control to mirror here, so a hidden <select> would be dead weight.
   const STASH_FILTER_CYCLE = [
-      { value: "any",       label: "Stash: All",       bg: "#555"    },
-      { value: "matched",   label: "Stash: Matched",   bg: "#6c5ce7" },
-      { value: "unmatched", label: "Stash: Unmatched", bg: "#8e7cc3" }
+      { value: "any",       label: "Stash: All" },
+      { value: "matched",   label: "Stash: Matched" },
+      { value: "unmatched", label: "Stash: Unmatched" }
   ];
 
   window.syncStashFilterToggleLabel = function () {
@@ -2609,8 +2609,9 @@ searchBox.addEventListener("keydown", (e) => {
       const entry = STASH_FILTER_CYCLE.find(o => o.value === b.dataset.state)
           || STASH_FILTER_CYCLE[0];
       b.textContent = entry.label;
-      b.style.background = entry.bg;
-      b.style.color = "#fff";
+      // Same treatment as the orientation toggle: grey off, blue on. Colour is
+      // not carrying WHICH of the two on-states is armed - the label does that.
+      b.style.background = entry.value === "any" ? "#555" : "#007bff";
   };
 
   const stashFilterToggleBtn = document.getElementById("stashFilterToggleBtn");
@@ -2624,7 +2625,9 @@ searchBox.addEventListener("keydown", (e) => {
           // Kick a refresh the moment the filter is actually armed, so an
           // answer that costs nothing when unchanged is never stale.
           if (next.value !== "any" && typeof window.scrayLoadStashState === "function") {
-              window.scrayLoadStashState().catch(() => {});
+              window.scrayLoadStashState()
+                  .then(() => { filterDisplayedByFilename(); })
+                  .catch(() => {});
           }
           window.skipSearchScroll = true;
           filterDisplayedByFilename();
@@ -2633,9 +2636,9 @@ searchBox.addEventListener("keydown", (e) => {
   }
 
   const BOOKMARK_FILTER_CYCLE = [
-      { value: "any",  label: "BM Both", bg: "#555"    },
-      { value: "only", label: "BM Only", bg: "#6f42c1" },
-      { value: "none", label: "BM None", bg: "#9c8ac4" }
+      { value: "any",  label: "BM Both" },
+      { value: "only", label: "BM Only" },
+      { value: "none", label: "BM None" }
   ];
 
   window.syncBookmarkFilterToggleLabel = function () {
@@ -2644,8 +2647,7 @@ searchBox.addEventListener("keydown", (e) => {
       const entry = BOOKMARK_FILTER_CYCLE.find(o => o.value === b.dataset.state)
           || BOOKMARK_FILTER_CYCLE[0];
       b.textContent = entry.label;
-      b.style.background = entry.bg;
-      b.style.color = "#fff";
+      b.style.background = entry.value === "any" ? "#555" : "#007bff";
   };
 
   const bookmarkFilterToggleBtn = document.getElementById("bookmarkFilterToggleBtn");

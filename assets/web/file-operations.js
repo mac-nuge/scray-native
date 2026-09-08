@@ -3648,6 +3648,22 @@ async function showStashModal(video) {
                     // Deliberately load(false): the id is stored locally now, so
                     // this works whether or not StashDB has reindexed yet.
                     await load(false);
+
+                    // The server has just written stash_matches and stash_scenes,
+                    // so this file now HAS a studio/performer name - but every
+                    // list on screen was drawn from the cached name table and is
+                    // still printing the filename. Force the dictionary to
+                    // re-fetch; its own refresh() repaints the lists when the
+                    // signature moves. The state fetch is the same idea for the
+                    // S button, whose signature has moved for the same reason.
+                    try {
+                        if (window.scrayStashNames) await window.scrayStashNames.refresh(true);
+                    } catch (e) { /* names stay stale; the lists still work */ }
+                    try {
+                        if (typeof window.scrayLoadStashState === 'function') {
+                            await window.scrayLoadStashState(true);
+                        }
+                    } catch (e) { /* button colour catches up on the next poll */ }
                 } catch (err) {
                     sBtn.disabled = false;
                     sMsg.innerHTML = '<span style="color:#dc3545;">' + esc(err.message) + '</span>';

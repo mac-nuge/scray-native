@@ -1683,6 +1683,25 @@ if (orientationFilter && orientationFilter !== "any") {
  });
 }
 
+// ✅ NEW: StashDB match filter. State lives on the button's own dataset - see
+// the toggle wiring further down this file. scrayHasStashMatch reads the same
+// cached matched-key set that colours the S buttons, so the filter and the
+// button colours can never disagree.
+const stashFilterState = document.getElementById("stashFilterToggleBtn")?.dataset.state || "any";
+if (stashFilterState !== "any" && typeof window.scrayHasStashMatch === "function") {
+ const wantMatched = stashFilterState === "matched";
+ videos = videos.filter(v => window.scrayHasStashMatch(v) === wantMatched);
+}
+
+// ✅ NEW: Bookmark filter. scrayHasBookmarks prefers the row's own array and
+// falls back to the bookmark cache, so basket and history entries - stored
+// without one - are judged correctly rather than all reading as unbookmarked.
+const bookmarkFilterState = document.getElementById("bookmarkFilterToggleBtn")?.dataset.state || "any";
+if (bookmarkFilterState !== "any" && typeof window.scrayHasBookmarks === "function") {
+ const wantBookmarked = bookmarkFilterState === "only";
+ videos = videos.filter(v => window.scrayHasBookmarks(v) === wantBookmarked);
+}
+
 // ✅ NEW: MIME type filter
 const mimeTypeFilter = $('#mimeTypeFilter').val() || [];
 if (mimeTypeFilter.length > 0) {
@@ -1897,6 +1916,15 @@ if (addFilteredBtn) {
 const orientationFilter = document.getElementById("orientationFilter");
 if (orientationFilter) orientationFilter.value = "any";
 if (typeof window.syncOrientationToggleLabel === "function") window.syncOrientationToggleLabel();
+
+// ✅ NEW: Reset the Stash and BM cycles
+const stashFilterBtn = document.getElementById("stashFilterToggleBtn");
+if (stashFilterBtn) stashFilterBtn.dataset.state = "any";
+if (typeof window.syncStashFilterToggleLabel === "function") window.syncStashFilterToggleLabel();
+
+const bookmarkFilterBtn = document.getElementById("bookmarkFilterToggleBtn");
+if (bookmarkFilterBtn) bookmarkFilterBtn.dataset.state = "any";
+if (typeof window.syncBookmarkFilterToggleLabel === "function") window.syncBookmarkFilterToggleLabel();
 
 // ✅ NEW: Reset MIME type filter
 $('#mimeTypeFilter').val(null).trigger('change');
@@ -2559,6 +2587,79 @@ searchBox.addEventListener("keydown", (e) => {
       btn.textContent = entry.label;
       btn.style.background = entry.value === "any" ? "#555" : "#007bff";
   };
+
+  // ✅ StashDB-match cycle and bookmark cycle. Both keep their state on the
+  // button's own dataset, like the offline toggle - there is no filter-panel
+  // control to mirror here, so a hidden <select> would be dead weight.
+  const STASH_FILTER_CYCLE = [
+      { value: "any",       label: "Stash: All",       bg: "#555"    },
+      { value: "matched",   label: "Stash: Matched",   bg: "#6c5ce7" },
+      { value: "unmatched", label: "Stash: Unmatched", bg: "#8e7cc3" }
+  ];
+
+  window.syncStashFilterToggleLabel = function () {
+      const b = document.getElementById("stashFilterToggleBtn");
+      if (!b) return;
+      // No stash-state cache on this build means nothing to filter against.
+      // Hiding beats showing a control that silently does nothing.
+      if (typeof window.scrayHasStashMatch !== "function") {
+          b.style.display = "none";
+          return;
+      }
+      const entry = STASH_FILTER_CYCLE.find(o => o.value === b.dataset.state)
+          || STASH_FILTER_CYCLE[0];
+      b.textContent = entry.label;
+      b.style.background = entry.bg;
+      b.style.color = "#fff";
+  };
+
+  const stashFilterToggleBtn = document.getElementById("stashFilterToggleBtn");
+  if (stashFilterToggleBtn) {
+      stashFilterToggleBtn.addEventListener("click", () => {
+          const idx = STASH_FILTER_CYCLE.findIndex(o => o.value === stashFilterToggleBtn.dataset.state);
+          const next = STASH_FILTER_CYCLE[(idx + 1) % STASH_FILTER_CYCLE.length];
+          stashFilterToggleBtn.dataset.state = next.value;
+          window.syncStashFilterToggleLabel();
+          // A cold start has only the localStorage copy of the matched set.
+          // Kick a refresh the moment the filter is actually armed, so an
+          // answer that costs nothing when unchanged is never stale.
+          if (next.value !== "any" && typeof window.scrayLoadStashState === "function") {
+              window.scrayLoadStashState().catch(() => {});
+          }
+          window.skipSearchScroll = true;
+          filterDisplayedByFilename();
+      });
+      window.syncStashFilterToggleLabel();
+  }
+
+  const BOOKMARK_FILTER_CYCLE = [
+      { value: "any",  label: "BM Both", bg: "#555"    },
+      { value: "only", label: "BM Only", bg: "#6f42c1" },
+      { value: "none", label: "BM None", bg: "#9c8ac4" }
+  ];
+
+  window.syncBookmarkFilterToggleLabel = function () {
+      const b = document.getElementById("bookmarkFilterToggleBtn");
+      if (!b) return;
+      const entry = BOOKMARK_FILTER_CYCLE.find(o => o.value === b.dataset.state)
+          || BOOKMARK_FILTER_CYCLE[0];
+      b.textContent = entry.label;
+      b.style.background = entry.bg;
+      b.style.color = "#fff";
+  };
+
+  const bookmarkFilterToggleBtn = document.getElementById("bookmarkFilterToggleBtn");
+  if (bookmarkFilterToggleBtn) {
+      bookmarkFilterToggleBtn.addEventListener("click", () => {
+          const idx = BOOKMARK_FILTER_CYCLE.findIndex(o => o.value === bookmarkFilterToggleBtn.dataset.state);
+          const next = BOOKMARK_FILTER_CYCLE[(idx + 1) % BOOKMARK_FILTER_CYCLE.length];
+          bookmarkFilterToggleBtn.dataset.state = next.value;
+          window.syncBookmarkFilterToggleLabel();
+          window.skipSearchScroll = true;
+          filterDisplayedByFilename();
+      });
+      window.syncBookmarkFilterToggleLabel();
+  }
 
   const orientationToggleBtn = document.getElementById("orientationToggleBtn");
   if (orientationToggleBtn) {

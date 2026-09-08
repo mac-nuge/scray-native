@@ -575,6 +575,102 @@ window.SCRAY_FACET_META = {
    stashtag:  { label: 'Stash tags', pill: 'floating-tag-stashtag'  }
 };
 
+/**
+ * Re-run the filter and repaint the pills bar.
+ *
+ * refreshFiltersFromCommonSet is declared INSIDE populateTagDropdowns, so at
+ * this file's top level the bare name is not in scope at all. A `typeof x ===
+ * 'function'` guard wrapped around it is therefore always false, and every
+ * call silently does nothing - which is precisely what happened: the Sets
+ * filled up correctly and nothing ever repainted.
+ *
+ * So: go through window. The fallback covers the gap between this file being
+ * parsed and populateTagDropdowns having run, where the export does not exist
+ * yet - filterDisplayedByFilename is top-level and reachable throughout.
+ */
+function scrayRefreshFilters() {
+   if (typeof window.refreshFiltersFromCommonSet === 'function') {
+       window.refreshFiltersFromCommonSet();
+       return;
+   }
+   if (typeof window.updateFloatingTagPillsFromCommon === 'function') {
+       window.updateFloatingTagPillsFromCommon();
+   }
+   window.skipSearchScroll = true;
+   if (typeof filterDisplayedByFilename === 'function') filterDisplayedByFilename();
+}
+window.scrayRefreshFilters = scrayRefreshFilters;
+
+/**
+ * Clear every filter the floating bar can represent, in one tap.
+ *
+ * Deliberately NOT clearAllFilters(): that one belongs to the big Clear
+ * button and also stops the player, empties #playlist and
+ * #taggedVideosContainer and scrolls the page. From a pill sitting in the
+ * filter bar the expected result is the unfiltered catalogue still on screen,
+ * not a blank one.
+ *
+ * `ev` is passed through only so clearSearchPillFilter can position its
+ * "Filter cleared" tooltip. Without one, the search boxes are cleared here
+ * directly rather than risking showButtonFeedback on an undefined event.
+ */
+window.scrayClearAllFilters = function (ev) {
+   if (window.commonSelectedTags) window.commonSelectedTags.clear();
+   ['studio', 'performer', 'stashtag'].forEach(k => {
+       const s = (window.scrayFacetFilters || {})[k];
+       if (s) s.clear();
+   });
+   window.scrayTagIntersect = false;
+
+   // Cleared through jQuery so each select's own change handler runs and the
+   // cascade re-widens the option lists. Every one of these fires a filter
+   // pass, which is why this is a deliberate single action rather than
+   // something done on each individual pill removal.
+   ['#tagFilterLevel1Select', '#tagFilterLevel2Select', '#tagFilterLevel3Select',
+    '#tagFilterAllSelect', '#excludeTagSelect'].forEach(sel => {
+       if ($(sel).length) $(sel).val(null).trigger('change');
+   });
+
+   if (ev && typeof window.clearSearchPillFilter === 'function') {
+       window.clearSearchPillFilter(ev);
+   } else {
+       const box   = document.getElementById("filenameSearchBox");
+       const panel = document.getElementById("panelSearchBox");
+       if (box)   { box.value = "";   box.dispatchEvent(new Event('input', { bubbles: true })); }
+       if (panel) { panel.value = ""; }
+       const x  = document.getElementById("clearSearchX");
+       const px = document.getElementById("panelSearchClearX");
+       if (x)  x.style.display  = "none";
+       if (px) px.style.display = "none";
+   }
+
+   if (window.selectedScoreFilters) window.selectedScoreFilters.clear();
+
+   // Orientation goes through its change handler rather than being set
+   // silently, so the toggle button's label can never drift from the select.
+   const orient = document.getElementById("orientationFilter");
+   if (orient && orient.value !== "any") {
+       orient.value = "any";
+       orient.dispatchEvent(new Event("change", { bubbles: true }));
+   }
+   window.syncOrientationToggleLabel?.();
+
+   const offlineBtn = document.getElementById("offlineOnlyToggleBtn");
+   if (offlineBtn) offlineBtn.dataset.active = "0";
+   window.syncOfflineOnlyToggleLabel?.();
+
+   const stashBtn = document.getElementById("stashFilterToggleBtn");
+   if (stashBtn) stashBtn.dataset.state = "any";
+   window.syncStashFilterToggleLabel?.();
+
+   const bmBtn = document.getElementById("bookmarkFilterToggleBtn");
+   if (bmBtn) bmBtn.dataset.state = "any";
+   window.syncBookmarkFilterToggleLabel?.();
+
+   window.skipSearchScroll = true;
+   scrayRefreshFilters();
+};
+
 /** Which Set holds a given class. 'tag' is the pre-existing global. */
 function scrayFacetSet(kind) {
    return kind === 'tag'
@@ -626,7 +722,7 @@ window.scrayAddTagFilter = function (kind, name) {
    const clean = kind === 'tag' ? raw : raw.toLowerCase();
    if (!clean || set.has(clean)) return false;
    set.add(clean);
-   if (typeof refreshFiltersFromCommonSet === 'function') refreshFiltersFromCommonSet();
+   scrayRefreshFilters();
    return true;
 };
 
@@ -635,7 +731,7 @@ window.scrayRemoveTagFilter = function (kind, name) {
    if (!set) return;
    const raw = String(name == null ? '' : name).trim();
    set.delete(kind === 'tag' ? raw : raw.toLowerCase());
-   if (typeof refreshFiltersFromCommonSet === 'function') refreshFiltersFromCommonSet();
+   scrayRefreshFilters();
 };
 
 /** How many terms are selected across every class. */
@@ -770,7 +866,7 @@ async function showTagCloudModal(kind) {
        // every cloud so it is reachable from whichever one happens to be open.
        mkToggle('Tag intersect', window.scrayTagIntersect, () => {
            window.scrayTagIntersect = !window.scrayTagIntersect;
-           if (typeof refreshFiltersFromCommonSet === 'function') refreshFiltersFromCommonSet();
+           scrayRefreshFilters();
            renderControls();
        });
    }
@@ -822,7 +918,7 @@ async function showTagCloudModal(kind) {
                if (set.has(name)) set.delete(name); else set.add(name);
                btn.classList.toggle('is-on', set.has(name));
                syncTitle(names.length);
-               if (typeof refreshFiltersFromCommonSet === 'function') refreshFiltersFromCommonSet();
+               scrayRefreshFilters();
            });
 
            grid.appendChild(btn);
@@ -850,7 +946,7 @@ async function showTagCloudModal(kind) {
    clearBtn.textContent = 'Clear ' + meta.label.toLowerCase();
    clearBtn.addEventListener('click', () => {
        set.clear();
-       if (typeof refreshFiltersFromCommonSet === 'function') refreshFiltersFromCommonSet();
+       scrayRefreshFilters();
        renderGrid();
    });
    footer.appendChild(clearBtn);
@@ -1248,6 +1344,22 @@ if (typeof window.scrayTotalFilterTerms === 'function' && window.scrayTotalFilte
        refreshFiltersFromCommonSet();
    });
    container.appendChild(ixPill);
+
+   // Clear-all rides in the same gate as the intersect switch, so the two
+   // appear and disappear together. Below two terms there is nothing worth a
+   // dedicated button - one selected tag is already one tap to remove via its
+   // own pill - and the bar stays clean when nothing is filtered at all.
+   //
+   // The action itself still clears everything, search and toggles included.
+   // It is only the visibility that keys off the tag count.
+   const clearPill = document.createElement("span");
+   clearPill.className = "floating-tag-pill floating-tag-clearall";
+   clearPill.textContent = "\u2715 Clear all";
+   clearPill.title = "Clear every active filter";
+   clearPill.addEventListener("click", (ev) => {
+       if (typeof window.scrayClearAllFilters === 'function') window.scrayClearAllFilters(ev);
+   });
+   container.appendChild(clearPill);
 }
 
 // ✅ Search filter pill - PINK (only shown when search is active)
@@ -1582,6 +1694,11 @@ updateFloatingTagPillsFromCommon();
 
 // Export globally so score modal can use it
 window.updateFloatingTagPillsFromCommon = updateFloatingTagPillsFromCommon;
+
+// Both of these live inside populateTagDropdowns, so the bare names are
+// invisible to anything at this file's top level - including the facet filter
+// module above. Exported for the same reason the pills function already was.
+window.refreshFiltersFromCommonSet = refreshFiltersFromCommonSet;
 
 // Populate exclude tags dropdown with ALL tags from DB
 async function populateExcludeTagDropdown() {

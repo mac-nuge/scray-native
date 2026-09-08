@@ -276,6 +276,9 @@ align-items: center;
 .floating-tag-stashtag      { background-color: #b8860b; color: white; }
 .floating-tag-intersect     { background-color: #222;    color: white; }
 .floating-tag-intersect-off { background-color: #bbb;    color: #222;  }
+/* Red, matching the exclude pill and the Clear buttons in the modals - the
+   one colour in the bar that means "this removes something". */
+.floating-tag-clearall      { background-color: #f94144; color: white; font-weight: 600; }
 .floating-tag-exclude { background-color: #f94144; color: white; }
 .floating-tag-search { background-color: hsl(330, 100%, 84%); color: #333; }
 

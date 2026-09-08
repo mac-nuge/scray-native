@@ -3439,10 +3439,21 @@ async function showStashModal(video) {
     // fullscreen player outranks the default overlay z-index.
     modal.style.cssText = 'transform:none;padding:0;z-index:2147483647;';
     modal.innerHTML =
-        '<div class="basket-json-modal-content" style="transform:none;max-width:640px;">' +
-          '<h3 style="margin-top:0;">Stash lookup</h3>' +
-          '<div id="stashBody">Looking up&hellip;</div>' +
-          '<div style="display:flex;gap:8px;margin-top:14px;">' +
+        // Flex column with overflow:hidden, which is what moves the scroll off
+        // the card and onto #stashBody. The base class sets max-height:90vh
+        // AND overflow-y:auto, so without this the button row is just more
+        // content and scrolls away with everything else. 82vh rather than 90
+        // so the card reads as a panel with a floor rather than a full-height
+        // sheet. ⚙️ Nudge that if the footer sits too high or too low.
+        '<div class="basket-json-modal-content" style="transform:none;max-width:640px;' +
+             'max-height:82vh;display:flex;flex-direction:column;overflow:hidden;">' +
+          '<h3 style="margin-top:0;flex:0 0 auto;">Stash lookup</h3>' +
+          // min-height:0 is load-bearing: a flex item's default min-height is
+          // auto, which refuses to shrink below its content and would push the
+          // footer back out of view no matter what overflow says.
+          '<div id="stashBody" style="flex:1 1 auto;min-height:0;overflow-y:auto;' +
+               '-webkit-overflow-scrolling:touch;">Looking up&hellip;</div>' +
+          '<div style="display:flex;gap:8px;margin-top:14px;flex:0 0 auto;">' +
             '<button id="stashAddBtn" class="modal-btn modal-btn-primary" ' +
                     'style="flex:1;background:#28a745;" disabled>Add timestamps</button>' +
             '<button id="stashRecheckBtn" class="modal-btn modal-btn-secondary">Re-check</button>' +
@@ -3682,7 +3693,8 @@ async function showStashModal(video) {
             ? '<div style="display:flex;flex-wrap:wrap;gap:4px;margin:4px 0;">' +
               arr.map(t => '<span' +
                            (kind ? ' class="stash-facet-chip" data-facet="' + kind +
-                                   '" data-val="' + esc(String(t)) + '"' : '') +
+                                   '" data-val="' + esc(String(t)) + '"' +
+                                   ' data-bg="' + bg + '"' : '') +
                            ' style="background:' + bg + ';padding:2px 7px;border-radius:10px;' +
                            'font-size:.78rem;white-space:nowrap;' +
                            (kind ? 'cursor:pointer;' : '') + '">' + esc(t) + '</span>').join('') +
@@ -3794,7 +3806,10 @@ async function showStashModal(video) {
               meta + '</div>' + degradedWarn + notes +
             (markers.length ? '<div style="display:flex;gap:10px;margin-bottom:6px;">' +
                 '<a href="#" id="stashAll">Select all</a><a href="#" id="stashNone">None</a></div>' : '') +
-            '<div style="max-height:260px;overflow:auto;">' + list + '</div>';
+            // No cap and no scroller of its own now - #stashBody is the one
+            // scroll region, and a nested one here meant a drag over the
+            // markers moved a different thing to a drag two pixels above them.
+            '<div>' + list + '</div>';
 
         modal.querySelector('#stashAll')?.addEventListener('click', (e) => {
             e.preventDefault();
@@ -3808,15 +3823,123 @@ async function showStashModal(video) {
         });
 
         // Performer and tag chips are filter buttons. Deliberately does NOT
-        // close the modal - the point is to add several in a row - and the
-        // chip dims itself so a second tap on one already in the filter still
-        // reads as acknowledged rather than as a dead control.
+        // close the modal - the point is to add several in a row.
+        //
+        // Each chip paints itself from the LIVE filter rather than from
+        // whether it happens to have been tapped, so the modal shows what is
+        // actually selected whichever way it got there: from a list row, from
+        // the cloud, or from a previous visit to this modal. That is also what
+        // makes deselecting honest - the colour follows the Set, not a local
+        // flag that could drift out of step with it.
+        const facetPaint = (el) => {
+            const kind = el.dataset.facet;
+            const val  = String(el.dataset.val || el.textContent || '').trim().toLowerCase();
+            const set  = (typeof window.scrayFacetSet === 'function') ? window.scrayFacetSet(kind) : null;
+            const on   = !!(set && set.has(val));
+            // A selected chip takes the same colour its floating pill will, so
+            // the modal and the pills bar agree about which class a term came
+            // from without either having to look the other up.
+            el.style.background = on
+                ? (kind === 'performer' ? '#6c5ce7'
+                 : kind === 'studio'    ? '#0f8b6c'
+                 : '#b8860b')
+                : (el.dataset.bg || 'transparent');
+            el.style.color      = on ? '#fff' : '';
+            el.style.fontWeight = on ? '600'  : '';
+        };
+
+        // A performer name is two things at once - a filter term and a person
+        // you might want to read about - so it gets a choice instead of a
+        // straight toggle. Tags keep the single tap: there is nothing to look
+        // up for those, and putting a menu in front of them would add a step
+        // to the one action that is meant to be quick.
+        const facetMenu = (el, kind, val) => {
+            // Only ever one open. Re-tapping a chip while its own menu is up
+            // therefore closes it, which is what a second tap should do.
+            document.querySelectorAll('.stash-chip-menu').forEach(m => m.remove());
+
+            const set = (typeof window.scrayFacetSet === 'function') ? window.scrayFacetSet(kind) : null;
+            const on  = !!(set && set.has(String(val).trim().toLowerCase()));
+
+            const menu = document.createElement('div');
+            menu.className = 'stash-chip-menu';
+            // Same z-index as the modal and parented to <body>, not to the
+            // modal: #stashBody is a scroll container now, and a child of it
+            // would be clipped by the chip's own row near the edges.
+            menu.style.cssText =
+                'position:fixed;z-index:2147483647;background:#222;color:#fff;' +
+                'border-radius:8px;padding:4px;display:flex;flex-direction:column;gap:2px;' +
+                'box-shadow:0 4px 16px rgba(0,0,0,.45);min-width:200px;';
+
+            const mkItem = (label, fn) => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.textContent = label;
+                b.style.cssText = 'width:100%;margin:0;padding:10px 12px;border:none;border-radius:6px;' +
+                                  'background:transparent;color:#fff;text-align:left;font-size:.82rem;' +
+                                  'line-height:1.2;cursor:pointer;white-space:nowrap;';
+                b.addEventListener('click', (ev) => { ev.stopPropagation(); menu.remove(); fn(); });
+                menu.appendChild(b);
+            };
+
+            mkItem(on ? '\u2715  Remove from filter' : '\u2295  Filter by this performer', () => {
+                if (on) window.scrayRemoveTagFilter?.(kind, val);
+                else    window.scrayAddTagFilter?.(kind, val);
+                facetPaint(el);
+            });
+            // Site search rather than /performers/<uuid>: the scene rows carry
+            // performer NAMES only, no ids, so there is no profile URL we can
+            // build. For a name specific enough to have produced this scene the
+            // search lands on the performer anyway.
+            //
+            // openNative is the same helper the not-found panel uses, so this
+            // routes correctly on all three surfaces - a scraynative:// hop
+            // inside Native's own browser, the bridge in its main web view, and
+            // a plain new tab in Picker.
+            mkItem('\u2197  Open on StashDB', () => openNative(stashSearchUrl(val)));
+
+            document.body.appendChild(menu);
+
+            // Measured AFTER insertion, so the real height is known: a chip low
+            // on screen flips its menu above itself rather than off the edge.
+            const r  = el.getBoundingClientRect();
+            const mw = menu.offsetWidth, mh = menu.offsetHeight;
+            let top  = r.bottom + 6;
+            if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+            menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - mw - 8)) + 'px';
+            menu.style.top  = top + 'px';
+
+            const dismiss = (ev) => {
+                if (ev && ev.target && menu.contains(ev.target)) return;
+                menu.remove();
+                document.removeEventListener('click', dismiss, true);
+                document.removeEventListener('keydown', esc, true);
+            };
+            const esc = (ev) => { if (ev.key === 'Escape') dismiss(null); };
+            // Deferred by a tick: the click that opened this menu is still
+            // propagating, and binding synchronously would dismiss it with the
+            // very tap that asked for it.
+            setTimeout(() => {
+                document.addEventListener('click', dismiss, true);
+                document.addEventListener('keydown', esc, true);
+            }, 0);
+        };
+
         body.querySelectorAll('.stash-facet-chip').forEach(el => {
-            el.addEventListener('click', () => {
-                if (typeof window.scrayAddTagFilter !== 'function') return;
-                window.scrayAddTagFilter(el.dataset.facet, el.dataset.val || el.textContent);
-                el.style.outline = '2px solid #6c5ce7';
-                el.style.opacity = '0.7';
+            // Painted before any click, so a chip already in the filter opens
+            // in its selected colour rather than looking untouched.
+            facetPaint(el);
+            el.addEventListener('click', (ev) => {
+                const kind = el.dataset.facet;
+                const val  = el.dataset.val || el.textContent;
+                if (kind === 'performer') { ev.stopPropagation(); facetMenu(el, kind, val); return; }
+                const set = (typeof window.scrayFacetSet === 'function') ? window.scrayFacetSet(kind) : null;
+                if (set && set.has(String(val).trim().toLowerCase())) {
+                    if (typeof window.scrayRemoveTagFilter === 'function') window.scrayRemoveTagFilter(kind, val);
+                } else {
+                    if (typeof window.scrayAddTagFilter === 'function') window.scrayAddTagFilter(kind, val);
+                }
+                facetPaint(el);
             });
         });
         // Cover art comes straight from StashDB unblurred. Three deliberate

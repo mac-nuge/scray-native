@@ -330,8 +330,32 @@ async function pullDeltas(applyRow) {
 
   for (;;) {
     const json = await apiCall("pull", { params: { since, limit: 5000 } });
+
+    // The pull response has always carried bookmarks and this loop has always
+    // thrown them away: applyRow was called with two arguments while
+    // scrayApplyPulledRow takes three, so its bookmarksByKey branch never once
+    // ran. Server-side bookmark changes therefore only ever reached Native
+    // through an explicit Refresh Data on that one video.
+    //
+    // Keys with no rows at all are left OUT of the map rather than mapped to
+    // an empty array, so "the server said nothing about this video" stays
+    // distinct from "the server says this video has none" and a local
+    // bookmark that has not been pushed yet cannot be wiped by a pull.
+    const bookmarksByKey = new Map();
+    for (const b of (json.bookmarks || [])) {
+      if (!bookmarksByKey.has(b.video_key)) bookmarksByKey.set(b.video_key, []);
+      if (!b.deleted) {
+        bookmarksByKey.get(b.video_key).push({
+          time: b.time_ms / 1000,
+          note: b.note || "",
+          source: b.source || ""
+        });
+      }
+    }
+    for (const list of bookmarksByKey.values()) list.sort((a, b) => a.time - b.time);
+
     for (const row of json.videos) {
-      await applyRow(dbRowToApp(row), row);
+      await applyRow(dbRowToApp(row), row, bookmarksByKey);
       await scraySetSyncState(`row:${row.video_key}`, { seq: row.seq });
       pulled++;
     }

@@ -5119,8 +5119,11 @@ function showBookmarkRail(group, onPick, opts = {}) {
         chip.className = 'bookmark-tooltip-chip';
         // Falls back to the timestamp when there is no note, so a chip is
         // never blank - including in noteOnly mode.
-        chip.textContent = entry.bm.note
-            ? (opts.noteOnly ? entry.bm.note : `${formatDuration(entry.bm.time * 1000)} ${entry.bm.note}`)
+        // Display only - the stored note is untouched. scrayMapName falls back
+        // to the raw text when there is no mapping, or none loaded yet.
+        const chipNote = window.scrayMapName ? window.scrayMapName('note', entry.bm.note) : entry.bm.note;
+        chip.textContent = chipNote
+            ? (opts.noteOnly ? chipNote : `${formatDuration(entry.bm.time * 1000)} ${chipNote}`)
             : formatDuration(entry.bm.time * 1000);
         chip.title = chip.textContent;
         // Equal widths come from flex-grow/shrink/basis against the rail's
@@ -5305,7 +5308,9 @@ entries.forEach(entry => {
     if (!note) return;
     const label = document.createElement('span');
     label.className = 'bookmark-marker-label';
-    label.textContent = note;
+    // Display only: the marker prints the mapped name, the bookmark row keeps
+    // the raw one.
+    label.textContent = window.scrayMapName ? window.scrayMapName('note', note) : note;
     entry.marker.appendChild(label);
 });
 

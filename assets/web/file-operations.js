@@ -3700,7 +3700,7 @@ async function showStashModal(video) {
                         '</div>' : '') +
             '<div style="font-size:1.1em;font-weight:600;margin-bottom:4px;">' +
                 esc(sc.title || '(untitled scene)') + '</div>' +
-            row('Studio', sc.studio) +
+            row('Studio', window.scrayMapName ? window.scrayMapName('studio', sc.studio) : sc.studio) +
             row('Released', (sc.release_date || '').slice(0, 10)) +
             durLine +
             row('Code', sc.code) +

@@ -372,3 +372,124 @@ window.scrayFingerprint = function (v) {
   const d = dur != null ? Math.round(dur / 1000) : "?";
   return `${size}:${d}:${v?.width ?? "?"}x${v?.height ?? "?"}`;
 };
+
+/* =========================================
+   DISPLAY NAME MAPPING
+   =========================================
+
+   One dictionary, two kinds: 'studio' and 'note'. namemap.html writes it;
+   everything that PRINTS one of those strings reads it through
+   scrayMapName(). EDITING surfaces deliberately do not - the bookmark modal
+   has to show, and save, the raw text, or a tidy-up would silently rewrite
+   the row it was only meant to relabel.
+
+   Synchronous by design: it returns the raw string until the dictionary
+   lands, so a slow or failed fetch degrades to today's behaviour instead of
+   blanking a label. The localStorage copy means that only ever happens on a
+   genuinely first run.
+
+   Lives here rather than in a new file so Native needs no change to
+   index.html's script list and no bundle rebuild to pick it up.
+   ========================================= */
+window.scrayNameMap = (function () {
+  const CACHE_KEY = "scray_name_maps_v1";
+  const TTL_MS    = 10 * 60 * 1000;
+
+  let dict     = { studio: {}, note: {} };
+  let loadedAt = 0;
+  let inFlight = null;
+
+  try {
+    const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+    if (cached && cached.maps) {
+      dict     = { studio: cached.maps.studio || {}, note: cached.maps.note || {} };
+      loadedAt = cached.at || 0;
+    }
+  } catch { /* corrupt cache is the same as no cache */ }
+
+  // Must stay identical to scrayNameKey() in api.php and nameKey() in
+  // namemap.html, or a saved mapping is never found.
+  const key = (s) => String(s == null ? "" : s).normalize("NFC").trim().toLowerCase();
+
+  function lookup(kind, raw) {
+    const original = String(raw == null ? "" : raw);
+    const table = dict[kind];
+    if (!table || !original) return original;
+    const hit = table[key(original)];
+    return (typeof hit === "string" && hit !== "") ? hit : original;
+  }
+
+  async function refresh(force) {
+    if (!force && Date.now() - loadedAt < TTL_MS) return dict;
+    if (inFlight) return inFlight;
+    inFlight = (async () => {
+      try {
+        const url = new URL(window.SCRAY_SYNC.API_BASE);
+        url.searchParams.set("action", "name_map_get");
+        const res  = await fetch(url.toString(), { headers: { "X-Scray-Key": window.SCRAY_SYNC.API_KEY } });
+        const json = await res.json();
+        if (!json || !json.ok) throw new Error((json && json.error) || `HTTP ${res.status}`);
+        dict     = { studio: json.maps?.studio || {}, note: json.maps?.note || {} };
+        loadedAt = Date.now();
+        try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: loadedAt, rev: json.rev, maps: dict })); } catch {}
+      } catch (err) {
+        // Keep whatever is cached. A missing dictionary means raw names, which
+        // is a worse label, not a broken player.
+        console.warn("[name-map] refresh failed, keeping cached copy:", err.message);
+      } finally {
+        inFlight = null;
+      }
+      return dict;
+    })();
+    return inFlight;
+  }
+
+  return { lookup, refresh, key, dump: () => dict };
+})();
+
+/** kind is 'studio' or 'note'. Unmapped names come back unchanged. */
+window.scrayMapName = function (kind, raw) {
+  return window.scrayNameMap.lookup(kind, raw);
+};
+
+/* ---- when the dictionary gets re-fetched ----------------------------------
+   Three triggers, in descending order of how often they fire:
+
+     boot            - forced, so a cold start is always current.
+     scray-sync-done - TTL-guarded, so the frequent quiet drains cost nothing
+                       but a comparison. drainQuietly() already dispatches it.
+     foreground      - forced, but only after a real gap. This is the one that
+                       covers "edited the map on the laptop, picked up the
+                       phone", which neither of the other two would catch.
+
+   All of them swallow their own failures: a stale dictionary means raw names,
+   which is a worse label, not a broken player.
+--------------------------------------------------------------------------- */
+(function () {
+  // ⚙️ ADJUSTABLE: how old the copy must be before returning to the app is
+  //    worth a round trip. Below this, a tab-switch is not evidence of
+  //    anything having changed.
+  const FOREGROUND_MIN_MS = 60 * 1000;
+  let lastLoad = 0;
+
+  const load = (force) => {
+    lastLoad = Date.now();
+    try { window.scrayNameMap.refresh(force); } catch (err) {
+      console.warn("[name-map] refresh threw:", err.message);
+    }
+  };
+
+  // Deferred a tick rather than called inline: this file is document.write'd
+  // from <head>, and start-up is already dense enough without one more
+  // synchronous branch in the parse path. scrayBoot's fetch hook is installed
+  // at the top of this file, so READY still waits for the request.
+  setTimeout(() => load(true), 0);
+
+  window.addEventListener("scray-sync-done", () => load(false));
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (Date.now() - lastLoad < FOREGROUND_MIN_MS) return;
+    load(true);
+  });
+})();

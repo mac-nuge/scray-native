@@ -60,7 +60,15 @@
     videos.forEach(video => {
       if (!Array.isArray(video.bookmarks) || !video.bookmarks.length) return;
       video.bookmarks.forEach(bm => {
-        const note = (bm.note || '').trim();
+        // Mapped here rather than at each render point, so the cloud, the
+        // counts, the filter set, the sort and the row label all agree. Two
+        // raw spellings that map to one name therefore become ONE chip with a
+        // combined count, which is the whole reason for mapping them.
+        //
+        // Safe because this page is read-only: nothing here pushes a bookmark
+        // back, so the stored note is never overwritten with its display form.
+        const rawNote = (bm.note || '').trim();
+        const note = window.scrayMapName ? window.scrayMapName('note', rawNote) : rawNote;
         // A shallow clone per bookmark. oneDriveId is preserved, so the basket,
         // history, scoring and every file operation still address the right
         // video; __bmStartAt is the only addition.

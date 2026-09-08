@@ -246,7 +246,11 @@ function syncVideoTitleBar(video) {
     }
     if (v) {
         const scoreText = (v.user_score !== undefined && v.user_score !== null) ? ` [${v.user_score}]` : '';
-        textEl.textContent = (v.filename || '') + scoreText;
+        // Same rule as every list: a matched video is named by its scene.
+        // scrayStashNames.text() returns "" when there is no match, so the
+        // filename stays the fallback.
+        const stashName = window.scrayStashNames ? window.scrayStashNames.text(v) : '';
+        textEl.textContent = (stashName || v.filename || '') + scoreText;
     }
     syncFullscreenFilterPill();
 

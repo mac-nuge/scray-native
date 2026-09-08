@@ -91,7 +91,7 @@ li.appendChild(nameSpan);
   if (video.path === "yet-to-upload" || (Array.isArray(video.tags) && video.tags.includes("yet-to-upload"))) {
     sizeDurSpan.textContent = "";
   } else {
-    sizeDurSpan.textContent = ` [${formatFileSize(video.sizeBytes)}, ${formatDuration(video.durationMs)}]`;
+    sizeDurSpan.textContent = ` [${formatFileSize(video.sizeBytes)}, ${formatDuration(window.scrayDisplayDurationMs ? window.scrayDisplayDurationMs(video) : video.durationMs)}]`;
   }
   sizeDurSpan.style.marginLeft = "6px";
   sizeDurSpan.style.fontSize = "0.65rem";
@@ -387,7 +387,7 @@ setTimeout(() => {
    if (video.path === "yet-to-upload" || (Array.isArray(video.tags) && video.tags.includes("yet-to-upload"))) {
      sizeDurSpan.textContent = "";
    } else {
-     sizeDurSpan.textContent = ` [${formatFileSize(video.sizeBytes)}, ${formatDuration(video.durationMs)}]`;
+     sizeDurSpan.textContent = ` [${formatFileSize(video.sizeBytes)}, ${formatDuration(window.scrayDisplayDurationMs ? window.scrayDisplayDurationMs(video) : video.durationMs)}]`;
    }
    sizeDurSpan.style.marginLeft = "6px";
    sizeDurSpan.style.fontSize = "0.65rem";
@@ -642,7 +642,7 @@ function appendToTaggedListInPanel(videos, paginationState) {
    if (video.path === "yet-to-upload" || (Array.isArray(video.tags) && video.tags.includes("yet-to-upload"))) {
      sizeDurSpan.textContent = "";
    } else {
-     sizeDurSpan.textContent = ` [${formatFileSize(video.sizeBytes)}, ${formatDuration(video.durationMs)}]`;
+     sizeDurSpan.textContent = ` [${formatFileSize(video.sizeBytes)}, ${formatDuration(window.scrayDisplayDurationMs ? window.scrayDisplayDurationMs(video) : video.durationMs)}]`;
    }
    sizeDurSpan.style.marginLeft = "6px";
    sizeDurSpan.style.fontSize = "0.65rem";

@@ -316,6 +316,73 @@ window.scrayPathSep = scrayPathSep;
 function createClickablePath(video, includeFilename = true, useCataloguePath = false) {
 const container = document.createDocumentFragment();
 
+// A StashDB-matched video is named by its scene, not its path: studio,
+// female cast and title, all lower case. Done HERE rather than in each list
+// renderer because every list - main, random panel, basket, history and the
+// bookmarks page - builds its row text through this one function.
+//
+// Unmatched videos fall straight through to the path/filename rendering
+// below, untouched. So does a matched video whose scene row carries nothing
+// worth printing: parts() returns null for those rather than handing back
+// three empty strings and two separators.
+const stashParts = window.scrayStashNames && window.scrayStashNames.parts(video);
+if (stashParts) {
+  // Local rather than shared: Picker's copy of this file has no
+  // scrayPathSep, and one helper defined here keeps both bundles' patch
+  // text identical.
+  const sep = (text) => {
+    const s = document.createElement('span');
+    s.textContent = text;
+    s.style.color = '#666';
+    return s;
+  };
+  const chip = (label) => {
+    const span = document.createElement('span');
+    span.textContent = label;
+    span.style.cursor = 'pointer';
+    // Purple, not the blue used for folder and bracket tags. Same hue as the
+    // S button, so "this text came from StashDB" reads the same way wherever
+    // it appears - and a row's own path tags stay visibly a different thing.
+    span.style.color = '#6c5ce7';
+    // Load-bearing, not decoration: the row click handler in render.js
+    // treats an underlined target as "a tag was clicked, do not open the
+    // rename modal". Without this, filtering by a performer would also
+    // open rename every time.
+    span.style.textDecoration = 'underline';
+    span.title = `Click to filter by "${label}"`;
+    span.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (typeof window.scrayAddSearchTerm === 'function') window.scrayAddSearchTerm(label);
+    });
+    return span;
+  };
+
+  // Built as groups so the " / " separators land BETWEEN the three sections
+  // and never around a section that turned out to be empty.
+  const groups = [];
+  if (stashParts.studio) groups.push([chip(stashParts.studio)]);
+  if (stashParts.performerList.length) {
+    const cast = [];
+    stashParts.performerList.forEach((name, i) => {
+      if (i) cast.push(sep(', '));
+      cast.push(chip(name));
+    });
+    groups.push(cast);
+  }
+  if (stashParts.title) {
+    const t = document.createElement('span');
+    t.textContent = stashParts.title;
+    t.style.color = '#333';
+    groups.push([t]);
+  }
+
+  groups.forEach((group, i) => {
+    if (i) container.appendChild(sep(' / '));
+    group.forEach(node => container.appendChild(node));
+  });
+  return container;
+}
+
 // Parse path into folders
 const parts = scrayResolvePathParts(video, { catalogue: useCataloguePath });
 if (parts.catalogue.length || parts.device.length) {
@@ -802,7 +869,7 @@ try {
 
    if (tokens.length > 0) {
        videos = videos.filter(video => {
-           const haystack = `${video.filename} ${video.cataloguePath || ''} ${video.path}`.toLowerCase();
+           const haystack = `${video.filename} ${video.cataloguePath || ''} ${video.path} ${window.scrayStashNames ? window.scrayStashNames.text(video) : ''}`.toLowerCase();
            return tokens.every(token => haystack.includes(token));
        });
    }

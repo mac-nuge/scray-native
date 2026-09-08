@@ -106,7 +106,7 @@ if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
  if (video.path === "yet-to-upload" || (Array.isArray(video.tags) && video.tags.includes("yet-to-upload"))) {
      sizeDurSpan.textContent = "";
  } else {
-     sizeDurSpan.textContent = ` [${formatFileSize(video.sizeBytes)}, ${formatDuration(video.durationMs)}]`;
+     sizeDurSpan.textContent = ` [${formatFileSize(video.sizeBytes)}, ${formatDuration(window.scrayDisplayDurationMs ? window.scrayDisplayDurationMs(video) : video.durationMs)}]`;
  }
  sizeDurSpan.style.marginLeft = "6px";
  sizeDurSpan.style.display = "inline";

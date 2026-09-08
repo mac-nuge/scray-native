@@ -795,7 +795,11 @@ async function refreshSingleVideoComprehensive(video) {
    }
 
    const [accountIdStored] = (video.accountKey || "").split("::");
-   let accountInfo = accountsData.find(acc => acc.accountId === accountIdStored);
+   // Legacy rows key on the old MSAL homeAccountId, so a strict match
+   // misses them. See scrayFindAccountForVideo in auth.js.
+   let accountInfo = (typeof scrayFindAccountForVideo === "function")
+       ? scrayFindAccountForVideo(video)
+       : accountsData.find(acc => acc.accountId === accountIdStored);
 
    if (!accountInfo) {
        throw new Error(`Account not found for video: ${video.filename}`);
@@ -903,7 +907,11 @@ for (let idx = 0; idx < targetVideos.length; idx++) {
     console.log(`Processing ${idx + 1}/${targetVideos.length}: ${video.filename}`);
 
     const [accountIdStored] = (video.accountKey || "").split("::");
-    let accountInfo = accountsData.find(acc => acc.accountId === accountIdStored);
+    // Legacy rows key on the old MSAL homeAccountId, so a strict match
+    // misses them. See scrayFindAccountForVideo in auth.js.
+    let accountInfo = (typeof scrayFindAccountForVideo === "function")
+        ? scrayFindAccountForVideo(video)
+        : accountsData.find(acc => acc.accountId === accountIdStored);
 
     if (!accountInfo) {
         console.warn(`Account not found for basket item: ${video.filename}`);

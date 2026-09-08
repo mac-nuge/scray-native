@@ -524,6 +524,28 @@
     takeOverRandomButton();
     takeOverPlayRandomButton();
 
+    // The mirror is the only thing this page reads, and nothing else on it
+    // syncs - index.php/index.html pull on boot, this page never did. So a
+    // bookmark that arrived server-side (a promoted stash import, an edit on
+    // another device) stayed invisible here until you happened to visit the
+    // main page first. Pull before reading.
+    //
+    // Two engines, because the apps boot differently: Picker's
+    // refreshMetadataFromDb re-reads from since=0, which is what repairs rows
+    // a scan overwrote; Native has no such function and goes through the
+    // ordinary delta pull instead.
+    try {
+      if (typeof window.ensureMetadataFresh === 'function') {
+        await window.ensureMetadataFresh();
+      } else if (typeof window.scrayPullDeltas === 'function' &&
+                 typeof window.scrayApplyPulledRow === 'function') {
+        await window.scrayPullDeltas(window.scrayApplyPulledRow);
+      }
+    } catch (err) {
+      // A failed sync is not a failed page. Show the local copy.
+      console.warn('[bookmarks] sync before load failed, showing the local copy:', err);
+    }
+
     try {
       await loadEntries();
     } catch (err) {

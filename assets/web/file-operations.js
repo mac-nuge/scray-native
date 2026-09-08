@@ -856,7 +856,11 @@ async function renameFile(video, newName) {
 
    // Get account info and refresh token
    const [accountIdStored] = (video.accountKey || "").split("::");
-   let accountInfo = accountsData.find(acc => acc.accountId === accountIdStored);
+   // Legacy rows key on the old MSAL homeAccountId, so a strict match
+   // misses them. See scrayFindAccountForVideo in auth.js.
+   let accountInfo = (typeof scrayFindAccountForVideo === "function")
+       ? scrayFindAccountForVideo(video)
+       : accountsData.find(acc => acc.accountId === accountIdStored);
    
    if (!accountInfo) {
        throw new Error(`Account not found for file: ${video.filename}`);
@@ -919,7 +923,11 @@ async function deleteFile(video) {
 
    // Get account info and refresh token
    const [accountIdStored] = (video.accountKey || "").split("::");
-   let accountInfo = accountsData.find(acc => acc.accountId === accountIdStored);
+   // Legacy rows key on the old MSAL homeAccountId, so a strict match
+   // misses them. See scrayFindAccountForVideo in auth.js.
+   let accountInfo = (typeof scrayFindAccountForVideo === "function")
+       ? scrayFindAccountForVideo(video)
+       : accountsData.find(acc => acc.accountId === accountIdStored);
    
    if (!accountInfo) {
        throw new Error(`Account not found for file: ${video.filename}`);

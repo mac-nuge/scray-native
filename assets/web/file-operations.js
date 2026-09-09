@@ -2826,11 +2826,13 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     let allNotes = [];   // the full note vocabulary, for the autocomplete
     if (typeof window.getTopBookmarkNotes === 'function') {
         try {
-            // 30 is plenty for the quick-note pills, but the autocomplete
-            // wants the long tail. getTopBookmarkNotes caches the full sorted
-            // list, so the pills just slice the front of it.
+            // Both lists are the MAPPED vocabulary - getTopBookmarkNotes folds
+            // raw spellings into their display name - so a pill tap stores the
+            // standard text and the note field suggests the same words.
+            // ⚙️ 50 pills on the quick-add rail; the autocomplete still wants
+            // the long tail, and both come from the one cached fetch.
             allNotes = await window.getTopBookmarkNotes(500);
-            topNotes = allNotes.slice(0, 30);
+            topNotes = allNotes.slice(0, 50);
         } catch (err) {
             console.warn('Could not load top bookmark notes:', err);
         }

@@ -2325,7 +2325,9 @@ async function loadAllVideosFromExcel() {
    }
 }
 
-// ✅Cache for top bookmark notes (avoids re-reading the whole sheet every time a modal opens)
+// ✅Cache of the RAW counted rows the server sent, not the folded names.
+// Folding happens on the way out, so a note remapped in manage-data.html is
+// picked up on the next modal open rather than after a cache clear.
 let cachedTopBookmarkNotes = null;
 
 /**

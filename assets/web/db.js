@@ -1070,18 +1070,27 @@ window.refreshVideoFromDb = refreshVideoFromDb;
 // implementation (download the whole catalogue, tally notes in JS, requires
 // an Excel token). This is the same one indexed GROUP BY that Picker now
 // uses - no Microsoft auth anywhere in the path.
+// Holds the RAW counted rows, not the folded names: folding on the way out
+// means a note remapped in manage-data.html lands on the next modal open
+// instead of waiting for the cache to be cleared.
 let cachedTopBookmarkNotesDb = null;
 
 window.getTopBookmarkNotes = async function (limit = 12, forceRefresh = false) {
+  // Every return goes through the fold, so callers only ever see mapped names.
+  const fold = (rows) => (window.scrayFoldNotes
+    ? window.scrayFoldNotes(rows)
+    : (rows || []).map(r => (r && typeof r === 'object') ? r.note : r));
+
   if (cachedTopBookmarkNotesDb && !forceRefresh && cachedTopBookmarkNotesDb.length >= limit) {
-    return cachedTopBookmarkNotesDb.slice(0, limit);
+    return fold(cachedTopBookmarkNotesDb).slice(0, limit);
   }
   try {
-    const res = await window.scrayApiCall("top_notes", { params: { limit: Math.max(limit, 30) } });
-    const sorted = (res.notes || []).map(n => n.note);
-    cachedTopBookmarkNotesDb = sorted;
-    console.log(`✅ Compiled ${sorted.length} top bookmark notes from the bookmarks table`);
-    return sorted.slice(0, limit);
+    const res = await window.scrayApiCall("top_notes", { params: { limit: Math.max(limit, 50) } });
+    const rows = res.notes || [];
+    cachedTopBookmarkNotesDb = rows;
+    const names = fold(rows);
+    console.log(`✅ Compiled ${names.length} mapped bookmark notes from the bookmarks table`);
+    return names.slice(0, limit);
   } catch (err) {
     console.error('Failed to compute top bookmark notes:', err);
     return [];

@@ -510,6 +510,42 @@ window.scrayMapName = function (kind, raw) {
   return window.scrayNameMap.lookup(kind, raw);
 };
 
+/**
+ * Fold a counted list of bookmark notes down to the mapped vocabulary.
+ *
+ * api.php already does this, so against a current server it is one cheap pass
+ * that changes nothing. It stays here for the two cases the server cannot
+ * cover: a mapping edited AFTER the list was cached - callers fold on the way
+ * OUT, so the next modal open is already correct - and an older api.php still
+ * answering with raw names.
+ *
+ * Takes either the server's [{ note, n }] or a plain string[]. Entries landing
+ * on the same display name merge and their counts add, so "most used first"
+ * survives the merge instead of inheriting whichever spelling ranked higher.
+ *
+ * @param {Array} rows
+ * @returns {string[]} display names, most used first
+ */
+window.scrayFoldNotes = function (rows) {
+  const totals = new Map();
+  (rows || []).forEach(r => {
+    const obj = r && typeof r === 'object';
+    const raw = String((obj ? r.note : r) || '').trim();
+    if (!raw) return;
+    const name = window.scrayMapName ? window.scrayMapName('note', raw) : raw;
+    if (!name) return;
+    // The same fold key the dictionary is stored under, so two spellings that
+    // differ only in case or accent form cannot survive as two pills.
+    const k   = window.scrayNameMap ? window.scrayNameMap.key(name) : name.toLowerCase();
+    const n   = (obj && Number(r.n)) || 1;
+    const hit = totals.get(k);
+    if (hit) hit.n += n; else totals.set(k, { name, n });
+  });
+  return Array.from(totals.values())
+    .sort((a, b) => (b.n - a.n) || a.name.localeCompare(b.name))
+    .map(e => e.name);
+};
+
 /* ---- when the dictionary gets re-fetched ----------------------------------
    Three triggers, in descending order of how often they fire:
 

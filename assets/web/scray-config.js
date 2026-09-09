@@ -377,11 +377,16 @@ window.scrayFingerprint = function (v) {
    DISPLAY NAME MAPPING
    =========================================
 
-   One dictionary, two kinds: 'studio' and 'note'. namemap.html writes it;
+   One dictionary, two kinds: 'studio' and 'note'. manage-data.html writes it;
    everything that PRINTS one of those strings reads it through
    scrayMapName(). EDITING surfaces deliberately do not - the bookmark modal
    has to show, and save, the raw text, or a tidy-up would silently rewrite
    the row it was only meant to relabel.
+
+   The same rows also carry ATTRIBUTES - a studio's region and class today -
+   which are not display names at all: nothing prints them, the studio cloud
+   groups by them. attrsFor() answers by either spelling, so a caller holding a
+   mapped name and a caller holding a raw one both find the same row.
 
    Synchronous by design: it returns the raw string until the dictionary
    lands, so a slow or failed fetch degrades to today's behaviour instead of
@@ -392,24 +397,57 @@ window.scrayFingerprint = function (v) {
    index.html's script list and no bundle rebuild to pick it up.
    ========================================= */
 window.scrayNameMap = (function () {
-  const CACHE_KEY = "scray_name_maps_v1";
+  // v2: the cached payload gained attributes, and a v1 blob would leave the
+  // studio cloud with no rows until the TTL expired.
+  const CACHE_KEY = "scray_name_maps_v2";
   const TTL_MS    = 10 * 60 * 1000;
 
   let dict     = { studio: {}, note: {} };
+  let attrs    = { studio: {}, note: {} };
+  let defs     = { studio: [], note: [] };
+  // raw_key AND the fold key of the mapped spelling both point at the same
+  // attribute object. A caller asks by whichever name it happens to be
+  // holding - the lists print the mapped one, the database carries the raw
+  // one - and neither has to know whether a studio was ever renamed.
+  let index    = { studio: {}, note: {} };
   let loadedAt = 0;
   let inFlight = null;
 
+  // Must stay identical to scrayNameKey() in api.php and nameKey() in
+  // manage-data.html, or a saved mapping is never found.
+  const key = (s) => String(s == null ? "" : s).normalize("NFC").trim().toLowerCase();
+
+  function reindex() {
+    index = { studio: {}, note: {} };
+    Object.keys(index).forEach(kind => {
+      const table = attrs[kind] || {};
+      const names = dict[kind]  || {};
+      Object.keys(table).forEach(rk => {
+        const a = table[rk];
+        if (!a) return;
+        index[kind][rk] = a;
+        const m = names[rk];
+        if (m) index[kind][key(m)] = a;
+      });
+    });
+  }
+
+  // One path for the cached copy and the fetched one, so a shape change can
+  // only ever be got wrong in a single place.
+  function adopt(payload) {
+    const p = payload || {};
+    dict  = { studio: (p.maps      && p.maps.studio)      || {}, note: (p.maps      && p.maps.note)      || {} };
+    attrs = { studio: (p.attrs     && p.attrs.studio)     || {}, note: (p.attrs     && p.attrs.note)     || {} };
+    defs  = { studio: (p.attr_defs && p.attr_defs.studio) || [], note: (p.attr_defs && p.attr_defs.note) || [] };
+    reindex();
+  }
+
   try {
     const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
-    if (cached && cached.maps) {
-      dict     = { studio: cached.maps.studio || {}, note: cached.maps.note || {} };
-      loadedAt = cached.at || 0;
-    }
+    if (cached && cached.maps) { adopt(cached); loadedAt = cached.at || 0; }
   } catch { /* corrupt cache is the same as no cache */ }
-
-  // Must stay identical to scrayNameKey() in api.php and nameKey() in
-  // namemap.html, or a saved mapping is never found.
-  const key = (s) => String(s == null ? "" : s).normalize("NFC").trim().toLowerCase();
+  // The v1 blob has no attributes in it and will never be read again.
+  try { localStorage.removeItem("scray_name_maps_v1"); } catch {}
 
   function lookup(kind, raw) {
     const original = String(raw == null ? "" : raw);
@@ -417,6 +455,22 @@ window.scrayNameMap = (function () {
     if (!table || !original) return original;
     const hit = table[key(original)];
     return (typeof hit === "string" && hit !== "") ? hit : original;
+  }
+
+  /**
+   * The attributes filed against one name, by either spelling. Always an
+   * object, so a caller can read a key straight off it - an unknown name and a
+   * name with nothing filled in are the same answer.
+   */
+  function attrsFor(kind, name) {
+    const table = index[kind];
+    if (!table) return {};
+    return table[key(name)] || {};
+  }
+
+  /** [{ key, label }] for one kind, straight from api.php's declaration. */
+  function attrDefs(kind) {
+    return defs[kind] || [];
   }
 
   async function refresh(force) {
@@ -429,9 +483,12 @@ window.scrayNameMap = (function () {
         const res  = await fetch(url.toString(), { headers: { "X-Scray-Key": window.SCRAY_SYNC.API_KEY } });
         const json = await res.json();
         if (!json || !json.ok) throw new Error((json && json.error) || `HTTP ${res.status}`);
-        dict     = { studio: json.maps?.studio || {}, note: json.maps?.note || {} };
+        adopt(json);
         loadedAt = Date.now();
-        try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: loadedAt, rev: json.rev, maps: dict })); } catch {}
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify(
+            { at: loadedAt, rev: json.rev, maps: dict, attrs: attrs, attr_defs: defs }));
+        } catch {}
       } catch (err) {
         // Keep whatever is cached. A missing dictionary means raw names, which
         // is a worse label, not a broken player.
@@ -444,7 +501,8 @@ window.scrayNameMap = (function () {
     return inFlight;
   }
 
-  return { lookup, refresh, key, dump: () => dict };
+  return { lookup, refresh, key, attrsFor, attrDefs,
+           dump: () => dict, dumpAttrs: () => attrs };
 })();
 
 /** kind is 'studio' or 'note'. Unmapped names come back unchanged. */
@@ -566,7 +624,7 @@ window.scrayStashNames = (function () {
     if (!r) return null;
 
     // Studio goes through the same display-name dictionary as everywhere else
-    // that PRINTS a studio, so a rename in namemap.html reaches the lists.
+    // that PRINTS a studio, so a rename in manage-data.html reaches the lists.
     const studio = String(
       window.scrayMapName ? window.scrayMapName("studio", r[0] || "") : (r[0] || "")
     ).trim().toLowerCase();

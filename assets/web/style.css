@@ -4067,6 +4067,40 @@ cursor: pointer;
 }
 .scray-cloud-toggle.is-on { background: #007bff; border-color: #007bff; color: #fff; }
 
+/* ⚙️ The attribute narrowing rows. Violet rather than the class colours, so a
+   chip that changes what the cloud SHOWS never reads as one that changes what
+   is selected. */
+.scray-cloud-attrs { display: flex; flex-direction: column; gap: 4px; }
+.scray-cloud-attrs:empty { display: none; }
+.scray-cloud-attrrow {
+display: flex;
+flex-wrap: wrap;
+align-items: center;
+gap: 5px;
+}
+.scray-cloud-attrlabel {
+font-size: 0.68rem;
+letter-spacing: 0.08em;
+text-transform: uppercase;
+color: #888;
+min-width: 62px;
+}
+.scray-cloud-attrchip {
+width: auto;
+flex: 0 0 auto;
+margin: 0;
+padding: 4px 9px;
+font-size: 0.72rem;
+line-height: 1;
+border: 1px solid #ccc;
+border-radius: 12px;
+background: #f7f7f7;
+color: #555;
+cursor: pointer;
+}
+.scray-cloud-attrchip.is-on { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
+.scray-cloud-attrchip.is-on .scray-cloud-count { opacity: 0.85; }
+
 /* ⚙️ The cloud is the only part that grows with the catalogue - the controls
    and the footer sit outside it, so this is where the scroll belongs. */
 .scray-cloud-grid {

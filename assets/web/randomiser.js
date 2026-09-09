@@ -779,6 +779,48 @@ window.scrayFacetCounts = scrayFacetCounts;
 let scrayCloudGender = 'all';
 let scrayCloudSort   = 'count';
 
+// Attribute narrowing, per class. Session-only for the same reason as the two
+// above. kind -> attrKey -> Set of chosen values.
+let scrayCloudAttrPick = {};
+// The bucket a value with no attribute filed against it falls into, so "which
+// studios have I not classified yet" is one tap rather than a trip back to
+// manage-data.html.
+const SCRAY_CLOUD_UNSET = '—';
+
+/**
+ * The attributes a cloud can narrow by.
+ *
+ * Only a class with a name-map kind behind it can have any: performers and
+ * stash tags are derived live from StashDB and never pass through
+ * manage-data.html, so they get an empty list and no rows at all. The list
+ * itself is declared once, in api.php - adding a third studio attribute needs
+ * no change here.
+ */
+function scrayCloudAttrDefs(kind) {
+   if (kind !== 'studio') return [];
+   const nm = window.scrayNameMap;
+   return (nm && typeof nm.attrDefs === 'function') ? (nm.attrDefs('studio') || []) : [];
+}
+
+function scrayCloudAttrPickSet(kind, attrKey) {
+   const perKind = scrayCloudAttrPick[kind] || (scrayCloudAttrPick[kind] = {});
+   return perKind[attrKey] || (perKind[attrKey] = new Set());
+}
+
+/**
+ * One cloud value's attribute, folded to the unset bucket when it has none.
+ *
+ * The cloud's names are the MAPPED spellings, already lower-cased by parts().
+ * scrayNameMap indexes attributes under both spellings for exactly this, so
+ * nothing here has to know whether a studio has been renamed.
+ */
+function scrayCloudAttrValue(kind, name, attrKey) {
+   const nm = window.scrayNameMap;
+   const a  = (nm && typeof nm.attrsFor === 'function') ? nm.attrsFor(kind, name) : null;
+   const v  = a && a[attrKey];
+   return (typeof v === 'string' && v.trim()) ? v.trim() : SCRAY_CLOUD_UNSET;
+}
+
 /**
  * The big picker that replaced the AT dropdown.
  *
@@ -818,11 +860,20 @@ async function showTagCloudModal(kind) {
    btnRow.className = 'scray-cloud-btnrow';
    controls.appendChild(btnRow);
 
+   // The attribute rows sit between the controls and the grid because that is
+   // the order they get used in: narrow to a region, then pick studios out of
+   // what is left.
+   const attrDefs = scrayCloudAttrDefs(kind);
+   const attrWrap = document.createElement('div');
+   attrWrap.className = 'scray-cloud-attrs';
+   controls.appendChild(attrWrap);
+
    const grid = document.createElement('div');
    grid.className = 'tag-selection-grid scray-cloud-grid';
    content.appendChild(grid);
 
    let counts = new Map();
+   let shown  = [];
    let term   = '';
 
    const close = () => {
@@ -869,6 +920,81 @@ async function showTagCloudModal(kind) {
            scrayRefreshFilters();
            renderControls();
        });
+
+       // With a narrowing on, "every studio in this region" is usually the
+       // whole point, and tapping thirty of them one at a time is not.
+       if (attrDefs.length) {
+           mkToggle('Select all shown', false, () => {
+               shown.forEach(n => set.add(n));
+               scrayRefreshFilters();
+               renderGrid();
+           });
+       }
+   }
+
+   /**
+    * A chip row per attribute, built from the values actually in use.
+    *
+    * The tallies are counted over EVERY name in the cloud rather than over
+    * what the other rows have already narrowed to: a chip that vanished the
+    * moment a sibling chip was used would be a trap door.
+    */
+   function renderAttrRows() {
+       attrWrap.innerHTML = '';
+       if (!attrDefs.length || !counts.size) return;
+
+       attrDefs.forEach(def => {
+           const tally = new Map();
+           counts.forEach((n, name) => {
+               const v = scrayCloudAttrValue(kind, name, def.key);
+               tally.set(v, (tally.get(v) || 0) + n);
+           });
+           // Nothing filled in for this attribute yet, so no row - rather than
+           // a row with a single "everything is unset" chip in it.
+           if (tally.size <= 1 && tally.has(SCRAY_CLOUD_UNSET)) return;
+
+           const picked = scrayCloudAttrPickSet(kind, def.key);
+           const row = document.createElement('div');
+           row.className = 'scray-cloud-attrrow';
+
+           const label = document.createElement('span');
+           label.className = 'scray-cloud-attrlabel';
+           label.textContent = def.label;
+           row.appendChild(label);
+
+           const chip = (text, on, fn, n) => {
+               const b = document.createElement('button');
+               b.type = 'button';
+               b.className = 'scray-cloud-attrchip' + (on ? ' is-on' : '');
+               b.textContent = text;
+               if (n != null) {
+                   const c = document.createElement('span');
+                   c.className = 'scray-cloud-count';
+                   c.textContent = '(' + n + ')';
+                   b.appendChild(c);
+               }
+               b.addEventListener('click', fn);
+               row.appendChild(b);
+           };
+
+           chip('All', !picked.size, () => {
+               picked.clear();
+               renderAttrRows();
+               renderGrid();
+           });
+
+           [...tally.keys()].sort((a, b) =>
+               a === SCRAY_CLOUD_UNSET ? 1
+             : b === SCRAY_CLOUD_UNSET ? -1
+             : a.localeCompare(b, undefined, { sensitivity: 'base' })
+           ).forEach(v => chip(v, picked.has(v), () => {
+               if (picked.has(v)) picked.delete(v); else picked.add(v);
+               renderAttrRows();
+               renderGrid();
+           }, tally.get(v)));
+
+           attrWrap.appendChild(row);
+       });
    }
 
    function syncTitle(shown) {
@@ -879,6 +1005,17 @@ async function showTagCloudModal(kind) {
        grid.innerHTML = '';
        let names = Array.from(counts.keys());
 
+       // Every active attribute row has to agree - two Regions is "either", a
+       // Region and a Class is "both", which is how a two-axis grid is
+       // normally read. A value already selected stays visible either way, on
+       // the same principle as the search box below.
+       attrDefs.forEach(def => {
+           const picked = scrayCloudAttrPickSet(kind, def.key);
+           if (!picked.size) return;
+           names = names.filter(n =>
+               set.has(n) || picked.has(scrayCloudAttrValue(kind, n, def.key)));
+       });
+
        // A selected value stays visible even once it stops matching the search
        // box, so the way to undo a pick is never hidden behind clearing the
        // box first.
@@ -888,6 +1025,9 @@ async function showTagCloudModal(kind) {
            ? (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })
            : (a, b) => (counts.get(b) - counts.get(a)) || a.localeCompare(b));
 
+       // What "Select all shown" means, kept here so it can never disagree
+       // with what is actually painted.
+       shown = names;
        syncTitle(names.length);
 
        if (!names.length) {
@@ -928,6 +1068,7 @@ async function showTagCloudModal(kind) {
    async function rebuild() {
        counts = await scrayFacetCounts(kind, scrayCloudGender);
        renderControls();
+       renderAttrRows();
        renderGrid();
    }
 

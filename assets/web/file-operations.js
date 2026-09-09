@@ -3727,6 +3727,39 @@ async function showStashModal(video) {
             .concat((sc && sc.urls || []).slice(0, 2).map((u, i) =>
                 '<a href="' + esc(u) + '" target="_blank" rel="noopener">Official ' + (i + 1) + '</a>'));
 
+        // The scene arrives with your corrections already folded in, so
+        // nothing below needs to know about them - but you do. Without this
+        // the modal presents your studio as though StashDB had said it, and
+        // there is no way to tell the two apart from the phone.
+        const OV_LABEL = {
+            title: 'title', studio: 'studio', performers: 'performers', tags: 'tags',
+            release_date: 'released', code: 'code', director: 'director',
+            duration_sec: 'duration', duration: 'duration', details: 'synopsis'
+        };
+        const ovFields = (sc && sc.override && sc.override_fields) || [];
+        const ovSaid   = (sc && sc.stash_said) || {};
+        const ovSay    = (v) => Array.isArray(v)
+            ? (v.length ? v.join(', ') : '(none)')
+            : (v === '' || v === null || v === undefined ? '(empty)' : String(v));
+
+        const ovLine = ovFields.length
+            ? '<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;' +
+              'background:#efe9fb;border-left:3px solid #8b7cf0;font-size:.8rem;">' +
+                '<strong>Your labelling</strong> &mdash; ' +
+                esc(ovFields.map(f => OV_LABEL[f] || f).join(', ')) +
+                ' overridden on the Manual Stash page.' +
+                (Object.keys(ovSaid).length
+                    ? '<details style="margin-top:4px;">' +
+                      '<summary style="cursor:pointer;">What StashDB says</summary>' +
+                      Object.keys(ovSaid).map(f =>
+                          '<div style="margin:2px 0;opacity:.8;"><strong>' +
+                          esc(OV_LABEL[f] || f) + ':</strong> ' + esc(ovSay(ovSaid[f])) +
+                          '</div>').join('') +
+                      '</details>'
+                    : '') +
+              '</div>'
+            : '';
+
         const meta = sc ? (
             (sc.cover ? '<div id="stashCoverWrap" ' +
                         'style="position:relative;overflow:hidden;border-radius:6px;margin-bottom:8px;' +
@@ -3744,6 +3777,7 @@ async function showStashModal(video) {
                         '</div>' : '') +
             '<div style="font-size:1.1em;font-weight:600;margin-bottom:4px;">' +
                 esc(sc.title || '(untitled scene)') + '</div>' +
+            ovLine +
             row('Studio', window.scrayMapName ? window.scrayMapName('studio', sc.studio) : sc.studio) +
             row('Released', (sc.release_date || '').slice(0, 10)) +
             durLine +

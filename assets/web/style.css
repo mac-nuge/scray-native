@@ -4132,6 +4132,28 @@ color: #333;
 .scray-cloud-stashtag.is-on  { background: #b8860b; color: #fff; }
 .scray-cloud-item.is-on .scray-cloud-count { opacity: 0.85; }
 
+/* Second tap. Red rather than a fifth class colour, and struck through so the
+   state reads at a glance in a grid of two hundred chips. Wins over .is-on in
+   source order, which is belt and braces - the two are never set together. */
+.scray-cloud-item.is-ex {
+background: #f94144;
+color: #fff;
+text-decoration: line-through;
+}
+.scray-cloud-item.is-ex .scray-cloud-count { opacity: 0.85; text-decoration: none; }
+
+/* Facet exclude pills in the floating bar. Class colour survives as a left
+   edge so the bar still reads as groups. */
+.floating-tag-fexclude {
+background-color: #f94144;
+color: #fff;
+text-decoration: line-through;
+border-left: 4px solid rgba(255,255,255,0.5);
+}
+.floating-tag-fexclude.fx-studio    { border-left-color: #0f8b6c; }
+.floating-tag-fexclude.fx-performer { border-left-color: #6c5ce7; }
+.floating-tag-fexclude.fx-stashtag  { border-left-color: #b8860b; }
+
 .scray-cloud-empty { font-size: 0.75rem; color: #999; font-style: italic; }
 .scray-cloud-footer { display: flex; gap: 10px; width: 100%; margin-top: 12px; }
 

@@ -566,6 +566,74 @@ window.scrayFacetFilters = window.scrayFacetFilters || {
 };
 window.scrayTagIntersect = !!window.scrayTagIntersect;
 
+/* Excludes, one set per facet class.
+   Catalogue tags are deliberately absent: they already have #excludeTagSelect,
+   which the Exclude (n) pill, its modal, the row menu and getFilteredVideos all
+   read. A second parallel store for the same thing is how the two end up
+   disagreeing, so 'tag' goes through the select and only the three facet
+   classes live here. */
+window.scrayFacetExcludes = window.scrayFacetExcludes || {
+   studio:    new Set(),
+   performer: new Set(),
+   stashtag:  new Set()
+};
+
+function scrayFacetExcludeSet(kind) {
+   return (window.scrayFacetExcludes || {})[kind] || null;
+}
+window.scrayFacetExcludeSet = scrayFacetExcludeSet;
+
+/** Is this value currently excluded for its class? */
+function scrayIsExcluded(kind, name) {
+   if (kind === 'tag') return ($('#excludeTagSelect').val() || []).includes(name);
+   const s = scrayFacetExcludeSet(kind);
+   return !!(s && s.has(name));
+}
+window.scrayIsExcluded = scrayIsExcluded;
+
+/**
+ * Turn one value's exclude state on or off.
+ *
+ * Returns TRUE when the caller still has to fire a refresh. The tag path
+ * returns false on purpose: triggering 'change' on the select runs its own
+ * handler, which repaints the pills and re-filters already, and a second pass
+ * on top of it is a whole extra sweep of the catalogue for nothing.
+ */
+function scraySetExcluded(kind, name, on) {
+   if (kind === 'tag') {
+       const $sel = $('#excludeTagSelect');
+       if (!$sel.length) return false;
+       const cur = $sel.val() || [];
+       if (on) {
+           if (cur.includes(name)) return false;
+           // The dropdown is filled from tags in the DB, but a cloud value can
+           // outrun it after a re-index, and select2 silently drops a value it
+           // has no option for. Add one rather than lose the exclude.
+           if (!$sel.find('option').filter(function () { return this.value === name; }).length) {
+               $sel.append(new Option(name, name, false, false));
+           }
+           $sel.val(cur.concat([name])).trigger('change');
+       } else {
+           if (!cur.includes(name)) return false;
+           $sel.val(cur.filter(t => t !== name)).trigger('change');
+       }
+       return false;
+   }
+   const s = scrayFacetExcludeSet(kind);
+   if (!s) return false;
+   if (on) s.add(name); else s.delete(name);
+   return true;
+}
+window.scraySetExcluded = scraySetExcluded;
+
+/** How many values are excluded in one class, for the modal title. */
+function scrayExcludeCount(kind) {
+   if (kind === 'tag') return ($('#excludeTagSelect').val() || []).length;
+   const s = scrayFacetExcludeSet(kind);
+   return s ? s.size : 0;
+}
+window.scrayExcludeCount = scrayExcludeCount;
+
 // Label and pill class per filter class, in the order the button row and the
 // pills bar render them.
 window.SCRAY_FACET_META = {
@@ -619,6 +687,8 @@ window.scrayClearAllFilters = function (ev) {
    ['studio', 'performer', 'stashtag'].forEach(k => {
        const s = (window.scrayFacetFilters || {})[k];
        if (s) s.clear();
+       const x = (window.scrayFacetExcludes || {})[k];
+       if (x) x.clear();
    });
    window.scrayTagIntersect = false;
 
@@ -998,7 +1068,10 @@ async function showTagCloudModal(kind) {
    }
 
    function syncTitle(shown) {
-       title.textContent = meta.label + ' \u2014 ' + set.size + ' selected, ' + shown + ' shown';
+       const ex = scrayExcludeCount(kind);
+       title.textContent = meta.label + ' \u2014 ' + set.size + ' selected'
+           + (ex ? ', ' + ex + ' excluded' : '')
+           + ', ' + shown + ' shown';
    }
 
    function renderGrid() {
@@ -1013,13 +1086,17 @@ async function showTagCloudModal(kind) {
            const picked = scrayCloudAttrPickSet(kind, def.key);
            if (!picked.size) return;
            names = names.filter(n =>
-               set.has(n) || picked.has(scrayCloudAttrValue(kind, n, def.key)));
+               set.has(n) || scrayIsExcluded(kind, n) ||
+               picked.has(scrayCloudAttrValue(kind, n, def.key)));
        });
 
        // A selected value stays visible even once it stops matching the search
        // box, so the way to undo a pick is never hidden behind clearing the
-       // box first.
-       if (term) names = names.filter(n => n.toLowerCase().includes(term) || set.has(n));
+       // box first. An EXCLUDED one has to stay for the same reason and more
+       // so: the only way back to neutral is the third tap on that same chip,
+       // and a chip that vanished on tap two would strand it.
+       if (term) names = names.filter(n =>
+           n.toLowerCase().includes(term) || set.has(n) || scrayIsExcluded(kind, n));
 
        names.sort(scrayCloudSort === 'alpha'
            ? (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })
@@ -1038,12 +1115,22 @@ async function showTagCloudModal(kind) {
            return;
        }
 
+       // One chip, three states, so include and exclude live on the same
+       // control rather than in two lists that have to be kept in step.
+       const paintItem = (btn, name) => {
+           const on = set.has(name);
+           const ex = scrayIsExcluded(kind, name);
+           btn.classList.toggle('is-on', on);
+           btn.classList.toggle('is-ex', ex);
+           btn.title = ex ? name + ' \u2014 excluded (tap to clear)'
+                     : on ? name + ' \u2014 included (tap to exclude)'
+                          : name;
+       };
+
        names.forEach(name => {
            const btn = document.createElement('button');
            btn.type = 'button';
-           btn.className = 'tag-selection-item scray-cloud-item scray-cloud-' + kind +
-                           (set.has(name) ? ' is-on' : '');
-           btn.title = name;
+           btn.className = 'tag-selection-item scray-cloud-item scray-cloud-' + kind;
            btn.textContent = name;
 
            const c = document.createElement('span');
@@ -1051,14 +1138,31 @@ async function showTagCloudModal(kind) {
            c.textContent = '(' + counts.get(name) + ')';
            btn.appendChild(c);
 
+           paintItem(btn, name);
+
            btn.addEventListener('click', () => {
-               // Toggle here, unlike the row chips: inside the cloud the
-               // current state is on screen, so a second tap plainly means
-               // "undo that one".
-               if (set.has(name)) set.delete(name); else set.add(name);
-               btn.classList.toggle('is-on', set.has(name));
+               // off -> include -> exclude -> off. Cycling rather than
+               // toggling because inside the cloud the current state is on
+               // screen, so the next tap always has an obvious meaning; the
+               // row chips still only ADD, where nothing is visible.
+               const wasIn = set.has(name);
+               const wasEx = scrayIsExcluded(kind, name);
+               let refresh = true;
+
+               if (wasEx) {
+                   refresh = scraySetExcluded(kind, name, false);
+               } else if (wasIn) {
+                   // Include and exclude are mutually exclusive states of one
+                   // chip, so the include comes off in the same step.
+                   set.delete(name);
+                   refresh = scraySetExcluded(kind, name, true);
+               } else {
+                   set.add(name);
+               }
+
+               paintItem(btn, name);
                syncTitle(names.length);
-               scrayRefreshFilters();
+               if (refresh) scrayRefreshFilters();
            });
 
            grid.appendChild(btn);
@@ -1087,6 +1191,15 @@ async function showTagCloudModal(kind) {
    clearBtn.textContent = 'Clear ' + meta.label.toLowerCase();
    clearBtn.addEventListener('click', () => {
        set.clear();
+       // Both halves of this class, not just the includes: the button says
+       // "clear studios" and leaving three excluded ones behind would be a
+       // filter still running with nothing on screen to show for it.
+       if (kind === 'tag') {
+           if ($('#excludeTagSelect').length) $('#excludeTagSelect').val([]).trigger('change');
+       } else {
+           const ex = scrayFacetExcludeSet(kind);
+           if (ex) ex.clear();
+       }
        scrayRefreshFilters();
        renderGrid();
    });
@@ -1467,6 +1580,27 @@ Array.from(window.commonSelectedTags).forEach(tag => {
            window.scrayRemoveTagFilter(kind, val);
        });
        container.appendChild(fPill);
+   });
+});
+
+// Facet excludes. Red like every other "this removes something" control in
+// the bar, with the class colour kept as a left edge - a fifth and sixth and
+// seventh shade of red would be three more colours to learn for one idea.
+// Catalogue-tag excludes are NOT here: they keep their consolidated
+// Exclude (n) pill further down, which already has a modal behind it.
+['studio', 'performer', 'stashtag'].forEach(kind => {
+   const exSet = (window.scrayFacetExcludes || {})[kind];
+   if (!exSet || !exSet.size) return;
+   Array.from(exSet).forEach(val => {
+       const xPill = document.createElement("span");
+       xPill.className = "floating-tag-pill floating-tag-fexclude fx-" + kind;
+       xPill.textContent = "\u2212 " + val;
+       xPill.title = "Excluded - click to stop excluding it";
+       xPill.addEventListener("click", () => {
+           exSet.delete(val);
+           if (typeof window.scrayRefreshFilters === 'function') window.scrayRefreshFilters();
+       });
+       container.appendChild(xPill);
    });
 });
 
@@ -2281,6 +2415,30 @@ if (Array.isArray(excludeTags) && excludeTags.length > 0) {
    videos = videos.filter(rec => !(Array.isArray(rec.tags) && rec.tags.some(t => excludeTags.includes(t))));
 }
 
+// Facet excludes - studios, performers, stash tags.
+//
+// Applied AFTER the includes and always as ANY, whatever scrayTagIntersect
+// says: exclude wins, and "not these" has no ALL reading worth offering - a
+// video would have to carry every excluded studio at once to be dropped.
+const facetExcl = ['studio', 'performer', 'stashtag']
+   .map(kind => [kind, Array.from((window.scrayFacetExcludes || {})[kind] || [])])
+   .filter(pair => pair[1].length > 0);
+
+if (facetExcl.length > 0) {
+   videos = videos.filter(rec => {
+       // parts() once per record, same reason as the include pass above.
+       const p = window.scrayStashNames ? window.scrayStashNames.parts(rec) : null;
+       if (!p) return true;   // no StashDB row - nothing to exclude on
+       return !facetExcl.some(pair => {
+           const kind = pair[0], list = pair[1];
+           const have = kind === 'studio'    ? (p.studio ? [p.studio] : [])
+                      : kind === 'performer' ? (p.performerListAll || p.performerList || [])
+                      : (p.stashTagList || []);
+           return list.some(val => have.includes(val));
+       });
+   });
+}
+
 // Duration filter (skipped if the min/max duration dropdowns don't exist)
 if (minDurationMs !== null && maxDurationMs !== null) {
 videos = videos.filter(rec => {
@@ -2552,6 +2710,9 @@ if (window.commonSelectedTags) {
 if (window.scrayFacetFilters) {
   ['studio', 'performer', 'stashtag'].forEach(k => {
       if (window.scrayFacetFilters[k]) window.scrayFacetFilters[k].clear();
+      if (window.scrayFacetExcludes && window.scrayFacetExcludes[k]) {
+          window.scrayFacetExcludes[k].clear();
+      }
   });
 }
 window.scrayTagIntersect = false;

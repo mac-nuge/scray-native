@@ -32,7 +32,11 @@ const VIDEO_SCHEMA = [
   "bitrate","mime_type","created_date","last_modified_date","oneDriveId",
   "drive_id","account_key","account_name","path","web_url","tags",
   "bracket_tags","level_1","level_2","level_3","level_4","level_5",
-  "view_count","last_played","first_seen","user_score","notes","f_tally","bookmarks"
+  "view_count","last_played","first_seen","user_score","notes","f_tally","bookmarks",
+  // On the END. This list is a column ORDER - inserting time_viewed next to
+  // view_count where it reads better would shift every column after it and
+  // silently re-label six years of exported CSVs.
+  "time_viewed"
 ];
 window.VIDEO_SCHEMA = VIDEO_SCHEMA;
 
@@ -40,7 +44,7 @@ window.VIDEO_SCHEMA = VIDEO_SCHEMA;
 // file-operations.js auto-routes any of these to videoMeta so existing
 // callers (saveBookmarks, etc.) keep working without changes.
 const META_FIELDS = new Set([
-  "user_score", "notes", "bookmarks", "view_count",
+  "user_score", "notes", "bookmarks", "view_count", "time_viewed",
   "last_played", "first_seen", "f_tally"
 ]);
 window.VIDEO_META_FIELDS = META_FIELDS;
@@ -246,6 +250,7 @@ async function saveVideos(videos, username, accountId, driveId) {
             notes: null,
             bookmarks: [],
             view_count: 0,
+            time_viewed: 0,
             last_played: null,
             first_seen: new Date().toISOString(),
             f_tally: 0,
@@ -282,7 +287,8 @@ async function saveVideoMeta(oneDriveId, metaUpdates, updatedBy = "app", opUpdat
   store.put({
     ...(existing || {
       oneDriveId, user_score: null, notes: null, bookmarks: [],
-      view_count: 0, last_played: null, first_seen: new Date().toISOString(), f_tally: 0
+      view_count: 0, time_viewed: 0, last_played: null,
+      first_seen: new Date().toISOString(), f_tally: 0
     }),
     ...metaUpdates,
     oneDriveId,
@@ -358,15 +364,20 @@ async function saveVideoMeta(oneDriveId, metaUpdates, updatedBy = "app", opUpdat
       const { bookmarks, ...derivedOpUpdates } = (opUpdates || metaUpdates);
       const finalOp = opUpdates ? derivedOpUpdates : derivedOpUpdates;
 
-      // Play counters are deliberately NOT queued when offline. A view
-      // recorded on a plane and replayed three days later lands with the
-      // wrong last_played and inflates a count nobody can account for -
-      // better to lose it than to record it misleadingly. The local
-      // IndexedDB write above still happened, so the device's own numbers
-      // stay right.
-      if (updatedBy === "play" && !navigator.onLine) {
-        console.log(`[sync] offline - play counters for ${key} stay on this device`);
-      } else if (Object.keys(finalOp).length) {
+      // Play counters used to be DROPPED when offline, on the grounds that a
+      // view recorded on a plane and replayed three days later would land with
+      // the wrong last_played and inflate a count nobody could account for.
+      // Both objections have since been answered, so they queue like anything
+      // else and a week off the network costs you nothing:
+      //
+      //   * last_played is stamped by buildOp at ENQUEUE time, not at push
+      //     time, so the timestamp is when you actually watched it.
+      //   * the double-count risk on replay is handled by op_uid - api.php
+      //     records the id inside the push transaction and ignores a repeat.
+      if (Object.keys(finalOp).length) {
+        if (updatedBy === "play" && !navigator.onLine) {
+          console.log(`[sync] offline - play counters for ${key} queued for the next sync`);
+        }
         await window.scrayEnqueueOp(key, finalOp);
       }
     }
@@ -635,6 +646,7 @@ async function exportVideosToCsv(selectedFolders = null) {
       level_4: x?.level_4 ?? "", level_5: x?.level_5 ?? "",
       // behaviour + app metadata - native is authoritative
       view_count: v.view_count ?? 0,
+      time_viewed: v.time_viewed ?? 0,
       last_played: v.last_played ?? "",
       first_seen: v.first_seen ?? "",
       user_score: v.user_score ?? "",
@@ -1024,6 +1036,7 @@ async function refreshVideoFromDb(video, { silent = false } = {}) {
   const patch = {
     user_score: row.video.user_score,
     view_count: row.video.view_count,
+    time_viewed: row.video.time_viewed ?? 0,
     f_tally: row.video.f_tally,
     notes: row.video.notes,
     last_played: row.video.last_played,

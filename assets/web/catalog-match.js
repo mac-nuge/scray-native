@@ -21,7 +21,7 @@
 //     last resort for rows with no size on either side.
 // =========================================
 
-const NUMERIC_FIELDS_CM = new Set(["file_size_bytes","duration_ms","width","height","bitrate","view_count","user_score","f_tally"]);
+const NUMERIC_FIELDS_CM = new Set(["file_size_bytes","duration_ms","width","height","bitrate","view_count","user_score","f_tally","time_viewed"]);
 function toNum(v) {
   if (v === null || v === undefined || v === "") return null;
   const n = Number(v);

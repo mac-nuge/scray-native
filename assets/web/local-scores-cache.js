@@ -384,6 +384,32 @@ async function queueExcelUpdate(video, updates) {
         }
     }
 
+    // Watched seconds. Same read/modify/write shape as the counters above -
+    // IndexedDB holds the running total so the phone can show it offline,
+    // while the server is told only how many seconds to ADD. Deliberately a
+    // separate block: this arrives on its own flush, not alongside a view.
+    if (updates.add_time_viewed) {
+        const secs = Math.max(0, Math.round(Number(updates.add_time_viewed) || 0));
+        if (secs) {
+            let currentTv = null;
+            try {
+                const db = await openDB();
+                const tx = db.transaction(META_STORE_NAME, "readonly");
+                currentTv = await new Promise((resolve, reject) => {
+                    const req = tx.objectStore(META_STORE_NAME).get(video.oneDriveId);
+                    req.onsuccess = () => resolve(req.result);
+                    req.onerror = () => reject(req.error);
+                });
+            } catch (err) {
+                console.warn("Could not read current time_viewed:", err);
+            }
+            const next = (parseInt(currentTv?.time_viewed) || 0) + secs;
+            metaUpdates.time_viewed = next;   // absolute, for local display
+            video.time_viewed = next;
+            opUpdates.add_time_viewed = secs; // delta, for the server
+        }
+    }
+
     if (updates.played_now) {
         const now = new Date().toISOString();
         metaUpdates.last_played = now;
@@ -395,7 +421,8 @@ async function queueExcelUpdate(video, updates) {
 
     // "play" rather than "app" so saveVideoMeta knows to drop this op when
     // offline instead of queueing it for a confusing later replay.
-    const isPlayTracking = !!(updates.increment_views || updates.played_now || updates.increment_f_tally);
+    const isPlayTracking = !!(updates.increment_views || updates.played_now ||
+                             updates.increment_f_tally || updates.add_time_viewed);
 
     if (Object.keys(metaUpdates).length && typeof saveVideoMeta === "function") {
         await saveVideoMeta(
@@ -410,7 +437,7 @@ async function queueExcelUpdate(video, updates) {
 // Everything except the absolute counter values, which the server must
 // receive as deltas instead.
 function metaUpdatesNonCounter(m) {
-    const { view_count, f_tally, last_played, ...rest } = m;
+    const { view_count, f_tally, time_viewed, last_played, ...rest } = m;
     return rest;
 }
 

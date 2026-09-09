@@ -22,6 +22,11 @@
  *   number — the higher number always wins, forever. Fine for the current
  *   app; worth remembering if that changes.
  *
+ *   Counter ops now carry an `op_uid`. api.php records it inside the push
+ *   transaction and ignores a second sighting, which is what makes an op
+ *   safe to hold in the outbox and replay — Native queues plays through an
+ *   offline stretch, and a push whose response is lost gets retried.
+ *
  *   Each app must resolve view_count/f_tally to the actual next absolute
  *   value *before* calling buildOp (i.e. read the current count, add 1,
  *   pass that number) — buildOp does not do read-modify-write itself, it
@@ -95,6 +100,10 @@ window.scrayDbRowToApp = dbRowToApp;
  * The old `increment_views`/`increment_f_tally` pseudo-fields are no longer
  * accepted here for that reason; resolve them before calling buildOp (see
  * Stage 2.2 for Native, Stage 3.1 for Picker).
+ *
+ * `add_time_viewed` is the exception and is genuinely a delta: watched
+ * seconds are summed across every device and every play, so there is no
+ * absolute for a client to resolve to in the first place.
  */
 function buildOp(oneDriveId, updates, baseSeq, defaults) {
   const op = { id: oneDriveId, device: window.SCRAY_SYNC.DEVICE_ID, base_seq: baseSeq ?? 0 };
@@ -106,11 +115,20 @@ function buildOp(oneDriveId, updates, baseSeq, defaults) {
     // route did: `max` only accepts a HIGHER value, so a client that read 0
     // when the server had 10 would send 1 and have it silently discarded.
     //
-    // The trade-off is idempotency - a replayed op would double-count. That's
-    // acceptable precisely because play counters are never queued for replay:
-    // Picker pushes immediately and Native drops them when offline.
+    // Deltas are not naturally idempotent - a replayed op would double-count.
+    // That used to be fine because play counters were never queued for
+    // replay; Native now holds them through an offline stretch, so op_uid
+    // (minted at the bottom of this function) carries the guarantee instead.
     if (rawKey === "increment_views")    { (op.add ??= {}).view_count = (op.add?.view_count ?? 0) + 1; continue; }
     if (rawKey === "increment_f_tally")  { (op.add ??= {}).f_tally    = (op.add?.f_tally    ?? 0) + 1; continue; }
+    // Seconds watched since the last flush, not a total. Rounded and floored
+    // at zero so a bad clock or a rounding artefact can never send a negative
+    // delta into a column that is only ever supposed to climb.
+    if (rawKey === "add_time_viewed") {
+      const secs = Math.max(0, Math.round(Number(value) || 0));
+      if (secs) (op.add ??= {}).time_viewed = (op.add?.time_viewed ?? 0) + secs;
+      continue;
+    }
     // A play is proof of life. If the row is tombstoned — a stale local
     // delete, or a restore from the recycle bin — clear it server-side
     // rather than leaving a video you just watched marked deleted = 1.
@@ -134,6 +152,13 @@ function buildOp(oneDriveId, updates, baseSeq, defaults) {
   }
 
   if (defaults) op.upsert_defaults = defaults;
+
+  // Minted once, here, and carried by the stored outbox entry - so a replay
+  // of that entry presents the SAME id and the server recognises it. Minting
+  // it at push time instead would defeat the whole point.
+  op.op_uid = (window.crypto?.randomUUID?.())
+    || `${window.SCRAY_SYNC.DEVICE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
   return op;
 }
 window.scrayBuildOp = buildOp;

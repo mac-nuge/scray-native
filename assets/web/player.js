@@ -8031,6 +8031,136 @@ window.scrayApplyPendingStartAt = function (reason) {
     attempt();
 };
 
+
+// =========================================
+// WATCH TRACKING  (view_count + time_viewed)
+// =========================================
+// A view used to be recorded the instant a video was LOADED. Flicking through
+// ten videos therefore recorded ten views of things nobody watched, and the
+// "favour less-watched" random weighting was being fed by that noise.
+//
+// Counting now runs on evidence - real playback, measured off the timeupdate
+// stream:
+//
+//   * VIEW_THRESHOLD_S seconds of actual playback -> view_count + 1 and
+//     last_played, once per load. Load it again and it can count again;
+//     that is a second sitting, not a double count.
+//   * TIME_THRESHOLD_S seconds -> time_viewed starts accumulating. The gate
+//     is there to throw away skim-throughs; once it opens, the WHOLE watched
+//     duration counts, including those first ten seconds.
+//
+// Seeking is not watching. timeupdate reports where the head is, not how far
+// it travelled, so a jump of more than MAX_STEP_S is treated as a seek and
+// contributes nothing. Pausing needs no handling at all - timeupdate simply
+// stops firing. Rewinding gives a negative step, also ignored.
+//
+// Seconds are measured on the video's own clock, so watching at 2x for a
+// minute is two minutes of the video watched - which is what "seconds of this
+// video watched" should mean.
+const SCRAY_VIEW_THRESHOLD_S    = 20;   // playback before a view counts
+const SCRAY_TIME_THRESHOLD_S    = 10;   // playback before time_viewed counts
+const SCRAY_WATCH_MAX_STEP_S    = 2;    // a bigger jump is a seek, not playback
+const SCRAY_WATCH_FLUSH_EVERY_S = 60;   // don't hold more than a minute unsent
+
+// The session for whatever is loaded right now. One at a time - there is one
+// player - and replaced wholesale by scrayWatchBegin below.
+let scrayWatchSession = null;
+let scrayWatchBound   = false;   // plyr listeners attach once, not per video
+
+/**
+ * Send the seconds watched but not yet reported, as a delta.
+ *
+ * Called often and cheap to call: below the gate, or with nothing whole to
+ * report, it does nothing. `flushed` is what has already gone to the server,
+ * so the deltas across a session sum to the time actually watched however
+ * many times this fires.
+ */
+function scrayWatchFlushTime(s) {
+    if (!s) return;
+    if (s.watched < SCRAY_TIME_THRESHOLD_S) return;    // gate still shut
+    const secs = Math.floor(s.watched - s.flushed);
+    if (secs < 1) return;
+    if (!scrayWatchTrackingOn()) return;
+    s.flushed += secs;
+    window.queueExcelUpdate(s.video, { add_time_viewed: secs })
+        .catch(err => console.warn("Failed to track watch time:", err));
+}
+
+function scrayWatchTrackingOn() {
+    if (typeof window.queueExcelUpdate !== 'function') return false;
+    return typeof window.isAutoTrackEnabled === 'function' ? window.isAutoTrackEnabled() : true;
+}
+
+function scrayWatchCountView(s) {
+    if (!scrayWatchTrackingOn()) return;
+    console.log(`[watch] ${Math.round(s.watched)}s watched — counting a view of ${s.video?.filename}`);
+    window.queueExcelUpdate(s.video, { increment_views: true, played_now: true })
+        .catch(err => console.warn("Failed to track video view:", err));
+}
+
+/** Attach the listeners to the one Plyr instance. Idempotent. */
+function scrayWatchAttach() {
+    if (scrayWatchBound || !window.plyrPlayer) return;
+    scrayWatchBound = true;
+
+    window.plyrPlayer.on('timeupdate', () => {
+        const s = scrayWatchSession;
+        if (!s) return;
+        const now = window.plyrPlayer.currentTime;
+        if (!Number.isFinite(now)) return;
+
+        // First tick of a load only establishes where we are. Accumulating
+        // from it would bank the whole start offset as watched time, which is
+        // exactly what a bookmark jump or a resume would do.
+        if (s.lastTime === null) { s.lastTime = now; return; }
+
+        const step = now - s.lastTime;
+        s.lastTime = now;
+        if (step <= 0 || step > SCRAY_WATCH_MAX_STEP_S) return;   // seek, or a repeat tick
+
+        s.watched += step;
+
+        if (!s.viewCounted && s.watched >= SCRAY_VIEW_THRESHOLD_S) {
+            s.viewCounted = true;
+            scrayWatchCountView(s);
+        }
+        if (s.watched - s.flushed >= SCRAY_WATCH_FLUSH_EVERY_S) scrayWatchFlushTime(s);
+    });
+
+    // Natural stopping points. Flushing here means a normal watch reports its
+    // seconds immediately rather than waiting out the next flush interval.
+    window.plyrPlayer.on('ended', () => scrayWatchFlushTime(scrayWatchSession));
+    window.plyrPlayer.on('pause', () => scrayWatchFlushTime(scrayWatchSession));
+
+    // Backgrounding the app or closing the tab is the ordinary way a watch
+    // ends on a phone, and neither of those fires 'pause'. pagehide is the
+    // one that survives iOS's back-forward cache; visibilitychange catches
+    // the app being swiped away.
+    window.addEventListener('pagehide', () => scrayWatchFlushTime(scrayWatchSession));
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') scrayWatchFlushTime(scrayWatchSession);
+    });
+}
+
+/**
+ * Start a watch session for a newly loaded video.
+ *
+ * Whatever was playing before gets one last flush on the way out - loading
+ * the next video is the commonest way a watch ends, and its unreported
+ * seconds would otherwise die with the session object.
+ */
+window.scrayWatchBegin = function (video) {
+    scrayWatchFlushTime(scrayWatchSession);
+    scrayWatchSession = {
+        video,
+        watched: 0,        // seconds of real playback this load
+        flushed: 0,        // of those, how many have reached the server
+        lastTime: null,    // last currentTime seen, for the step calculation
+        viewCounted: false
+    };
+    scrayWatchAttach();
+};
+
 async function playVideoInline(video, listContext = null, index = null, startAt = null) {
 // ⚙️ Where to start this video, in seconds. Stashed here and applied once on
 // 'loadedmetadata' below, then cleared - so it survives the load without
@@ -8198,19 +8328,10 @@ if (typeof window.addToHistory === 'function') {
 window.addToHistory(video);
 }
 
-// Track view in Excel Online if auto-tracking enabled
-// Guard on the function actually being CALLED. This used to check
-// updateVideoInExcel, which lives in excel-sheets.js and isn't loaded in
-// Native - so the guard was permanently false and no play was ever recorded.
-const autoTrackActive = typeof window.isAutoTrackEnabled === 'function' ? window.isAutoTrackEnabled() : true;
-if (autoTrackActive && typeof window.queueExcelUpdate === 'function') {
-  window.queueExcelUpdate(video, {
-    increment_views: true,
-    played_now: true
-}).catch(err => {
-    console.warn("Failed to track video view:", err);
-});
-}
+// Open a watch session. Nothing is recorded here - view_count and
+// last_played wait for SCRAY_VIEW_THRESHOLD_S seconds of real playback, and
+// time_viewed for SCRAY_TIME_THRESHOLD_S. See WATCH TRACKING above.
+window.scrayWatchBegin(video);
 
 // Extract video info building into reusable global function
 window.rebuildVideoInfoDisplay = function(video) {

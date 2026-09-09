@@ -168,6 +168,11 @@ final class ScrayBrowserViewController: UIViewController,
     /// Bar folded down to the pill. Cleared once the queue empties, so a
     /// minimise only ever applies to the downloads it was tapped for.
     private var downloadBarMinimised = false
+    /// Downloads started by Wholesale over the bridge. Their failures are
+    /// reported to the page, which is already showing a run summary — forty
+    /// modal alerts stacking up behind a batch is not a useful way to learn
+    /// that the wifi dropped.
+    private var wholesaleJobIDs: Set<String> = []
     private var exportingTempFiles: [URL] = []
     private var pendingExportJobID: String?
     /// WKDownload keys we cancelled ourselves in order to pause, so the
@@ -1187,7 +1192,12 @@ final class ScrayBrowserViewController: UIViewController,
             listVideoFiles: function () { return callNative('listVideoFiles'); },
             listVideoFilesDetailed: function () { return callNative('listVideoFilesDetailed'); },
             deviceStorage: function () { return callNative('deviceStorage'); },
-            deleteFile: function (relativePath) { return callNative('deleteFile', { path: relativePath }); }
+            deleteFile: function (relativePath) { return callNative('deleteFile', { path: relativePath }); },
+            folderInfo: function () { return callNative('folderInfo'); },
+            enqueueDownload: function (item) { return callNative('enqueueDownload', item); },
+            downloadStatus: function (ids) { return callNative('downloadStatus', { ids: ids || null }); },
+            forgetDownload: function (id) { return callNative('forgetDownload', { id: id }); },
+            refreshLibrary: function () { return callNative('refreshLibrary'); }
           };
         })();
         """
@@ -1230,6 +1240,110 @@ final class ScrayBrowserViewController: UIViewController,
             }
             bridgeResolve(webView, id: id, result: storage)
 
+        case "folderInfo":
+            // Wholesale's pre-flight. Two independent bookmarks: the video
+            // folder BookmarkStore lists, and the folder finished downloads
+            // are copied into. They are usually the same folder, and a refresh
+            // is meaningless when they are not.
+            var info: [String: Any] = [
+                "hasVideoFolder": BookmarkStore.shared.folderName != nil,
+                "hasDownloadFolder": ScrayDownloadFolder.shared.hasFolder
+            ]
+            if let v = BookmarkStore.shared.folderName { info["videoFolder"] = v }
+            if let d = ScrayDownloadFolder.shared.displayName { info["downloadFolder"] = d }
+            bridgeResolve(webView, id: id, result: info)
+
+        case "enqueueDownload":
+            guard #available(iOS 14.5, *) else {
+                bridgeReject(webView, id: id, error: "Downloads need iOS 14.5 or later")
+                return
+            }
+            guard let payload = body["payload"] as? [String: Any],
+                  let urlString = payload["url"] as? String,
+                  let source = URL(string: urlString) else {
+                bridgeReject(webView, id: id, error: "Invalid download payload")
+                return
+            }
+            // Without a remembered folder, deliver() opens a document picker
+            // for every finished file. Forty of those in a row is not a
+            // refresh, so refuse rather than start something unstoppable.
+            guard ScrayDownloadFolder.shared.hasFolder else {
+                bridgeReject(webView, id: id, error: "No download folder is set")
+                return
+            }
+            let dlName = sanitizedFilename(payload["filename"] as? String)
+            let dlID = (payload["id"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? UUID().uuidString
+            let dlTotal = (payload["sizeBytes"] as? NSNumber)?.int64Value ?? 0
+            guard let dlHost = (message.webView ?? currentWebView),
+                  let dest = makeTempDestination(filename: dlName) else {
+                bridgeReject(webView, id: id, error: "Couldn't open a temporary file")
+                return
+            }
+
+            let job = ScrayDownloadJob(id: dlID, filename: dlName)
+            job.totalBytes = dlTotal
+            job.fileURL = dest
+            ScrayDownloadCenter.shared.begin(id: dlID, filename: dlName, total: dlTotal, source: source)
+            wholesaleJobIDs.insert(dlID)
+            jobs.append(job)
+            refreshDownloadBar()
+
+            dlHost.startDownload(using: URLRequest(url: source)) { [weak self] download in
+                guard let self = self else { return }
+                download.delegate = self
+                let key = ObjectIdentifier(download)
+                job.httpKey = key
+                job.httpDownload = download
+                self.downloadDestinations[key] = dest
+                // begin() has already made the record and the destination is
+                // settled, so borrow the resume path's "already decided" slot:
+                // decideDestinationUsing would otherwise prompt and add a
+                // duplicate row for every single file.
+                self.resumeDestinations[key] = dest
+                job.progressObs = self.makeProgressObserver(for: job, download: download)
+                self.refreshDownloadBar()
+            }
+            bridgeResolve(webView, id: id, result: ["started": true, "id": dlID])
+
+        case "downloadStatus":
+            let wanted = ((body["payload"] as? [String: Any])?["ids"] as? [String]).map(Set.init)
+            let rows: [[String: Any]] = ScrayDownloadCenter.shared.records
+                .filter { wanted == nil || wanted!.contains($0.id) }
+                .map { r in
+                    var row: [String: Any] = [
+                        "id": r.id,
+                        "filename": r.filename,
+                        "state": Self.stateName(r.state),
+                        "received": r.received,
+                        "total": r.total,
+                        "bytesPerSecond": r.bytesPerSecond
+                    ]
+                    // Only when there is one: a nil here would make the whole
+                    // payload unserialisable and take the poll down with it.
+                    if let saved = r.savedURL?.lastPathComponent { row["savedAs"] = saved }
+                    return row
+                }
+            bridgeResolve(webView, id: id, result: rows)
+
+        case "forgetDownload":
+            guard let payload = body["payload"] as? [String: Any],
+                  let dropID = payload["id"] as? String else {
+                bridgeReject(webView, id: id, error: "Invalid forget payload")
+                return
+            }
+            ScrayDownloadCenter.shared.remove(id: dropID)
+            wholesaleJobIDs.remove(dropID)
+            bridgeResolve(webView, id: id, result: ["success": true])
+
+        case "refreshLibrary":
+            // libraryNeedsRefresh only fires on the way out of the browser, so
+            // without this the offline list stays stale until the browser is
+            // closed — and Wholesale wants to show the finished state straight
+            // away.
+            ScrayNativeView.current?.refreshLocalFolder()
+            libraryNeedsRefresh = false
+            bridgeResolve(webView, id: id, result: ["success": true])
+
         case "deleteFile":
             guard let payload = body["payload"] as? [String: Any],
                   let relativePath = payload["path"] as? String else {
@@ -1245,6 +1359,16 @@ final class ScrayBrowserViewController: UIViewController,
 
         default:
             bridgeReject(webView, id: id, error: "Unknown action: \(action)")
+        }
+    }
+
+    private static func stateName(_ s: ScrayDownloadRecord.State) -> String {
+        switch s {
+        case .active:    return "active"
+        case .paused:    return "paused"
+        case .finished:  return "finished"
+        case .failed:    return "failed"
+        case .cancelled: return "cancelled"
         }
     }
 
@@ -1798,7 +1922,9 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
         // We cancelled this one ourselves to pause it. The job stays put.
         if pausingKeys.remove(key) != nil { return }
 
+        var startedByWholesale = false
         if let idx = jobs.firstIndex(where: { $0.httpKey == key }) {
+            startedByWholesale = wholesaleJobIDs.contains(jobs[idx].id)
             ScrayDownloadCenter.shared.fail(id: jobs[idx].id, message: error.localizedDescription)
             jobs[idx].progressObs?.invalidate()
             jobs.remove(at: idx)
@@ -1807,6 +1933,8 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
         // No recorded destination means we cancelled it ourselves — at the
         // prompt, or from the bar. Not a failure worth an alert.
         guard downloadDestinations.removeValue(forKey: key) != nil else { return }
+        // Wholesale polls for this and shows it in its own run summary.
+        guard !startedByWholesale else { return }
         showAlert(title: "Download failed", message: error.localizedDescription)
     }
 }

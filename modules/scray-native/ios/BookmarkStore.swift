@@ -26,6 +26,15 @@ class BookmarkStore {
         ensureResolved()
     }
 
+    /// The video folder's display name, for Wholesale's pre-flight. Downloads
+    /// land in a SEPARATELY chosen folder (ScrayDownloadFolder), so a refresh
+    /// whose two folders differ would fetch files the app never sees as
+    /// offline. The page compares the two names and refuses to start.
+    var folderName: String? {
+        ensureResolved()
+        return resolvedRoot?.lastPathComponent
+    }
+
     func resolveFile(forId relativePath: String) -> URL? {
         ensureResolved()
         return resolvedRoot?.appendingPathComponent(relativePath)

@@ -134,6 +134,9 @@ final class ScrayBrowserViewController: UIViewController,
 
     private var webConfig: WKWebViewConfiguration!
     private let messageProxy = ScrayBrowserMessageProxy()
+    /// Serves scray-video:// in this browser too, so Wholesale can preview a
+    /// file that is already on the device without going near the network.
+    private let videoSchemeHandler = VideoSchemeHandler()
 
     private var popupWebView: WKWebView?
     private weak var popupController: UIViewController?
@@ -185,6 +188,7 @@ final class ScrayBrowserViewController: UIViewController,
     deinit {
         observations.forEach { $0.invalidate() }
         webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayDownload")
+        webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayBridge")
     }
 
     override func viewDidLoad() {
@@ -222,6 +226,13 @@ final class ScrayBrowserViewController: UIViewController,
         messageProxy.target = self
         config.userContentController.add(messageProxy, name: "scrayDownload")
 
+        // Picker's Wholesale page runs HERE, not in Native's own web view, so
+        // without this it has no way to see what is actually on the device.
+        // Same action names and the same resolve/reject contract as
+        // ScrayNativeView's handler, so one page's code works in both.
+        config.userContentController.add(messageProxy, name: "scrayBridge")
+        config.setURLSchemeHandler(videoSchemeHandler, forURLScheme: "scray-video")
+
         // Lets Picker tell it is inside Native's own browser rather than
         // Safari. The "N" button only works here, because this is the only
         // place the scraynative:// hop can be caught and this modal dismissed.
@@ -234,6 +245,11 @@ final class ScrayBrowserViewController: UIViewController,
             WKUserScript(source: Self.downloadShimJS,
                          injectionTime: .atDocumentStart,
                          forMainFrameOnly: false)
+        )
+        config.userContentController.addUserScript(
+            WKUserScript(source: bridgeShimJS(host: homeURL.host ?? ""),
+                         injectionTime: .atDocumentStart,
+                         forMainFrameOnly: true)
         )
 
         webConfig = config
@@ -395,6 +411,7 @@ final class ScrayBrowserViewController: UIViewController,
 
     private func makeWebView(configuration: WKWebViewConfiguration?) -> WKWebView {
         let wv = WKWebView(frame: webContainer.bounds, configuration: configuration ?? webConfig)
+        videoSchemeHandler.webView = wv
         wv.uiDelegate = self
         wv.navigationDelegate = self
         wv.allowsBackForwardNavigationGestures = true
@@ -1121,7 +1138,144 @@ final class ScrayBrowserViewController: UIViewController,
     })();
     """
 
+    // MARK: - Device bridge
+
+    /// The read/delete slice of ScrayBridge, for pages loaded in this browser.
+    ///
+    /// Gated to the home host. This browser can navigate anywhere — StashDB, a
+    /// Microsoft sign-in — and deleteFile is not something to hand to whatever
+    /// page happens to be loaded. The gate is enforced HERE rather than only in
+    /// the injected script, because a page can rewrite anything we inject.
+    private func bridgeShimJS(host: String) -> String {
+        let escaped = host.lowercased()
+            .replacingOccurrences(of: "\\", with: "")
+            .replacingOccurrences(of: "'", with: "")
+        return """
+        (function () {
+          if (window.ScrayBridge) return;
+          if (String(location.hostname || '').toLowerCase() !== '\(escaped)') return;
+
+          window._scrayPending = window._scrayPending || {};
+          window._scrayResolve = function (id, result) {
+            var p = window._scrayPending[id];
+            if (p) { p.resolve(result); delete window._scrayPending[id]; }
+          };
+          window._scrayReject = function (id, error) {
+            var p = window._scrayPending[id];
+            if (p) { p.reject(new Error(error)); delete window._scrayPending[id]; }
+          };
+
+          function callNative(action, payload) {
+            return new Promise(function (resolve, reject) {
+              var id = Math.random().toString(36).slice(2);
+              window._scrayPending[id] = { resolve: resolve, reject: reject };
+              try {
+                window.webkit.messageHandlers.scrayBridge.postMessage({
+                  id: id, action: action, payload: payload || null
+                });
+              } catch (e) {
+                delete window._scrayPending[id];
+                reject(new Error('Bridge unavailable: ' + e));
+              }
+            });
+          }
+
+          // Lets a page tell this apart from Native's own web view, where the
+          // bridge is the full ScrayBridge from scray-bridge.js.
+          window.SCRAY_DEVICE_BRIDGE = 'browser';
+          window.ScrayBridge = {
+            listVideoFiles: function () { return callNative('listVideoFiles'); },
+            listVideoFilesDetailed: function () { return callNative('listVideoFilesDetailed'); },
+            deviceStorage: function () { return callNative('deviceStorage'); },
+            deleteFile: function (relativePath) { return callNative('deleteFile', { path: relativePath }); }
+          };
+        })();
+        """
+    }
+
+    private func handleBridgeMessage(_ message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any],
+              let id = body["id"] as? String,
+              let action = body["action"] as? String else { return }
+
+        let webView = message.webView
+        let origin = message.frameInfo.securityOrigin.host.lowercased()
+        guard !origin.isEmpty, origin == (homeURL.host ?? "").lowercased() else {
+            bridgeReject(webView, id: id, error: "Bridge is not available on this site")
+            return
+        }
+
+        switch action {
+        case "listVideoFiles":
+            bridgeResolve(webView, id: id, result: BookmarkStore.shared.listVideoFiles())
+
+        case "listVideoFilesDetailed":
+            bridgeResolve(webView, id: id, result: BookmarkStore.shared.listVideoFilesDetailed())
+
+        case "deviceStorage":
+            // ForImportantUsage counts purgeable space, which is what iOS
+            // actually frees when a write needs room — the same reasoning as
+            // ScrayNativeView's copy, and the two must agree or Wholesale's
+            // figure would disagree with the app's.
+            var storage: [String: Any] = [:]
+            if let values = try? URL(fileURLWithPath: NSHomeDirectory())
+                .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey,
+                                          .volumeTotalCapacityKey]) {
+                if let free = values.volumeAvailableCapacityForImportantUsage {
+                    storage["freeBytes"] = free
+                }
+                if let total = values.volumeTotalCapacity {
+                    storage["totalBytes"] = total
+                }
+            }
+            bridgeResolve(webView, id: id, result: storage)
+
+        case "deleteFile":
+            guard let payload = body["payload"] as? [String: Any],
+                  let relativePath = payload["path"] as? String else {
+                bridgeReject(webView, id: id, error: "Invalid delete payload")
+                return
+            }
+            do {
+                try BookmarkStore.shared.deleteFile(relativePath: relativePath)
+                bridgeResolve(webView, id: id, result: ["success": true, "deleted": true])
+            } catch {
+                bridgeReject(webView, id: id, error: error.localizedDescription)
+            }
+
+        default:
+            bridgeReject(webView, id: id, error: "Unknown action: \(action)")
+        }
+    }
+
+    private func bridgeResolve(_ webView: WKWebView?, id: String, result: Any) {
+        guard let data = try? JSONSerialization.data(withJSONObject: result, options: []),
+              let json = String(data: data, encoding: .utf8) else {
+            bridgeReject(webView, id: id, error: "Failed to serialize result")
+            return
+        }
+        let escapedId = id.replacingOccurrences(of: "'", with: "")
+        DispatchQueue.main.async {
+            webView?.evaluateJavaScript("window._scrayResolve('\(escapedId)', \(json));")
+        }
+    }
+
+    private func bridgeReject(_ webView: WKWebView?, id: String, error: String) {
+        let escapedId = id.replacingOccurrences(of: "'", with: "")
+        let escaped = error
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        DispatchQueue.main.async {
+            webView?.evaluateJavaScript("window._scrayReject('\(escapedId)', '\(escaped)');")
+        }
+    }
+
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "scrayBridge" {
+            handleBridgeMessage(message)
+            return
+        }
+
         guard message.name == "scrayDownload",
               let body = message.body as? [String: Any],
               let phase = body["phase"] as? String,

@@ -98,6 +98,35 @@ class BookmarkStore {
         try FileManager.default.removeItem(at: target)
     }
 
+    /// The same walk as listVideoFiles, carrying the facts Wholesale needs to
+    /// total a selection up. Without the sizes, totalling four hundred files
+    /// would mean four hundred getVideoMetadata round trips across the bridge.
+    func listVideoFilesDetailed() -> [[String: Any]] {
+        ensureResolved()
+        guard let root = resolvedRoot else { return [] }
+        let exts = ["mp4", "mkv", "mov", "m4v", "avi"]
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        guard let enumerator = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: keys) else { return [] }
+
+        let formatter = ISO8601DateFormatter()
+        var results: [[String: Any]] = []
+        for case let fileURL as URL in enumerator {
+            guard exts.contains(fileURL.pathExtension.lowercased()) else { continue }
+            var row: [String: Any] = [
+                "path": fileURL.path.replacingOccurrences(of: root.path + "/", with: "")
+            ]
+            if let values = try? fileURL.resourceValues(forKeys: Set(keys)) {
+                if let size = values.fileSize { row["sizeBytes"] = size }
+                if let modified = values.contentModificationDate {
+                    row["modifiedAt"] = formatter.string(from: modified)
+                }
+            }
+            results.append(row)
+        }
+        return results
+    }
+
     func listVideoFiles() -> [String] {
         ensureResolved()
         guard let root = resolvedRoot else { return [] }

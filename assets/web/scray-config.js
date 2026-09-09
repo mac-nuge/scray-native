@@ -771,25 +771,93 @@ window.scrayStashNames = (function () {
 })();
 
 /**
+ * WHICH NAME a video gets, decided once for every renderer.
+ *
+ * Three outcomes, and the whole app agrees on them because they are chosen
+ * here rather than in each of the six places that draw a row:
+ *
+ *   null          unmatched, or matched to a row carrying nothing worth
+ *                 printing. The old path / filename rendering, untouched.
+ *
+ *   "scene"       the row says more than just who made it - there is a cast,
+ *                 or a title, or both. The scene names the video and the path
+ *                 is dropped:  studio / performers / title [filename]
+ *
+ *   "studioPath"  a studio and nothing else. That is not a name - it says who
+ *                 made it and nothing about WHICH file this is - so the folder
+ *                 crumbs stay, with the studio in front:
+ *                 studio / path / [filename]
+ *
+ * The filename is back in both, in square brackets, because a scene name on
+ * its own gave no way to tell two files of the same scene apart.
+ */
+window.scrayStashNamePlan = function (video) {
+  const parts = window.scrayStashNames && window.scrayStashNames.parts(video);
+  if (!parts) return null;
+  const scene = parts.performerList.length > 0 || !!parts.title;
+  return { mode: scene ? "scene" : "studioPath", parts };
+};
+
+/**
+ * The folder crumbs of a path, as an array.
+ *
+ * Through scrayResolvePathParts where it exists, so Native's on-device folder
+ * arrives in the same grey-bracket shape the lists print - "(camera/)" after
+ * the OneDrive crumbs. Picker has no such split and falls back to video.path,
+ * where a leading "*" is the legacy device marker and not part of a folder's
+ * name.
+ */
+window.scrayPathCrumbs = function (video) {
+  if (typeof window.scrayResolvePathParts === "function") {
+    const parts = window.scrayResolvePathParts(video);
+    return [
+      ...parts.catalogue,
+      ...(parts.device.length ? [`(${parts.device.join("/")}/)`] : [])
+    ];
+  }
+  const raw = (video && video.path) || "";
+  const clean = raw.startsWith("*") ? raw.slice(1) : raw;
+  return clean.split("/").filter(Boolean);
+};
+
+/** The filename as it is printed inside a name: bracketed, or "" if absent. */
+window.scrayBracketedFilename = function (video) {
+  const f = (video && video.filename) || "";
+  return f ? "[" + f + "]" : "";
+};
+
+/**
  * The display name as plain text, for the places that cannot take a DOM
  * fragment: the loading overlay's innerHTML, the PIP and mini-player titles,
  * Plyr's own media title, toasts and the in-player list modal.
  *
- * Same three parts and the same " / " separators createClickablePath prints,
- * from the same dictionary - so the strip under the player and the row you
- * clicked to get there can never disagree.
+ * Same parts, same rule and the same " / " separators createClickablePath
+ * prints, from the same dictionary - so the strip under the player and the
+ * row you clicked to get there can never disagree.
  *
  * "" for an unmatched video, which is every caller's signal to fall straight
  * through to the old path/filename text.
  */
 window.scrayStashDisplayName = function (video) {
-  const p = window.scrayStashNames && window.scrayStashNames.parts(video);
-  if (!p) return "";
+  const plan = window.scrayStashNamePlan(video);
+  if (!plan) return "";
+  const p    = plan.parts;
+  const file = window.scrayBracketedFilename(video);
+
+  if (plan.mode === "studioPath") {
+    // Every section is its own " / " group here, filename included - the
+    // studio is standing in for a folder, so the whole line reads as one path.
+    return [p.studio, ...window.scrayPathCrumbs(video), file]
+        .filter(Boolean).join(" / ");
+  }
+
   const groups = [];
   if (p.studio) groups.push(p.studio);
   if (p.performerList.length) groups.push(p.performerList.join(", "));
   if (p.title) groups.push(p.title);
-  return groups.join(" / ");
+  // A SPACE before the filename, not a separator: the scene parts are the
+  // name, and the bracket is an aside after it.
+  return groups.join(" / ") + (file ? (groups.length ? " " : "") + file : "");
 };
 
 /**

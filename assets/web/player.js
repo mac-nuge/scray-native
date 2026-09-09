@@ -246,10 +246,14 @@ function syncVideoTitleBar(video) {
     }
     if (v) {
         const scoreText = (v.user_score !== undefined && v.user_score !== null) ? ` [${v.user_score}]` : '';
-        // Same rule as every list: a matched video is named by its scene.
-        // scrayStashNames.text() returns "" when there is no match, so the
-        // filename stays the fallback.
-        const stashName = window.scrayStashNames ? window.scrayStashNames.text(v) : '';
+        // Same rule as every list: a matched video is named by its scene,
+        // with its filename bracketed after it. scrayStashDisplayName returns
+        // "" when there is no match, so the filename stays the fallback.
+        //
+        // NOT scrayStashNames.text(), which joins the parts with spaces for
+        // the search haystack - this bar wants the printed name, separators
+        // and all.
+        const stashName = window.scrayStashDisplayName ? window.scrayStashDisplayName(v) : '';
         textEl.textContent = (stashName || v.filename || '') + scoreText;
     }
     syncFullscreenFilterPill();
@@ -7859,6 +7863,33 @@ function scrayPlayPreviewDelayMs() {
     return PLAY_PREVIEW_DELAY_MPB_MS;
 }
 
+/**
+ * The scene name for the player's own chrome, read straight from the
+ * dictionary rather than through window.scrayStashDisplayName.
+ *
+ * Two reasons it is not that helper. It leaves out the PATH, because this
+ * card already prints the path on a "Loading from:" line of its own - a
+ * studio-only video shows the studio here and its crumbs up there, rather
+ * than the path twice. And reading parts() directly means a bundle whose
+ * scray-config.js is a version behind falls back to filenames silently
+ * instead of erroring: one less file that has to be in step for the card to
+ * be right.
+ */
+function scrayPlayerStashName(video) {
+    const p = window.scrayStashNames && window.scrayStashNames.parts(video);
+    if (!p) return '';
+    const file = video && video.filename ? `[${video.filename}]` : '';
+    const groups = [];
+    if (p.studio) groups.push(p.studio);
+    if (p.performerList.length) groups.push(p.performerList.join(', '));
+    if (p.title) groups.push(p.title);
+    if (!groups.length) return '';
+    // A plain SPACE before the bracket when the scene named the video; a
+    // separator when the studio is standing in for a folder.
+    const sceneNamed = p.performerList.length > 0 || !!p.title;
+    return groups.join(' / ') + (file ? (sceneNamed ? ' ' : ' / ') + file : '');
+}
+
 // Just the label and the filename. The full path/percentage version lands a
 // moment later when playVideoInline's own overlay block runs; this only has
 // to answer "what am I about to watch".
@@ -7886,12 +7917,15 @@ function scrayShowPreviewTitle(video) {
     // PIP title and the mini-player title all rebuild themselves from these
     // two - patching only the markup would flip back to the filename on the
     // first buffered-range update.
-    const stashPreviewName = window.scrayStashDisplayName
-        ? window.scrayStashDisplayName(video) : '';
+    const stashPreviewName = scrayPlayerStashName(video);
     window.currentLoadingFilename = stashPreviewName || video.filename || '';
-    // The path IS the name for an unmatched video. For a matched one it is a
-    // folder crumb in front of a name that already says what this is.
-    window.currentLoadingPath = stashPreviewName ? '' : pathText;
+    // The path IS the name for an unmatched video, and it still is for a
+    // studio-only one - the studio says who made it, not which file this is.
+    // Only a scene name (cast and/or title) earns dropping the folder crumbs,
+    // so the test is on the PARTS, not on whether a name came back at all.
+    const previewParts = window.scrayStashNames && window.scrayStashNames.parts(video);
+    const previewSceneNamed = !!(previewParts && (previewParts.performerList.length || previewParts.title));
+    window.currentLoadingPath = previewSceneNamed ? '' : pathText;
     window.currentLoadingLabel = window.lastPlayLabel || null;
     const label = window.lastPlayLabel
         ? `<div style="font-size: 0.65rem; opacity: 0.9; margin-bottom: 4px; color: #ff9800; font-weight: bold;">${window.lastPlayLabel}</div>`
@@ -8100,14 +8134,20 @@ window.currentLoadingFilename = video.filename || '';
 const pathParts = (typeof window.scrayResolvePathParts === 'function')
   ? window.scrayResolvePathParts(video)
   : { catalogue: (video.path || '').split('/').filter(Boolean), device: [] };
-// A matched video is named by its scene, so the OneDrive crumbs and the iOS
-// folder aside both go: they are not part of the name any more. Written to
-// the globals because the 'progress' handler and updatePIPTitle rebuild from
-// them and would otherwise revert to the filename mid-buffer.
-const stashLoadName = window.scrayStashDisplayName
-  ? window.scrayStashDisplayName(video) : '';
+// A SCENE-named video drops the OneDrive crumbs and the iOS folder aside:
+// they are not part of the name any more. A studio-only one keeps them - the
+// studio says who made it, not which file this is - so the test is on the
+// PARTS, not on whether a name came back at all. Same test as
+// scrayShowPreviewTitle, so the preview card and the real one never disagree
+// about whether a path line is showing.
+//
+// Written to the globals because the 'progress' handler and updatePIPTitle
+// rebuild from them and would otherwise revert to the filename mid-buffer.
+const stashLoadName = scrayPlayerStashName(video);
 if (stashLoadName) window.currentLoadingFilename = stashLoadName;
-window.currentLoadingPath = stashLoadName ? '' : [
+const loadParts = window.scrayStashNames && window.scrayStashNames.parts(video);
+const loadSceneNamed = !!(loadParts && (loadParts.performerList.length || loadParts.title));
+window.currentLoadingPath = loadSceneNamed ? '' : [
   ...pathParts.catalogue,
   ...(pathParts.device.length ? [`(${pathParts.device.join('/')}/)`] : [])
 ].join(' / ');
@@ -8193,19 +8233,21 @@ if (container) {
 
 videoInfoEl.innerHTML = ''; // Clear existing content
 
-// A matched video is named by its scene here exactly as it is in every list:
-// studio / female cast / title, with no path and no filename. Looked up once
-// and used twice below - to skip the folder crumbs, and to build the name
-// itself through createClickablePath, so this strip renders from the same
-// code as the row you clicked to get here.
-const stashParts = window.scrayStashNames && window.scrayStashNames.parts(video);
+// A matched video is named by its scene here exactly as it is in every list.
+// Looked up once and used twice below - to skip the folder crumbs this
+// function draws itself, and to build the name through createClickablePath,
+// so this strip renders from the same code as the row you clicked to get here.
+const namePlan = window.scrayStashNamePlan && window.scrayStashNamePlan(video);
 
 // Parse path into folders. Same resolution as the loading overlay above: the
-// OneDrive path leads, the iOS folder trails in grey brackets.
+// OneDrive path leads, the iOS folder trails in grey brackets. Skipped for ANY
+// matched video, scene or studio-only: createClickablePath draws the crumbs
+// itself for a studio-only row, after the studio, and drawing them here as
+// well would print the path twice.
 const pathParts = (typeof window.scrayResolvePathParts === 'function')
   ? window.scrayResolvePathParts(video)
   : { catalogue: (video.path || '').split('/').filter(Boolean), device: [] };
-if (!stashParts && (pathParts.catalogue.length || pathParts.device.length)) {
+if (!namePlan && (pathParts.catalogue.length || pathParts.device.length)) {
 const scrayPathSep = window.scrayPathSep || ((text) => {
   const s = document.createElement('span');
   s.textContent = text; s.style.color = '#666'; return s;
@@ -8390,17 +8432,18 @@ filenameSpan.style.cursor = 'pointer';
 filenameSpan.style.color = '#555';
 filenameSpan.title = 'Click to rename file';
 
-// ✅ Matched: the same studio / performers / title fragment every list row
-// uses, chips and all, so tapping a performer here filters exactly as it does
-// in the grid. createClickablePath returns ONLY the stash rendering for a
-// matched video, so there is no path to strip back off.
+// ✅ Matched: the same fragment every list row uses, chips and all, so
+// tapping a performer here filters exactly as it does in the grid.
+// createClickablePath draws the WHOLE name for a matched video - the scene
+// parts, or the studio and its folder crumbs - and the bracketed filename at
+// the end, which is why the block above left the path alone.
 //
 // It goes INSIDE filenameSpan rather than straight into videoInfoEl because
 // that span carries the rename click, the basket highlight, and the
 // "Click to rename file" title that updateNowPlayingBasketHighlight searches
 // for. The chips stopPropagation their own clicks, so filtering by a
 // performer still never opens the rename modal.
-if (stashParts && typeof window.createClickablePath === 'function') {
+if (namePlan && typeof window.createClickablePath === 'function') {
 const stashFragment = window.createClickablePath(video);
 while (stashFragment.firstChild) {
     filenameSpan.appendChild(stashFragment.firstChild);

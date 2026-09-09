@@ -317,19 +317,25 @@ function createClickablePath(video, includeFilename = true, useCataloguePath = f
 const container = document.createDocumentFragment();
 
 // A StashDB-matched video is named by its scene, not its path: studio,
-// female cast and title, all lower case. Done HERE rather than in each list
-// renderer because every list - main, random panel, basket, history and the
-// bookmarks page - builds its row text through this one function.
+// female cast and title, all lower case, with the filename bracketed after
+// it. Done HERE rather than in each list renderer because every list - main,
+// random panel, basket, history and the bookmarks page - builds its row text
+// through this one function.
 //
-// Unmatched videos fall straight through to the path/filename rendering
-// below, untouched. So does a matched video whose scene row carries nothing
-// worth printing: parts() returns null for those rather than handing back
-// three empty strings and two separators.
-const stashParts = window.scrayStashNames && window.scrayStashNames.parts(video);
-if (stashParts) {
+// A row carrying ONLY a studio is the exception: that says who made it and
+// nothing about which file this is, so it keeps its folder crumbs and just
+// gains the studio in front. scrayStashNamePlan decides which of the two it
+// is; unmatched videos, and matched ones whose row carries nothing worth
+// printing, get null and fall straight through to the old rendering.
+const namePlan = window.scrayStashNamePlan && window.scrayStashNamePlan(video);
+const stashParts = namePlan ? namePlan.parts : null;
+
   // Local rather than shared: Picker's copy of this file has no
   // scrayPathSep, and one helper defined here keeps both bundles' patch
   // text identical.
+  //
+  // Hoisted above both branches - the studio leading a studio-only row is the
+  // same purple, clickable chip it is inside a full scene name.
   const sep = (text) => {
     const s = document.createElement('span');
     s.textContent = text;
@@ -366,6 +372,36 @@ if (stashParts) {
     return span;
   };
 
+// The filename. All three renderings below end with it, so it is built once
+// here.
+//
+// The square brackets are LITERAL, and only for a matched video: there they
+// separate the raw filename from the scene text in front of it. An unmatched
+// row is nothing but a path and a filename, has no scene text to be told
+// apart from, and is left looking exactly as it always has.
+const appendFilename = (bracket) => {
+  if (!video.filename) return;
+  // Use clickable filename to make bracket tags clickable
+  const filenameFragment = createClickableFilename(video.filename);
+
+  const wrapper = document.createElement('span');
+  // Non-MP4s keep their warning colour; the brackets are part of the name, so
+  // they go inside the wrapper and take that colour with the rest.
+  const isNonMp4 = video.filename.split('.').pop().toLowerCase() !== 'mp4';
+  wrapper.style.color = isNonMp4 ? '#be7b7bff' : '#333';
+  if (bracket) wrapper.appendChild(document.createTextNode('['));
+  while (filenameFragment.firstChild) {
+    wrapper.appendChild(filenameFragment.firstChild);
+  }
+  if (bracket) wrapper.appendChild(document.createTextNode(']'));
+  // Keep bracket tags blue and clickable
+  wrapper.querySelectorAll('span[style*="underline"]').forEach(span => {
+    span.style.color = '#007bff';
+  });
+  container.appendChild(wrapper);
+};
+
+if (namePlan && namePlan.mode === 'scene') {
   // Built as groups so the " / " separators land BETWEEN the three sections
   // and never around a section that turned out to be empty.
   const groups = [];
@@ -389,11 +425,29 @@ if (stashParts) {
     if (i) container.appendChild(sep(' / '));
     group.forEach(node => container.appendChild(node));
   });
+  // A plain SPACE, not a " / ": those three parts are the name, and the
+  // bracketed filename is an aside sitting after it.
+  if (includeFilename && video.filename) {
+    if (groups.length) container.appendChild(sep(' '));
+    appendFilename(true);
+  }
   return container;
 }
 
 // Parse path into folders
 const parts = scrayResolvePathParts(video, { catalogue: useCataloguePath });
+
+// Studio-only: the studio takes the place of a leading folder, so it gets the
+// same " / " after it that every crumb below gets, and the path continues as
+// though nothing had changed - the on-device bracket included.
+if (namePlan && namePlan.mode === 'studioPath' && stashParts.studio) {
+  container.appendChild(chip(stashParts.studio, 'studio'));
+  // Only if something actually follows it - a studio-only row on a video with
+  // neither a path nor a filename would otherwise end on a dangling " / ".
+  if (parts.catalogue.length || parts.device.length || (includeFilename && video.filename)) {
+    container.appendChild(sep(' / '));
+  }
+}
 if (parts.catalogue.length || parts.device.length) {
 // Remove leading "*" if present (legacy format)
 // Path resolution (including the legacy leading "*") now lives in scrayResolvePathParts.
@@ -572,38 +626,7 @@ if (searchBox) {
 }
 
 // Add filename if requested
-if (includeFilename) {
- // Use clickable filename to make bracket tags clickable
- const filenameFragment = createClickableFilename(video.filename);
- 
- // Apply styling to all text nodes (non-MP4 color if needed)
- const isNonMp4 = (video.filename || '').split('.').pop().toLowerCase() !== 'mp4';
- if (isNonMp4) {
-   // Wrap in span to apply color
-   const wrapper = document.createElement('span');
-   wrapper.style.color = '#be7b7bff';
-   while (filenameFragment.firstChild) {
-     wrapper.appendChild(filenameFragment.firstChild);
-   }
-   // But keep bracket tags blue and clickable
-   wrapper.querySelectorAll('span[style*="underline"]').forEach(span => {
-     span.style.color = '#007bff';
-   });
-   container.appendChild(wrapper);
- } else {
-   // Normal color
-   const wrapper = document.createElement('span');
-   wrapper.style.color = '#333';
-   while (filenameFragment.firstChild) {
-     wrapper.appendChild(filenameFragment.firstChild);
-   }
-   // Keep bracket tags blue and clickable
-   wrapper.querySelectorAll('span[style*="underline"]').forEach(span => {
-     span.style.color = '#007bff';
-   });
-   container.appendChild(wrapper);
- }
-}
+if (includeFilename) appendFilename(!!namePlan);
 
 return container;
 }

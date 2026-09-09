@@ -8057,7 +8057,11 @@ window.scrayApplyPendingStartAt = function (reason) {
 // Seconds are measured on the video's own clock, so watching at 2x for a
 // minute is two minutes of the video watched - which is what "seconds of this
 // video watched" should mean.
-const SCRAY_VIEW_THRESHOLD_S    = 20;   // playback before a view counts
+// These two currently coincide at 10s: ten seconds of playback both counts
+// the view and opens the time_viewed gate. They stay separate constants
+// because they answer different questions - "was this watched?" and "is this
+// worth measuring?" - and one may want to move without the other.
+const SCRAY_VIEW_THRESHOLD_S    = 10;   // playback before a view counts
 const SCRAY_TIME_THRESHOLD_S    = 10;   // playback before time_viewed counts
 const SCRAY_WATCH_MAX_STEP_S    = 2;    // a bigger jump is a seek, not playback
 const SCRAY_WATCH_FLUSH_EVERY_S = 60;   // don't hold more than a minute unsent
@@ -8124,7 +8128,11 @@ function scrayWatchAttach() {
             s.viewCounted = true;
             scrayWatchCountView(s);
         }
-        if (s.watched - s.flushed >= SCRAY_WATCH_FLUSH_EVERY_S) scrayWatchFlushTime(s);
+        // Flush the moment the gate opens, then at intervals. Without that
+        // first one, a watch that ends abruptly anywhere between 10s and 70s
+        // - app killed, phone locked, tab closed - reports nothing at all,
+        // and there is no way to see anything working until a full minute in.
+        if (!s.flushed || s.watched - s.flushed >= SCRAY_WATCH_FLUSH_EVERY_S) scrayWatchFlushTime(s);
     });
 
     // Natural stopping points. Flushing here means a normal watch reports its
@@ -8159,6 +8167,20 @@ window.scrayWatchBegin = function (video) {
         viewCounted: false
     };
     scrayWatchAttach();
+};
+
+/**
+ * Read-only peek at the live session, for the console. Returns null when
+ * nothing is loaded. `watched` is seconds of real playback so far, `flushed`
+ * is how many of those have reached the server - so watched >= 10 with
+ * flushed still 0 means the send failed, not that tracking is asleep.
+ */
+window.scrayWatchState = () => scrayWatchSession && {
+    filename: scrayWatchSession.video?.filename,
+    watched: Math.round(scrayWatchSession.watched * 10) / 10,
+    flushed: scrayWatchSession.flushed,
+    viewCounted: scrayWatchSession.viewCounted,
+    listening: scrayWatchBound
 };
 
 async function playVideoInline(video, listContext = null, index = null, startAt = null) {

@@ -1,1 +1,1 @@
-stg-native - 13.15 test: view_count now needs 20s of playback, plus a new time_viewed stat
+stg-native - 13.17 test: a view now needs 10s of playback, not 20s

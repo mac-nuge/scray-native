@@ -2696,7 +2696,10 @@ function showVideoScoringModal(video, event) {
      // ✅ Confirmation only shown after Excel has saved
      const message = document.createElement('div');
      const scoreLabel = i === 0 ? 'Score cleared' : `Score: ${i}`;
-     message.innerHTML = `✅ ${scoreLabel}<br><span style="font-size: 0.5em; opacity: 0.9;">${video.filename}</span>`;
+     const scoredName =
+         (window.scrayStashDisplayName && window.scrayStashDisplayName(video))
+         || video.filename;
+     message.innerHTML = `✅ ${scoreLabel}<br><span style="font-size: 0.5em; opacity: 0.9;">${scoredName}</span>`;
      showScoreConfirmation(message.innerHTML);
      console.log(`Scored ${video.filename}: ${i}/10`);
 

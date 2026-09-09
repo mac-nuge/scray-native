@@ -677,6 +677,28 @@ window.scrayStashNames = (function () {
 })();
 
 /**
+ * The display name as plain text, for the places that cannot take a DOM
+ * fragment: the loading overlay's innerHTML, the PIP and mini-player titles,
+ * Plyr's own media title, toasts and the in-player list modal.
+ *
+ * Same three parts and the same " / " separators createClickablePath prints,
+ * from the same dictionary - so the strip under the player and the row you
+ * clicked to get there can never disagree.
+ *
+ * "" for an unmatched video, which is every caller's signal to fall straight
+ * through to the old path/filename text.
+ */
+window.scrayStashDisplayName = function (video) {
+  const p = window.scrayStashNames && window.scrayStashNames.parts(video);
+  if (!p) return "";
+  const groups = [];
+  if (p.studio) groups.push(p.studio);
+  if (p.performerList.length) groups.push(p.performerList.join(", "));
+  if (p.title) groups.push(p.title);
+  return groups.join(" / ");
+};
+
+/**
  * The duration a list should PRINT for this video.
  *
  * StashDB's number describes the scene; ours describes the file, and the file

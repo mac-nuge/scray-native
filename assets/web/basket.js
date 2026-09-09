@@ -364,7 +364,11 @@ let targetDropIndex = null; // Track where we want to drop
 function createGhostElement(video) {
    const ghost = document.createElement('div');
    ghost.className = 'basket-drag-ghost';
-   ghost.textContent = video.filename || 'Video';
+   // The ghost has to read as the row you picked up, not a filename you have
+   // not seen since the basket started naming rows by scene.
+   ghost.textContent =
+       (window.scrayStashDisplayName && window.scrayStashDisplayName(video))
+       || video.filename || 'Video';
    document.body.appendChild(ghost);
    return ghost;
 }

@@ -4029,15 +4029,21 @@ background: #f94144 !important;
 /* =========================================
 TAG CLOUD MODAL
 =========================================
-Replaces the AT select2 dropdown. Taller than the exclude modal because it is
-the primary way tags are picked now, and the performer cloud runs to several
-hundred entries. Every rule here sets width/margin/padding explicitly: the
+Replaces the AT select2 dropdown. Every rule here sets width/margin/padding explicitly: the
 mobile media query later in this file sets `button, select, input
 { width:100%; padding:12px }`, which would otherwise stack every pill into its
 own full-width row. */
+/* ⚙️ ADJUSTABLE: cloud height and top offset. Deliberately well short of the
+   viewport and pinned near the top rather than centred, so the floating pills
+   bar at the bottom of the screen stays visible while chips are being picked -
+   the selection is confirmed where it will live, not only inside the modal.
+   Raise max-height (and lower margin-top to match) if the cloud needs more
+   room; the grid scrolls, so nothing is lost at a shorter height. */
 .scray-cloud-content {
 max-width: 720px;
-max-height: 88vh;
+max-height: 62vh;
+align-self: flex-start;
+margin-top: 5vh;
 display: flex;
 flex-direction: column;
 }

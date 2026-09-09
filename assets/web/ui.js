@@ -437,6 +437,14 @@ if (namePlan && namePlan.mode === 'scene') {
 // Parse path into folders
 const parts = scrayResolvePathParts(video, { catalogue: useCataloguePath });
 
+// The name hides the top of the tree - see scrayNameCrumbs. Only when the
+// CATALOGUE path is the one being drawn: with catalogue:false these crumbs are
+// the iOS folder, where the first level is the whole address and dropping it
+// would leave nothing.
+const catCrumbs = (useCataloguePath && typeof window.scrayNameCrumbs === 'function')
+    ? window.scrayNameCrumbs(parts.catalogue)
+    : parts.catalogue;
+
 // Studio-only: the studio takes the place of a leading folder, so it gets the
 // same " / " after it that every crumb below gets, and the path continues as
 // though nothing had changed - the on-device bracket included.
@@ -444,18 +452,18 @@ if (namePlan && namePlan.mode === 'studioPath' && stashParts.studio) {
   container.appendChild(chip(stashParts.studio, 'studio'));
   // Only if something actually follows it - a studio-only row on a video with
   // neither a path nor a filename would otherwise end on a dangling " / ".
-  if (parts.catalogue.length || parts.device.length || (includeFilename && video.filename)) {
+  if (catCrumbs.length || parts.device.length || (includeFilename && video.filename)) {
     container.appendChild(sep(' / '));
   }
 }
-if (parts.catalogue.length || parts.device.length) {
+if (catCrumbs.length || parts.device.length) {
 // Remove leading "*" if present (legacy format)
 // Path resolution (including the legacy leading "*") now lives in scrayResolvePathParts.
 // One list, flagged. OneDrive segments render as they always did; iOS segments
 // get the grey italic bracket treatment inside the same loop, so the click
 // handler below stays in one place instead of being duplicated.
 const folders = [
-  ...parts.catalogue.map(name => ({ name, local: false })),
+  ...catCrumbs.map(name => ({ name, local: false })),
   ...parts.device.map(name => ({ name, local: true }))
 ];
   

@@ -8247,13 +8247,17 @@ const namePlan = window.scrayStashNamePlan && window.scrayStashNamePlan(video);
 const pathParts = (typeof window.scrayResolvePathParts === 'function')
   ? window.scrayResolvePathParts(video)
   : { catalogue: (video.path || '').split('/').filter(Boolean), device: [] };
-if (!namePlan && (pathParts.catalogue.length || pathParts.device.length)) {
+// The top of the tree comes off here too - see scrayNameCrumbs - so this strip
+// and the row you clicked to get here print the same crumbs.
+const nameCrumbs = (typeof window.scrayNameCrumbs === 'function')
+  ? window.scrayNameCrumbs(pathParts.catalogue) : pathParts.catalogue;
+if (!namePlan && (nameCrumbs.length || pathParts.device.length)) {
 const scrayPathSep = window.scrayPathSep || ((text) => {
   const s = document.createElement('span');
   s.textContent = text; s.style.color = '#666'; return s;
 });
 const folders = [
-  ...pathParts.catalogue.map(name => ({ name, local: false })),
+  ...nameCrumbs.map(name => ({ name, local: false })),
   ...pathParts.device.map(name => ({ name, local: true }))
 ];
 

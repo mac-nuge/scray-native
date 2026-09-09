@@ -799,6 +799,34 @@ window.scrayStashNamePlan = function (video) {
 };
 
 /**
+ * ⚙️ ADJUSTABLE: how many leading folders a NAME hides.
+ *
+ * The top of the tree - "2NGM", "4NGT" - sorts the library, it does not
+ * identify a file: every row underneath carries the same crumb, so it spends
+ * width on something no two rows disagree about. Dropped from the rendered
+ * NAME only. The folder itself is untouched: it is still scanned into tags,
+ * still filterable, and the lines that exist to answer "where does this live"
+ * - the player's "Loading from", the move and delete confirmations - still
+ * print the address in full.
+ *
+ * Set to 0 to print whole paths again, or 2 to hide two levels.
+ */
+window.SCRAY_NAME_PATH_SKIP = 1;
+
+/**
+ * The crumbs a name should print, with the top levels dropped.
+ *
+ * Every place a name is drawn goes through here - the list rows, the strip
+ * under the player, and the plain-text name used by the overlays and titles -
+ * so the three can never disagree about how much of the path is showing.
+ */
+window.scrayNameCrumbs = function (crumbs) {
+  const skip = window.SCRAY_NAME_PATH_SKIP || 0;
+  if (!Array.isArray(crumbs)) return [];
+  return skip ? crumbs.slice(skip) : crumbs;
+};
+
+/**
  * The folder crumbs of a path, as an array.
  *
  * Through scrayResolvePathParts where it exists, so Native's on-device folder
@@ -808,16 +836,20 @@ window.scrayStashNamePlan = function (video) {
  * name.
  */
 window.scrayPathCrumbs = function (video) {
+  // The top of the tree comes off here rather than in each caller, so the
+  // plain-text name and the DOM one are trimmed by the same rule.
+  const trim = (crumbs) => (typeof window.scrayNameCrumbs === "function")
+      ? window.scrayNameCrumbs(crumbs) : crumbs;
   if (typeof window.scrayResolvePathParts === "function") {
     const parts = window.scrayResolvePathParts(video);
     return [
-      ...parts.catalogue,
+      ...trim(parts.catalogue),
       ...(parts.device.length ? [`(${parts.device.join("/")}/)`] : [])
     ];
   }
   const raw = (video && video.path) || "";
   const clean = raw.startsWith("*") ? raw.slice(1) : raw;
-  return clean.split("/").filter(Boolean);
+  return trim(clean.split("/").filter(Boolean));
 };
 
 /** The filename as it is printed inside a name: bracketed, or "" if absent. */

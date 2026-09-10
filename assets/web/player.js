@@ -3942,6 +3942,8 @@ function attachFrameStepButtons() {
     //        into a minus sixth and a plus sixth.
     //   MPFS (portrait branch):  quarters - fullscreen, play/pause, minus,
     //        plus.
+    //   MPB  (portrait branch too): the MPFS set, full height. Its tier
+    //        lines are moved by scrayPlaceMpbTapTiers - see there.
     // Change one, change the other.
     if (!wrapper.querySelector('.fls-tap-guides')) {
         const guides = document.createElement('div');
@@ -3978,10 +3980,11 @@ function attachFrameStepButtons() {
         // .fls-tap-guides spans the whole wrapper rather than just the strip
         // under the clock. The two classes differ only in where they start:
         // the seek zone is the right third in FLS, the right half in MPFS.
-        ['33.333%', '66.667%'].forEach(top => {
+        ['33.333%', '66.667%'].forEach((top, i) => {
             ['fls-tap-tier', 'mpfs-tap-tier'].forEach(cls => {
                 const tier = document.createElement('div');
-                tier.className = cls;
+                // upper/lower: MPB's CSS moves each one on its own.
+                tier.className = cls + (i === 0 ? ' scray-tap-tier-upper' : ' scray-tap-tier-lower');
                 tier.style.top = top;
                 guides.appendChild(tier);
             });
@@ -4731,8 +4734,11 @@ window.exitPIPMode = exitPIPMode;
 //     bar, markers included - whether or not the bar is showing yet,
 //   - while a bookmark tooltip rail is up, since the rail lives inside it,
 //   - and whenever our own code asks (scrayShowControlsNow).
+// MPB is the exception (13.45): there a touch ANYWHERE on the player counts
+// as a control-area touch, so a tap on the picture brings the bar up again.
 // A drag that turns into a scrub puts back a bar its own touch raised.
-// The double-tap grid (FLS/MPFS) shows only while you're tapping the picture:
+// The double-tap grid (FLS/MPFS, and MPB since 13.46) shows only while you're
+// tapping the picture:
 // up on the touch, gone as soon as the taps stop or the touch becomes a drag.
 // It still hides on Plyr's usual timer. Mouse-only desktops keep Plyr's own
 // behaviour, apart from the bar staying up under a tooltip rail.
@@ -4757,6 +4763,10 @@ const SCRAY_TOUCH_MOUSE_WINDOW_MS = 1000;
 const SCRAY_CONTROLS_HIDE_MS = 3000;
 
 let scrayGestureInControls = false;
+// The current touch started on the picture rather than the control bar or the
+// progress bar - it drives the grid. Not simply !scrayGestureInControls, since
+// in MPB a picture touch is both.
+let scrayGestureOnPicture = false;
 let scrayLastTouchAt = 0;
 let scrayGuidesTimer = null;
 // Where the current touch started, and whether its touchstart raised a bar
@@ -4768,6 +4778,16 @@ let scrayGestureRaisedBar = false;
 // seeks, and the seek's 'playing' makes Plyr re-evaluate and hide the bar
 // straight away - this holds it for the normal delay instead.
 let scrayControlsHeldUntil = 0;
+
+/**
+ * MPB - the docked in-page player (see PLAYER MODES). Not while a load holds
+ * FLS's body classes, nor mid fullscreen.
+ */
+function scrayIsMpb() {
+    const b = document.body.classList;
+    return b.contains('portrait-inline') && !b.contains('manual-rotate-landscape') &&
+        !window.plyrPlayer?.fullscreen?.active;
+}
 
 /** Whether a screen point is on the control bar or the progress bar. */
 function scrayPointInControlArea(x, y) {
@@ -4796,8 +4816,28 @@ function scrayPointInControlArea(x, y) {
     });
 }
 
+/**
+ * MPB's tier lines. handleDoubleTap there divides the height of .plyr, which
+ * in MPB is the picture PLUS the progress bar in-flow under it, while the grid
+ * lives in the picture's wrapper. So 33.333%/66.667% of the wrapper would sit
+ * a little high; measure .plyr and hand CSS the px instead.
+ */
+function scrayPlaceMpbTapTiers() {
+    if (!scrayIsMpb()) return;
+    const plyr = document.querySelector('.plyr');
+    const guides = plyr && plyr.querySelector('.fls-tap-guides');
+    const wrapper = guides && guides.parentElement;
+    if (!wrapper) return;
+    const p = plyr.getBoundingClientRect();
+    const w = wrapper.getBoundingClientRect();
+    if (!p.height || !w.height) return;
+    guides.style.setProperty('--scray-mpb-tier-upper', (p.top + p.height / 3 - w.top) + 'px');
+    guides.style.setProperty('--scray-mpb-tier-lower', (p.top + p.height * 2 / 3 - w.top) + 'px');
+}
+
 function scrayWakeTapGuides() {
     clearTimeout(scrayGuidesTimer);
+    scrayPlaceMpbTapTiers();
     document.body.classList.add('scray-guides-awake');
 }
 
@@ -4833,26 +4873,30 @@ document.addEventListener('touchstart', (e) => {
     const plyr = document.querySelector('.plyr');
     if (!e.touches || e.touches.length !== 1 || !plyr || !plyr.contains(e.target)) {
         scrayGestureInControls = false;
+        scrayGestureOnPicture = false;
         return;
     }
     const t = e.touches[0];
     scrayGestureStartX = t.clientX;
     scrayGestureStartY = t.clientY;
-    scrayGestureInControls = scrayPointInControlArea(t.clientX, t.clientY);
+    scrayGestureOnPicture = !scrayPointInControlArea(t.clientX, t.clientY);
+    // MPB: the whole player is the control area - a tap anywhere shows the bar.
+    scrayGestureInControls = !scrayGestureOnPicture || scrayIsMpb();
     scrayGestureRaisedBar = false;
     if (scrayGestureInControls) {
         scrayGestureRaisedBar = plyr.classList.contains('plyr--hide-controls');
         scrayRaiseControlsForTouch();
-    } else {
-        scrayWakeTapGuides();
     }
+    // MPB does both: the bar comes up AND the grid shows.
+    if (scrayGestureOnPicture) scrayWakeTapGuides();
 }, { capture: true, passive: true });
 
 document.addEventListener('touchmove', (e) => {
     scrayLastTouchAt = Date.now();
-    if (scrayGestureInControls || !e.touches || !e.touches[0]) return;
+    if (!scrayGestureOnPicture || !e.touches || !e.touches[0]) return;
     const t = e.touches[0];
-    // A drag, not a tap: the grid is for tapping.
+    // A drag, not a tap: the grid is for tapping. In MPB that includes a
+    // swipe scrolling the list through the player.
     if (Math.abs(t.clientX - scrayGestureStartX) > SCRAY_GUIDES_DRAG_PX ||
         Math.abs(t.clientY - scrayGestureStartY) > SCRAY_GUIDES_DRAG_PX) {
         scraySleepTapGuides(0);

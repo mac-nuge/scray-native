@@ -2304,6 +2304,26 @@ top: 0;
 bottom: 0;
 }
 
+/* MPB (13.46): the MPFS set - quarters, tiers across the right half - over the
+   whole docked picture, since MPB's double taps have no band. The segments
+   keep the shared inset (under the clock, clear of the control row). The tier
+   lines take px from scrayPlaceMpbTapTiers in player.js, because MPB's zones
+   divide .plyr's height, which includes the progress bar below the picture;
+   the percentages are only the fallback until the first touch measures it.
+   :not(.manual-rotate-landscape) - an FLS load can leave portrait-inline on
+   the body for a moment. */
+body.portrait-inline:not(.manual-rotate-landscape) .fls-tap-guides,
+body.portrait-inline:not(.manual-rotate-landscape) .mpfs-tap-guide,
+body.portrait-inline:not(.manual-rotate-landscape) .mpfs-tap-tier {
+display: block;
+}
+body.portrait-inline:not(.manual-rotate-landscape) .mpfs-tap-tier.scray-tap-tier-upper {
+top: var(--scray-mpb-tier-upper, 33.333%) !important;
+}
+body.portrait-inline:not(.manual-rotate-landscape) .mpfs-tap-tier.scray-tap-tier-lower {
+top: var(--scray-mpb-tier-lower, 66.667%) !important;
+}
+
 /* =========================================
 SINGLE-TAP FRAME-STEP ZONES (landscape mobile only)
 Invisible overlays over the LEFT half of the player (previously the

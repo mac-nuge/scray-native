@@ -43,9 +43,12 @@ window.VIDEO_SCHEMA = VIDEO_SCHEMA;
 // Fields that belong to you, not the file. updateVideoInDB() in
 // file-operations.js auto-routes any of these to videoMeta so existing
 // callers (saveBookmarks, etc.) keep working without changes.
+// variant_group (native 13.45) is here so a pulled row can set it on a file that is
+// on this device - the pull applies nothing else to a local row. The server
+// owns it and never takes it back from a push.
 const META_FIELDS = new Set([
   "user_score", "notes", "bookmarks", "view_count", "time_viewed",
-  "last_played", "first_seen", "f_tally"
+  "last_played", "first_seen", "f_tally", "variant_group"
 ]);
 window.VIDEO_META_FIELDS = META_FIELDS;
 

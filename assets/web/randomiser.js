@@ -2779,6 +2779,13 @@ window.sortVideosByScore = sortVideosByScore;
 Rendering Lists
 ========================================= */
 async function renderPlaylist(videos) {
+// Linked copies of one video become one row (render.js, LINKED VARIANTS).
+// Before filteredVideosGlobal is set, so next and previous walk the rows.
+if (typeof window.scrayCollapseVariants === 'function') {
+  const collapsed = window.scrayCollapseVariants(videos);
+  videos = collapsed.videos;
+  window.scrayRandomVariants = collapsed.groups.size ? collapsed.groups : null;
+}
 // Scores already in IndexedDB - no need to merge
 filteredVideosGlobal = videos;
 
@@ -2935,6 +2942,16 @@ if (isLandscape && isMobile && !window.skipPanelAutoOpen) { // ✅ Check global 
  */
 function scrayGroupMainList(list) {
   const ps = paginationState;
+  // Linked copies first (render.js, LINKED VARIANTS): one entry per video,
+  // judged against the whole filtered list, so a re-sort of what's on screen
+  // - which only holds the copy each row shows - still knows every copy.
+  if (typeof window.scrayCollapseVariants === 'function') {
+    const collapsed = window.scrayCollapseVariants(list, ps.unsortedVideos || list);
+    ps.variants = collapsed.groups.size ? collapsed.groups : null;
+    list = collapsed.videos;
+  } else {
+    ps.variants = null;
+  }
   if (typeof window.scrayGroupVideos !== 'function') {
     ps.groups = null; ps.groupOf = null; ps.indexOf = null;
     return list;

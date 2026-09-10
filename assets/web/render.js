@@ -581,7 +581,14 @@ function scrayBuildListRow(video, index, cfg) {
   // file, so it's remembered as open by file AND bookmark time - otherwise
   // opening one bookmark would open every bookmark in that file.
   const bmKey = video.__bmStartAt != null ? `${vidId}@${video.__bmStartAt}` : vidId;
-  li._scrayRowKey = String(cfg.rowKey ?? bmKey);
+  // Linked copies (see LINKED VARIANTS): open state follows the video, not
+  // the file, so switching size keeps the row open.
+  const variants = Array.isArray(cfg.variants) && cfg.variants.length >= 2 ? cfg.variants : null;
+  li._scrayRowKey = String(cfg.rowKey ?? (variants ? `vg:${scrayVariantGroupOf(video)}` : bmKey));
+  if (variants) {
+    li._scrayVariants = variants;
+    li.classList.add('lc-variants');
+  }
 
   const want = SCRAY_LIST_COLUMNS_FOR[list] || SCRAY_LIST_COLUMNS_FOR.main;
   const cols = scrayListColumns(video);
@@ -643,7 +650,11 @@ function scrayBuildListRow(video, index, cfg) {
   if (want.includes('lc-note')) line.appendChild(scrayListNoteCell(video));
   line.append(studio, perf, file, scoreCell);
   if (want.includes('lc-size')) {
-    line.appendChild(cell('lc-size', scrayListIsYetToUpload(video) ? '' : scrayListSize(video.sizeBytes)));
+    const sizeText = variants ? `${variants.length} size`
+      : (scrayListIsYetToUpload(video) ? '' : scrayListSize(video.sizeBytes));
+    const sizeCell = cell('lc-size', sizeText);
+    if (variants) sizeCell.title = variants.map(v => scrayListSize(v.sizeBytes)).join(' / ');
+    line.appendChild(sizeCell);
   }
   li.appendChild(line);
 
@@ -830,7 +841,28 @@ function ensureListRowDetail(li) {
     const sizeDur = document.createElement('span');
     sizeDur.className = 'lc-d-sizedur';
     const dur = window.scrayDisplayDurationMs ? window.scrayDisplayDurationMs(video) : video.durationMs;
-    sizeDur.textContent = ` (${formatFileSize(video.sizeBytes)}, ${formatDuration(dur)})`;
+    if (li._scrayVariants) {
+      // One chip per copy, largest first; the lit one is on screen. Tapping
+      // another switches the whole row to that file.
+      sizeDur.append(' (');
+      li._scrayVariants.forEach((copy, i) => {
+        const on = scrayVariantIdOf(copy) === scrayVariantIdOf(video);
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'lc-variant-chip' + (on ? ' is-on' : '');
+        chip.textContent = formatFileSize(copy.sizeBytes);
+        chip.title = on ? `Showing ${copy.filename}` : `Switch to ${copy.filename}`;
+        chip.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!on) scraySwitchVariant(li, copy);
+        });
+        if (i) sizeDur.append(' ');
+        sizeDur.append(chip);
+      });
+      sizeDur.append(`, ${formatDuration(dur)})`);
+    } else {
+      sizeDur.textContent = ` (${formatFileSize(video.sizeBytes)}, ${formatDuration(dur)})`;
+    }
     fileLine.appendChild(sizeDur);
   }
   detail.appendChild(fileLine);
@@ -869,7 +901,9 @@ function ensureListRowDetail(li) {
 
   // 5 · Buttons: that list's own actions in the shared layout, visible up to
   // and including R. The basket has no B, so one fewer.
-  const raw = typeof cfg.buttons === 'function' ? cfg.buttons() : [];
+  // Handed the row's video: after a size switch that is the other copy, and
+  // a list's buttons closure would otherwise still hold the one it was built with.
+  const raw = typeof cfg.buttons === 'function' ? cfg.buttons(video) : [];
   const { buttons, playSpec } = scrayArrangeOpenRowButtons(raw, video);
   const visible = buttons.findIndex(b => b && b.label === 'R') + 1 || 6;
   detail.appendChild(createCompactButtonGroup(buttons, visible, video));
@@ -1072,6 +1106,190 @@ function scrayGroupVideos(videos) {
   return { videos: out, groups, keyOf };
 }
 window.scrayGroupVideos = scrayGroupVideos;
+
+/* =========================================
+LINKED VARIANTS (picker 13.47, native 13.45)
+=========================================
+
+The same video in more than one file size, linked in bulk stash. The server
+stamps every copy's catalogue row with variant_group, and the main and random
+lists draw the copies as ONE line:
+
+  collapsed   #  studio  performers  filename           score  2 size
+  open        filename [score] ([1.4 GB] [520 MB], 44:12)
+
+Tapping a size in the open row switches the row to that copy. The filename,
+path, size, duration and anything else that differs follow, and P, next and
+previous play that copy. The choice is remembered per video on this device;
+until one is made, the largest copy is shown.
+
+Only copies IN the list count. A filter that leaves one copy gives an
+ordinary row, and so does a phone holding only one - which is what makes
+Native show just what is downloaded: its list is the files on the device.
+
+Wholesale mode lists files one at a time on purpose, and is left alone.
+Basket, history and bookmarks keep one row per file: those are a specific
+size by nature.
+========================================= */
+
+// localStorage: { variant_group: video key of the copy last picked }
+const SCRAY_VARIANT_CHOICE_KEY = 'scrayVariantChoice';
+
+// What linked copies share on the server (api.php, VARIANTS). A switch carries
+// these over from the copy on screen, so a score set a moment ago doesn't
+// vanish because the other copy's object was built before it.
+const SCRAY_VARIANT_SHARED_FIELDS = [
+  'user_score', 'userScore', 'notes', 'bookmarks',
+  'view_count', 'time_viewed', 'last_played', 'f_tally'
+];
+
+function scrayVariantGroupOf(video) {
+  const g = video && video.__bmStartAt == null ? video.variant_group : null;
+  return g ? String(g) : null;
+}
+window.scrayVariantGroupOf = scrayVariantGroupOf;
+
+function scrayVariantIdOf(video) {
+  return String((video && (video.videoKey ?? video.video_key ?? video.oneDriveId ?? video.filename)) || '');
+}
+
+function scrayVariantChoices() {
+  try { return JSON.parse(localStorage.getItem(SCRAY_VARIANT_CHOICE_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+
+function scrayRememberVariant(video) {
+  const g = scrayVariantGroupOf(video);
+  if (!g) return;
+  const choices = scrayVariantChoices();
+  choices[g] = scrayVariantIdOf(video);
+  try { localStorage.setItem(SCRAY_VARIANT_CHOICE_KEY, JSON.stringify(choices)); } catch {}
+}
+
+/** The copy a group shows: the one last picked here, else the largest. */
+function scrayPickVariant(group, members) {
+  const want = scrayVariantChoices()[group];
+  return (want && members.find(m => scrayVariantIdOf(m) === want)) || members[0];
+}
+
+/**
+ * One entry per video for a list: each linked group's copies reduced to the
+ * copy it shows, placed where the group's best-placed copy was.
+ *
+ * @param {Array} list  the list, in display order
+ * @param {Array} pool  every file the list was drawn from (defaults to list).
+ *                      A re-sort of what's on screen only holds the copies it
+ *                      shows, so it passes the full filtered list here.
+ * @returns {{ videos: Array, groups: Map }}
+ *   groups  variant_group -> its copies in this pool, largest first. Only
+ *           groups with two or more copies present.
+ */
+function scrayCollapseVariants(list, pool) {
+  list = Array.isArray(list) ? list : [];
+  pool = Array.isArray(pool) ? pool : list;
+  const groups = new Map();
+  const wholesale = window.scrayWholesaleMode && typeof window.scrayWholesaleMode.isOn === 'function'
+    && window.scrayWholesaleMode.isOn();
+  if (wholesale) return { videos: list, groups };
+
+  const byGroup = new Map();
+  pool.forEach(v => {
+    const g = scrayVariantGroupOf(v);
+    if (!g) return;
+    if (!byGroup.has(g)) byGroup.set(g, new Map());
+    const copies = byGroup.get(g);
+    const id = scrayVariantIdOf(v);
+    if (!copies.has(id)) copies.set(id, v);
+  });
+  byGroup.forEach((copies, g) => {
+    if (copies.size < 2) return;
+    groups.set(g, [...copies.values()].sort((a, b) => (Number(b.sizeBytes) || 0) - (Number(a.sizeBytes) || 0)));
+  });
+  if (!groups.size) return { videos: list, groups };
+
+  // The list's own object for a copy wins over the pool's: an edit made since
+  // the pool was built (a score, a rename) lives on the list's.
+  const inList = new Map();
+  list.forEach(v => {
+    const g = scrayVariantGroupOf(v);
+    if (g && groups.has(g)) inList.set(g + ' ' + scrayVariantIdOf(v), v);
+  });
+
+  const out = [];
+  const placed = new Set();
+  list.forEach(v => {
+    const g = scrayVariantGroupOf(v);
+    if (!g || !groups.has(g)) { out.push(v); return; }
+    if (placed.has(g)) return;
+    placed.add(g);
+    const pick = scrayPickVariant(g, groups.get(g));
+    out.push(inList.get(g + ' ' + scrayVariantIdOf(pick)) || pick);
+  });
+  return { videos: out, groups };
+}
+window.scrayCollapseVariants = scrayCollapseVariants;
+
+/**
+ * Switch a row to another copy. The row is rebuilt from scratch with the new
+ * copy - every cell and every button then reads the right file, with no chance
+ * of one being missed - and it reopens itself, because a variant row is
+ * remembered as open by its group, not by its file.
+ */
+function scraySwitchVariant(li, target) {
+  const cur = li && li._scrayVideo;
+  if (!cur || !target || scrayVariantIdOf(target) === scrayVariantIdOf(cur)) return;
+
+  const next = { ...target };
+  SCRAY_VARIANT_SHARED_FIELDS.forEach(f => { if (cur[f] !== undefined) next[f] = cur[f]; });
+  scrayRememberVariant(next);
+
+  const cfg = li._scrayCfg || {};
+  const copies = (li._scrayVariants || []).map(m => scrayVariantIdOf(m) === scrayVariantIdOf(next) ? next : m);
+  if (typeof cfg.onVariant === 'function') cfg.onVariant(next, cur);
+
+  const fresh = scrayBuildListRow(next, li._scrayIndex, { ...cfg, variants: copies });
+  li.replaceWith(fresh);
+  if (typeof updateBasketHighlights === 'function') updateBasketHighlights();
+}
+window.scraySwitchVariant = scraySwitchVariant;
+
+/** The main list's copies for a row, from renderPaginatedListSetup. */
+function scrayMainVariantsFor(video) {
+  const ps = window.paginationState;
+  const g = scrayVariantGroupOf(video);
+  return (ps && ps.variants && g) ? (ps.variants.get(g) || null) : null;
+}
+
+/**
+ * The main list swapped a row to another copy: put that copy where the old
+ * one was in allVideos - what P, next and previous read - and in the maps
+ * that find a file's place and its folder group.
+ */
+function scraySetMainVariant(index, next, prev) {
+  const ps = window.paginationState;
+  if (!ps || !Array.isArray(ps.allVideos)) return;
+  let at = ps.allVideos[index] === prev ? index : ps.allVideos.indexOf(prev);
+  if (at < 0) at = ps.allVideos.findIndex(v => scrayVariantIdOf(v) === scrayVariantIdOf(prev));
+  if (at < 0) return;
+  ps.allVideos[at] = next;
+  if (ps.indexOf) { ps.indexOf.delete(prev); ps.indexOf.set(next, at); }
+  if (ps.groupOf && ps.groupOf.has(prev)) {
+    const key = ps.groupOf.get(prev);
+    ps.groupOf.delete(prev);
+    ps.groupOf.set(next, key);
+    const group = ps.groups && ps.groups.get(key);
+    if (group) group.members = group.members.map(m => m === prev ? next : m);
+  }
+}
+
+/** The random list swapped a row: same, for filteredVideosGlobal. */
+function scraySetRandomVariant(index, next, prev) {
+  const arr = window.filteredVideosGlobal;
+  if (!Array.isArray(arr)) return;
+  let at = arr[index] === prev ? index : arr.indexOf(prev);
+  if (at < 0) at = arr.findIndex(v => scrayVariantIdOf(v) === scrayVariantIdOf(prev));
+  if (at >= 0) arr[at] = next;
+}
 
 function scrayBasketIdOf(video) {
   let oneDriveId = video.oneDriveId ?? video.idFromAPI ?? null;
@@ -1290,7 +1508,10 @@ function renderVideoList(videos, containerId) {
     container.appendChild(columns
       ? scrayBuildListRow(video, index, {
           list: 'random',
-          buttons: () => buildVideoRowButtons(video, 'random', index)
+          variants: (window.scrayRandomVariants && scrayVariantGroupOf(video))
+            ? (window.scrayRandomVariants.get(scrayVariantGroupOf(video)) || null) : null,
+          onVariant: (next, prev) => scraySetRandomVariant(index, next, prev),
+          buttons: (v) => buildVideoRowButtons(v || video, 'random', index)
         })
       : buildVideoRow(video, 'random', index));
   });
@@ -1323,7 +1544,9 @@ function appendVideoList(videos, containerId) {
   const mainRow = (video, index, number) => scrayBuildListRow(video, index, {
     list: 'main',
     number,
-    buttons: () => buildVideoRowButtons(video, 'main', index)
+    variants: scrayMainVariantsFor(video),
+    onVariant: (next, prev) => scraySetMainVariant(index, next, prev),
+    buttons: (v) => buildVideoRowButtons(v || video, 'main', index)
   });
 
   videos.forEach((video, index) => {

@@ -14,6 +14,9 @@ function updateBasketHighlights() {
           li.classList.remove('basket-added');
       }
   });
+  // Folder groups (they have no video id of their own, so the loop above just
+  // cleared them) - pink when every file is in the basket.
+  if (typeof scrayRefreshGroupBasketState === 'function') scrayRefreshGroupBasketState();
 }
 
 /**
@@ -568,7 +571,9 @@ function scrayBuildListRow(video, index, cfg) {
   // "N. " as a bare text node at the front of the row's FIRST span. That is
   // exactly what removeRowFromLists rewrites to renumber after a delete, so
   // it keeps working on these rows without knowing they changed.
-  const num = cell('lc-num', `${index + 1}. `);
+  // cfg.number when the printed number isn't the position - a list with
+  // folder groups counts lines, and a group's files count within the group.
+  const num = cell('lc-num', `${cfg.number ?? index + 1}. `);
   if (cfg.select) {
     // The number doubles as the tick, so the rest of the line is free to open
     // the row. A ticked row shows ✓ in place of its number.
@@ -891,6 +896,323 @@ window.scrayRefreshMainListHeader = function () {
 };
 
 
+/* =========================================
+SMALL-FILE GROUPS
+=========================================
+
+Files under SCRAY_GROUP_MAX_BYTES from the same folder, and not matched on
+StashDB, are shown as ONE line for the folder instead of scattered through
+the list - small files tend to be watched together.
+
+  collapsed   #  studio  performers  misc <100mb · 12   ★  (total size)
+  open        [Add folder to basket]  12 files · 640 MB · folder/path
+              1. file   (each an ordinary row, which opens as usual)
+              2. file
+              ...
+
+A stash-matched file always keeps its own line. A folder with only one small
+file showing keeps it as an ordinary line too - a group needs two.
+
+Used by the main list and the basket. The basket only syncs a list of files,
+not how they got there, so a group there is never stored: it is worked out
+from the same rule every time the basket is drawn.
+========================================= */
+
+// ⚙️ Files strictly under this size can be grouped. 1 MB = 1024 KB, the same
+// as the sizes the lists print.
+const SCRAY_GROUP_MAX_BYTES = 100 * 1024 * 1024;
+// ⚙️ Fewest small files from one folder that make a group.
+const SCRAY_GROUP_MIN_FILES = 2;
+// ⚙️ What a group line says where a filename would go.
+const SCRAY_GROUP_LABEL = 'misc <100mb';
+
+// Which groups are open, per list, by group key - kept across re-renders for
+// the same reason as scrayOpenListRows.
+const scrayOpenListGroups = { main: new Set(), basket: new Set() };
+function scrayOpenGroupsFor(list) {
+  if (!scrayOpenListGroups[list]) scrayOpenListGroups[list] = new Set();
+  return scrayOpenListGroups[list];
+}
+
+/** The folder a video sits in, as a full path - the catalogue path on Native. */
+function scrayGroupFolder(video) {
+  let raw;
+  if (typeof window.scrayResolvePathParts === 'function') {
+    raw = window.scrayResolvePathParts(video).catalogue;
+  } else {
+    const p = (video && video.path) || '';
+    raw = (p.startsWith('*') ? p.slice(1) : p).split('/').filter(Boolean);
+  }
+  return raw.join('/');
+}
+
+/**
+ * The group a video belongs in, or null if it keeps its own line.
+ *
+ * "Stash matched" is either signal the app has: the server's matched set
+ * (what colours the S button) or a scene name to print. A file with an unknown
+ * size never groups - it might not be small.
+ */
+function scrayGroupKeyFor(video) {
+  if (!video) return null;
+  const size = Number(video.sizeBytes);
+  if (!(size > 0 && size < SCRAY_GROUP_MAX_BYTES)) return null;
+  if (scrayListIsYetToUpload(video)) return null;
+  if (typeof window.scrayHasStashMatch === 'function' && window.scrayHasStashMatch(video)) return null;
+  if (window.scrayStashNames && window.scrayStashNames.has(video)) return null;
+  return 'g:' + scrayGroupFolder(video);
+}
+window.scrayGroupKeyFor = scrayGroupKeyFor;
+
+/**
+ * Put a list into display order with each group's files together.
+ *
+ * A group takes the place of its FIRST file in the order given, and its files
+ * keep their order among themselves - so whatever the list was sorted by, the
+ * group sits where its best-placed file would, and plays in that order. Every
+ * list that uses this plays straight down the returned array, which is why
+ * the files have to be moved together rather than just drawn together.
+ *
+ * @returns {{ videos: Array, groups: Map, keyOf: Map }}
+ *   videos  the same files, grouped files moved together
+ *   groups  key -> { key, folder, members, totalBytes }
+ *   keyOf   video -> key, for grouped files only
+ */
+function scrayGroupVideos(videos) {
+  const list = Array.isArray(videos) ? videos : [];
+  const byKey = new Map();
+  list.forEach(v => {
+    const k = scrayGroupKeyFor(v);
+    if (!k) return;
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(v);
+  });
+
+  const groups = new Map();
+  const keyOf = new Map();
+  byKey.forEach((members, key) => {
+    if (members.length < SCRAY_GROUP_MIN_FILES) return;
+    groups.set(key, {
+      key,
+      folder: scrayGroupFolder(members[0]),
+      members,
+      totalBytes: members.reduce((sum, v) => sum + (Number(v.sizeBytes) || 0), 0)
+    });
+    members.forEach(v => keyOf.set(v, key));
+  });
+
+  if (!groups.size) return { videos: list, groups, keyOf };
+
+  const out = [];
+  const placed = new Set();
+  list.forEach(v => {
+    const k = keyOf.get(v);
+    if (!k) { out.push(v); return; }
+    if (placed.has(k)) return;
+    placed.add(k);
+    out.push(...groups.get(k).members);
+  });
+  return { videos: out, groups, keyOf };
+}
+window.scrayGroupVideos = scrayGroupVideos;
+
+function scrayBasketIdOf(video) {
+  let oneDriveId = video.oneDriveId ?? video.idFromAPI ?? null;
+  let driveId = video.driveId ?? null;
+  if ((!oneDriveId || !driveId) && video.webUrl) {
+    try {
+      const u = new URL(video.webUrl);
+      driveId = driveId || u.searchParams.get("cid");
+      oneDriveId = oneDriveId || u.searchParams.get("id");
+    } catch {}
+  }
+  return { oneDriveId, driveId };
+}
+
+function scrayAfterBasketChange() {
+  if (typeof window.resetBasketPlayIndex === 'function') window.resetBasketPlayIndex();
+  if (typeof window.saveBasket === 'function') window.saveBasket();
+  if (typeof window.renderBasket === 'function') window.renderBasket();
+  if (typeof window.updateBasketHighlights === 'function') window.updateBasketHighlights();
+  if (typeof window.updateHistoryHighlights === 'function') window.updateHistoryHighlights();
+  if (typeof window.updateRandomPanelHighlights === 'function') window.updateRandomPanelHighlights();
+}
+
+/**
+ * Add several files at once - a whole folder - in one basket change, so the
+ * basket saves, syncs and redraws once rather than once per file. They go on
+ * top, in the order given, like addToBasket.
+ */
+window.scrayAddVideosToBasket = function (videos) {
+  const basket = window.basketVideos || [];
+  const have = new Set(basket.map(v => v.oneDriveId));
+  const adding = [];
+  (videos || []).forEach(video => {
+    const { oneDriveId, driveId } = scrayBasketIdOf(video);
+    if (!oneDriveId || have.has(oneDriveId)) return;
+    have.add(oneDriveId);
+    adding.push({ ...video, oneDriveId, driveId });
+  });
+  if (!adding.length) return 0;
+  window.basketVideos = adding.concat(basket);
+  scrayAfterBasketChange();
+  return adding.length;
+};
+
+window.scrayRemoveVideosFromBasket = function (videos) {
+  const ids = new Set((videos || []).map(v => scrayBasketIdOf(v).oneDriveId).filter(Boolean));
+  const basket = window.basketVideos || [];
+  const kept = basket.filter(v => !ids.has(v.oneDriveId));
+  if (kept.length === basket.length) return 0;
+  window.basketVideos = kept;
+  if (window.selectedBasketIds) ids.forEach(id => window.selectedBasketIds.delete(id));
+  scrayAfterBasketChange();
+  return basket.length - kept.length;
+};
+
+function scrayGroupAllInBasket(group) {
+  const ids = new Set((window.basketVideos || []).map(v => v.oneDriveId));
+  return group.members.length > 0 && group.members.every(v => ids.has(scrayBasketIdOf(v).oneDriveId));
+}
+
+/**
+ * The line for a group, with its (hidden) body. Files are added with
+ * li._scrayAddMember(rowLi) - the main list adds them all at once, the basket
+ * one by one as it walks its array.
+ *
+ * @param {Object} group   from scrayGroupVideos
+ * @param {number} number  what the # column prints
+ * @param {Object} cfg
+ *   list    'main' | 'basket'
+ *   select  { on, toggle } - the # ticks every file in the group (basket)
+ */
+function scrayBuildGroupRow(group, number, cfg) {
+  const list = cfg.list || 'main';
+  const li = document.createElement('li');
+  // lc-row as well, so the row styling (grid, fonts, backgrounds) applies.
+  // It carries no data-video-id, so nothing that looks rows up by video
+  // mistakes it for one.
+  li.className = 'lc-row lc-group';
+  li.dataset.groupKey = group.key;
+  li._scrayGroup = group;
+  li._scrayCfg = cfg;
+
+  const want = SCRAY_LIST_COLUMNS_FOR[list] || SCRAY_LIST_COLUMNS_FOR.main;
+  const cols = scrayListColumns(group.members[0]);
+
+  const line = document.createElement('div');
+  line.className = 'lc-line lc-group-line';
+  const cell = (cls, text) => {
+    const s = document.createElement('span');
+    s.className = 'lc-cell ' + cls;
+    s.textContent = text;
+    return s;
+  };
+
+  const num = cell('lc-num', `${number}. `);
+  if (cfg.select) {
+    num.classList.add('lc-tick');
+    num.title = cfg.select.on ? 'Tap to deselect the folder' : 'Tap to select the whole folder';
+    if (cfg.select.on) {
+      li.classList.add('lc-selected');
+      num.textContent = '✓';
+    }
+    num.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cfg.select.toggle();
+    });
+  }
+
+  const studio = cell('lc-studio', cols.studio);
+  studio.title = group.folder;
+  const perf = cell('lc-perf', cols.performers);
+  perf.title = group.folder;
+
+  const file = cell('lc-file lc-group-name', '');
+  file.appendChild(document.createTextNode(SCRAY_GROUP_LABEL));
+  const count = document.createElement('span');
+  count.className = 'lc-group-count';
+  count.textContent = ` · ${group.members.length}`;
+  file.appendChild(count);
+  file.title = `${group.members.length} files under 100 MB in ${group.folder || 'the top folder'}`;
+
+  const scoreCell = cell('lc-score lc-blank', '');
+
+  line.append(num, studio, perf, file, scoreCell);
+  if (want.includes('lc-size')) line.appendChild(cell('lc-size', scrayListSize(group.totalBytes)));
+  li.appendChild(line);
+
+  const body = document.createElement('div');
+  body.className = 'lc-group-body';
+  body.hidden = true;
+
+  const actions = document.createElement('div');
+  actions.className = 'lc-group-actions';
+  const basketBtn = document.createElement('button');
+  basketBtn.type = 'button';
+  basketBtn.className = 'lc-group-basket';
+  const summary = document.createElement('span');
+  summary.className = 'lc-group-summary';
+  const summarise = () => {
+    summary.textContent = `${group.members.length} files · ${formatFileSize(group.totalBytes)} · ${group.folder || '(top folder)'}`;
+  };
+  summarise();
+  // In the main list the button toggles, like B does for one file. In the
+  // basket every file is already in it, so it only ever takes the folder out.
+  const syncBasketBtn = () => {
+    const remove = list === 'basket' || scrayGroupAllInBasket(group);
+    basketBtn.textContent = remove ? 'Remove folder from basket' : 'Add folder to basket';
+    basketBtn.classList.toggle('lc-group-basket-remove', remove);
+  };
+  li._scraySyncGroupBasket = syncBasketBtn;
+  syncBasketBtn();
+  basketBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (list === 'basket' || scrayGroupAllInBasket(group)) {
+      window.scrayRemoveVideosFromBasket(group.members);
+    } else {
+      window.scrayAddVideosToBasket(group.members);
+    }
+  });
+  actions.append(basketBtn, summary);
+
+  const members = document.createElement('ul');
+  members.className = 'lc-group-list';
+  body.append(actions, members);
+  li.appendChild(body);
+
+  li._scrayAddMember = (rowLi) => {
+    rowLi.classList.add('lc-group-member');
+    members.appendChild(rowLi);
+  };
+
+  const setOpen = (open) => {
+    body.hidden = !open;
+    li.classList.toggle('lc-group-open', open);
+    const set = scrayOpenGroupsFor(list);
+    if (open) set.add(group.key); else set.delete(group.key);
+  };
+  line.addEventListener('click', () => {
+    const before = li.getBoundingClientRect().top;
+    setOpen(body.hidden);
+    const moved = li.getBoundingClientRect().top - before;
+    if (moved) window.scrollBy(0, moved);
+  });
+  if (scrayOpenGroupsFor(list).has(group.key)) setOpen(true);
+
+  return li;
+}
+window.scrayBuildGroupRow = scrayBuildGroupRow;
+
+/** Group lines follow the basket too: pink when the whole folder is in, and the button's wording. */
+function scrayRefreshGroupBasketState() {
+  document.querySelectorAll('#taggedVideosContainer li.lc-group').forEach(g => {
+    if (!g._scrayGroup) return;
+    g.classList.toggle('basket-added', scrayGroupAllInBasket(g._scrayGroup));
+    if (typeof g._scraySyncGroupBasket === 'function') g._scraySyncGroupBasket();
+  });
+}
+
 /**
 * Render a list of videos into a given container.
 *
@@ -932,16 +1254,47 @@ function appendVideoList(videos, containerId) {
   // The main list is the column layout; anything else handed here keeps the
   // old row. The header is re-added whenever the container has been cleared.
   const columns = containerId === 'taggedVideosContainer';
-  if (columns) ensureListHeader(container, 'main');
+  const ps = paginationState;
+  if (columns) {
+    // No header means the container was just cleared: numbering starts again.
+    if (!container.querySelector(':scope > .lc-head')) ps.entryCount = 0;
+    ensureListHeader(container, 'main');
+  }
+
+  const mainRow = (video, index, number) => scrayBuildListRow(video, index, {
+    list: 'main',
+    number,
+    buttons: () => buildVideoRowButtons(video, 'main', index)
+  });
 
   videos.forEach((video, index) => {
-    const globalIndex = paginationState.currentEndIndex + index;
-    container.appendChild(columns
-      ? scrayBuildListRow(video, globalIndex, {
-          list: 'main',
-          buttons: () => buildVideoRowButtons(video, 'main', globalIndex)
-        })
-      : buildVideoRow(video, 'main', globalIndex));
+    const globalIndex = ps.currentEndIndex + index;
+    if (!columns) {
+      container.appendChild(buildVideoRow(video, 'main', globalIndex));
+      return;
+    }
+
+    // A small file in a folder group: the group line is built when its first
+    // file comes past, with every file in it, and the rest are skipped here.
+    // Each file keeps its own position in allVideos, which is what next and
+    // previous walk - renderPaginatedListSetup has already moved a group's
+    // files together, so that order matches the screen.
+    const groupKey = ps.groupOf && ps.groupOf.get(video);
+    if (groupKey) {
+      if (container.querySelector(`:scope > li.lc-group[data-group-key="${CSS.escape(groupKey)}"]`)) return;
+      const group = ps.groups.get(groupKey);
+      ps.entryCount = (ps.entryCount || 0) + 1;
+      const groupLi = scrayBuildGroupRow(group, ps.entryCount, { list: 'main' });
+      group.members.forEach((member, i) => {
+        const at = ps.indexOf && ps.indexOf.has(member) ? ps.indexOf.get(member) : globalIndex + i;
+        groupLi._scrayAddMember(mainRow(member, at, i + 1));
+      });
+      container.appendChild(groupLi);
+      return;
+    }
+
+    ps.entryCount = (ps.entryCount || 0) + 1;
+    container.appendChild(mainRow(video, globalIndex, ps.entryCount));
   });
 
   updateBasketHighlights();

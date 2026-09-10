@@ -81,6 +81,29 @@ if (typeof window.scrayBuildListHeader === 'function') {
     basketList.appendChild(window.scrayBuildListHeader('basket'));
 }
 
+// Small files from one folder are kept together as a folder group
+// (render.js, scrayGroupVideos). The basket only syncs a list of files, so
+// the grouping isn't stored anywhere - it is worked out here every time, and
+// if the files aren't already next to each other they are MOVED together
+// (to where the first of them is) and saved, because the basket plays in
+// array order and that has to match what's on screen.
+let basketGroups = null;
+let basketGroupOf = null;
+if (typeof window.scrayGroupVideos === 'function') {
+    const grouped = window.scrayGroupVideos(basketVideos);
+    if (grouped.videos.some((v, i) => v !== basketVideos[i])) {
+        basketVideos = grouped.videos;
+        window.basketVideos = basketVideos;
+        saveBasket();
+    }
+    if (grouped.groups.size) {
+        basketGroups = grouped.groups;
+        basketGroupOf = grouped.keyOf;
+    }
+}
+let basketLineNo = 0;
+const basketGroupLis = new Map();
+
 basketVideos.forEach((video, idx) => {
 
     // ✅ Create compact button group with overflow menu
@@ -263,11 +286,55 @@ onClick: async (e) => {
 // The row itself is render.js's column row: tap the line to open it, tap the
 // number to tick it (what tapping the row used to do), tap the open row's text
 // to play, long-press to drag as before. These buttons are laid out there as
-// B D ★ S BM R …: "Remove" becomes B, the R above stays rename, and this P
-// still decides what "play" means here (basket order, panel closes on phones).
+// D ★ S BM R …: "Remove" is dropped (Remove selected does that), the R above
+// stays rename, and this P still decides what "play" means here (basket
+// order, panel closes on phones).
 const selected = selectedBasketIds.has(video.oneDriveId);
+const groupKey = basketGroupOf && basketGroupOf.get(video);
+
+if (groupKey) {
+    // A file in a folder group: the group line is made when its first file
+    // comes past, and every file is added inside it. The GROUP is what drags,
+    // as a block of dataset.count files from dataset.index; its files don't
+    // drag on their own. Ticking the group's # ticks all of its files.
+    let groupLi = basketGroupLis.get(groupKey);
+    if (!groupLi) {
+        const group = basketGroups.get(groupKey);
+        const ids = group.members.map(v => v.oneDriveId);
+        const allSelected = ids.every(id => selectedBasketIds.has(id));
+        groupLi = window.scrayBuildGroupRow(group, ++basketLineNo, {
+            list: 'basket',
+            select: {
+                on: allSelected,
+                toggle: () => {
+                    ids.forEach(id => allSelected ? selectedBasketIds.delete(id) : selectedBasketIds.add(id));
+                    renderBasket();
+                }
+            }
+        });
+        groupLi.draggable = true;
+        groupLi.dataset.index = idx;
+        groupLi.dataset.count = group.members.length;
+        if (allSelected) groupLi.classList.add("basket-selected");
+        setupDragAndDrop(groupLi);
+        basketList.appendChild(groupLi);
+        basketGroupLis.set(groupKey, groupLi);
+        groupLi._scrayMemberNo = 0;
+    }
+    const memberLi = window.scrayBuildListRow(video, idx, {
+        list: 'basket',
+        number: ++groupLi._scrayMemberNo,
+        buttons: () => buttons,
+        select: { on: selected, toggle: () => toggleBasketSelection(video.oneDriveId) }
+    });
+    if (selected) memberLi.classList.add("basket-selected");
+    groupLi._scrayAddMember(memberLi);
+    return;
+}
+
 const li = window.scrayBuildListRow(video, idx, {
     list: 'basket',
+    number: ++basketLineNo,
     buttons: () => buttons,
     select: { on: selected, toggle: () => toggleBasketSelection(video.oneDriveId) }
 });
@@ -295,6 +362,7 @@ if (window.updateHistoryHighlights) window.updateHistoryHighlights();
 // ✅ Drag and drop functionality
 let draggedItem = null;
 let draggedIndex = null;
+let draggedCount = 1;   // a folder group drags as a block of this many files
 let dropIndicator = null;
 let ghostElement = null;
 let targetDropIndex = null; // Track where we want to drop
@@ -335,6 +403,7 @@ function setupDragAndDrop(li) {
 
      draggedItem = li;
      draggedIndex = parseInt(li.dataset.index);
+     draggedCount = parseInt(li.dataset.count || '1', 10);
      const video = basketVideos[draggedIndex];
      
      li.classList.add('dragging');
@@ -378,8 +447,10 @@ function setupDragAndDrop(li) {
      const midpoint = rect.top + rect.height / 2;
      
      // Determine drop position
-     const allItems = Array.from(li.parentElement.querySelectorAll('li[draggable="true"]'));
-     const overIndex = allItems.indexOf(li);
+     // Basket positions, not DOM positions: a folder group is one element
+     // holding several files, so counting elements no longer gives the index.
+     const overIndex = parseInt(li.dataset.index, 10);
+     const overCount = parseInt(li.dataset.count || '1', 10);
      
      // ✅ Make sure indicator is in the DOM and visible
      if (e.clientY < midpoint) {
@@ -391,7 +462,7 @@ function setupDragAndDrop(li) {
          if (dropIndicator.previousSibling !== li) {
              li.parentElement.insertBefore(dropIndicator, li.nextSibling);
          }
-         targetDropIndex = overIndex + 1;
+         targetDropIndex = overIndex + overCount;
      }
  });
 
@@ -403,16 +474,17 @@ function setupDragAndDrop(li) {
          dropIndicator.remove();
      }
      
-     if (draggedIndex !== null && targetDropIndex !== null && draggedIndex !== targetDropIndex) {
-         const [movedItem] = basketVideos.splice(draggedIndex, 1);
+     if (draggedIndex !== null && targetDropIndex !== null && !(targetDropIndex >= draggedIndex && targetDropIndex <= draggedIndex + (draggedCount || 1))) {
+         // Dropping a block anywhere inside its own span changes nothing.
+         const movedItems = basketVideos.splice(draggedIndex, draggedCount || 1);
          
          // Adjust target index if dragging from earlier position
          let insertIndex = targetDropIndex;
          if (draggedIndex < targetDropIndex) {
-             insertIndex--;
+             insertIndex -= (draggedCount || 1);
          }
          
-         basketVideos.splice(insertIndex, 0, movedItem);
+         basketVideos.splice(insertIndex, 0, ...movedItems);
          
          window.basketVideos = basketVideos;
          saveBasket();
@@ -458,6 +530,7 @@ li.addEventListener('touchstart', (e) => {
      touchStartX = e.touches[0].clientX;
      touchStartTime = Date.now();
      draggedIndex = parseInt(li.dataset.index);
+     draggedCount = parseInt(li.dataset.count || '1', 10);
      targetDropIndex = null;
      hasMoved = false;
      
@@ -528,15 +601,16 @@ li.addEventListener('touchstart', (e) => {
          const rect = overItem.getBoundingClientRect();
          const midpoint = rect.top + rect.height / 2;
          
-         const allItems = Array.from(li.parentElement.querySelectorAll('li[draggable="true"]'));
-         const overIndex = allItems.indexOf(overItem);
+         // Basket positions, not DOM positions - see dragover above.
+         const overIndex = parseInt(overItem.dataset.index, 10);
+         const overCount = parseInt(overItem.dataset.count || '1', 10);
          
          if (currentY < midpoint) {
              li.parentElement.insertBefore(dropIndicator, overItem);
              targetDropIndex = overIndex;
          } else {
              li.parentElement.insertBefore(dropIndicator, overItem.nextSibling);
-             targetDropIndex = overIndex + 1;
+             targetDropIndex = overIndex + overCount;
          }
      }
      
@@ -564,16 +638,17 @@ li.addEventListener('touchstart', (e) => {
      }
      
      // ✅ Use targetDropIndex instead of calculating from DOM
-     if (draggedIndex !== null && targetDropIndex !== null && draggedIndex !== targetDropIndex) {
-         const [movedItem] = basketVideos.splice(draggedIndex, 1);
+     if (draggedIndex !== null && targetDropIndex !== null && !(targetDropIndex >= draggedIndex && targetDropIndex <= draggedIndex + (draggedCount || 1))) {
+         // Dropping a block anywhere inside its own span changes nothing.
+         const movedItems = basketVideos.splice(draggedIndex, draggedCount || 1);
          
          // Adjust target index if dragging from earlier position
          let insertIndex = targetDropIndex;
          if (draggedIndex < targetDropIndex) {
-             insertIndex--;
+             insertIndex -= (draggedCount || 1);
          }
          
-         basketVideos.splice(insertIndex, 0, movedItem);
+         basketVideos.splice(insertIndex, 0, ...movedItems);
          
          window.basketVideos = basketVideos;
          saveBasket();

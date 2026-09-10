@@ -1222,12 +1222,19 @@ function removeRowFromLists(oneDriveId) {
     ['taggedVideosContainer', 'panelTaggedList', 'playlist'].forEach(id => {
         const container = document.getElementById(id);
         if (!container) return;
-        let n = 0;
-        container.querySelectorAll('li[data-video-id]').forEach(li => {
-            n++;
-            const first = li.querySelector('span')?.firstChild;
-            if (first && first.nodeType === 3) first.nodeValue = `${n}. `;
-        });
+        // Lines, not files: a folder group (render.js) is one line, and the
+        // files inside it are numbered within the group.
+        const renumber = (parent) => {
+            let n = 0;
+            parent.querySelectorAll(':scope > li[data-video-id], :scope > li.lc-group').forEach(li => {
+                n++;
+                const first = li.querySelector('span')?.firstChild;
+                if (first && first.nodeType === 3) first.nodeValue = `${n}. `;
+                const inner = li.classList.contains('lc-group') && li.querySelector('.lc-group-list');
+                if (inner) renumber(inner);
+            });
+        };
+        renumber(container);
     });
 }
 window.removeRowFromLists = removeRowFromLists;

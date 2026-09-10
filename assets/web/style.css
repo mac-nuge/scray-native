@@ -6772,5 +6772,74 @@ specificity (the extra .lc-row class). */
   padding: 4px 7px !important;
 }
 
+/* ---- small-file folder groups (render.js, scrayBuildGroupRow) ----
+   A group is an ordinary row (li.lc-row.lc-group) whose line names the folder
+   and "misc <100mb", and whose body is an action bar plus the files, each an
+   ordinary row again. */
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-group > .lc-line .lc-group-name {
+  font-style: italic;
+  color: #555;
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-group > .lc-line .lc-group-count {
+  font-style: normal;
+  color: #999;
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-group.lc-group-open:not(.basket-added):not(.lc-selected) {
+  background-color: rgba(30, 60, 100, 0.04) !important;
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-group.lc-group-open > .lc-line .lc-group-name {
+  font-weight: 600;
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-group > .lc-group-body[hidden] {
+  display: none !important;
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-group-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 8px 6px calc(1.5rem + 8px);
+}
+:is(#historyList, #basketList) .lc-group-actions {
+  padding-left: 8px;
+}
+/* !important against the phone-wide "button { width: 100%; padding: 12px }". */
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-group-actions .lc-group-basket {
+  flex: 0 0 auto;
+  width: auto !important;
+  margin: 0 !important;
+  padding: 5px 10px !important;
+  min-height: 28px;
+  font-size: 0.72rem !important;
+  line-height: 1.1;
+  border: none;
+  border-radius: 4px;
+  background: #e91e63;
+  color: #fff;
+  cursor: pointer;
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-group-actions .lc-group-basket.lc-group-basket-remove {
+  background: #6c757d;
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-group-summary {
+  min-width: 0;
+  font-size: 0.68rem;
+  color: #777;
+  overflow-wrap: anywhere;
+}
+/* The files, set in under the group with a rule down the left. */
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) ul.lc-group-list {
+  list-style: none;
+  margin: 0 0 4px 6px !important;
+  padding: 0 !important;
+  border-left: 2px solid rgba(30, 60, 100, 0.18);
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) ul.lc-group-list > li.lc-row:last-child {
+  border-bottom: 0 !important;
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-group-member:not(.lc-selected) .lc-num {
+  color: #bbb;
+}
+
 /* Clear has nothing to clear. */
 .sort-btn.sort-btn-idle { opacity: 0.55; }

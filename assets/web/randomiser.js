@@ -249,7 +249,7 @@ function scrayApplyListSort() {
   }
   // A heading tap on a 200-row list shouldn't also cut it back to 25.
   const depth = Math.max(25, ps.currentEndIndex || 0);
-  ps.allVideos = scraySortVideos(ps.allVideos, ps.unsortedVideos || null);
+  ps.allVideos = scrayGroupMainList(scraySortVideos(ps.allVideos, ps.unsortedVideos || null));
   ps.currentEndIndex = 0;
   container.innerHTML = '';
   renderNextChunk(depth);
@@ -2868,7 +2868,7 @@ if (hasActiveSearchTerm && (!videos || videos.length === 0)) {
 // The list's one sort - headings and buttons together. The unsorted list is
 // kept so a later heading tap can restore filter order for its ties.
 paginationState.unsortedVideos = videos;
-let sortedVideos = scraySortVideos(videos, null);
+let sortedVideos = scrayGroupMainList(scraySortVideos(videos, null));
 
 // The reset to 25 is right for a genuine filter/search change and wrong for
 // a plain refresh - same function serves both, which is why the list
@@ -2923,12 +2923,47 @@ if (isLandscape && isMobile && !window.skipPanelAutoOpen) { // ✅ Check global 
  renderNextChunk(firstChunk);
 }
 
+/**
+ * Small files from one folder become a single group line (render.js,
+ * scrayGroupVideos). Done AFTER sorting, so a group sits where its best-placed
+ * file would, and its files are moved together in allVideos itself - that
+ * array is what next/previous play through, so it has to match the screen.
+ */
+function scrayGroupMainList(list) {
+  const ps = paginationState;
+  if (typeof window.scrayGroupVideos !== 'function') {
+    ps.groups = null; ps.groupOf = null; ps.indexOf = null;
+    return list;
+  }
+  const grouped = window.scrayGroupVideos(list);
+  ps.groups = grouped.groups;
+  ps.groupOf = grouped.keyOf.size ? grouped.keyOf : null;
+  ps.indexOf = new Map(grouped.videos.map((v, i) => [v, i]));
+  return grouped.videos;
+}
+
+/**
+ * Where a chunk of `lines` lines starting at `start` ends, in allVideos
+ * positions. A group counts as one line however many files it holds, and is
+ * never split across two chunks.
+ */
+function scrayChunkEnd(start, lines) {
+  const ps = paginationState;
+  const list = ps.allVideos;
+  if (!ps.groupOf) return Math.min(start + lines, list.length);
+  let i = start, n = 0;
+  while (i < list.length && n < lines) {
+    const key = ps.groupOf.get(list[i]);
+    if (key) { while (i < list.length && ps.groupOf.get(list[i]) === key) i++; }
+    else i++;
+    n++;
+  }
+  return i;
+}
+
 function renderNextChunk(amount = null) {
 const increment = amount ?? paginationState.pageSize;
-const nextEnd = Math.min(
-  paginationState.currentEndIndex + increment,
-  paginationState.allVideos.length
-);
+const nextEnd = scrayChunkEnd(paginationState.currentEndIndex, increment);
 
 const chunk = paginationState.allVideos.slice(paginationState.currentEndIndex, nextEnd);
 

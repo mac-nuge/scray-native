@@ -6763,9 +6763,9 @@ if (buffered && buffered.length) {
     const loadedSeconds = buffered.end(buffered.length - 1);
     const totalSeconds = window.plyrPlayer.duration || 0;
     const percent = totalSeconds ? Math.round((loadedSeconds / totalSeconds) * 100) : 0;
-    const progressLabel = window.currentLoadingLabel
+    const progressLabel = (window.currentLoadingLabel
         ? `<div style="font-size: 0.65rem; opacity: 0.9; margin-bottom: 4px; color: #ff9800; font-weight: bold;">${window.currentLoadingLabel}</div>`
-        : '';
+        : '') + scrayLoadingBookmarkLine();
     if (window.currentLoadingPath) {
         loadingOverlay.innerHTML = `
             ${progressLabel}
@@ -8233,9 +8233,9 @@ function scrayShowPreviewTitle(video) {
     const previewSceneNamed = !!(previewParts && (previewParts.performerList.length || previewParts.title));
     window.currentLoadingPath = previewSceneNamed ? '' : pathText;
     window.currentLoadingLabel = window.lastPlayLabel || null;
-    const label = window.lastPlayLabel
+    const label = (window.lastPlayLabel
         ? `<div style="font-size: 0.65rem; opacity: 0.9; margin-bottom: 4px; color: #ff9800; font-weight: bold;">${window.lastPlayLabel}</div>`
-        : '';
+        : '') + scrayLoadingBookmarkLine();
     ov.innerHTML = `
         ${label}
         ${window.currentLoadingPath ? pathLine : ''}
@@ -8489,6 +8489,47 @@ window.scrayWatchState = () => scrayWatchSession && {
     listening: scrayWatchBound
 };
 
+// 🔖 BOOKMARK NAME ON THE LOADING PAGE (13.38)
+// A play that opens at a bookmark says which one on the loading card, under
+// the orange source label (Random bookmark, X, >...) and above the path.
+// Two ways a play is "from a bookmark":
+//   - the video carries __bmStartAt: bookmark rows, Xb, and anything that
+//     re-plays one of those clones (P, >, history). __bmNote rides along.
+//   - an explicit startAt that IS one of the video's bookmark times: the BM
+//     modal's jump on a video that isn't the current one. Matched to 0.01s -
+//     tight enough that the R@% random start can't land on one by accident.
+// Stored on window.currentLoadingBookmark, like the label, because the
+// 'progress' handler rebuilds the overlay from globals on every buffer update.
+function scrayLoadingBookmarkFor(video, startAt) {
+    if (!video) return null;
+    const mapNote = (raw) => {
+        const n = (raw || '').trim();
+        return (n && typeof window.scrayMapName === 'function') ? window.scrayMapName('note', n) : n;
+    };
+    const explicit = typeof startAt === 'number' && startAt > 0;
+    if (!explicit && typeof video.__bmStartAt === 'number' && video.__bmStartAt > 0) {
+        return { note: mapNote(video.__bmNote), time: video.__bmStartAt };
+    }
+    if (!explicit) return null;
+    if (typeof video.__bmStartAt === 'number' && Math.abs(video.__bmStartAt - startAt) < 0.01) {
+        return { note: mapNote(video.__bmNote), time: startAt };
+    }
+    const bm = (Array.isArray(video.bookmarks) ? video.bookmarks : [])
+        .find(b => b && typeof b.time === 'number' && Math.abs(b.time - startAt) < 0.01);
+    return bm ? { note: mapNote(bm.note), time: bm.time } : null;
+}
+
+function scrayLoadingBookmarkLine() {
+    const bm = window.currentLoadingBookmark;
+    if (!bm) return '';
+    const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const time = typeof formatDuration === 'function' ? formatDuration(bm.time * 1000) : `${Math.round(bm.time)}s`;
+    const name = bm.note
+        ? `<span style="color: #d6bcff; font-weight: bold;">${esc(bm.note)}</span>`
+        : `<span style="color: #bbb; font-style: italic;">no note</span>`;
+    return `<div class="scray-loading-bookmark" style="font-size: 0.8rem; margin-bottom: 4px;">🔖 ${name} <span style="opacity: 0.75;">@ ${time}</span></div>`;
+}
+
 async function playVideoInline(video, listContext = null, index = null, startAt = null) {
 // ⚙️ Where to start this video, in seconds. Stashed here and applied once on
 // 'loadedmetadata' below, then cleared - so it survives the load without
@@ -8501,6 +8542,8 @@ const resolvedStartAt = (typeof startAt === 'number' && startAt > 0)
     ? startAt
     : (typeof video.__bmStartAt === 'number' && video.__bmStartAt > 0 ? video.__bmStartAt : null);
 window.scrayPendingStartAt = resolvedStartAt;
+// Every play sets it, so a plain play after a bookmark one clears it.
+window.currentLoadingBookmark = scrayLoadingBookmarkFor(video, startAt);
 // Picked from the page while FLS was peeking: slide the player back down
 // before anything else, so the preview and the load happen in FLS as normal.
 if (flsPeekActive) setFlsPeek(false);
@@ -8625,9 +8668,9 @@ window.currentLoadingPath = loadSceneNamed ? '' : [
 window.currentLoadingLabel = window.lastPlayLabel || null;
 window.lastPlayLabel = null; // consume the flag - only applies to this triggered play
 
-const playSourceLabel = window.currentLoadingLabel
+const playSourceLabel = (window.currentLoadingLabel
     ? `<div style="font-size: 0.65rem; opacity: 0.9; margin-bottom: 4px; color: #ff9800; font-weight: bold;">${window.currentLoadingLabel}</div>`
-    : '';
+    : '') + scrayLoadingBookmarkLine();
 
 if (window.currentLoadingPath) {
     loadingOverlay.innerHTML = `

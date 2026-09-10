@@ -6614,6 +6614,7 @@ specificity (the extra .lc-row class). */
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.2 !important;
@@ -7175,6 +7176,7 @@ bookmark and adds a Note column (render.js, scrayListNoteCell). html gets
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.2 !important;

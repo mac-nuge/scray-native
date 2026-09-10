@@ -60,6 +60,15 @@ final class ScrayBrowser: NSObject {
         }
     }
 
+    /// Whether the browser is up right now (or on its way up or down).
+    var isShowing: Bool { controller?.presentingViewController != nil }
+
+    /// Open the browser where it was left - the run monitor's ring.
+    func resume() {
+        guard let vc = controller else { return }
+        present(url: nil, home: vc.homeURL.absoluteString)
+    }
+
     static func topViewController() -> UIViewController? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let window = scenes.first(where: { $0.activationState == .foregroundActive })?
@@ -645,8 +654,22 @@ final class ScrayBrowserViewController: UIViewController,
     /// metadata pass over the folder.
     fileprivate var libraryNeedsRefresh = false
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        ScrayRunMonitor.shared.browserWillShow()
+        // A checkout page parked in the window while the browser was closed
+        // has just been taken back out of it (see ScrayRunMonitor). Put the
+        // tab on screen back in its container. A no-op on every other
+        // appearance, including a sheet going away over the browser.
+        if let tab = currentTab, tab.webView.superview !== webContainer {
+            selectTab(currentIndex)
+        }
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        // Keeps a running basket checkout alive and on the screen as a ring.
+        if isBeingDismissed { ScrayRunMonitor.shared.browserDidHide() }
         // This also fires when a document picker or share sheet goes up over
         // the browser, which is not the browser going away.
         guard isBeingDismissed, libraryNeedsRefresh else { return }
@@ -1197,7 +1220,8 @@ final class ScrayBrowserViewController: UIViewController,
             enqueueDownload: function (item) { return callNative('enqueueDownload', item); },
             downloadStatus: function (ids) { return callNative('downloadStatus', { ids: ids || null }); },
             forgetDownload: function (id) { return callNative('forgetDownload', { id: id }); },
-            refreshLibrary: function () { return callNative('refreshLibrary'); }
+            refreshLibrary: function () { return callNative('refreshLibrary'); },
+            runStatus: function (status) { return callNative('runStatus', status || {}); }
           };
         })();
         """
@@ -1342,6 +1366,21 @@ final class ScrayBrowserViewController: UIViewController,
             // away.
             ScrayNativeView.current?.refreshLocalFolder()
             libraryNeedsRefresh = false
+            bridgeResolve(webView, id: id, result: ["success": true])
+
+        case "runStatus":
+            // basket-checkout.js, about once a second while a run is going and
+            // once more with active: false at the end. Screen-on, the ring over
+            // Native and keeping the page alive all hang off this.
+            let status = body["payload"] as? [String: Any] ?? [:]
+            let progress = ScrayRunMonitor.Progress(
+                done: (status["done"] as? NSNumber)?.intValue ?? 0,
+                total: (status["total"] as? NSNumber)?.intValue ?? 0,
+                bytesDone: (status["bytesDone"] as? NSNumber)?.int64Value ?? 0,
+                bytesTotal: (status["bytesTotal"] as? NSNumber)?.int64Value ?? 0
+            )
+            let active = (status["active"] as? NSNumber)?.boolValue ?? false
+            ScrayRunMonitor.shared.heartbeat(active: active, progress: progress, from: webView)
             bridgeResolve(webView, id: id, result: ["success": true])
 
         case "deleteFile":

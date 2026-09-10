@@ -6528,3 +6528,212 @@ body.portrait-fullscreen:not(.manual-rotate-landscape) #plyr-feedback {
     display: inline;
     cursor: help;
 }
+
+/* =========================================
+MAIN LIST - column rows (render.js, buildMainListRow)
+=========================================
+Wholesale step 1's condensed list, brought into the main list. One line per
+file; tap it to open the full row underneath.
+
+⚙️ --lc-row-h is the density knob. --lc-cols sets the six widths, in order:
+#, studio, performers, file, score, size. The three name columns share what
+is left after the fixed ones, file taking the biggest share.
+
+The older "#taggedVideosContainer li" rules above are flex, padded and
+!important on phones. The overrides here are !important too, and win on
+specificity (the extra .lc-row class). */
+#taggedVideosContainer {
+  --lc-row-h: 30px;
+  /* ⚙️ Text size on a closed row. Smaller than the rest of the app so more of
+     each name fits; the row height above doesn't follow it. An open row goes
+     back to --lc-font-open, since it has the room. */
+  --lc-font: 0.65rem;
+  --lc-font-open: 0.75rem;
+  /* rem, not em: the header's font is smaller than the rows', and em widths
+     would give it narrower columns that no longer line up.
+     # is wide enough for "1000."; the score column only ever holds a number
+     or two. The file share is set so the room those two gave up goes to the
+     filename rather than being split three ways with studio and performers. */
+  --lc-cols: 1.5rem minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2.15fr) 1.4rem 3.2rem;
+}
+
+#taggedVideosContainer .lc-head,
+#taggedVideosContainer li.lc-row > .lc-line {
+  display: grid;
+  grid-template-columns: var(--lc-cols);
+  column-gap: 6px;
+  align-items: center;
+  /* 2px on the left: the row number sits against the edge. */
+  padding: 0 6px 0 2px;
+}
+
+/* ---- header ---- */
+#taggedVideosContainer .lc-head {
+  height: 26px;
+  border-bottom: 1px solid #ddd;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #999;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#taggedVideosContainer .lc-hcell {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 100%;
+}
+#taggedVideosContainer .lc-hcell[data-sort-key] {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+#taggedVideosContainer .lc-hlabel {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Kept outside the label so a narrow column clips the word, never the arrow. */
+#taggedVideosContainer .lc-hmark { flex: 0 0 auto; letter-spacing: 0; }
+#taggedVideosContainer .lc-hcell.lc-sorted { color: #007bff; font-weight: 700; }
+#taggedVideosContainer .lc-head .lc-score,
+#taggedVideosContainer .lc-head .lc-size { justify-content: flex-end; }
+/* The two number columns are narrow but have a short FILE heading to their
+   left, so a sorted "★↓1" spills leftwards into that empty space rather
+   than clipping. */
+#taggedVideosContainer .lc-head .lc-score,
+#taggedVideosContainer .lc-head .lc-size { overflow: visible; }
+#taggedVideosContainer .lc-head .lc-score .lc-hlabel,
+#taggedVideosContainer .lc-head .lc-size .lc-hlabel { flex-shrink: 0; overflow: visible; }
+
+/* ---- rows ---- */
+#taggedVideosContainer li.lc-row {
+  display: block !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  gap: 0 !important;
+  list-style: none;
+  border-bottom: 1px solid #f0f0f0;
+}
+#taggedVideosContainer li.lc-row > .lc-line {
+  min-height: var(--lc-row-h);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+#taggedVideosContainer li.lc-row > .lc-line:active { background: rgba(0, 0, 0, 0.05); }
+/* Basket pink still shows on an open row - it is the more useful signal. */
+#taggedVideosContainer li.lc-row.lc-open:not(.basket-added) { background: #f5f7fa; }
+#taggedVideosContainer li.lc-row.lc-open { border-bottom-color: #dde3ea; }
+
+#taggedVideosContainer li.lc-row { --lc-cell-font: var(--lc-font); }
+#taggedVideosContainer li.lc-row.lc-open { --lc-cell-font: var(--lc-font-open); }
+
+#taggedVideosContainer li.lc-row .lc-cell {
+  font-size: var(--lc-cell-font) !important;
+  line-height: 1.3 !important;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Search highlights are spans inside a cell, and the older
+   "#taggedVideosContainer li span" rule would size them back up to 0.75rem. */
+#taggedVideosContainer li.lc-row .lc-cell span {
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
+/* Names wrap onto a second line inside the row rather than cutting off after
+   one, then end in an ellipsis. Two lines at line-height 1.2 is 25px at
+   --lc-font, inside the 30px row - so the row height doesn't change. Long
+   filenames with no spaces break wherever they have to. */
+#taggedVideosContainer li.lc-row .lc-studio,
+#taggedVideosContainer li.lc-row .lc-perf,
+#taggedVideosContainer li.lc-row .lc-file {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2 !important;
+}
+/* A fixed size, not one that grows on an open row: the column is only as wide
+   as "1000." at this size. */
+#taggedVideosContainer li.lc-row .lc-num {
+  font-size: 0.6rem !important;
+  text-align: left;
+  color: #aaa;
+  font-variant-numeric: tabular-nums;
+}
+#taggedVideosContainer .lc-studio,
+#taggedVideosContainer .lc-perf { color: #444; }
+/* Stood in from the folder path rather than StashDB. */
+#taggedVideosContainer .lc-studio.lc-from-path,
+#taggedVideosContainer .lc-perf.lc-from-path { color: #9a9a9a; }
+#taggedVideosContainer .lc-file { color: #222; }
+#taggedVideosContainer .lc-file.lc-non-mp4 { color: #be7b7b; }
+#taggedVideosContainer .lc-file.lc-uncatalogued::before { content: "\26A0  "; color: #f39c12; }
+#taggedVideosContainer li.lc-open > .lc-line .lc-file { font-weight: 600; }
+#taggedVideosContainer li.lc-row .lc-score {
+  text-align: right;
+  font-weight: 700;
+  color: #ff9800;
+  font-variant-numeric: tabular-nums;
+}
+#taggedVideosContainer li.lc-row .lc-score.lc-blank { color: #ccc; font-weight: 400; }
+#taggedVideosContainer li.lc-row .lc-size {
+  font-size: calc(var(--lc-cell-font) - 0.05rem) !important;
+  text-align: right;
+  color: #777;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- open row ---- */
+#taggedVideosContainer li.lc-row > .lc-detail {
+  /* Indented to line up with the studio column. */
+  padding: 2px 8px 9px calc(1.5rem + 8px);
+  cursor: pointer;
+}
+#taggedVideosContainer li.lc-row > .lc-detail[hidden] { display: none !important; }
+#taggedVideosContainer .lc-d-line {
+  font-size: 0.75rem;
+  line-height: 1.45;
+  margin: 1px 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+#taggedVideosContainer .lc-d-path { color: #666; }
+#taggedVideosContainer .lc-d-filename { color: #333; }
+#taggedVideosContainer .lc-d-filename.lc-non-mp4 { color: #be7b7b; }
+#taggedVideosContainer .lc-d-score { color: #ff9800; font-weight: 700; }
+#taggedVideosContainer .lc-d-sizedur { color: #555; }
+#taggedVideosContainer .lc-d-stats {
+  font-size: 0.7rem;
+  color: #777;
+  font-variant-numeric: tabular-nums;
+}
+#taggedVideosContainer .lc-detail .compact-btn-group {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 7px 0 0;
+}
+/* Bigger than the old 20px squares: these are the only way in now, and they
+   are a thumb's target on a phone. style.css makes every button full width on
+   phones and style-index.css pins .compact-btn to 20px, so both are undone. */
+#taggedVideosContainer .lc-detail .compact-btn {
+  width: auto !important;
+  max-width: none !important;
+  min-width: 34px !important;
+  height: auto !important;
+  max-height: none !important;
+  min-height: 28px !important;
+  margin: 0 !important;
+  padding: 4px 10px !important;
+  font-size: 0.75rem !important;
+  line-height: 1 !important;
+}
+
+/* Clear has nothing to clear. */
+.sort-btn.sort-btn-idle { opacity: 0.55; }

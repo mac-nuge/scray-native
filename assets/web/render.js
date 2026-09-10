@@ -112,6 +112,46 @@ if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
  sizeDurSpan.style.display = "inline";
  li.appendChild(sizeDurSpan);
 
+ const buttons = buildVideoRowButtons(video, listContext, index, options);
+
+const btnContainer = createCompactButtonGroup(buttons, 5, video);
+
+li.appendChild(btnContainer);
+
+// ✅ Right-click context menu
+li.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showContextMenu(buttons.slice(3), e); // Show overflow menu (buttons after first 3)
+});
+
+// ✅ Click anywhere on list item (except buttons and clickable tags) to open rename modal
+li.style.cursor = 'pointer';
+li.addEventListener('click', async (e) => {
+   // Don't trigger if clicking on buttons
+   if (e.target.closest('.compact-btn-group')) return;
+   if (e.target.closest('button')) return;
+   
+   // Don't trigger if clicking on clickable tags (folders or bracket tags)
+   if (e.target.style.textDecoration === 'underline') return;
+   
+   // Open rename modal
+   if (typeof window.showRenameModal === 'function') {
+       await window.showRenameModal(video);
+   }
+});
+
+ if (options.prefix) li.insertBefore(options.prefix, li.firstChild);
+
+ return li;
+}
+window.scrayBuildVideoRow = buildVideoRow;
+
+/**
+* The per-video button specs: P, D, ★, B, BM and the overflow actions.
+* Lifted out of buildVideoRow so the main list's open rows get the
+* identical set - one list of actions, not two drifting copies.
+*/
+function buildVideoRowButtons(video, listContext, index, options = {}) {
   // Check if yet-to-upload
  const isYetToUpload = video.path === "yet-to-upload" || 
                        (Array.isArray(video.tags) && video.tags.includes("yet-to-upload"));
@@ -277,37 +317,469 @@ onClick: async (e) => {
 }
 ];
 
-const btnContainer = createCompactButtonGroup(buttons, 5, video);
-
-li.appendChild(btnContainer);
-
-// ✅ Right-click context menu
-li.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    showContextMenu(buttons.slice(3), e); // Show overflow menu (buttons after first 3)
-});
-
-// ✅ Click anywhere on list item (except buttons and clickable tags) to open rename modal
-li.style.cursor = 'pointer';
-li.addEventListener('click', async (e) => {
-   // Don't trigger if clicking on buttons
-   if (e.target.closest('.compact-btn-group')) return;
-   if (e.target.closest('button')) return;
-   
-   // Don't trigger if clicking on clickable tags (folders or bracket tags)
-   if (e.target.style.textDecoration === 'underline') return;
-   
-   // Open rename modal
-   if (typeof window.showRenameModal === 'function') {
-       await window.showRenameModal(video);
-   }
-});
-
- if (options.prefix) li.insertBefore(options.prefix, li.firstChild);
-
- return li;
+return buttons;
 }
-window.scrayBuildVideoRow = buildVideoRow;
+window.scrayBuildVideoRowButtons = buildVideoRowButtons;
+
+/* =========================================
+MAIN LIST - column rows
+=========================================
+
+The main list borrows Wholesale step 1's condensed layout: one line per file,
+in columns you can sort by, with everything else one tap away.
+
+  collapsed   #  studio  performers  filename  score  size
+  open        path
+              studio / performers / title          (where StashDB has one)
+              filename [score] (size, duration)
+              views · watched · last played · created
+              the button group
+
+The open half is built the FIRST time a row is opened, not for every row up
+front, so a 200-row list costs 200 short lines rather than 200 button groups.
+
+Only #taggedVideosContainer draws these. The random list, the bookmarks page
+and the landscape panel keep buildVideoRow's rendering above.
+========================================= */
+
+// ⚙️ ADJUSTABLE: true closes the open row when another one is opened.
+// false lets several stay open at once.
+const SCRAY_LIST_ONE_OPEN = true;
+
+// Which rows are open, by video id. Held outside the DOM because nearly every
+// edit made from an open row - score, rename, bookmark, sync pull - re-renders
+// the list, and the row you were working in shouldn't snap shut under you.
+const scrayOpenListRows = new Set();
+
+/** The score this app displays, or null when there isn't one. */
+function scrayListScore(video) {
+  const s = video ? (video.user_score ?? video.userScore) : null;
+  return (s === undefined || s === null || s === '') ? null : s;
+}
+window.scrayListScore = scrayListScore;
+
+function scrayListIsYetToUpload(video) {
+  return video.path === "yet-to-upload" ||
+         (Array.isArray(video.tags) && video.tags.includes("yet-to-upload"));
+}
+
+/**
+ * The folder crumbs the studio and performer columns fall back to. The
+ * catalogue path where the app has one (Native), video.path otherwise, and
+ * the top of the tree trimmed by the same rule that trims every name.
+ */
+function scrayListCrumbs(video) {
+  let raw;
+  if (typeof window.scrayResolvePathParts === 'function') {
+    raw = window.scrayResolvePathParts(video).catalogue;
+  } else {
+    const p = (video && video.path) || '';
+    raw = (p.startsWith('*') ? p.slice(1) : p).split('/').filter(Boolean);
+  }
+  return (typeof window.scrayNameCrumbs === 'function') ? window.scrayNameCrumbs(raw) : raw;
+}
+
+/**
+ * Studio and performers as the columns print them. StashDB wins wherever it
+ * has an answer. Otherwise the path stands in, the way the library is laid
+ * out: everything above the last folder is the studio, the last folder is
+ * the performers. The two fall back independently - a studio-only match
+ * still takes its performers from the folder.
+ *
+ * The sort reads this too, so a column sorts by exactly what it shows.
+ */
+function scrayListColumns(video) {
+  const parts  = window.scrayStashNames ? window.scrayStashNames.parts(video) : null;
+  const crumbs = scrayListCrumbs(video);
+  const stashStudio = (parts && parts.studio) || '';
+  const stashCast   = (parts && parts.performerList.length) ? parts.performerList.join(', ') : '';
+  return {
+    studio: stashStudio || crumbs.slice(0, -1).join(' / '),
+    studioFromPath: !stashStudio,
+    performers: stashCast || (crumbs.length ? crumbs[crumbs.length - 1] : ''),
+    performersFromPath: !stashCast
+  };
+}
+window.scrayListColumns = scrayListColumns;
+
+// Short forms for the columns. The open row prints the long forms through
+// formatFileSize / formatDuration like everywhere else.
+function scrayListSize(bytes) {
+  if (bytes == null || !isFinite(bytes) || bytes <= 0) return '';
+  const KB = 1024, MB = KB * 1024, GB = MB * 1024;
+  if (bytes >= GB) return (bytes / GB).toFixed(bytes >= 10 * GB ? 0 : 1) + ' GB';
+  if (bytes >= MB) return Math.round(bytes / MB) + ' MB';
+  return Math.max(1, Math.round(bytes / KB)) + ' KB';
+}
+
+function scrayListScoreText(score) {
+  if (score == null) return '—';
+  const n = Number(score);
+  return isFinite(n) ? (Number.isInteger(n) ? String(n) : n.toFixed(1)) : String(score);
+}
+
+function scrayListDate(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  return isNaN(d) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// time_viewed is seconds of playback accumulated, not a timestamp.
+function scrayListWatched(seconds) {
+  const s = Number(seconds) || 0;
+  return s > 0 ? formatDuration(s * 1000) : '—';
+}
+
+// ---------------------------------------------------------------- header
+
+// ⚙️ Column labels. Short because each header cell is only as wide as the
+// column under it: "Perf" for performers, and ★ for score, whose column is
+// narrowed to fit the number rather than the word. `name` is the long form,
+// for the tooltip.
+const SCRAY_LIST_COLUMN_DEFS = [
+  { key: null,         label: '#',      name: 'Number',     cls: 'lc-num' },
+  { key: 'studio',     label: 'Studio', name: 'Studio',     cls: 'lc-studio' },
+  { key: 'performers', label: 'Perf',   name: 'Performers', cls: 'lc-perf' },
+  { key: 'filename',   label: 'File',   name: 'Filename',   cls: 'lc-file' },
+  { key: 'score',      label: '★',      name: 'Score',      cls: 'lc-score' },
+  { key: 'size',       label: 'Size',   name: 'Size',       cls: 'lc-size' }
+];
+
+/**
+ * The header row. Drawn INSIDE the container, as its first child, so it goes
+ * wherever the list goes - desktop-layout.js moves the container into a
+ * column, and a static header in the page would be left behind.
+ *
+ * Tap a heading to add it to the sort; tap again to reverse it; a third tap
+ * takes it back out. With more than one key the arrow carries its place in
+ * the order.
+ */
+function buildMainListHeader() {
+  const head = document.createElement('div');
+  head.className = 'lc-head';
+  const sort = (typeof window.scrayListSortState === 'function') ? window.scrayListSortState() : [];
+
+  SCRAY_LIST_COLUMN_DEFS.forEach(col => {
+    const cell = document.createElement('span');
+    cell.className = 'lc-cell lc-hcell ' + col.cls;
+
+    const label = document.createElement('span');
+    label.className = 'lc-hlabel';
+    label.textContent = col.label;
+    cell.appendChild(label);
+
+    if (col.key) {
+      cell.dataset.sortKey = col.key;
+      cell.title = `${col.name}: tap to sort, again to reverse, a third time to remove`;
+      const at = sort.findIndex(s => s.key === col.key);
+      if (at >= 0) {
+        cell.classList.add('lc-sorted');
+        const mark = document.createElement('span');
+        mark.className = 'lc-hmark';
+        mark.textContent = (sort[at].dir === 'asc' ? '↑' : '↓') + (sort.length > 1 ? String(at + 1) : '');
+        cell.appendChild(mark);
+      }
+      cell.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof window.scrayListSortTap === 'function') window.scrayListSortTap(col.key);
+      });
+    }
+    head.appendChild(cell);
+  });
+  return head;
+}
+
+function ensureMainListHeader(container) {
+  if (container.querySelector(':scope > .lc-head')) return;
+  container.insertBefore(buildMainListHeader(), container.firstChild);
+}
+
+// ---------------------------------------------------------------- rows
+
+/**
+ * One collapsed line. Everything the open row needs is hung off the <li> so
+ * it can be built later without going back to the list for the video.
+ */
+function buildMainListRow(video, index) {
+  const li = document.createElement('li');
+  li.className = 'lc-row';
+
+  const vidId = video.oneDriveId ?? video.idFromAPI ?? null;
+  li.dataset.videoId = vidId;
+  li._scrayVideo = video;
+  li._scrayIndex = index;
+
+  const cols = scrayListColumns(video);
+  const score = scrayListScore(video);
+
+  const line = document.createElement('div');
+  line.className = 'lc-line';
+
+  const cell = (cls, text) => {
+    const s = document.createElement('span');
+    s.className = 'lc-cell ' + cls;
+    s.textContent = text;
+    return s;
+  };
+
+  // "N. " as a bare text node at the front of the row's FIRST span. That is
+  // exactly what removeRowFromLists rewrites to renumber after a delete, so
+  // it keeps working on these rows without knowing they changed.
+  const num = cell('lc-num', `${index + 1}. `);
+
+  const studio = cell('lc-studio', cols.studio);
+  studio.title = cols.studio;
+  if (cols.studioFromPath) studio.classList.add('lc-from-path');
+
+  const perf = cell('lc-perf', cols.performers);
+  perf.title = cols.performers;
+  if (cols.performersFromPath) perf.classList.add('lc-from-path');
+
+  const filename = video.filename || '';
+  const file = cell('lc-file', filename);
+  file.title = filename;
+  if (filename.split('.').pop().toLowerCase() !== 'mp4') file.classList.add('lc-non-mp4');
+  // A class, never an inline underline - see scray-offline-title in style.css.
+  if (window.scrayIsOffline && window.scrayIsOffline(video)) file.classList.add('scray-offline-title');
+  // Native only: on this device but not in the catalogue. The tappable ⚠ that
+  // looks for a match lives in the open row.
+  if (video.inCatalogue === false) file.classList.add('lc-uncatalogued');
+
+  const scoreCell = cell('lc-score', scrayListScoreText(score));
+  if (score == null) scoreCell.classList.add('lc-blank');
+
+  const size = cell('lc-size', scrayListIsYetToUpload(video) ? '' : scrayListSize(video.sizeBytes));
+
+  line.append(num, studio, perf, file, scoreCell, size);
+  li.appendChild(line);
+
+  if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
+    [studio, perf, file].forEach(el => applyHighlightingToElement(el, window.currentSearchTerms));
+  }
+
+  line.addEventListener('click', () => toggleMainListRow(li));
+
+  // Right-click still gives the overflow menu on a closed row. The buttons
+  // are built for it if the row has never been opened - the menu reads the
+  // same array the button group was built from.
+  li.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const buttons = ensureMainListDetail(li);
+    showContextMenu(buttons.slice(3), e);
+  });
+
+  if (scrayOpenListRows.has(String(vidId))) setMainListRowOpen(li, true);
+
+  return li;
+}
+
+function setDetailScore(badge, score) {
+  badge.textContent = score == null ? '' : ` [${score}]`;
+  badge.hidden = score == null;
+}
+
+/**
+ * Build the open half of a row, once. Returns the button spec array, which
+ * the context menu needs whether or not the row is showing.
+ */
+function ensureMainListDetail(li) {
+  if (li._scrayButtons) return li._scrayButtons;
+
+  const video = li._scrayVideo;
+  const index = li._scrayIndex;
+  const terms = (window.currentSearchTerms && window.currentSearchTerms.length) ? window.currentSearchTerms : null;
+
+  const detail = document.createElement('div');
+  detail.className = 'lc-detail';
+  detail.hidden = true;
+
+  const lineOf = (cls) => {
+    const d = document.createElement('div');
+    d.className = 'lc-d-line ' + cls;
+    return d;
+  };
+
+  // 1 · Where it lives. Through createClickablePath so the folder crumbs keep
+  // their filter / search / exclude modal - handed a copy whose key no
+  // StashDB row can have, or a matched video would print its scene name here
+  // instead of its path. The key is only used for that lookup; nothing is
+  // written back.
+  const pathLine = lineOf('lc-d-path');
+  pathLine.appendChild(createClickablePath({ ...video, videoKey: '~no stash match~' }, false, true));
+  if (pathLine.childNodes.length) detail.appendChild(pathLine);
+
+  // 2 · The scene name, where StashDB has one. A copy with no path this time,
+  // so a studio-only match prints just its studio rather than repeating line 1.
+  if (window.scrayStashNamePlan && window.scrayStashNamePlan(video)) {
+    const sceneLine = lineOf('lc-d-scene');
+    sceneLine.appendChild(createClickablePath({ ...video, path: '', cataloguePath: '' }, false, true));
+    if (sceneLine.childNodes.length) detail.appendChild(sceneLine);
+  }
+
+  // 3 · filename [score] (size, duration)
+  const fileLine = lineOf('lc-d-file');
+  const fname = document.createElement('span');
+  fname.className = 'lc-d-filename';
+  if ((video.filename || '').split('.').pop().toLowerCase() !== 'mp4') fname.classList.add('lc-non-mp4');
+  if (window.scrayIsOffline && window.scrayIsOffline(video)) fname.classList.add('scray-offline-title');
+  fname.appendChild(createClickableFilename(video.filename));
+  fileLine.appendChild(fname);
+
+  const scoreBadge = document.createElement('span');
+  scoreBadge.className = 'lc-d-score';
+  setDetailScore(scoreBadge, scrayListScore(video));
+  fileLine.appendChild(scoreBadge);
+
+  if (video.inCatalogue === false && typeof window.scrayTryFingerprintMatch === 'function') {
+    const warn = document.createElement('span');
+    warn.className = 'not-in-catalogue-badge';
+    warn.textContent = '⚠';
+    warn.title = 'Not in the SQLite catalogue — tap to check for a match';
+    warn.style.cursor = 'pointer';
+    warn.style.padding = '0 6px';
+    warn.onclick = (e) => { e.stopPropagation(); window.scrayTryFingerprintMatch(video, warn); };
+    fileLine.appendChild(warn);
+  }
+
+  if (!scrayListIsYetToUpload(video)) {
+    const sizeDur = document.createElement('span');
+    sizeDur.className = 'lc-d-sizedur';
+    const dur = window.scrayDisplayDurationMs ? window.scrayDisplayDurationMs(video) : video.durationMs;
+    sizeDur.textContent = ` (${formatFileSize(video.sizeBytes)}, ${formatDuration(dur)})`;
+    fileLine.appendChild(sizeDur);
+  }
+  detail.appendChild(fileLine);
+
+  // 4 · History.
+  const stats = lineOf('lc-d-stats');
+  stats.textContent = [
+    `Views ${video.view_count ?? 0}`,
+    `Watched ${scrayListWatched(video.time_viewed)}`,
+    `Played ${scrayListDate(video.last_played)}`,
+    `Created ${scrayListDate(video.createdDateTime)}`
+  ].join('  ·  ');
+  detail.appendChild(stats);
+
+  if (terms) {
+    detail.querySelectorAll('.lc-d-path, .lc-d-scene, .lc-d-filename')
+      .forEach(el => applyHighlightingToElement(el, terms));
+  }
+
+  // 5 · Buttons. The same specs every list uses, rearranged for the open row:
+  //
+  //   B  D  ★  S  BM  R  …      (other lists: P  D  ★  S  BM  …)
+  //
+  // B (basket) takes P's place - tapping the text plays now, so P's spec is
+  // held back for that rather than drawn. R is rename, which the text tap used
+  // to do. Basket is then left out of the overflow menu, since it's in the row.
+  //
+  // S is placed here explicitly. Left to createCompactButtonGroup, it would
+  // find a B and swap S into B's slot - index 0 now - and push a second
+  // "Add to Basket" into the overflow. With an S already present it skips all
+  // of that, and still colours S the same way. All of this is local to the
+  // open row; buildVideoRowButtons and the other lists are untouched.
+  const buttons = buildVideoRowButtons(video, 'main', index);
+  const takeSpec = (label) => {
+    const at = buttons.findIndex(b => b && b.label === label);
+    return at >= 0 ? buttons.splice(at, 1)[0] : null;
+  };
+  const playSpec = takeSpec('P');
+  const basketSpec = takeSpec('B');
+  if (basketSpec) buttons.unshift(basketSpec);
+  const stashSpec = {
+    label: "S",
+    title: "Look up scene data and timestamps",
+    color: "#6c5ce7",
+    onClick: (e) => {
+      e.stopPropagation();
+      if (typeof window.showStashModal === 'function') {
+        window.showStashModal(video);
+      }
+    }
+  };
+  const starAt = buttons.findIndex(b => b && b.label === '★');
+  buttons.splice(starAt >= 0 ? starAt + 1 : buttons.length, 0, stashSpec);
+  const renameBtn = {
+    label: "R",
+    title: "Rename",
+    color: "#795548",
+    onClick: async (e) => {
+      e.stopPropagation();
+      if (typeof window.showRenameModal === 'function') {
+        await window.showRenameModal(video);
+      }
+    }
+  };
+  const bmAt = buttons.findIndex(b => b && b.label === 'BM');
+  buttons.splice(bmAt >= 0 ? bmAt + 1 : buttons.length, 0, renameBtn);
+  detail.appendChild(createCompactButtonGroup(buttons, 6, video));
+
+  // Tapping the open row's text plays it, through the P button's own handler
+  // (held back from the row above) so it plays exactly what P would. Only the text lines count -
+  // a thumb landing in the padding under the buttons shouldn't start a video.
+  // Buttons and tags (underlined, and they stop propagation anyway) don't.
+  detail.addEventListener('click', (e) => {
+    if (!e.target.closest('.lc-d-line')) return;
+    if (e.target.closest('button')) return;
+    if (e.target.style && e.target.style.textDecoration === 'underline') return;
+    if (playSpec && playSpec.onClick) playSpec.onClick(e);
+  });
+
+  li.appendChild(detail);
+  li._scrayButtons = buttons;
+  return buttons;
+}
+
+function setMainListRowOpen(li, open) {
+  if (open) ensureMainListDetail(li);
+  const detail = li.querySelector(':scope > .lc-detail');
+  if (detail) detail.hidden = !open;
+  li.classList.toggle('lc-open', open);
+  const id = String(li.dataset.videoId);
+  if (open) scrayOpenListRows.add(id); else scrayOpenListRows.delete(id);
+}
+
+function toggleMainListRow(li) {
+  const opening = !li.classList.contains('lc-open');
+  // Closing a taller row ABOVE this one would pull the row you just tapped
+  // up the screen, out from under your finger. Measure, change, then scroll
+  // by whatever it moved.
+  const before = li.getBoundingClientRect().top;
+
+  if (opening && SCRAY_LIST_ONE_OPEN && li.parentElement) {
+    li.parentElement.querySelectorAll(':scope > li.lc-open').forEach(other => {
+      if (other !== li) setMainListRowOpen(other, false);
+    });
+    scrayOpenListRows.clear();
+  }
+  setMainListRowOpen(li, opening);
+
+  const moved = li.getBoundingClientRect().top - before;
+  if (moved) window.scrollBy(0, moved);
+}
+
+/**
+ * patchScoreInLists hands these rows here: the score is a column and a
+ * badge on the open line, not the single badge span the old rows had.
+ */
+window.scrayListRowSetScore = function (li, score) {
+  const s = (score === undefined || score === '') ? null : score;
+  const cellEl = li.querySelector('.lc-score');
+  if (cellEl) {
+    cellEl.textContent = scrayListScoreText(s);
+    cellEl.classList.toggle('lc-blank', s == null);
+  }
+  const badge = li.querySelector('.lc-d-score');
+  if (badge) setDetailScore(badge, s);
+};
+
+/** Redraw just the header - the sort buttons call this when there is no list to re-render. */
+window.scrayRefreshMainListHeader = function () {
+  const container = document.getElementById('taggedVideosContainer');
+  const old = container && container.querySelector(':scope > .lc-head');
+  if (old) old.replaceWith(buildMainListHeader());
+};
+
 
 /**
 * Render a list of videos into a given container.
@@ -337,9 +809,16 @@ function appendVideoList(videos, containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
+  // The main list is the column layout; anything else handed here keeps the
+  // old row. The header is re-added whenever the container has been cleared.
+  const columns = containerId === 'taggedVideosContainer';
+  if (columns) ensureMainListHeader(container);
+
   videos.forEach((video, index) => {
     const globalIndex = paginationState.currentEndIndex + index;
-    container.appendChild(buildVideoRow(video, 'main', globalIndex));
+    container.appendChild(columns
+      ? buildMainListRow(video, globalIndex)
+      : buildVideoRow(video, 'main', globalIndex));
   });
 
   updateBasketHighlights();

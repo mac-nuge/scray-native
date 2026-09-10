@@ -23,9 +23,9 @@ let currentSortState = 'none'; // 'none', 'asc', 'desc'
 // sort tap threw immediately after clearing the container and the list came
 // back empty. Hoisted here so the toggles get the depth currently on screen.
 let firstChunk = 25;
-// ✅ NEW: Add sort states for created and modified dates
-// ⚙️ DEFAULT SORT ON BOOT/REFRESH: newest created first. Set back to 'none'
-// for the old unsorted default, or 'asc' for oldest first.
+// The landscape panel's own sort buttons (random-panel.js) are the only thing
+// still reading these five. The main list's sort is scrayListSort below; its
+// boot default lives there.
 let currentCreatedSortState = 'desc';
 let currentModifiedSortState = 'none';
 let currentFilenameSortState = 'none';
@@ -107,283 +107,181 @@ const sorted = [...videos].sort((a, b) => {
 return sorted;
 }
 
-/**
-* Toggle sort state and re-render list
-*/
-function toggleSortState() {
-const states = ['none', 'asc', 'desc'];
-const currentIndex = states.indexOf(currentSortState);
-currentSortState = states[(currentIndex + 1) % states.length];
+/* =========================================
+LIST SORT - one ordered sort for the main list
+=========================================
 
-// ✅ Reset other sorts when size sort is activated
-currentCreatedSortState = 'none';
-currentModifiedSortState = 'none';
-currentFilenameSortState = 'none';
-currentScoreSortState = 'none';
-updateCreatedSortButton();
-updateModifiedSortButton();
-updateFilenameSortButton();
-updateScoreSortButton();
-updateSortButton();
+The column headings (studio, performers, file, score, size) and the sort
+buttons (views, watched, played, created) all feed the SAME sort, in the order
+they were tapped. The first key decides; the next breaks its ties; and so on,
+up to every key at once. Tap a key to add it, again to reverse it, a third
+time to take it out. Clear empties it.
 
-// ✅ Update panel button too
-if (typeof updatePanelSortButton === 'function') {
-  updatePanelSortButton('panelSortSizeBtn', currentSortState);
-}
-  
-  // Re-render current list with new sort
-  if (paginationState.allVideos && paginationState.allVideos.length > 0) {
-      const sorted = sortVideosBySize(paginationState.allVideos, currentSortState);
-      paginationState.allVideos = sorted;
-      paginationState.currentEndIndex = 0;
-      
-      const container = document.getElementById(paginationState.containerId);
-      container.innerHTML = "";
-      renderNextChunk(firstChunk);
+Nulls sort last whichever way a key runs: an unscored file is not a
+zero-scored one, and a file never played has no date to put first. View count
+and watch time are the exception - they are counters, so a missing one is 0.
+
+The five current*SortState variables above are no longer read by the main
+list. random-panel.js still drives them from the landscape panel's own
+buttons, so they stay declared rather than leave those handlers throwing.
+========================================= */
+
+const SCRAY_LIST_SORT_KEYS = {
+  studio:     { type: 'text', first: 'asc',  value: v => window.scrayListColumns ? window.scrayListColumns(v).studio : '' },
+  performers: { type: 'text', first: 'asc',  value: v => window.scrayListColumns ? window.scrayListColumns(v).performers : '' },
+  filename:   { type: 'text', first: 'asc',  value: v => v.filename },
+  score:      { type: 'num',  first: 'desc', value: v => window.scrayListScore ? window.scrayListScore(v) : (v.userScore ?? v.user_score) },
+  size:       { type: 'num',  first: 'desc', value: v => v.sizeBytes },
+  views:      { type: 'num',  first: 'desc', zero: true, value: v => v.view_count },
+  watched:    { type: 'num',  first: 'desc', zero: true, value: v => v.time_viewed },
+  played:     { type: 'date', first: 'desc', value: v => v.last_played },
+  created:    { type: 'date', first: 'desc', value: v => v.createdDateTime }
+};
+
+// ⚙️ DEFAULT SORT ON BOOT: newest created first, as before. [] boots unsorted.
+let scrayListSort = [{ key: 'created', dir: 'desc' }];
+
+// The boot default is a starting point, not a first choice. Left in place,
+// the first heading you tapped would only break ties between identical
+// created dates - which never happen - and look as if it did nothing. So the
+// first tap replaces the default, unless it is a tap on the default's own
+// key, which just carries on cycling it.
+let scrayListSortIsDefault = true;
+
+// numeric: "clip 9" before "clip 10". sensitivity base: case never splits a studio.
+const scrayListCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function scrayListSortValue(def, video) {
+  const raw = def.value(video);
+  if (def.type === 'text') {
+    const s = String(raw ?? '').trim();
+    return s === '' ? null : s;
   }
-}
-
-// ✅ NEW: Toggle created date sort state and re-render list
-function toggleCreatedSortState() {
-const states = ['none', 'asc', 'desc'];
-const currentIndex = states.indexOf(currentCreatedSortState);
-currentCreatedSortState = states[(currentIndex + 1) % states.length];
-
-// Reset other sorts
-currentSortState = 'none';
-currentModifiedSortState = 'none';
-currentFilenameSortState = 'none';
-currentScoreSortState = 'none';
-updateSortButton();
-updateModifiedSortButton();
-updateFilenameSortButton();
-updateScoreSortButton();
-updateCreatedSortButton();
-
-// ✅ Update panel button too
-if (typeof updatePanelSortButton === 'function') {
-  updatePanelSortButton('panelSortCreatedBtn', currentCreatedSortState);
-}
- 
- // Re-render current list with new sort
- if (paginationState.allVideos && paginationState.allVideos.length > 0) {
-      const sorted = sortVideosByCreated(paginationState.allVideos, currentCreatedSortState);
-      paginationState.allVideos = sorted;
-      paginationState.currentEndIndex = 0;
-      
-      const container = document.getElementById(paginationState.containerId);
-      container.innerHTML = "";
-      renderNextChunk(firstChunk);
+  if (def.type === 'date') {
+    const t = raw ? Date.parse(raw) : NaN;
+    return isNaN(t) ? null : t;
   }
-}
-
-// ✅ NEW: Toggle modified date sort state and re-render list
-function toggleModifiedSortState() {
-const states = ['none', 'asc', 'desc'];
-const currentIndex = states.indexOf(currentModifiedSortState);
-currentModifiedSortState = states[(currentIndex + 1) % states.length];
-
-// Reset other sorts
-currentSortState = 'none';
-currentCreatedSortState = 'none';
-currentFilenameSortState = 'none';
-currentScoreSortState = 'none';
-updateSortButton();
-updateCreatedSortButton();
-updateFilenameSortButton();
-updateScoreSortButton();
-updateModifiedSortButton();
-
-// ✅ Update panel button too
-if (typeof updatePanelSortButton === 'function') {
-  updatePanelSortButton('panelSortModifiedBtn', currentModifiedSortState);
-}
- 
- // Re-render current list with new sort
- if (paginationState.allVideos && paginationState.allVideos.length > 0) {
-      const sorted = sortVideosByModified(paginationState.allVideos, currentModifiedSortState);
-      paginationState.allVideos = sorted;
-      paginationState.currentEndIndex = 0;
-      
-      const container = document.getElementById(paginationState.containerId);
-      container.innerHTML = "";
-      renderNextChunk(firstChunk);
-  }
+  if (raw === null || raw === undefined || raw === '') return def.zero ? 0 : null;
+  const n = Number(raw);
+  return isFinite(n) ? n : (def.zero ? 0 : null);
 }
 
 /**
-* Update sort button appearance
-*/
-function updateSortButton() {
- const btn = document.getElementById('sortSizeBtn');
- if (!btn) return;
- 
- const labels = {
-     'none': 'Size',
-     'asc': 'Size ↑',
-     'desc': 'Size ↓'
- };
-  
-  btn.textContent = labels[currentSortState];
-  btn.dataset.sortState = currentSortState;
-  
-  if (currentSortState === 'none') {
-      btn.style.background = '#555';
-  } else {
-      btn.style.background = '#007bff';
+ * Sort by the current key list.
+ *
+ * Every key is read ONCE per video up front, not inside the comparator:
+ * studio and performers go through the StashDB name lookup, and doing that
+ * on every comparison of a few thousand rows is the difference between
+ * instant and a visible stall.
+ *
+ * @param {Array} videos
+ * @param {Array|null} baseOrder - the unsorted list. Ties fall back to its
+ *        order, so taking a key out puts rows back where the filter left
+ *        them rather than where the previous sort did. Null: ties keep the
+ *        order they arrived in.
+ */
+function scraySortVideos(videos, baseOrder) {
+  if (!Array.isArray(videos)) return videos;
+  const spec = scrayListSort.filter(s => SCRAY_LIST_SORT_KEYS[s.key]);
+  if (!spec.length && !baseOrder) return videos;
+
+  const base = baseOrder ? new Map(baseOrder.map((v, i) => [v, i])) : null;
+  const rows = videos.map((v, i) => ({
+    v,
+    i: (base && base.has(v)) ? base.get(v) : i,
+    k: spec.map(s => scrayListSortValue(SCRAY_LIST_SORT_KEYS[s.key], v))
+  }));
+
+  rows.sort((a, b) => {
+    for (let j = 0; j < spec.length; j++) {
+      const x = a.k[j], y = b.k[j];
+      if (x === y) continue;
+      if (x === null) return 1;
+      if (y === null) return -1;
+      const c = SCRAY_LIST_SORT_KEYS[spec[j].key].type === 'text'
+        ? scrayListCollator.compare(x, y)
+        : (x < y ? -1 : x > y ? 1 : 0);
+      if (c) return spec[j].dir === 'asc' ? c : -c;
+    }
+    return a.i - b.i;
+  });
+  return rows.map(r => r.v);
+}
+window.scraySortVideos = scraySortVideos;
+
+/** A copy, for render.js to draw the heading arrows from. */
+window.scrayListSortState = () => scrayListSort.map(s => ({ ...s }));
+
+function scrayListSortTap(key) {
+  const def = SCRAY_LIST_SORT_KEYS[key];
+  if (!def) return;
+  if (scrayListSortIsDefault) {
+    scrayListSortIsDefault = false;
+    if (!scrayListSort.some(s => s.key === key)) scrayListSort = [];
   }
-}
-
-// ✅ NEW: Update created sort button appearance
-function updateCreatedSortButton() {
- const btn = document.getElementById('sortCreatedBtn');
- if (!btn) return;
- 
- const labels = {
-     'none': 'Create',
-     'asc': 'Create ↑',
-     'desc': 'Create ↓'
- };
-  
-  btn.textContent = labels[currentCreatedSortState];
-  btn.dataset.sortState = currentCreatedSortState;
-  
-  if (currentCreatedSortState === 'none') {
-      btn.style.background = '#555';
+  const at = scrayListSort.findIndex(s => s.key === key);
+  if (at === -1) {
+    scrayListSort.push({ key, dir: def.first });
+  } else if (scrayListSort[at].dir === def.first) {
+    scrayListSort[at].dir = def.first === 'asc' ? 'desc' : 'asc';
   } else {
-      btn.style.background = '#007bff';
+    scrayListSort.splice(at, 1);
   }
+  scrayApplyListSort();
+}
+window.scrayListSortTap = scrayListSortTap;
+
+function scrayListSortClear() {
+  scrayListSortIsDefault = false;
+  scrayListSort = [];
+  scrayApplyListSort();
+}
+window.scrayListSortClear = scrayListSortClear;
+
+/** Re-sort what's on screen and redraw it, at the depth already showing. */
+function scrayApplyListSort() {
+  syncListSortButtons();
+  const ps = paginationState;
+  const container = document.getElementById(ps.containerId);
+  if (!ps.allVideos || !ps.allVideos.length || !container) {
+    if (typeof window.scrayRefreshMainListHeader === 'function') window.scrayRefreshMainListHeader();
+    return;
+  }
+  // A heading tap on a 200-row list shouldn't also cut it back to 25.
+  const depth = Math.max(25, ps.currentEndIndex || 0);
+  ps.allVideos = scraySortVideos(ps.allVideos, ps.unsortedVideos || null);
+  ps.currentEndIndex = 0;
+  container.innerHTML = '';
+  renderNextChunk(depth);
 }
 
-// ✅ NEW: Update modified sort button appearance
-function updateModifiedSortButton() {
-const btn = document.getElementById('sortModifiedBtn');
-if (!btn) return;
+/**
+ * Button labels follow the sort: an arrow for direction and, once there is
+ * more than one key, the key's place in the order. The blue comes from
+ * data-sort-state in style.css.
+ */
+function syncListSortButtons() {
+  document.querySelectorAll('.sort-btn[data-list-sort]').forEach(btn => {
+    if (!btn.dataset.label) btn.dataset.label = btn.textContent.trim();
+    const base = btn.dataset.label;
+    const key = btn.dataset.listSort;
 
-const labels = {
-    'none': 'Mod',
-    'asc': 'Mod ↑',
-    'desc': 'Mod ↓'
-};
- 
- btn.textContent = labels[currentModifiedSortState];
- btn.dataset.sortState = currentModifiedSortState;
- 
- if (currentModifiedSortState === 'none') {
-     btn.style.background = '#555';
- } else {
-     btn.style.background = '#007bff';
- }
-}
+    if (key === 'clear') {
+      btn.dataset.sortState = 'none';
+      btn.classList.toggle('sort-btn-idle', scrayListSort.length === 0);
+      return;
+    }
 
-// ✅ NEW: Toggle filename sort state and re-render list
-function toggleFilenameSortState() {
-const states = ['none', 'asc', 'desc'];
-const currentIndex = states.indexOf(currentFilenameSortState);
-currentFilenameSortState = states[(currentIndex + 1) % states.length];
-
-// Reset other sorts
-currentSortState = 'none';
-currentCreatedSortState = 'none';
-currentModifiedSortState = 'none';
-currentScoreSortState = 'none';
-updateSortButton();
-updateCreatedSortButton();
-updateModifiedSortButton();
-updateScoreSortButton();
-updateFilenameSortButton();
-
-// ✅ Update panel button too
-if (typeof updatePanelSortButton === 'function') {
-  updatePanelSortButton('panelSortFilenameBtn', currentFilenameSortState);
-}
-
-// Re-render current list with new sort
-if (paginationState.allVideos && paginationState.allVideos.length > 0) {
-     const sorted = sortVideosByFilename(paginationState.allVideos, currentFilenameSortState);
-     paginationState.allVideos = sorted;
-     paginationState.currentEndIndex = 0;
-     
-     const container = document.getElementById(paginationState.containerId);
-     container.innerHTML = "";
-     renderNextChunk(firstChunk);
- }
-}
-
-// ✅ NEW: Update filename sort button appearance
-function updateFilenameSortButton() {
-const btn = document.getElementById('sortFilenameBtn');
-if (!btn) return;
-
-const labels = {
-    'none': 'File',
-    'asc': 'File ↑',
-    'desc': 'File ↓'
-};
-
-btn.textContent = labels[currentFilenameSortState];
-btn.dataset.sortState = currentFilenameSortState;
-
-if (currentFilenameSortState === 'none') {
-    btn.style.background = '#555';
-} else {
-    btn.style.background = '#007bff';
-}
-}
-
-// ✅ NEW: Toggle score sort state and re-render list
-function toggleScoreSortState() {
-const states = ['none', 'asc', 'desc'];
-const currentIndex = states.indexOf(currentScoreSortState);
-currentScoreSortState = states[(currentIndex + 1) % states.length];
-
-// Reset other sorts
-currentSortState = 'none';
-currentCreatedSortState = 'none';
-currentModifiedSortState = 'none';
-currentFilenameSortState = 'none';
-updateSortButton();
-updateCreatedSortButton();
-updateModifiedSortButton();
-updateFilenameSortButton();
-updateScoreSortButton();
-
-// ✅ Update panel button too
-if (typeof updatePanelSortButton === 'function') {
- updatePanelSortButton('panelSortScoreBtn', currentScoreSortState);
-}
-
-// Re-render current list with new sort
-if (paginationState.allVideos && paginationState.allVideos.length > 0) {
-    const sorted = sortVideosByScore(paginationState.allVideos, currentScoreSortState);
-    paginationState.allVideos = sorted;
-    paginationState.currentEndIndex = 0;
-    
-    const container = document.getElementById(paginationState.containerId);
-    container.innerHTML = "";
-    renderNextChunk(firstChunk);
-}
-}
-
-// ✅ NEW: Update score sort button appearance
-function updateScoreSortButton() {
-const btn = document.getElementById('sortScoreBtn');
-if (!btn) return;
-
-const labels = {
-    'none': 'Score',
-    'asc': 'Score ↑',
-    'desc': 'Score ↓'
-};
-
-btn.textContent = labels[currentScoreSortState];
-btn.dataset.sortState = currentScoreSortState;
-
-if (currentScoreSortState === 'none') {
-    btn.style.background = '#555';
-} else {
-    btn.style.background = '#007bff';
-}
+    const at = scrayListSort.findIndex(s => s.key === key);
+    if (at === -1) {
+      btn.textContent = base;
+      btn.dataset.sortState = 'none';
+      return;
+    }
+    const s = scrayListSort[at];
+    btn.textContent = `${base} ${s.dir === 'asc' ? '↑' : '↓'}${scrayListSort.length > 1 ? at + 1 : ''}`;
+    btn.dataset.sortState = s.dir;
+  });
 }
 
 window.sortVideosBySize = sortVideosBySize;
@@ -2967,19 +2865,10 @@ if (hasActiveSearchTerm && (!videos || videos.length === 0)) {
   return;
 }
 
-// ✅ Apply current sort state - check all five sort types
-let sortedVideos = videos;
-if (currentSortState !== 'none') {
-  sortedVideos = sortVideosBySize(videos, currentSortState);
-} else if (currentCreatedSortState !== 'none') {
-  sortedVideos = sortVideosByCreated(videos, currentCreatedSortState);
-} else if (currentModifiedSortState !== 'none') {
-  sortedVideos = sortVideosByModified(videos, currentModifiedSortState);
-} else if (currentFilenameSortState !== 'none') {
-  sortedVideos = sortVideosByFilename(videos, currentFilenameSortState);
-} else if (currentScoreSortState !== 'none') {
-  sortedVideos = sortVideosByScore(videos, currentScoreSortState);
-}
+// The list's one sort - headings and buttons together. The unsorted list is
+// kept so a later heading tap can restore filter order for its ties.
+paginationState.unsortedVideos = videos;
+let sortedVideos = scraySortVideos(videos, null);
 
 // The reset to 25 is right for a genuine filter/search change and wrong for
 // a plain refresh - same function serves both, which is why the list
@@ -3212,44 +3101,21 @@ if (refreshScoresBtn) {
   });
 }
 
-const sortBtn = document.getElementById('sortSizeBtn');
-   if (sortBtn) {
-       sortBtn.addEventListener('click', toggleSortState);
-       updateSortButton();
-   }
-   
-   // ✅ NEW: Add event listeners for created and modified sort buttons
-   const sortCreatedBtn = document.getElementById('sortCreatedBtn');
-   if (sortCreatedBtn) {
-       sortCreatedBtn.addEventListener('click', toggleCreatedSortState);
-       updateCreatedSortButton();
-   }
-   // Mirror the boot default onto the landscape panel's own sort button,
-   // which otherwise stays showing a plain "Create" while the list is
-   // already sorted newest-first.
-   if (typeof updatePanelSortButton === 'function') {
-       updatePanelSortButton('panelSortCreatedBtn', currentCreatedSortState);
-   }
-   
-   const sortModifiedBtn = document.getElementById('sortModifiedBtn');
-  if (sortModifiedBtn) {
-      sortModifiedBtn.addEventListener('click', toggleModifiedSortState);
-      updateModifiedSortButton();
-  }
-  
-  // ✅ NEW: Add event listener for filename sort button
- const sortFilenameBtn = document.getElementById('sortFilenameBtn');
- if (sortFilenameBtn) {
-     sortFilenameBtn.addEventListener('click', toggleFilenameSortState);
-     updateFilenameSortButton();
- }
- 
- // ✅ NEW: Add event listener for score sort button
- const sortScoreBtn = document.getElementById('sortScoreBtn');
- if (sortScoreBtn) {
-     sortScoreBtn.addEventListener('click', toggleScoreSortState);
-     updateScoreSortButton();
- }
+// Clear / Views / Watched / Played / Created. The column headings are wired
+// in render.js, each time the header is drawn.
+document.querySelectorAll('.sort-btn[data-list-sort]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        if (btn.dataset.listSort === 'clear') scrayListSortClear();
+        else scrayListSortTap(btn.dataset.listSort);
+    });
+});
+syncListSortButtons();
+
+// Mirror the boot default onto the landscape panel's own sort button,
+// which otherwise stays showing a plain "Create".
+if (typeof updatePanelSortButton === 'function') {
+    updatePanelSortButton('panelSortCreatedBtn', currentCreatedSortState);
+}
 
  ["generateRandomByTagsBtn", "listAllByTagsBtn"].forEach(id => {
        const btn = document.getElementById(id);

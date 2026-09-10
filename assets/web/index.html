@@ -405,7 +405,7 @@
 <button id="playNextBtn" class="burger-btn burger-btn-pink" title="Play Next in Current List">&gt;</button>
 <button id="playHistorySequenceBtn" class="burger-btn burger-btn-pink" title="Play Through History">H</button>
 <button id="playRandomBasketBtn" class="burger-btn burger-btn-pink" title="Play Random from Basket">B</button>
-<button id="basketToggleBtn" class="burger-btn">B (<span id="basketCount">0</span>)</button>i
+<button id="basketToggleBtn" class="burger-btn">B (<span id="basketCount">0</span>)</button>
 <button id="historyToggleBtn" class="burger-btn">H (<span id="historyCount">0</span>)</button>
 <button id="clearBtnCorner" class="burger-btn" title="Stop Playback">C</button>
 </div>
@@ -579,11 +579,13 @@
 </div>
 
  <div class="sort-buttons-container">
-<button id="sortSizeBtn" class="sort-btn" title="Toggle sort by file size">Size</button>
-<button id="sortCreatedBtn" class="sort-btn" title="Toggle sort by date created">Create</button>
-<button id="sortModifiedBtn" class="sort-btn" title="Toggle sort by date modified">Mod</button>
-<button id="sortFilenameBtn" class="sort-btn" title="Toggle sort by filename">File</button>
-<button id="sortScoreBtn" class="sort-btn" title="Toggle sort by score">Score</button>
+<!-- One sort with the list's column headings: each tap adds a key, reverses
+     it, or takes it out. Clear empties the lot. See scrayListSort in randomiser.js. -->
+<button class="sort-btn sort-btn-clear" data-list-sort="clear" title="Clear the sort - headings and buttons">Clear</button>
+<button class="sort-btn" data-list-sort="views" title="Sort by view count">Views</button>
+<button class="sort-btn" data-list-sort="watched" title="Sort by time watched">Watched</button>
+<button class="sort-btn" data-list-sort="played" title="Sort by last played">Played</button>
+<button class="sort-btn" data-list-sort="created" title="Sort by date created">Created</button>
 </div>
 
  <div id="videoStats" style="margin-top:8px; font-size:0.85rem; color:#555;"></div>

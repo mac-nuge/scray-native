@@ -1177,6 +1177,12 @@ function patchScoreInLists(oneDriveId, score) {
     if (!oneDriveId) return;
     const rows = document.querySelectorAll(`li[data-video-id="${CSS.escape(oneDriveId)}"]`);
     rows.forEach(li => {
+        // Main list column rows carry the score as a column plus a badge on
+        // the open line - render.js knows that shape, so it paints them.
+        if (li.classList.contains('lc-row')) {
+            if (typeof window.scrayListRowSetScore === 'function') window.scrayListRowSetScore(li, score);
+            return;
+        }
         let badge = li.querySelector('.list-score-badge');
         if (score === undefined || score === null) {
             if (badge) badge.remove();

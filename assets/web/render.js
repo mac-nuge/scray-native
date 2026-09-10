@@ -438,6 +438,25 @@ function scrayListWatched(seconds) {
   return s > 0 ? formatDuration(s * 1000) : '—';
 }
 
+/**
+ * The note column: a bookmark's note, then its time. A bookmark entry is a
+ * clone of its video carrying __bmNote and __bmStartAt (bookmarks-page.js).
+ */
+function scrayListNoteCell(video) {
+  const s = document.createElement('span');
+  s.className = 'lc-cell lc-note';
+  if (video.__bmStartAt == null) return s;
+  const note = document.createElement('span');
+  note.className = 'lc-note-text' + (video.__bmNote ? '' : ' is-empty');
+  note.textContent = video.__bmNote || 'no note';
+  const time = document.createElement('span');
+  time.className = 'lc-note-time';
+  time.textContent = formatDuration(video.__bmStartAt * 1000);
+  s.append(note, ' ', time);
+  s.title = `${video.__bmNote || 'no note'} at ${time.textContent}`;
+  return s;
+}
+
 // ---------------------------------------------------------------- header
 
 // ⚙️ Column labels. Short because each header cell is only as wide as the
@@ -446,6 +465,9 @@ function scrayListWatched(seconds) {
 // for the tooltip.
 const SCRAY_LIST_COLUMN_DEFS = [
   { key: null,         label: '#',      name: 'Number',     cls: 'lc-num' },
+  // Bookmarks page only (bookmarks-page.js adds it to the lists it draws):
+  // the bookmark's note and its time in one cell. Sorts by the note.
+  { key: 'note',       label: 'Note',   name: 'Bookmark note and time', cls: 'lc-note' },
   { key: 'studio',     label: 'Studio', name: 'Studio',     cls: 'lc-studio' },
   { key: 'performers', label: 'Perf',   name: 'Performers', cls: 'lc-perf' },
   { key: 'filename',   label: 'File',   name: 'Filename',   cls: 'lc-file' },
@@ -462,6 +484,9 @@ const SCRAY_LIST_COLUMNS_FOR = {
   history: ['lc-num', 'lc-studio', 'lc-perf', 'lc-file', 'lc-score'],
   basket:  ['lc-num', 'lc-studio', 'lc-perf', 'lc-file', 'lc-score']
 };
+
+// The bookmarks page adds its note column to these.
+window.SCRAY_LIST_COLUMNS_FOR = SCRAY_LIST_COLUMNS_FOR;
 
 function scrayListColumnDefs(list) {
   const want = SCRAY_LIST_COLUMNS_FOR[list] || SCRAY_LIST_COLUMNS_FOR.main;
@@ -552,7 +577,11 @@ function scrayBuildListRow(video, index, cfg) {
   li._scrayVideo = video;
   li._scrayIndex = index;
   li._scrayCfg = cfg;
-  li._scrayRowKey = String(cfg.rowKey ?? vidId);
+  // A bookmark entry (bookmarks page) is one of several rows for the same
+  // file, so it's remembered as open by file AND bookmark time - otherwise
+  // opening one bookmark would open every bookmark in that file.
+  const bmKey = video.__bmStartAt != null ? `${vidId}@${video.__bmStartAt}` : vidId;
+  li._scrayRowKey = String(cfg.rowKey ?? bmKey);
 
   const want = SCRAY_LIST_COLUMNS_FOR[list] || SCRAY_LIST_COLUMNS_FOR.main;
   const cols = scrayListColumns(video);
@@ -610,7 +639,9 @@ function scrayBuildListRow(video, index, cfg) {
   const scoreCell = cell('lc-score', scrayListScoreText(score));
   if (score == null) scoreCell.classList.add('lc-blank');
 
-  line.append(num, studio, perf, file, scoreCell);
+  line.append(num);
+  if (want.includes('lc-note')) line.appendChild(scrayListNoteCell(video));
+  line.append(studio, perf, file, scoreCell);
   if (want.includes('lc-size')) {
     line.appendChild(cell('lc-size', scrayListIsYetToUpload(video) ? '' : scrayListSize(video.sizeBytes)));
   }
@@ -804,6 +835,19 @@ function ensureListRowDetail(li) {
   }
   detail.appendChild(fileLine);
 
+  // Bookmark entries: which bookmark this row is, above the history line.
+  if (video.__bmStartAt != null) {
+    const bmLine = lineOf('lc-d-bm');
+    const bmNote = document.createElement('span');
+    bmNote.className = 'lc-note-text' + (video.__bmNote ? '' : ' is-empty');
+    bmNote.textContent = video.__bmNote || 'no note';
+    const bmTime = document.createElement('span');
+    bmTime.className = 'lc-note-time';
+    bmTime.textContent = formatDuration(video.__bmStartAt * 1000);
+    bmLine.append('Bookmark: ', bmNote, ' at ', bmTime);
+    detail.appendChild(bmLine);
+  }
+
   // 4 · History. A history row's "Played" is when THAT entry was played, to
   // the minute - the time the old history row printed - rather than the
   // catalogue's last_played, which may be a later play somewhere else.
@@ -966,6 +1010,8 @@ function scrayGroupFolder(video) {
  */
 function scrayGroupKeyFor(video) {
   if (!video) return null;
+  // A bookmark entry (bookmarks page) is a moment, not a file - never grouped.
+  if (video.__bmStartAt != null) return null;
   const size = Number(video.sizeBytes);
   if (!(size > 0 && size < SCRAY_GROUP_MAX_BYTES)) return null;
   if (scrayListIsYetToUpload(video)) return null;
@@ -1149,7 +1195,9 @@ function scrayBuildGroupRow(group, number, cfg) {
 
   const scoreCell = cell('lc-score lc-blank', '');
 
-  line.append(num, studio, perf, file, scoreCell);
+  line.append(num);
+  if (want.includes('lc-note')) line.appendChild(cell('lc-note lc-blank', ''));
+  line.append(studio, perf, file, scoreCell);
   if (want.includes('lc-size')) line.appendChild(cell('lc-size', scrayListSize(group.totalBytes)));
   li.appendChild(line);
 

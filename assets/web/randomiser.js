@@ -135,7 +135,11 @@ const SCRAY_LIST_SORT_KEYS = {
   views:      { type: 'num',  first: 'desc', zero: true, value: v => v.view_count },
   watched:    { type: 'num',  first: 'desc', zero: true, value: v => v.time_viewed },
   played:     { type: 'date', first: 'desc', value: v => v.last_played },
-  created:    { type: 'date', first: 'desc', value: v => v.createdDateTime }
+  created:    { type: 'date', first: 'desc', value: v => v.createdDateTime },
+  // Bookmarks page: a bookmark entry carries its note and time (bookmarks-page.js).
+  // Nothing on the main list has either, so these never move a video there.
+  note:       { type: 'text', first: 'asc',  value: v => v.__bmNote },
+  bmtime:     { type: 'num',  first: 'asc',  value: v => v.__bmStartAt }
 };
 
 // ⚙️ DEFAULT SORT ON BOOT: newest created first, as before. [] boots unsorted.

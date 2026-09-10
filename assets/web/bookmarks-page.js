@@ -1,559 +1,307 @@
 
 // bookmarks-page.js  —  Scray Native
 //
-// Drives bookmarks.html. The page is a copy of index.html's shell, so every
-// element the shared scripts reach for at DOMContentLoaded still exists; the
-// parts this page doesn't use are hidden rather than removed. This file owns
-// three things and nothing else:
+// Drives bookmarks.html. The page is a copy of index.html's shell, so it has the same
+// list, filters, tag clouds, pills bar, basket, history and player as the main
+// page - and this file's job is to make all of that work on BOOKMARKS instead
+// of videos, while re-using it rather than keeping a second copy of any of it.
 //
-//   1. The bookmark list itself (#bmList), one row per bookmark.
-//   2. The note cloud (#bmNoteCloud), which replaces the AT dropdown.
-//   3. The sort buttons, which carry bm-prefixed IDs so randomiser.js's own
-//      (null-guarded) binds simply don't find them.
+// How: one entry per bookmark, as a shallow clone of its video carrying
+//   __bmStartAt  the bookmark's time - playVideoInline starts there, so P, the
+//                row title, > and <, and X all open at the bookmark
+//   __bmNote     its note, mapped to its display name
+// and the main page's own pipeline is pointed at those entries:
 //
-// Rows are drawn by window.scrayBuildVideoRow, the same builder the main list
-// uses, so the buttons, context menu and click behaviour stay identical for
-// free. Each row gets a shallow CLONE of its video carrying __bmStartAt, which
-// playVideoInline reads as the start point - that is what makes P, > and <
-// and the random list all open at the bookmark rather than at 0.
+//   getFilteredVideos    the main filter (tags, studios, performers, stash tags,
+//                        excludes, toggles) runs on the videos as usual; its
+//                        result is then expanded to bookmarks and the note
+//                        filter applied. Everything that asks it - the list,
+//                        R's random list, X - therefore gets bookmarks.
+//   matchesSearchQuery   the search box also matches the note.
+//   updateVideoStats     counts bookmarks, and keeps the last filtered set for
+//                        the player's Xb.
+//   scrayFacetCounts     the tag clouds count bookmarks, and only over
+//                        bookmarked videos.
+//
+// So the list is the main list: the same column rows (plus a Note column),
+// the same heading sorts and sort buttons, the same open rows and taps.
+//
+// Notes are a fourth facet class, 'note', opened by the NOTE button into the
+// same cloud modal as AT / STU / PERF / STAG, with its own pills in the bar.
 
 (function () {
   'use strict';
 
-  // ⚙️ How many bookmarks a random list holds. Mirrors the main page's random
-  // count if that dropdown has a value, otherwise this.
-  const DEFAULT_RANDOM_COUNT = 25;
-
-  // ⚙️ How many recent picks X refuses to repeat before it will come round
-  // again. Matches randomiser.js's own window of 10.
-  const RECENT_MEMORY = 10;
-  let recentlyPlayed = [];
-  const entryKey = (e) => `${e.video.oneDriveId}@${e.time}`;
-
-  // Every bookmark on the device, one entry per bookmark (not per video).
-  let allEntries = [];
-  // What's on screen right now, after note filter + search + sort.
-  let visibleEntries = [];
-  // Notes currently selected in the cloud. Empty = no note filter.
-  const selectedNotes = new Set();
-
-  let noteSortMode = 'count';   // 'count' | 'alpha'
-  let noteSearchTerm = '';      // filters the cloud only, not the list
-  let rowSort = { key: null, dir: 'none' };
-
+  // The cloud's name for a bookmark with no note, so it can be picked too.
   const NO_NOTE = '(no note)';
 
-  // ---------------------------------------------------------------- data
+  document.documentElement.classList.add('scray-bookmarks-page');
 
-  /**
-   * Flatten the local mirror into one entry per bookmark.
-   *
-   * Reads IndexedDB, not the API: bookmarks ride the same delta stream as the
-   * video rows (see api.php's `pull`), so the mirror already holds them and
-   * this works offline. It also means the note counts match the rows exactly -
-   * a cloud pill can never advertise bookmarks the page can't show.
-   */
-  async function loadEntries() {
-    const videos = await window.getAllVideos();
-    const entries = [];
+  // ---------------------------------------------------------------- columns
 
-    videos.forEach(video => {
-      if (!Array.isArray(video.bookmarks) || !video.bookmarks.length) return;
-      video.bookmarks.forEach(bm => {
-        // Mapped here rather than at each render point, so the cloud, the
-        // counts, the filter set, the sort and the row label all agree. Two
-        // raw spellings that map to one name therefore become ONE chip with a
-        // combined count, which is the whole reason for mapping them.
-        //
-        // Safe because this page is read-only: nothing here pushes a bookmark
-        // back, so the stored note is never overwritten with its display form.
-        const rawNote = (bm.note || '').trim();
-        const note = window.scrayMapName ? window.scrayMapName('note', rawNote) : rawNote;
-        // A shallow clone per bookmark. oneDriveId is preserved, so the basket,
-        // history, scoring and every file operation still address the right
-        // video; __bmStartAt is the only addition.
-        const clone = Object.assign({}, video, {
-          __bmStartAt: bm.time,
-          __bmNote: note
-        });
-        entries.push({ video: clone, time: bm.time, note });
-      });
+  // # | Note | Studio | Perf | File | ★ | Size, on the list and the random list.
+  if (window.SCRAY_LIST_COLUMNS_FOR) {
+    ['main', 'random'].forEach(list => {
+      const cols = window.SCRAY_LIST_COLUMNS_FOR[list];
+      if (cols && !cols.includes('lc-note')) cols.splice(1, 0, 'lc-note');
     });
-
-    allEntries = entries;
-    console.log(`[bookmarks] ${entries.length} bookmark(s) across ${videos.length} video(s)`);
   }
 
-  /** Every distinct note, most-used first. Feeds the cloud search autocomplete. */
-  function distinctNotes() {
-    const counts = noteCounts();
-    return Array.from(counts.keys())
-      .filter(n => n !== NO_NOTE)
-      .sort((a, b) => counts.get(b) - counts.get(a));
+  // ---------------------------------------------------------------- entries
+
+  function noteOf(bm) {
+    const raw = (bm.note || '').trim();
+    // Mapped, so two raw spellings of one note are one cloud value and one
+    // pill. This page never writes a bookmark back, so the stored note is
+    // never replaced by its display form.
+    return window.scrayMapName ? window.scrayMapName('note', raw) : raw;
   }
 
-  /** note -> count, over every entry (not just the visible ones). */
-  function noteCounts() {
-    const counts = new Map();
-    allEntries.forEach(e => {
-      const key = e.note || NO_NOTE;
-      counts.set(key, (counts.get(key) || 0) + 1);
-    });
-    return counts;
-  }
-
-  // ---------------------------------------------------------------- filter + sort
-
-  /**
-   * The FLS player's Xb button asks here before falling back to the whole
-   * mirror. Returns the currently filtered bookmarks when a note pill or the
-   * filename search box is armed, and null when neither is - null meaning
-   * "no opinion", so Xb behaves on an unfiltered page exactly as it does on
-   * the main page.
-   *
-   * applyFilters() is re-run rather than trusting the last paint, for the same
-   * reason takeOverPlayRandomButton does it: the search box can have been
-   * typed into without a repaint having happened yet.
-   */
-  window.scrayFilteredBookmarkEntries = function () {
-    const searchEl = document.getElementById('filenameSearchBox');
-    const term = (searchEl?.value || '').trim();
-    if (!selectedNotes.size && !term) return null;
-
-    applyFilters();
-    return visibleEntries.map(e => ({ video: e.video, time: e.time, note: e.note }));
-  };
-
-  function applyFilters() {
-    const searchEl = document.getElementById('filenameSearchBox');
-    const term = (searchEl?.value || '').trim().toLowerCase();
-
-    let list = allEntries;
-
-    if (selectedNotes.size) {
-      list = list.filter(e => selectedNotes.has(e.note || NO_NOTE));
-    }
-
-    if (term) {
-      list = list.filter(e =>
-        (e.note || '').toLowerCase().includes(term) ||
-        (e.video.filename || '').toLowerCase().includes(term) ||
-        (e.video.path || '').toLowerCase().includes(term)
-      );
-    }
-
-    visibleEntries = sortEntries(list);
-  }
-
-  /**
-   * Sort by whichever button is armed. The five video-attribute sorts reuse
-   * randomiser.js's exported comparators rather than re-implementing them, so
-   * the ordering is identical to the main list. Time and Note are this page's
-   * own, since a bookmark has no equivalent on the main page.
-   */
-  function sortEntries(list) {
-    if (!rowSort.key || rowSort.dir === 'none') return list.slice();
-
-    if (rowSort.key === 'time') {
-      return list.slice().sort((a, b) =>
-        rowSort.dir === 'asc' ? a.time - b.time : b.time - a.time);
-    }
-    if (rowSort.key === 'note') {
-      return list.slice().sort((a, b) => {
-        const an = (a.note || '').toLowerCase();
-        const bn = (b.note || '').toLowerCase();
-        return rowSort.dir === 'asc' ? an.localeCompare(bn) : bn.localeCompare(an);
-      });
-    }
-
-    const fn = {
-      size: window.sortVideosBySize,
-      created: window.sortVideosByCreated,
-      modified: window.sortVideosByModified,
-      filename: window.sortVideosByFilename,
-      score: window.sortVideosByScore
-    }[rowSort.key];
-    if (typeof fn !== 'function') return list.slice();
-
-    // The comparators take videos, not entries. Sort the videos, then walk the
-    // result and pull the matching entries back out - a video can appear more
-    // than once (several bookmarks), so entries are consumed in order.
-    const sortedVideos = fn(list.map(e => e.video), rowSort.dir);
-    const byVideo = new Map();
-    list.forEach(e => {
-      if (!byVideo.has(e.video)) byVideo.set(e.video, []);
-      byVideo.get(e.video).push(e);
-    });
+  /** Videos -> one entry per bookmark, in time order within each video. */
+  function expandToBookmarks(videos) {
     const out = [];
-    sortedVideos.forEach(v => {
-      const bucket = byVideo.get(v);
-      if (bucket && bucket.length) out.push(bucket.shift());
+    (videos || []).forEach(video => {
+      if (!video || !Array.isArray(video.bookmarks) || !video.bookmarks.length) return;
+      video.bookmarks
+        .filter(bm => bm && typeof bm.time === 'number')
+        .sort((a, b) => a.time - b.time)
+        .forEach(bm => {
+          // oneDriveId is untouched, so the basket, history, scores and every
+          // file operation still address the real video.
+          out.push(Object.assign({}, video, { __bmStartAt: bm.time, __bmNote: noteOf(bm) }));
+        });
     });
     return out;
   }
 
-  // ---------------------------------------------------------------- render
+  // ---------------------------------------------------------------- note facet
 
-  /** "Kissing  00:07:08 " - the bit that leads each row. */
-  function buildRowPrefix(entry) {
-    const frag = document.createDocumentFragment();
-
-    const noteEl = document.createElement('span');
-    noteEl.className = 'bm-row-note' + (entry.note ? '' : ' is-empty');
-    noteEl.textContent = entry.note || 'no note';
-    frag.appendChild(noteEl);
-
-    const timeEl = document.createElement('span');
-    timeEl.className = 'bm-row-time';
-    timeEl.textContent = formatDuration(entry.time * 1000);
-    frag.appendChild(timeEl);
-
-    return frag;
+  window.scrayFacetFilters = window.scrayFacetFilters || {};
+  window.scrayFacetExcludes = window.scrayFacetExcludes || {};
+  window.scrayFacetFilters.note = window.scrayFacetFilters.note || new Set();
+  window.scrayFacetExcludes.note = window.scrayFacetExcludes.note || new Set();
+  if (window.SCRAY_FACET_META) {
+    window.SCRAY_FACET_META.note = { label: 'Notes', pill: 'floating-tag-note' };
   }
-
-  function renderList() {
-    const container = document.getElementById('bmList');
-    if (!container) return;
-    container.innerHTML = '';
-
-    if (!visibleEntries.length) {
-      const li = document.createElement('li');
-      li.style.cssText = 'color:#999; font-style:italic; list-style:none;';
-      li.textContent = allEntries.length
-        ? 'No bookmarks match the current filter.'
-        : 'No bookmarks found. Sync, or add some from the player.';
-      container.appendChild(li);
-    } else {
-      visibleEntries.forEach((entry, index) => {
-        const li = window.scrayBuildVideoRow(entry.video, 'bookmarks', index, {
-          prefix: buildRowPrefix(entry)
-        });
-        container.appendChild(li);
-      });
-    }
-
-    // What > and < walk. playVideoInline reads __bmStartAt off each clone, so
-    // stepping through the list keeps landing on the bookmarks.
-    window.scrayBookmarkVideos = visibleEntries.map(e => e.video);
-
-    const stats = document.getElementById('videoStats');
-    if (stats) {
-      const videos = new Set(visibleEntries.map(e => e.video.oneDriveId)).size;
-      stats.textContent = `Bookmarks: ${visibleEntries.length}`
-        + ` of ${allEntries.length} | Videos: ${videos}`;
-    }
-  }
+  const noteIncludes = window.scrayFacetFilters.note;
+  const noteExcludes = window.scrayFacetExcludes.note;
 
   /**
-   * The random list lives in #playlist - the blue panel - exactly as it does
-   * on the main page, and leaves #bmList untouched. The two lists are separate.
-   *
-   * Rows get the 'random' context and filteredVideosGlobal is pointed at them,
-   * which is the pairing player.js already understands. So > and < walk the
-   * random list when you played from it, and the bookmark list when you
-   * played from that - no extra player changes needed.
+   * Notes narrow the bookmarks the rest of the filter leaves. Picked notes are
+   * ANY-of among themselves - a bookmark has one note, so ALL could never
+   * match - and an excluded note always drops its bookmarks.
    */
-  function renderRandomList(entries) {
-    const container = document.getElementById('playlist');
-    if (!container) return;
-    container.innerHTML = '';
-
-    entries.forEach((entry, index) => {
-      container.appendChild(
-        window.scrayBuildVideoRow(entry.video, 'random', index, {
-          prefix: buildRowPrefix(entry)
-        })
-      );
-    });
-
-    window.filteredVideosGlobal = entries.map(e => e.video);
-    console.log(`[bookmarks] random list: ${entries.length} bookmark(s)`);
+  function passesNoteFilter(entry) {
+    const key = entry.__bmNote || NO_NOTE;
+    if (noteExcludes.size && noteExcludes.has(key)) return false;
+    if (noteIncludes.size && !noteIncludes.has(key)) return false;
+    return true;
   }
 
-  function renderNoteCloud() {
-    const cloud = document.getElementById('bmNoteCloud');
-    if (!cloud) return;
-    cloud.innerHTML = '';
+  // ---------------------------------------------------------------- pipeline
 
-    const counts = noteCounts();
-    let notes = Array.from(counts.keys());
+  // All four are top-level functions in randomiser.js, so their global
+  // bindings are properties of window: replacing them here changes what the
+  // bare-name calls inside randomiser.js reach.
+  const baseGetFilteredVideos = window.getFilteredVideos;
+  if (typeof baseGetFilteredVideos === 'function') {
+    window.getFilteredVideos = async function (...args) {
+      const videos = await baseGetFilteredVideos.apply(this, args);
+      return expandToBookmarks(videos).filter(passesNoteFilter);
+    };
+  }
 
-    // The search box narrows which pills are shown - it does not touch the
-    // list. A note you have already selected stays visible even when it no
-    // longer matches, so you can always see and undo the active filter.
-    const term = noteSearchTerm.trim().toLowerCase();
-    if (term) {
-      notes = notes.filter(n =>
-        n.toLowerCase().includes(term) || selectedNotes.has(n));
-    }
+  const baseMatchesSearchQuery = window.matchesSearchQuery;
+  if (typeof baseMatchesSearchQuery === 'function') {
+    window.matchesSearchQuery = function (video, query) {
+      if (!video || video.__bmStartAt == null) return baseMatchesSearchQuery(video, query);
+      // The main haystack, with the note in front.
+      const haystack = `${video.__bmNote || ''} ${video.filename} ${video.path} `
+        + `${window.scrayStashNames ? window.scrayStashNames.text(video) : ''}`;
+      const hay = haystack.toLowerCase();
+      const has = t => hay.includes(t);
+      return query.phrases.every(has) && query.required.every(has)
+        && !query.excluded.some(has) && query.optional.every(has);
+    };
+  }
 
-    if (noteSortMode === 'alpha') {
-      notes.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  // The last filtered set of bookmarks, after the search box. Xb reads it.
+  let lastFilteredEntries = null;
+
+  // Stats line: bookmarks and the files they're in, instead of files and size.
+  window.updateVideoStats = async function (filteredList = null) {
+    let entries = filteredList;
+    if (Array.isArray(entries)) {
+      lastFilteredEntries = entries;
     } else {
-      notes.sort((a, b) => (counts.get(b) - counts.get(a)) || a.localeCompare(b));
+      try {
+        entries = expandToBookmarks(await window.getAllVideos());
+      } catch (err) {
+        entries = [];
+      }
     }
+    const statsDiv = document.getElementById('videoStats');
+    if (!statsDiv) return;
+    const files = new Set(entries.map(e => e.oneDriveId ?? e.idFromAPI)).size;
+    statsDiv.textContent = `Bookmarks: ${entries.length} | Videos: ${files}`;
+  };
 
-    notes.forEach(note => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'bm-note-pill' + (selectedNotes.has(note) ? ' is-on' : '');
-      btn.title = note;
-      btn.textContent = note;
+  /**
+   * The FLS player's Xb asks here first. The currently filtered bookmarks when
+   * any filter or the search box is armed; null ("no opinion") when nothing
+   * is, so Xb then picks from every bookmark, as on the main page.
+   */
+  window.scrayFilteredBookmarkEntries = function () {
+    const term = (document.getElementById('filenameSearchBox')?.value || '').trim();
+    const terms = typeof window.scrayTotalFilterTerms === 'function' ? window.scrayTotalFilterTerms() : 0;
+    const excluded = noteExcludes.size
+      + ['studio', 'performer', 'stashtag'].reduce((n, k) => n + ((window.scrayFacetExcludes[k] || {}).size || 0), 0)
+      + (window.$ ? (($('#excludeTagSelect').val() || []).length) : 0);
+    if (!term && !terms && !excluded) return null;
+    return (lastFilteredEntries || []).map(v => ({ video: v, time: v.__bmStartAt, note: v.__bmNote }));
+  };
 
-      const count = document.createElement('span');
-      count.className = 'bm-note-count';
-      count.textContent = `(${counts.get(note)})`;
-      btn.appendChild(count);
+  // ---------------------------------------------------------------- clouds
 
-      btn.addEventListener('click', () => {
-        if (selectedNotes.has(note)) selectedNotes.delete(note);
-        else selectedNotes.add(note);
-        renderNoteCloud();
-        refresh();
-      });
-
-      cloud.appendChild(btn);
+  /**
+   * value -> number of BOOKMARKS carrying it, over bookmarked videos only.
+   * A studio's count is how many bookmarks you'd get by picking it, which is
+   * what matters on this page; a note's is how many bookmarks have that note.
+   */
+  window.scrayFacetCounts = async function (kind, genderMode) {
+    const videos = await window.getAllVideos();
+    const counts = new Map();
+    const bump = (val, n) => { if (val) counts.set(val, (counts.get(val) || 0) + n); };
+    videos.forEach(v => {
+      const bms = Array.isArray(v.bookmarks) ? v.bookmarks.filter(b => b && typeof b.time === 'number') : [];
+      if (!bms.length) return;
+      if (kind === 'note') {
+        bms.forEach(bm => bump(noteOf(bm) || NO_NOTE, 1));
+        return;
+      }
+      let values;
+      if (kind === 'performer') {
+        const p = window.scrayStashNames && window.scrayStashNames.parts(v);
+        if (!p) return;
+        values = genderMode === 'female' ? (p.performerListF || [])
+               : genderMode === 'male'   ? (p.performerListM || [])
+               : (p.performerListAll || []);
+      } else {
+        values = typeof window.scrayFacetValues === 'function' ? window.scrayFacetValues(v, kind) : [];
+      }
+      new Set(values || []).forEach(val => bump(val, bms.length));
     });
+    return counts;
+  };
 
-    if (!notes.length) {
-      const empty = document.createElement('span');
-      empty.style.cssText = 'font-size:0.75rem; color:#999; font-style:italic;';
-      empty.textContent = 'No notes match.';
-      cloud.appendChild(empty);
-    }
+  // Notes count towards "more than one term" (the intersect and Clear all
+  // pills) and are cleared by Clear all.
+  const baseTotalFilterTerms = window.scrayTotalFilterTerms;
+  if (typeof baseTotalFilterTerms === 'function') {
+    window.scrayTotalFilterTerms = function () {
+      return baseTotalFilterTerms() + noteIncludes.size;
+    };
   }
 
-  function refresh() {
-    applyFilters();
-    renderList();
+  const baseClearAll = window.scrayClearAllFilters;
+  if (typeof baseClearAll === 'function') {
+    window.scrayClearAllFilters = function (ev) {
+      noteIncludes.clear();
+      noteExcludes.clear();
+      return baseClearAll(ev);
+    };
+  }
+
+  const baseClearAllFilters = window.clearAllFilters;
+  if (typeof baseClearAllFilters === 'function') {
+    window.clearAllFilters = function (...args) {
+      noteIncludes.clear();
+      noteExcludes.clear();
+      return baseClearAllFilters.apply(this, args);
+    };
+  }
+
+  // ---------------------------------------------------------------- pills
+
+  /**
+   * Note pills in the floating bar. updateFloatingTagPillsFromCommon lives
+   * inside populateTagDropdowns and repaints the bar from scratch whenever a
+   * filter changes, knowing only its own four classes - so this watches the
+   * bar and adds the note pills after each repaint, beside the other facet
+   * pills and before the intersect / clear / search pills.
+   */
+  function paintNotePills(bar) {
+    const want = [...Array.from(noteIncludes).map(n => 'in:' + n), ...Array.from(noteExcludes).map(n => 'ex:' + n)];
+    const have = Array.from(bar.querySelectorAll(':scope > [data-bm-note]')).map(p => p.dataset.bmNote);
+    if (want.length === have.length && want.every((w, i) => w === have[i])) return;
+
+    bar.querySelectorAll(':scope > [data-bm-note]').forEach(p => p.remove());
+    const before = bar.querySelector(':scope > .floating-tag-intersect, :scope > .floating-tag-intersect-off, '
+      + ':scope > .floating-tag-clearall, :scope > .floating-tag-search, :scope > .floating-tag-search-wrap, '
+      + ':scope > .floating-tag-exclude');
+
+    const add = (pill) => bar.insertBefore(pill, before || null);
+    noteIncludes.forEach(note => {
+      const pill = document.createElement('span');
+      pill.className = 'floating-tag-pill floating-tag-note';
+      pill.dataset.bmNote = 'in:' + note;
+      pill.textContent = note;
+      pill.title = 'Click to remove this note filter';
+      pill.addEventListener('click', () => {
+        noteIncludes.delete(note);
+        window.scrayRefreshFilters?.();
+      });
+      add(pill);
+    });
+    noteExcludes.forEach(note => {
+      const pill = document.createElement('span');
+      pill.className = 'floating-tag-pill floating-tag-fexclude fx-note';
+      pill.dataset.bmNote = 'ex:' + note;
+      pill.textContent = '− ' + note;
+      pill.title = 'Excluded - click to stop excluding it';
+      pill.addEventListener('click', () => {
+        noteExcludes.delete(note);
+        window.scrayRefreshFilters?.();
+      });
+      add(pill);
+    });
+  }
+
+  function watchPillsBar() {
+    const bar = document.getElementById('floatingTagPillsBar');
+    if (!bar) return;
+    new MutationObserver(() => paintNotePills(bar)).observe(bar, { childList: true });
+    paintNotePills(bar);
   }
 
   // ---------------------------------------------------------------- controls
 
-  /**
-   * Cycle none -> asc -> desc, clearing the other buttons. Deliberately simple
-   * and local: randomiser.js's equivalent also drives paginationState and the
-   * landscape panel, neither of which this page uses.
-   */
-  const SORT_BUTTONS = [
-    { id: 'bmSortSizeBtn',     key: 'size',     label: 'Size'   },
-    { id: 'bmSortCreatedBtn',  key: 'created',  label: 'Create' },
-    { id: 'bmSortModifiedBtn', key: 'modified', label: 'Mod'    },
-    { id: 'bmSortFilenameBtn', key: 'filename', label: 'File'   },
-    { id: 'bmSortScoreBtn',    key: 'score',    label: 'Score'  },
-    { id: 'bmSortTimeBtn',     key: 'time',     label: 'Time'   },
-    { id: 'bmSortNoteBtn',     key: 'note',     label: 'Note'   }
-  ];
-
-  function paintSortButtons() {
-    SORT_BUTTONS.forEach(({ id, key, label }) => {
-      const btn = document.getElementById(id);
-      if (!btn) return;
-      const on = rowSort.key === key && rowSort.dir !== 'none';
-      const arrow = !on ? '' : (rowSort.dir === 'asc' ? ' ↑' : ' ↓');
-      btn.textContent = label + arrow;
-      btn.dataset.sortState = on ? rowSort.dir : 'none';
-      btn.style.background = on ? '#007bff' : '#555';
-    });
-  }
-
-  function wireSortButtons() {
-    SORT_BUTTONS.forEach(({ id, key }) => {
-      const btn = document.getElementById(id);
-      if (!btn) return;
-      btn.addEventListener('click', () => {
-        const states = ['none', 'asc', 'desc'];
-        const next = (rowSort.key === key)
-          ? states[(states.indexOf(rowSort.dir) + 1) % states.length]
-          : 'asc';
-        rowSort = { key: next === 'none' ? null : key, dir: next };
-        paintSortButtons();
-        refresh();
-      });
-    });
-    paintSortButtons();
-  }
-
-  function wireNoteSortButtons() {
-    const alpha = document.getElementById('bmNoteSortAlphaBtn');
-    const count = document.getElementById('bmNoteSortCountBtn');
-    const clear = document.getElementById('bmNoteClearBtn');
-
-    const paint = () => {
-      if (alpha) alpha.style.background = noteSortMode === 'alpha' ? '#007bff' : '#555';
-      if (count) count.style.background = noteSortMode === 'count' ? '#007bff' : '#555';
-    };
-
-    alpha?.addEventListener('click', () => { noteSortMode = 'alpha'; paint(); renderNoteCloud(); });
-    count?.addEventListener('click', () => { noteSortMode = 'count'; paint(); renderNoteCloud(); });
-    clear?.addEventListener('click', () => {
-      selectedNotes.clear();
-      renderNoteCloud();
-      refresh();
-    });
-    paint();
-  }
-
-  /**
-   * R generates a random list of bookmarks, the same way the main page's R
-   * generates a random list of videos.
-   *
-   * Clone-and-replace rather than addEventListener: randomiser.js already
-   * bound its own handler to this button at DOMContentLoaded, and that one
-   * calls generateRandomPlaylistByTags(), which has nothing to do with
-   * bookmarks. Replacing the node drops the old listener with it.
-   */
-  function takeOverRandomButton() {
-    // Clone-and-replace does NOT work here. randomiser.js's DOMContentLoaded
-    // handler is async - it awaits populateTagDropdowns() and friends before
-    // binding #quickRandomBtn, so it binds after this file has already run and
-    // simply binds to the clone. A capture-phase listener on document fires
-    // before any listener on the button itself, regardless of when they were
-    // added, and stopping propagation there means the event never reaches it.
-    document.addEventListener('click', (e) => {
-      const btn = (e.target instanceof Element) ? e.target.closest('#quickRandomBtn') : null;
-      if (!btn) return;
-      e.preventDefault();
-      e.stopPropagation();
-
-      const countEl = document.getElementById('randomCount');
-      const wanted = parseInt(countEl?.value, 10) || DEFAULT_RANDOM_COUNT;
-
-      // Pick from whatever the note cloud and search box currently allow, so
-      // "random" respects the filter rather than ignoring it.
-      applyFilters();
-      const pool = visibleEntries.slice();
-      for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [pool[i], pool[j]] = [pool[j], pool[i]];
-      }
-      renderRandomList(pool.slice(0, Math.min(wanted, pool.length)));
-
-      document.getElementById('playlist')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, true);
-  }
-
-  /**
-   * X plays a random bookmark rather than a random video.
-   *
-   * randomiser.js binds #playRandomFilteredBtn inside its own DOMContentLoaded
-   * handler, so the same capture-phase interception used for R applies here -
-   * it fires before any listener on the button itself, whichever order they
-   * were registered in.
-   *
-   * The pool is whatever the note cloud and search box currently allow, which
-   * mirrors the main page: X there picks from the filtered set, not from the
-   * list that happens to be on screen.
-   */
-  function takeOverPlayRandomButton() {
-    document.addEventListener('click', (e) => {
-      const btn = (e.target instanceof Element)
-        ? e.target.closest('#playRandomFilteredBtn')
-        : null;
-      if (!btn) return;
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (typeof toggleBasket === 'function') toggleBasket(false);
-      if (typeof toggleHistory === 'function') toggleHistory(false);
-
-      applyFilters();
-      if (!visibleEntries.length) {
-        alert('No bookmarks match the current filter');
-        return;
-      }
-
-      // Skip anything played in the last few goes, but fall back to the whole
-      // pool rather than refusing once everything has been seen. Keyed on the
-      // bookmark, not the video, so two bookmarks in one file stay distinct.
-      const eligible = visibleEntries.filter(e2 => !recentlyPlayed.includes(entryKey(e2)));
-      const pool = eligible.length ? eligible : visibleEntries;
-
-      const entry = pool[Math.floor(Math.random() * pool.length)];
-      recentlyPlayed.unshift(entryKey(entry));
-      if (recentlyPlayed.length > RECENT_MEMORY) {
-        recentlyPlayed = recentlyPlayed.slice(0, RECENT_MEMORY);
-      }
-
-      // Index within the rendered list, so > and < carry on from here. The
-      // clone holds __bmStartAt, so it opens at the bookmark.
-      const index = visibleEntries.indexOf(entry);
-      window.lastPlayLabel = 'Random bookmark';
-      console.log(`[bookmarks] random: "${entry.note || 'no note'}" at `
-        + `${formatDuration(entry.time * 1000)} in ${entry.video.filename}`);
-      window.inlineVideoPlayer.play(entry.video, 'bookmarks', index < 0 ? 0 : index);
-
-      if (window.innerWidth <= 1024) {
-        setTimeout(() => {
-          document.getElementById('inlineVideoContainer')
-            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, 300);
-      }
-    }, true);
-  }
-
-  /**
-   * The cloud search field. Filters which note pills are shown; the row list
-   * is left to #filenameSearchBox. Autocomplete comes from the shared helper
-   * in file-operations.js, so it behaves the same as the note field in the
-   * bookmark modal.
-   */
-  function wireNoteSearch() {
-    const box = document.getElementById('bmNoteSearch');
-    if (!box) return;
-
-    box.addEventListener('input', () => {
-      noteSearchTerm = box.value;
-      renderNoteCloud();
-    });
-
-    const clear = document.getElementById('bmNoteSearchClear');
-    clear?.addEventListener('click', () => {
-      box.value = '';
-      noteSearchTerm = '';
-      renderNoteCloud();
-      box.focus();
-    });
-
-    window.scrayAttachNoteAutocomplete?.(box, distinctNotes, {
-      openOnFocus: true,
-      onPick: (v) => { noteSearchTerm = v; renderNoteCloud(); }
+  function wireNoteButton() {
+    document.getElementById('btnNOTE')?.addEventListener('click', () => {
+      if (typeof window.showTagCloudModal === 'function') window.showTagCloudModal('note');
     });
   }
 
   function wireSearchBox() {
     const box = document.getElementById('filenameSearchBox');
-    if (!box) return;
-    box.placeholder = 'Filter notes / files';
-    // randomiser.js binds its own input handler here and calls
-    // filterDisplayedByFilename(), which repaints #taggedVideosContainer -
-    // hidden on this page, so it is a no-op rather than a conflict. Ours runs
-    // alongside it.
-    box.addEventListener('input', refresh);
+    if (box) box.placeholder = 'Filter notes / files';
   }
 
   // ---------------------------------------------------------------- boot
 
   document.addEventListener('DOMContentLoaded', async () => {
     document.body.classList.add('scray-bookmarks-page');
-
-    wireSortButtons();
-    wireNoteSortButtons();
-    wireNoteSearch();
+    wireNoteButton();
     wireSearchBox();
-    takeOverRandomButton();
-    takeOverPlayRandomButton();
+    watchPillsBar();
 
-    // The mirror is the only thing this page reads, and nothing else on it
-    // syncs - index.php/index.html pull on boot, this page never did. So a
-    // bookmark that arrived server-side (a promoted stash import, an edit on
-    // another device) stayed invisible here until you happened to visit the
-    // main page first. Pull before reading.
+    // The mirror is all this page reads. index.php/index.html pull on boot and
+    // this page never used to, so a bookmark that arrived server-side stayed
+    // invisible here until the main page had been visited. Pull, then draw.
     //
     // Two engines, because the apps boot differently: Picker's
-    // refreshMetadataFromDb re-reads from since=0, which is what repairs rows
-    // a scan overwrote; Native has no such function and goes through the
-    // ordinary delta pull instead.
+    // refreshMetadataFromDb re-reads from since=0; Native goes through the
+    // ordinary delta pull.
     try {
       if (typeof window.ensureMetadataFresh === 'function') {
         await window.ensureMetadataFresh();
@@ -566,20 +314,17 @@
       console.warn('[bookmarks] sync before load failed, showing the local copy:', err);
     }
 
-    try {
-      await loadEntries();
-    } catch (err) {
-      console.error('[bookmarks] could not load bookmarks:', err);
-    }
-
-    renderNoteCloud();
-    refresh();
+    window.skipSearchScroll = true;
+    window.skipPanelAutoOpen = true;
+    window.scrayRefreshBookmarksPage();
   });
 
-  // Let other code (and the console) force a rebuild after a sync or an edit.
+  // Let other code (and the console) redraw after a sync or an edit, at the
+  // depth already showing.
   window.scrayRefreshBookmarksPage = async function () {
-    await loadEntries();
-    renderNoteCloud();
-    refresh();
+    window.skipSearchScroll = true;
+    window.scrayKeepListDepth = true;
+    if (typeof window.filterDisplayedByFilename === 'function') await window.filterDisplayedByFilename();
+    else if (typeof filterDisplayedByFilename === 'function') await filterDisplayedByFilename();
   };
 })();

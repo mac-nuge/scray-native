@@ -7156,3 +7156,34 @@ body.scray-guides-awake .fls-tap-guides {
 opacity: 1;
 transition: none;
 }
+
+/* =========================================
+BOOKMARKS PAGE - note column, note filter
+=========================================
+bookmarks-page.js draws the main list and the random list with one row per
+bookmark and adds a Note column (render.js, scrayListNoteCell). html gets
+.scray-bookmarks-page as the script loads, so the grid is right on first paint. */
+
+/* ⚙️ # | note | studio | perf | file | ★ | size. The note takes the studio and
+   performer columns' share of the room; the file keeps the largest. */
+.scray-bookmarks-page :is(#taggedVideosContainer, #playlist) {
+  --lc-cols: 1.5rem minmax(0, 1.25fr) minmax(0, 0.85fr) minmax(0, 0.85fr) minmax(0, 1.7fr) 1.4rem 3.2rem;
+}
+
+/* Two lines, like the name columns: the note, then its time. */
+:is(#taggedVideosContainer, #playlist) li.lc-row .lc-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2 !important;
+}
+.lc-note-text { color: #6f42c1; font-weight: 600; }
+.lc-note-text.is-empty { color: #999; font-weight: 400; font-style: italic; }
+.lc-note-time { color: #777; font-variant-numeric: tabular-nums; }
+
+/* Note pills and cloud chips: the BM purple. */
+.floating-tag-note { background-color: #6f42c1; color: white; }
+.floating-tag-fexclude.fx-note { border-left-color: #6f42c1; }
+.scray-cloud-note.is-on { background: #6f42c1; color: #fff; }

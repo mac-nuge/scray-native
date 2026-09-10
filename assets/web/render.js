@@ -322,13 +322,15 @@ return buttons;
 window.scrayBuildVideoRowButtons = buildVideoRowButtons;
 
 /* =========================================
-MAIN LIST - column rows
+LISTS - column rows
 =========================================
 
-The main list borrows Wholesale step 1's condensed layout: one line per file,
-in columns you can sort by, with everything else one tap away.
+The main, random, history and basket lists borrow Wholesale step 1's
+condensed layout: one line per file, in columns, with everything else one tap
+away.
 
   collapsed   #  studio  performers  filename  score  size
+              (history and basket: no size, and the # is a tick)
   open        path
               studio / performers / title          (where StashDB has one)
               filename [score] (size, duration)
@@ -338,18 +340,21 @@ in columns you can sort by, with everything else one tap away.
 The open half is built the FIRST time a row is opened, not for every row up
 front, so a 200-row list costs 200 short lines rather than 200 button groups.
 
-Only #taggedVideosContainer draws these. The random list, the bookmarks page
-and the landscape panel keep buildVideoRow's rendering above.
+#taggedVideosContainer (main) and #playlist (random) are drawn from
+render.js; history.js and basket.js call scrayBuildListRow with their own
+buttons. The bookmarks page and the landscape panel keep buildVideoRow's
+rendering above.
 ========================================= */
 
 // ⚙️ ADJUSTABLE: true closes the open row when another one is opened.
 // false lets several stay open at once.
 const SCRAY_LIST_ONE_OPEN = true;
 
-// Which rows are open, by video id. Held outside the DOM because nearly every
-// edit made from an open row - score, rename, bookmark, sync pull - re-renders
-// the list, and the row you were working in shouldn't snap shut under you.
-const scrayOpenListRows = new Set();
+// Which rows are open, per list, by row key. Held outside the DOM because
+// nearly every edit made from an open row - score, rename, bookmark, sync
+// pull, ticking it - re-renders the list, and the row you were working in
+// shouldn't snap shut under you.
+const scrayOpenListRows = { main: new Set(), random: new Set(), history: new Set(), basket: new Set() };
 
 /** The score this app displays, or null when there isn't one. */
 function scrayListScore(video) {
@@ -445,30 +450,49 @@ const SCRAY_LIST_COLUMN_DEFS = [
   { key: 'size',       label: 'Size',   name: 'Size',       cls: 'lc-size' }
 ];
 
+// ⚙️ Which columns each list draws. History and the basket live in side
+// panels, so they drop size. style.css gives each list the matching
+// --lc-cols - change one, change the other.
+const SCRAY_LIST_COLUMNS_FOR = {
+  main:    ['lc-num', 'lc-studio', 'lc-perf', 'lc-file', 'lc-score', 'lc-size'],
+  random:  ['lc-num', 'lc-studio', 'lc-perf', 'lc-file', 'lc-score', 'lc-size'],
+  history: ['lc-num', 'lc-studio', 'lc-perf', 'lc-file', 'lc-score'],
+  basket:  ['lc-num', 'lc-studio', 'lc-perf', 'lc-file', 'lc-score']
+};
+
+function scrayListColumnDefs(list) {
+  const want = SCRAY_LIST_COLUMNS_FOR[list] || SCRAY_LIST_COLUMNS_FOR.main;
+  return SCRAY_LIST_COLUMN_DEFS.filter(c => want.includes(c.cls));
+}
+
 /**
- * The header row. Drawn INSIDE the container, as its first child, so it goes
- * wherever the list goes - desktop-layout.js moves the container into a
- * column, and a static header in the page would be left behind.
+ * The header row. Drawn INSIDE the list, so it goes wherever the list goes -
+ * desktop-layout.js moves the main container into a column, and a static
+ * header in the page would be left behind.
  *
- * Tap a heading to add it to the sort; tap again to reverse it; a third tap
- * takes it back out. With more than one key the arrow carries its place in
- * the order.
+ * Only the main list's headings sort. Tap one to add it to the sort; tap again
+ * to reverse it; a third tap takes it back out. With more than one key the
+ * arrow carries its place in the order. The random list keeps the order it
+ * was drawn in (which is also the order next/previous plays), and history
+ * and the basket keep their own order.
  */
-function buildMainListHeader() {
+function buildListHeader(list) {
   const head = document.createElement('div');
   head.className = 'lc-head';
-  const sort = (typeof window.scrayListSortState === 'function') ? window.scrayListSortState() : [];
+  const sortable = list === 'main';
+  const sort = (sortable && typeof window.scrayListSortState === 'function') ? window.scrayListSortState() : [];
 
-  SCRAY_LIST_COLUMN_DEFS.forEach(col => {
+  scrayListColumnDefs(list).forEach(col => {
     const cell = document.createElement('span');
     cell.className = 'lc-cell lc-hcell ' + col.cls;
+    cell.title = col.name;
 
     const label = document.createElement('span');
     label.className = 'lc-hlabel';
     label.textContent = col.label;
     cell.appendChild(label);
 
-    if (col.key) {
+    if (sortable && col.key) {
       cell.dataset.sortKey = col.key;
       cell.title = `${col.name}: tap to sort, again to reverse, a third time to remove`;
       const at = sort.findIndex(s => s.key === col.key);
@@ -488,19 +512,35 @@ function buildMainListHeader() {
   });
   return head;
 }
+window.scrayBuildListHeader = buildListHeader;
 
-function ensureMainListHeader(container) {
+function ensureListHeader(container, list) {
   if (container.querySelector(':scope > .lc-head')) return;
-  container.insertBefore(buildMainListHeader(), container.firstChild);
+  container.insertBefore(buildListHeader(list), container.firstChild);
 }
 
 // ---------------------------------------------------------------- rows
 
 /**
- * One collapsed line. Everything the open row needs is hung off the <li> so
- * it can be built later without going back to the list for the video.
+ * One collapsed line, for any of the four lists. Everything the open row
+ * needs is hung off the <li> so it can be built later.
+ *
+ * @param {Object} video
+ * @param {number} index  0-based position; the row prints index + 1
+ * @param {Object} cfg
+ *   list      'main' | 'random' | 'history' | 'basket' - columns, open state
+ *   buttons   () => that list's own button specs, as a fresh array. The open
+ *             row rearranges them (scrayArrangeOpenRowButtons), so each list
+ *             keeps its own actions - history's P closes the panel, the
+ *             basket's plays in basket order - in one shared layout.
+ *   rowKey    what "this row is open" is remembered by. Defaults to the video
+ *             id; history passes its entry id, since one file can be in
+ *             history more than once.
+ *   select    { on, toggle } - makes the # a tick (history and basket)
+ *   playedAt  history only: when this entry was played, for the open row
  */
-function buildMainListRow(video, index) {
+function scrayBuildListRow(video, index, cfg) {
+  const list = cfg.list || 'main';
   const li = document.createElement('li');
   li.className = 'lc-row';
 
@@ -508,7 +548,10 @@ function buildMainListRow(video, index) {
   li.dataset.videoId = vidId;
   li._scrayVideo = video;
   li._scrayIndex = index;
+  li._scrayCfg = cfg;
+  li._scrayRowKey = String(cfg.rowKey ?? vidId);
 
+  const want = SCRAY_LIST_COLUMNS_FOR[list] || SCRAY_LIST_COLUMNS_FOR.main;
   const cols = scrayListColumns(video);
   const score = scrayListScore(video);
 
@@ -526,6 +569,20 @@ function buildMainListRow(video, index) {
   // exactly what removeRowFromLists rewrites to renumber after a delete, so
   // it keeps working on these rows without knowing they changed.
   const num = cell('lc-num', `${index + 1}. `);
+  if (cfg.select) {
+    // The number doubles as the tick, so the rest of the line is free to open
+    // the row. A ticked row shows ✓ in place of its number.
+    num.classList.add('lc-tick');
+    num.title = cfg.select.on ? 'Tap to deselect' : 'Tap to select';
+    if (cfg.select.on) {
+      li.classList.add('lc-selected');
+      num.textContent = '✓';
+    }
+    num.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cfg.select.toggle();
+    });
+  }
 
   const studio = cell('lc-studio', cols.studio);
   studio.title = cols.studio;
@@ -548,29 +605,36 @@ function buildMainListRow(video, index) {
   const scoreCell = cell('lc-score', scrayListScoreText(score));
   if (score == null) scoreCell.classList.add('lc-blank');
 
-  const size = cell('lc-size', scrayListIsYetToUpload(video) ? '' : scrayListSize(video.sizeBytes));
-
-  line.append(num, studio, perf, file, scoreCell, size);
+  line.append(num, studio, perf, file, scoreCell);
+  if (want.includes('lc-size')) {
+    line.appendChild(cell('lc-size', scrayListIsYetToUpload(video) ? '' : scrayListSize(video.sizeBytes)));
+  }
   li.appendChild(line);
 
   if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
     [studio, perf, file].forEach(el => applyHighlightingToElement(el, window.currentSearchTerms));
   }
 
-  line.addEventListener('click', () => toggleMainListRow(li));
+  line.addEventListener('click', () => toggleListRow(li));
 
   // Right-click still gives the overflow menu on a closed row. The buttons
   // are built for it if the row has never been opened - the menu reads the
   // same array the button group was built from.
   li.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    const buttons = ensureMainListDetail(li);
+    const buttons = ensureListRowDetail(li);
     showContextMenu(buttons.slice(3), e);
   });
 
-  if (scrayOpenListRows.has(String(vidId))) setMainListRowOpen(li, true);
+  if (scrayOpenRowsFor(list).has(li._scrayRowKey)) setListRowOpen(li, true);
 
   return li;
+}
+window.scrayBuildListRow = scrayBuildListRow;
+
+function scrayOpenRowsFor(list) {
+  if (!scrayOpenListRows[list]) scrayOpenListRows[list] = new Set();
+  return scrayOpenListRows[list];
 }
 
 function setDetailScore(badge, score) {
@@ -579,14 +643,89 @@ function setDetailScore(badge, score) {
 }
 
 /**
+ * Put any list's button specs into the open row's layout:
+ *
+ *   B  D  ★  S  BM  R  …
+ *
+ * - P is held back and returned: tapping the open row's text plays, through
+ *   P's own handler, so it does exactly what that list's P did.
+ * - B leads, where the list has one. The basket's rows don't: their "Remove"
+ *   is dropped, since Remove selected in the toolbar does that job.
+ * - S is placed explicitly. Left to createCompactButtonGroup, it would find a
+ *   B, swap S into B's slot - index 0 - and push a second "Add to Basket" into
+ *   the overflow. With an S already present it skips all of that, and still
+ *   colours S the same way.
+ * - BM: history and the basket call it "Bookmarks". Renamed, so it sits in
+ *   the row and createCompactButtonGroup gives it the bookmarked colour.
+ * - R is rename. The basket brings its own; the others get one.
+ *
+ * Mutates and returns the array it is given.
+ */
+function scrayArrangeOpenRowButtons(buttons, video) {
+  const take = (...labels) => {
+    const at = buttons.findIndex(b => b && labels.includes(b.label));
+    return at >= 0 ? buttons.splice(at, 1)[0] : null;
+  };
+
+  const playSpec = take('P');
+
+  // The basket's own rows have "Remove" instead of a B. It is dropped rather
+  // than drawn: a row in the basket doesn't need a basket button, and taking
+  // things out is what the toolbar's Remove selected is for.
+  const basketSpec = take('B');
+  take('Remove');
+
+  const bmSpec = take('BM', 'Bookmarks');
+  if (bmSpec) bmSpec.label = 'BM';
+
+  const stashSpec = take('S') || {
+    label: "S",
+    title: "Look up scene data and timestamps",
+    color: "#6c5ce7",
+    onClick: (e) => {
+      e.stopPropagation();
+      if (typeof window.showStashModal === 'function') {
+        window.showStashModal(video);
+      }
+    }
+  };
+
+  const renameSpec = take('R') || {
+    onClick: async (e) => {
+      e.stopPropagation();
+      if (typeof window.showRenameModal === 'function') {
+        await window.showRenameModal(video);
+      }
+    }
+  };
+  Object.assign(renameSpec, { label: 'R', title: 'Rename', color: '#795548' });
+
+  if (basketSpec) buttons.unshift(basketSpec);
+  const starAt = buttons.findIndex(b => b && b.label === '★');
+  const row = [stashSpec].concat(bmSpec ? [bmSpec] : [], [renameSpec]);
+  buttons.splice(starAt >= 0 ? starAt + 1 : buttons.length, 0, ...row);
+
+  return { buttons, playSpec };
+}
+
+function scrayListPlayedAt(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  if (isNaN(d)) return '—';
+  return d.toLocaleString('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+}
+
+/**
  * Build the open half of a row, once. Returns the button spec array, which
  * the context menu needs whether or not the row is showing.
  */
-function ensureMainListDetail(li) {
+function ensureListRowDetail(li) {
   if (li._scrayButtons) return li._scrayButtons;
 
   const video = li._scrayVideo;
-  const index = li._scrayIndex;
+  const cfg = li._scrayCfg || {};
   const terms = (window.currentSearchTerms && window.currentSearchTerms.length) ? window.currentSearchTerms : null;
 
   const detail = document.createElement('div');
@@ -650,12 +789,16 @@ function ensureMainListDetail(li) {
   }
   detail.appendChild(fileLine);
 
-  // 4 · History.
+  // 4 · History. A history row's "Played" is when THAT entry was played, to
+  // the minute - the time the old history row printed - rather than the
+  // catalogue's last_played, which may be a later play somewhere else.
   const stats = lineOf('lc-d-stats');
   stats.textContent = [
     `Views ${video.view_count ?? 0}`,
     `Watched ${scrayListWatched(video.time_viewed)}`,
-    `Played ${scrayListDate(video.last_played)}`,
+    cfg.playedAt !== undefined
+      ? `Played ${scrayListPlayedAt(cfg.playedAt)}`
+      : `Played ${scrayListDate(video.last_played)}`,
     `Created ${scrayListDate(video.createdDateTime)}`
   ].join('  ·  ');
   detail.appendChild(stats);
@@ -665,59 +808,18 @@ function ensureMainListDetail(li) {
       .forEach(el => applyHighlightingToElement(el, terms));
   }
 
-  // 5 · Buttons. The same specs every list uses, rearranged for the open row:
-  //
-  //   B  D  ★  S  BM  R  …      (other lists: P  D  ★  S  BM  …)
-  //
-  // B (basket) takes P's place - tapping the text plays now, so P's spec is
-  // held back for that rather than drawn. R is rename, which the text tap used
-  // to do. Basket is then left out of the overflow menu, since it's in the row.
-  //
-  // S is placed here explicitly. Left to createCompactButtonGroup, it would
-  // find a B and swap S into B's slot - index 0 now - and push a second
-  // "Add to Basket" into the overflow. With an S already present it skips all
-  // of that, and still colours S the same way. All of this is local to the
-  // open row; buildVideoRowButtons and the other lists are untouched.
-  const buttons = buildVideoRowButtons(video, 'main', index);
-  const takeSpec = (label) => {
-    const at = buttons.findIndex(b => b && b.label === label);
-    return at >= 0 ? buttons.splice(at, 1)[0] : null;
-  };
-  const playSpec = takeSpec('P');
-  const basketSpec = takeSpec('B');
-  if (basketSpec) buttons.unshift(basketSpec);
-  const stashSpec = {
-    label: "S",
-    title: "Look up scene data and timestamps",
-    color: "#6c5ce7",
-    onClick: (e) => {
-      e.stopPropagation();
-      if (typeof window.showStashModal === 'function') {
-        window.showStashModal(video);
-      }
-    }
-  };
-  const starAt = buttons.findIndex(b => b && b.label === '★');
-  buttons.splice(starAt >= 0 ? starAt + 1 : buttons.length, 0, stashSpec);
-  const renameBtn = {
-    label: "R",
-    title: "Rename",
-    color: "#795548",
-    onClick: async (e) => {
-      e.stopPropagation();
-      if (typeof window.showRenameModal === 'function') {
-        await window.showRenameModal(video);
-      }
-    }
-  };
-  const bmAt = buttons.findIndex(b => b && b.label === 'BM');
-  buttons.splice(bmAt >= 0 ? bmAt + 1 : buttons.length, 0, renameBtn);
-  detail.appendChild(createCompactButtonGroup(buttons, 6, video));
+  // 5 · Buttons: that list's own actions in the shared layout, visible up to
+  // and including R. The basket has no B, so one fewer.
+  const raw = typeof cfg.buttons === 'function' ? cfg.buttons() : [];
+  const { buttons, playSpec } = scrayArrangeOpenRowButtons(raw, video);
+  const visible = buttons.findIndex(b => b && b.label === 'R') + 1 || 6;
+  detail.appendChild(createCompactButtonGroup(buttons, visible, video));
 
   // Tapping the open row's text plays it, through the P button's own handler
-  // (held back from the row above) so it plays exactly what P would. Only the text lines count -
-  // a thumb landing in the padding under the buttons shouldn't start a video.
-  // Buttons and tags (underlined, and they stop propagation anyway) don't.
+  // (held back from the row above) so it plays exactly what P would. Only the
+  // text lines count - a thumb landing in the padding under the buttons
+  // shouldn't start a video. Buttons and tags (underlined, and they stop
+  // propagation anyway) don't.
   detail.addEventListener('click', (e) => {
     if (!e.target.closest('.lc-d-line')) return;
     if (e.target.closest('button')) return;
@@ -730,32 +832,40 @@ function ensureMainListDetail(li) {
   return buttons;
 }
 
-function setMainListRowOpen(li, open) {
-  if (open) ensureMainListDetail(li);
+function setListRowOpen(li, open) {
+  if (open) ensureListRowDetail(li);
   const detail = li.querySelector(':scope > .lc-detail');
   if (detail) detail.hidden = !open;
   li.classList.toggle('lc-open', open);
-  const id = String(li.dataset.videoId);
-  if (open) scrayOpenListRows.add(id); else scrayOpenListRows.delete(id);
+  const rows = scrayOpenRowsFor((li._scrayCfg && li._scrayCfg.list) || 'main');
+  if (open) rows.add(li._scrayRowKey); else rows.delete(li._scrayRowKey);
 }
 
-function toggleMainListRow(li) {
+function toggleListRow(li) {
   const opening = !li.classList.contains('lc-open');
   // Closing a taller row ABOVE this one would pull the row you just tapped
   // up the screen, out from under your finger. Measure, change, then scroll
-  // by whatever it moved.
+  // by whatever it moved - the page for the main and random lists, the
+  // panel's own list for history and the basket.
   const before = li.getBoundingClientRect().top;
 
   if (opening && SCRAY_LIST_ONE_OPEN && li.parentElement) {
     li.parentElement.querySelectorAll(':scope > li.lc-open').forEach(other => {
-      if (other !== li) setMainListRowOpen(other, false);
+      if (other !== li) setListRowOpen(other, false);
     });
-    scrayOpenListRows.clear();
+    scrayOpenRowsFor((li._scrayCfg && li._scrayCfg.list) || 'main').clear();
   }
-  setMainListRowOpen(li, opening);
+  setListRowOpen(li, opening);
 
   const moved = li.getBoundingClientRect().top - before;
-  if (moved) window.scrollBy(0, moved);
+  if (!moved) return;
+  const scroller = li.parentElement;
+  if (scroller && /(auto|scroll)/.test(getComputedStyle(scroller).overflowY) &&
+      scroller.scrollHeight > scroller.clientHeight) {
+    scroller.scrollTop += moved;
+  } else {
+    window.scrollBy(0, moved);
+  }
 }
 
 /**
@@ -773,25 +883,35 @@ window.scrayListRowSetScore = function (li, score) {
   if (badge) setDetailScore(badge, s);
 };
 
-/** Redraw just the header - the sort buttons call this when there is no list to re-render. */
+/** Redraw just the main header - the sort buttons call this when there is no list to re-render. */
 window.scrayRefreshMainListHeader = function () {
   const container = document.getElementById('taggedVideosContainer');
   const old = container && container.querySelector(':scope > .lc-head');
-  if (old) old.replaceWith(buildMainListHeader());
+  if (old) old.replaceWith(buildListHeader('main'));
 };
 
 
 /**
 * Render a list of videos into a given container.
-* Each video name/path is clickable to add it to the basket.
+*
+* #playlist - the random list - draws column rows. Any other container keeps
+* buildVideoRow's old row.
 */
 function renderVideoList(videos, containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = '';
 
+  const columns = containerId === 'playlist';
+  if (columns) ensureListHeader(container, 'random');
+
   videos.forEach((video, index) => {
-    container.appendChild(buildVideoRow(video, 'random', index));
+    container.appendChild(columns
+      ? scrayBuildListRow(video, index, {
+          list: 'random',
+          buttons: () => buildVideoRowButtons(video, 'random', index)
+        })
+      : buildVideoRow(video, 'random', index));
   });
 
   updateBasketHighlights();
@@ -812,12 +932,15 @@ function appendVideoList(videos, containerId) {
   // The main list is the column layout; anything else handed here keeps the
   // old row. The header is re-added whenever the container has been cleared.
   const columns = containerId === 'taggedVideosContainer';
-  if (columns) ensureMainListHeader(container);
+  if (columns) ensureListHeader(container, 'main');
 
   videos.forEach((video, index) => {
     const globalIndex = paginationState.currentEndIndex + index;
     container.appendChild(columns
-      ? buildMainListRow(video, globalIndex)
+      ? scrayBuildListRow(video, globalIndex, {
+          list: 'main',
+          buttons: () => buildVideoRowButtons(video, 'main', globalIndex)
+        })
       : buildVideoRow(video, 'main', globalIndex));
   });
 

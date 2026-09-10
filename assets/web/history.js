@@ -92,104 +92,13 @@ totalDiv.style.padding = "6px";
 totalDiv.textContent = `Total size: ${formatFileSize(totalSize)}`;
 historyList.appendChild(totalDiv);
 
+// Column header - no size column in the panel, and not sortable: history
+// stays in the order things were played.
+if (typeof window.scrayBuildListHeader === 'function') {
+    historyList.appendChild(window.scrayBuildListHeader('history'));
+}
+
 historyVideos.forEach((video, idx) => {
-const li = document.createElement("li");
-
-const vidId = video.oneDriveId ?? video.idFromAPI ?? null;
-li.dataset.videoId = vidId;
-li.dataset.historyId = video.historyId;
-
-if (selectedHistoryIds.has(video.historyId)) {
-    li.classList.add("history-selected");
-}
-
-// ✅ Checkbox on the left
-const checkbox = document.createElement("input");
-checkbox.type = "checkbox";
-checkbox.className = "history-checkbox";
-checkbox.checked = selectedHistoryIds.has(video.historyId);
-checkbox.style.cursor = "pointer";
-checkbox.style.width = "auto";
-checkbox.style.flexShrink = "0";
-
-checkbox.addEventListener("click", (e) => {
-e.stopPropagation();
-toggleHistorySelection(video.historyId);
-});
-
-li.appendChild(checkbox);
-
-// ✅ Add item number next to checkbox
-const numberSpan = document.createElement("span");
-numberSpan.textContent = `${idx + 1}. `;
-numberSpan.style.fontSize = "0.65rem";
-numberSpan.style.color = "#666";
-numberSpan.style.marginLeft = "4px";
-numberSpan.style.marginRight = "4px";
-numberSpan.style.flexShrink = "0";
-numberSpan.style.display = "inline";
-li.appendChild(numberSpan);
-
-// ✅ Display path and filename
-const filenameSpan = document.createElement("span");
-filenameSpan.style.display = "inline";
-
-// ✅ Always show full clickable path (removed landscape exception)
-const pathFragment = createClickablePath(video, true);
-// Transfer all children to filenameSpan
-while (pathFragment.firstChild) {
- filenameSpan.appendChild(pathFragment.firstChild);
-}
-
-// Score display (if available from Excel)
-const scoreSpan = document.createElement("span");
-if (video.user_score !== undefined && video.user_score !== null) {
-   scoreSpan.textContent = ` [${video.user_score}]`;
-   scoreSpan.style.marginLeft = "4px";
-   scoreSpan.style.fontSize = "0.65rem";
-   scoreSpan.style.color = "#ff9800";
-   scoreSpan.style.fontWeight = "bold";
-   scoreSpan.style.display = "inline";
-   filenameSpan.appendChild(scoreSpan);
-}
-
-filenameSpan.style.fontSize = "0.75rem";
-
-if ((video.filename || '').split('.').pop().toLowerCase() !== 'mp4') {
-    // Find and color only the filename part
-    const textNodes = Array.from(filenameSpan.childNodes);
-    textNodes.forEach(node => {
-      if (node.textContent === video.filename) {
-        node.style.color = '#be7b7bff';
-      }
-    });
-}
-
-const sizeSpan = document.createElement("span");
-if (typeof video.sizeBytes === 'number') {
-    sizeSpan.textContent = ` [${formatFileSize(video.sizeBytes)}]`;
-    sizeSpan.style.whiteSpace = "nowrap";
-    sizeSpan.style.wordBreak = "normal";
-    sizeSpan.style.overflowWrap = "normal";
-}
-sizeSpan.style.fontSize = "0.65rem";
-sizeSpan.style.color = "#666";
-
-const timestampSpan = document.createElement("span");
-if (video.playedAt) {
-    const date = new Date(video.playedAt);
-    const timeStr = date.toLocaleString();
-    timestampSpan.textContent = ` [${timeStr}]`;
-    timestampSpan.style.fontSize = "0.6rem";
-    timestampSpan.style.color = "#999";
-    timestampSpan.style.marginLeft = "4px";
-    timestampSpan.style.whiteSpace = "nowrap";
-timestampSpan.style.display = "inline";
-}
-
-li.appendChild(filenameSpan);
-li.appendChild(sizeSpan);
-li.appendChild(timestampSpan);
 
 // ✅ Compact buttons with overflow menu
 const buttons = [
@@ -357,31 +266,21 @@ onClick: async (e) => {
 }
 ];
 
-const btnContainer = createCompactButtonGroup(buttons, 4, video);
-li.appendChild(btnContainer);
-
-// ✅ Right-click context menu
-li.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
-  showContextMenu(buttons.slice(3), e); // Show overflow menu (buttons after first 3)
+// The row itself is render.js's column row: tap the line to open it, tap the
+// number to tick it (what the checkbox did), tap the open row's text to play.
+// These buttons are laid out there as B D ★ S BM R …, so this P still decides
+// what "play" means here - it closes the panel - and Bookmarks becomes BM.
+const selected = selectedHistoryIds.has(video.historyId);
+const li = window.scrayBuildListRow(video, idx, {
+    list: 'history',
+    buttons: () => buttons,
+    // One file can be in history more than once; the entry id tells them apart.
+    rowKey: video.historyId,
+    select: { on: selected, toggle: () => toggleHistorySelection(video.historyId) },
+    playedAt: video.playedAt || null
 });
-
-// ✅ Click anywhere on list item (except buttons, clickable tags, and checkbox) to open rename modal
-li.style.cursor = 'pointer';
-li.addEventListener('click', async (e) => {
-  // Don't trigger if clicking on buttons
-  if (e.target.closest('.compact-btn-group')) return;
-  if (e.target.closest('button')) return;
-  if (e.target.closest('.history-checkbox')) return;
-  
-  // Don't trigger if clicking on clickable tags (folders or bracket tags)
-  if (e.target.style.textDecoration === 'underline') return;
-  
-  // Open rename modal
-  if (typeof window.showRenameModal === 'function') {
-      await window.showRenameModal(video);
-  }
-});
+li.dataset.historyId = video.historyId;
+if (selected) li.classList.add("history-selected");
 
 historyList.appendChild(li);
 });

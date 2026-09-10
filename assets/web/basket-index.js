@@ -50,94 +50,15 @@ if (!desktopBasketCol || !mobileBasketPanel) {
           // Clone tools and reattach event listeners
           const clonedTools = basketTools.cloneNode(true);
 
-// ✅ PUSH sync button - pushes current basket to Excel
-clonedTools.querySelector("#basketSaveBtn")?.addEventListener("click", async () => {
-  const btn = clonedTools.querySelector("#basketSaveBtn");
-  
-  if (!window.basketVideos.length) {
-      alert("Basket is empty - cannot push");
-      return;
-  }
-  
-  if (!window.excelAccessToken) {
-      alert("Please connect to Excel Online first");
-      if (confirm("Connect now?")) {
-          window.signInToExcelOnline();
-      }
-      return;
-  }
-  
-  btn.disabled = true;
-  btn.textContent = "⏳";
-  
-  try {
-    await window.syncCurrentBasketToExcel();
-    
-    btn.textContent = "✅";
-    
-    // Show success popup
-    if (typeof window.showSyncConfirmation === 'function') {
-        window.showSyncConfirmation(`✅ Pushed ${window.basketVideos.length} videos to Excel`);
-    }
-    
-    setTimeout(() => {
-        btn.textContent = "↑";
-        btn.disabled = false;
-    }, 2000);
-} catch (err) {
-      console.error('Push sync failed:', err);
-      btn.textContent = "❌";
-      setTimeout(() => {
-          btn.textContent = "↑";
-          btn.disabled = false;
-      }, 2000);
-      alert(`Push failed: ${err.message || 'Unknown error'}`);
-  }
-});
-
-// ✅ PULL sync button - pulls latest basket from Excel  
-clonedTools.querySelector("#basketLoadBtn")?.addEventListener("click", async () => {
-  const btn = clonedTools.querySelector("#basketLoadBtn");
-  
-  if (!window.excelAccessToken) {
-      alert("Please connect to Excel Online first");
-      if (confirm("Connect now?")) {
-          window.signInToExcelOnline();
-      }
-      return;
-  }
-  
-  btn.disabled = true;
-  btn.textContent = "⏳";
-  
-  try {
-    await window.loadCurrentBasketFromExcel();
-    
-    btn.textContent = "✅";
-    
-    // Show success popup
-    if (typeof window.showSyncConfirmation === 'function') {
-        window.showSyncConfirmation(`✅ Pulled basket from Excel`);
-    }
-    
-    setTimeout(() => {
-        btn.textContent = "↓";
-        btn.disabled = false;
-    }, 2000);
-} catch (err) {
-      console.error('Pull sync failed:', err);
-      btn.textContent = "❌";
-      setTimeout(() => {
-          btn.textContent = "↓";
-          btn.disabled = false;
-      }, 2000);
-      alert(`Pull failed: ${err.message || 'Unknown error'}`);
-  }
-});
+// ↑ push / ↓ pull (to Excel) removed from the toolbar - see basket.js.
 
 clonedTools.querySelector("#basketSelectAllBtn")?.addEventListener("click", () => {
     window.basketVideos.forEach(v => window.selectedBasketIds.add(v.oneDriveId));
     window.renderBasket();
+});
+
+clonedTools.querySelector("#basketClearSelBtn")?.addEventListener("click", () => {
+    window.clearBasketSelection();
 });
 
  clonedTools.querySelector("#basketRemoveBtn")?.addEventListener("click", () => {
@@ -176,10 +97,6 @@ clonedTools.querySelector("#basketSelectAllBtn")?.addEventListener("click", () =
                 }
                 window.showBasketPickerModal();
             }
-        },
-        {
-            label: "CLR - Clear Selection",
-            onClick: () => window.clearBasketSelection()
         },
         {
             label: "REF - Refresh Selected",

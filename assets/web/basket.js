@@ -75,86 +75,13 @@ totalDiv.appendChild(sizeText);
 
 basketList.appendChild(totalDiv);
 
+// Column header - no size column in the panel (the total is above), and not
+// sortable: the basket's order is yours, set by dragging.
+if (typeof window.scrayBuildListHeader === 'function') {
+    basketList.appendChild(window.scrayBuildListHeader('basket'));
+}
+
 basketVideos.forEach((video, idx) => {
-    const li = document.createElement("li");
-    
-    // Keep draggable=true on all devices - other code (dragover and the
-    // touch-based touchmove handler) both rely on the
-    // 'li[draggable="true"]' selector to calculate drop positions, so
-    // touch dragging breaks entirely if this is false. Native drag ghost
-    // is blocked separately below via a dragstart listener instead.
-    li.draggable = true;
-    li.dataset.index = idx; 
-
-    if (selectedBasketIds.has(video.oneDriveId)) {
-        li.classList.add("basket-selected");
-    }
-
-// ✅ Click to toggle selection
-li.addEventListener("click", (e) => {
-     if (e.target.closest(".compact-btn-group")) return;
-     if (e.target.closest("button")) return;
-     
-     // Toggle selection on click
-     toggleBasketSelection(video.oneDriveId);
- });
-
-// ✅ Always show full clickable path with item number
-const filenameSpan = document.createElement("span");
-filenameSpan.style.fontSize = "0.75rem";
-filenameSpan.style.display = "inline";
-filenameSpan.style.whiteSpace = "normal";
-filenameSpan.style.wordBreak = "break-word";
-
-const numberText = document.createElement("span");
-numberText.textContent = `${idx + 1}. `;
-numberText.style.fontSize = "0.65rem";
-numberText.style.color = "#666";
-numberText.style.marginRight = "4px";
-numberText.style.display = "inline";
-filenameSpan.appendChild(numberText);
-
-const pathFragment = createClickablePath(video, true);
-pathFragment.childNodes.forEach(node => {
-if (node.nodeType === 1) { // Element node
-  node.style.fontSize = "0.75rem";
-  // Apply non-MP4 color to filename only
-  if (node.textContent === video.filename && 
-      (video.filename || '').split('.').pop().toLowerCase() !== 'mp4') {
-    node.style.color = '#be7b7bff';
-  }
-}
-});
-// Transfer all children from pathFragment to filenameSpan
-while (pathFragment.firstChild) {
-filenameSpan.appendChild(pathFragment.firstChild);
-}
-
-// Score display (if available from Excel)
-const scoreSpan = document.createElement("span");
-if (video.user_score !== undefined && video.user_score !== null) {
-   scoreSpan.textContent = ` [${video.user_score}]`;
-   scoreSpan.style.marginLeft = "4px";
-   scoreSpan.style.fontSize = "0.65rem";
-   scoreSpan.style.color = "#ff9800";
-   scoreSpan.style.fontWeight = "bold";
-   scoreSpan.style.display = "inline";
-   filenameSpan.appendChild(scoreSpan);
-}
-
-const sizeSpan = document.createElement("span");
-  if (typeof video.sizeBytes === 'number') {
-       sizeSpan.textContent = ` [${formatFileSize(video.sizeBytes)}]`;
-       sizeSpan.style.whiteSpace = "nowrap";
-       sizeSpan.style.wordBreak = "normal";
-       sizeSpan.style.overflowWrap = "normal";
-   }
-   sizeSpan.style.fontSize = "0.65rem";
-   sizeSpan.style.color = "#666";
-   sizeSpan.style.display = "inline";
-
-  li.appendChild(filenameSpan);
-  li.appendChild(sizeSpan);
 
     // ✅ Create compact button group with overflow menu
 const buttons = [
@@ -333,20 +260,31 @@ onClick: async (e) => {
    }
 ];
 
-const btnContainer = createCompactButtonGroup(buttons, 4, video);
+// The row itself is render.js's column row: tap the line to open it, tap the
+// number to tick it (what tapping the row used to do), tap the open row's text
+// to play, long-press to drag as before. These buttons are laid out there as
+// B D ★ S BM R …: "Remove" becomes B, the R above stays rename, and this P
+// still decides what "play" means here (basket order, panel closes on phones).
+const selected = selectedBasketIds.has(video.oneDriveId);
+const li = window.scrayBuildListRow(video, idx, {
+    list: 'basket',
+    buttons: () => buttons,
+    select: { on: selected, toggle: () => toggleBasketSelection(video.oneDriveId) }
+});
 
-li.appendChild(btnContainer);
-   
-   // ✅ Right-click context menu
-   li.addEventListener('contextmenu', (e) => {
-       e.preventDefault();
-       showContextMenu(buttons.slice(3), e); // Show overflow menu (buttons after first 3)
-   });
-   
-   // ✅ Drag and drop event listeners
-   setupDragAndDrop(li);
-   
-   basketList.appendChild(li);
+// Keep draggable=true on all devices - other code (dragover and the
+// touch-based touchmove handler) both rely on the
+// 'li[draggable="true"]' selector to calculate drop positions, so
+// touch dragging breaks entirely if this is false. Native drag ghost
+// is blocked separately in setupDragAndDrop via a dragstart listener.
+li.draggable = true;
+li.dataset.index = idx;
+if (selected) li.classList.add("basket-selected");
+
+// ✅ Drag and drop event listeners
+setupDragAndDrop(li);
+
+basketList.appendChild(li);
 });
 
 updateBasketCount();
@@ -1816,94 +1754,19 @@ window.addEventListener("DOMContentLoaded", () => {
 
 document.getElementById("basketToggleBtn")?.addEventListener("click", () => toggleBasket());
 
-// ✅ PUSH sync button - pushes current basket to Excel
-document.getElementById("basketSaveBtn")?.addEventListener("click", async () => {
-  const btn = document.getElementById("basketSaveBtn");
-  
-  if (!window.basketVideos.length) {
-      alert("Basket is empty - cannot push");
-      return;
-  }
-  
-  if (!window.excelAccessToken) {
-      alert("Please connect to Excel Online first");
-      if (confirm("Connect now?")) {
-          window.signInToExcelOnline();
-      }
-      return;
-  }
-  
-  btn.disabled = true;
-  btn.textContent = "⏳";
-  
-  try {
-    await window.syncCurrentBasketToExcel();
-    
-    btn.textContent = "✅";
-    
-    // Show success popup
-    if (typeof window.showSyncConfirmation === 'function') {
-        window.showSyncConfirmation(`✅ Pushed ${window.basketVideos.length} videos to Excel`);
-    }
-    
-    setTimeout(() => {
-        btn.textContent = "↑";
-        btn.disabled = false;
-    }, 2000);
-} catch (err) {
-      console.error('Push sync failed:', err);
-      btn.textContent = "❌";
-      setTimeout(() => {
-          btn.textContent = "↑";
-          btn.disabled = false;
-      }, 2000);
-      alert(`Push failed: ${err.message || 'Unknown error'}`);
-  }
-});
-
-// ✅ PULL sync button - pulls latest basket from Excel
-document.getElementById("basketLoadBtn")?.addEventListener("click", async () => {
-  const btn = document.getElementById("basketLoadBtn");
-  
-  if (!window.excelAccessToken) {
-      alert("Please connect to Excel Online first");
-      if (confirm("Connect now?")) {
-          window.signInToExcelOnline();
-      }
-      return;
-  }
-  
-  btn.disabled = true;
-  btn.textContent = "⏳";
-  
-  try {
-    await window.loadCurrentBasketFromExcel();
-    
-    btn.textContent = "✅";
-    
-    // Show success popup
-    if (typeof window.showSyncConfirmation === 'function') {
-        window.showSyncConfirmation(`✅ Pulled basket from Excel`);
-    }
-    
-    setTimeout(() => {
-        btn.textContent = "↓";
-        btn.disabled = false;
-    }, 2000);
-} catch (err) {
-      console.error('Pull sync failed:', err);
-      btn.textContent = "❌";
-      setTimeout(() => {
-          btn.textContent = "↓";
-          btn.disabled = false;
-      }, 2000);
-      alert(`Pull failed: ${err.message || 'Unknown error'}`);
-  }
-});
+// The ↑ push / ↓ pull (to Excel) toolbar buttons are gone - Native's basket
+// stays on the device, and the Excel backend is retired. Save/Load to Excel
+// are still in the ... menu below.
 
 document.getElementById("basketSelectAllBtn")?.addEventListener("click", () => {
  basketVideos.forEach(v => selectedBasketIds.add(v.oneDriveId));
  renderBasket();
+});
+
+// Clear selection - was "CLR" in the ... menu; a toolbar button now the
+// labels are spelled out and there's room for it.
+document.getElementById("basketClearSelBtn")?.addEventListener("click", () => {
+ clearBasketSelection();
 });
 
 document.getElementById("basketRemoveBtn")?.addEventListener("click", () => {
@@ -1947,10 +1810,6 @@ document.getElementById("basketMoreBtn")?.addEventListener("click", (e) => {
              }
              window.showBasketPickerModal();
          }
-     },
-     {
-         label: "CLR - Clear Selection",
-         onClick: () => clearBasketSelection()
      },
      {
          label: "REF - Refresh Selected",

@@ -9153,6 +9153,9 @@ const basketList = document.getElementById("basketList");
 if (!basketList) return;
 const items = basketList.querySelectorAll("li");
 items.forEach((li, idx) => {
+    // Column rows (render.js) play from their open row - tapping the text or
+    // the list's own P - so they don't get a bolted-on "Play Inline".
+    if (li.classList.contains("lc-row")) return;
     if (li.querySelector(".basket-play-btn")) return;
     const playBtn = document.createElement("button");
     playBtn.textContent = "Play Inline";

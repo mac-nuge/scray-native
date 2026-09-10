@@ -429,9 +429,11 @@ body:not(.fullscreen-active) #inlineVideoContainer.mini-player {
 
 /* History panel mobile breakpoint - 768px */
 @media (max-width: 768px) {
+/* ⚙️ History width on phones - was 49%. Wide enough for its columns; keep
+   in step with #basketPanel in style.css. */
 #historyPanel {
-width: 49%;
-left: -49%;
+width: 80%;
+left: -80%;
 max-width: none;
 }
 

@@ -7112,3 +7112,47 @@ pointer-events: none !important;
 body.scray-video-loading:not(.fls-peek) .plyr--hide-controls .fls-video-title:has(> #currentVideoInfo:not(:empty)) > .fls-np-more {
 pointer-events: auto !important;
 }
+
+/* =========================================
+BOOKMARK TOOLTIP RAIL IN MPB
+=========================================
+The rail (showBookmarkRail, player.js) floats above the control bar. In MPB
+that left it a long way above the progress bar whose marker was tapped, and
+at the fullscreen modes' near-solid black it covered too much of the frame.
+Both override the rail's inline styles, hence !important. */
+
+/* ⚙️ Gap above the control bar. The inline value is 10px; each px lower here
+   brings the rail that much closer to the bar. */
+body.portrait-inline #bookmarkTooltipRail {
+margin-bottom: -14px !important;
+}
+
+/* ⚙️ Chip background. The fullscreen modes keep the inline 0.85. */
+body.portrait-inline #bookmarkTooltipRail .bookmark-tooltip-chip {
+background: rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Tap a marker again to jump (renderBookmarkMarkers): while a rail is up,
+   `.plyr__controls:has(#bookmarkTooltipRail)` lifts the control bar to z 96 so
+   its chips clear the pause-menu circles. In MPB the control bar's box reaches
+   down over the progress bar, so that lift put it on top of the markers and
+   the second tap landed on the controls instead. Lift the progress bar one
+   step higher for as long as the rail is up. MPB only: MPFS already runs the
+   bar far above the controls, and FLS stacks both inline. */
+body.portrait-inline:has(#bookmarkTooltipRail) #permanentProgressBar {
+z-index: 97 !important;
+}
+
+/* The double-tap grid shows only while you're tapping the picture
+   (CONTROLS POLICY in player.js sets body.scray-guides-awake from the touch and
+   clears it ~300ms after the taps stop, or as soon as the touch becomes a
+   drag) - not with the controls, and not for a scrub. Up at once, and
+   ⚙️ gone almost as fast. */
+body:not(.scray-guides-awake) .fls-tap-guides {
+opacity: 0;
+transition: opacity 0.1s ease;
+}
+body.scray-guides-awake .fls-tap-guides {
+opacity: 1;
+transition: none;
+}

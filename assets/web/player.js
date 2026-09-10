@@ -3348,6 +3348,8 @@ window.scrayScrubSeek = (function () {
             // video mid-drag, which would otherwise pop them up over the frame
             // you are trying to look at.
             document.body.classList.add('scray-scrubbing');
+            // Controls policy: no bar and no grid for a scrub.
+            if (typeof window.scrayOnScrubBegin === 'function') window.scrayOnScrubBegin();
             target = null;
             lastRequested = null;
             lastIssued = null;
@@ -4713,6 +4715,230 @@ window.exitPIPMode = exitPIPMode;
 // ========================
 // Create persistent player
 // ========================
+// =========================================================
+// CONTROLS POLICY (touch devices)
+// =========================================================
+// Plyr raises the control bar on every touchstart/touchmove anywhere on the
+// player, so a scrub, a double-tap seek or a tap on the picture all flashed
+// the controls up - while a tap on a bookmark marker (which stops its touch
+// from reaching Plyr) didn't, leaving its tooltip hidden inside a hidden bar.
+//
+// On a touch device the bar now comes up only:
+//   - on a real pause, and while paused - not the pause a scrub makes while
+//     the finger drags,
+//   - while a new video is loading (the transition hold),
+//   - when a touch STARTS in a control area - the control bar or the progress
+//     bar, markers included - whether or not the bar is showing yet,
+//   - while a bookmark tooltip rail is up, since the rail lives inside it,
+//   - and whenever our own code asks (scrayShowControlsNow).
+// A drag that turns into a scrub puts back a bar its own touch raised.
+// The double-tap grid (FLS/MPFS) shows only while you're tapping the picture:
+// up on the touch, gone as soon as the taps stop or the touch becomes a drag.
+// It still hides on Plyr's usual timer. Mouse-only desktops keep Plyr's own
+// behaviour, apart from the bar staying up under a tooltip rail.
+//
+// Done by wrapping the player's toggleControls rather than fighting Plyr's
+// listeners: every show and hide Plyr makes, from touches, media events or its
+// idle timer, funnels through that one method.
+
+// ⚙️ How long the grid stays up after a finger lifts from the picture. Just
+// long enough to still be there for the second tap of a double tap (the
+// double-tap window is 300ms) - any longer and a single tap leaves it hanging.
+const SCRAY_GUIDES_LINGER_MS = 300;
+// ⚙️ Movement (px) after which a touch on the picture is a drag, not a tap,
+// and the grid goes.
+const SCRAY_GUIDES_DRAG_PX = 10;
+// ⚙️ Slop around a control area, in px, when deciding where a touch started.
+const SCRAY_CONTROL_AREA_SLOP_PX = 6;
+// ⚙️ How long after a touch the mouse events a phone synthesises are still
+// treated as that touch.
+const SCRAY_TOUCH_MOUSE_WINDOW_MS = 1000;
+// Plyr's hide delay on touch devices, for the bar raised from a control area.
+const SCRAY_CONTROLS_HIDE_MS = 3000;
+
+let scrayGestureInControls = false;
+let scrayLastTouchAt = 0;
+let scrayGuidesTimer = null;
+// Where the current touch started, and whether its touchstart raised a bar
+// that was hidden - a scrub from there puts it back.
+let scrayGestureStartX = 0;
+let scrayGestureStartY = 0;
+let scrayGestureRaisedBar = false;
+// Until when a control-area touch keeps the bar up. A tap on the progress bar
+// seeks, and the seek's 'playing' makes Plyr re-evaluate and hide the bar
+// straight away - this holds it for the normal delay instead.
+let scrayControlsHeldUntil = 0;
+
+/** Whether a screen point is on the control bar or the progress bar. */
+function scrayPointInControlArea(x, y) {
+    const pad = SCRAY_CONTROL_AREA_SLOP_PX;
+    const plyr = document.querySelector('.plyr');
+    const hidden = !!plyr && plyr.classList.contains('plyr--hide-controls');
+    const areas = [document.querySelector('.plyr__controls'), document.getElementById('permanentProgressBar')];
+    return areas.some(el => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        if (!r.width && !r.height) return false;
+        let top = r.top;
+        let bottom = r.bottom;
+        // A hidden bar is slid down by its own height (Plyr's translateY(100%))
+        // in MPB and MPFS. The area is where it shows, not where it's parked.
+        if (hidden && el.classList.contains('plyr__controls')) {
+            const t = getComputedStyle(el).transform;
+            if (t && t !== 'none') {
+                try {
+                    const m = new DOMMatrixReadOnly(t);
+                    if (m.b === 0 && m.c === 0 && m.f > 0) { top -= m.f; bottom -= m.f; }
+                } catch (_) {}
+            }
+        }
+        return x >= r.left - pad && x <= r.right + pad && y >= top - pad && y <= bottom + pad;
+    });
+}
+
+function scrayWakeTapGuides() {
+    clearTimeout(scrayGuidesTimer);
+    document.body.classList.add('scray-guides-awake');
+}
+
+function scraySleepTapGuides(afterMs) {
+    clearTimeout(scrayGuidesTimer);
+    if (afterMs > 0) {
+        scrayGuidesTimer = setTimeout(() => document.body.classList.remove('scray-guides-awake'), afterMs);
+    } else {
+        document.body.classList.remove('scray-guides-awake');
+    }
+}
+
+/** Raise the bar for a control-area touch, and hide it again on Plyr's timing. */
+function scrayRaiseControlsForTouch() {
+    const player = window.plyrPlayer;
+    if (!player) return;
+    // A little under the timers below, so Plyr's own 3s hide and ours both get
+    // past it.
+    scrayControlsHeldUntil = Date.now() + SCRAY_CONTROLS_HIDE_MS - 150;
+    if (typeof window.scrayShowControlsNow === 'function') window.scrayShowControlsNow();
+    if (!player.timers) return;
+    clearTimeout(player.timers.controls);
+    player.timers.controls = setTimeout(() => {
+        if (player.paused || window.scrayVideoLoading) return;
+        player.toggleControls(false);
+    }, SCRAY_CONTROLS_HIDE_MS);
+}
+
+// Capture phase on the document, so this sees every touch before anything on
+// the player can stop it - a marker stops its own touchstart dead.
+document.addEventListener('touchstart', (e) => {
+    scrayLastTouchAt = Date.now();
+    const plyr = document.querySelector('.plyr');
+    if (!e.touches || e.touches.length !== 1 || !plyr || !plyr.contains(e.target)) {
+        scrayGestureInControls = false;
+        return;
+    }
+    const t = e.touches[0];
+    scrayGestureStartX = t.clientX;
+    scrayGestureStartY = t.clientY;
+    scrayGestureInControls = scrayPointInControlArea(t.clientX, t.clientY);
+    scrayGestureRaisedBar = false;
+    if (scrayGestureInControls) {
+        scrayGestureRaisedBar = plyr.classList.contains('plyr--hide-controls');
+        scrayRaiseControlsForTouch();
+    } else {
+        scrayWakeTapGuides();
+    }
+}, { capture: true, passive: true });
+
+document.addEventListener('touchmove', (e) => {
+    scrayLastTouchAt = Date.now();
+    if (scrayGestureInControls || !e.touches || !e.touches[0]) return;
+    const t = e.touches[0];
+    // A drag, not a tap: the grid is for tapping.
+    if (Math.abs(t.clientX - scrayGestureStartX) > SCRAY_GUIDES_DRAG_PX ||
+        Math.abs(t.clientY - scrayGestureStartY) > SCRAY_GUIDES_DRAG_PX) {
+        scraySleepTapGuides(0);
+    }
+}, { capture: true, passive: true });
+
+// A scrub - on the picture or dragged along the progress bar - keeps the bar
+// down. One raised by this same touch (a progress-bar touch that turned into a
+// drag) goes back; a bar that was already up stays. scrayScrubSeek.begin calls
+// this the moment a drag is confirmed.
+window.scrayOnScrubBegin = function () {
+    scraySleepTapGuides(0);
+    // From here the drag is a scrub, wherever it started - its touchmoves are
+    // not control-area touches any more.
+    scrayGestureInControls = false;
+    if (!scrayGestureRaisedBar) return;
+    scrayGestureRaisedBar = false;
+    scrayControlsHeldUntil = 0;
+    const player = window.plyrPlayer;
+    if (!player) return;
+    if (player.timers) clearTimeout(player.timers.controls);
+    document.querySelector('.plyr')?.classList.add('plyr--hide-controls');
+    try { player.toggleControls(false); } catch (err) {}
+};
+
+document.addEventListener('touchend', (e) => {
+    scrayLastTouchAt = Date.now();
+    // Last finger up: the grid lingers just long enough for a second tap.
+    if (!e.touches || e.touches.length === 0) {
+        if (document.body.classList.contains('scray-guides-awake')) scraySleepTapGuides(SCRAY_GUIDES_LINGER_MS);
+    }
+    // Plyr marks the bar "pressed" on touchstart and clears it on the bar's
+    // touchend - but our buttons stop their touchend, so it stuck on, which
+    // both pinned the bar up and let the next picture tap raise it. A finger
+    // lifted anywhere is a finger off the bar.
+    const bar = window.plyrPlayer && window.plyrPlayer.elements && window.plyrPlayer.elements.controls;
+    if (bar) bar.pressed = false;
+}, { capture: true, passive: true });
+
+function scrayControlsMayShow(player, railUp) {
+    // A scrub pauses the video while the finger drags (SCRUB_PAUSE_WHILE_DRAGGING);
+    // that pause isn't one to answer with the controls.
+    if (player.paused && !document.body.classList.contains('scray-scrubbing')) return true;
+    if (window.scrayVideoLoading || railUp) return true;
+    // Not `pressed`: on touch, where the touch started (below) is the truth.
+    const bar = player.elements && player.elements.controls;
+    if (bar && bar.hover) return true;
+    const type = window.event && window.event.type;
+    if (type === 'touchstart' || type === 'touchmove') return scrayGestureInControls;
+    if (type === 'mousemove' || type === 'mousedown') {
+        // A real mouse is Plyr's business; a phone's after-tap mouse events
+        // belong to the touch they came from.
+        return Date.now() - scrayLastTouchAt > SCRAY_TOUCH_MOUSE_WINDOW_MS || scrayGestureInControls;
+    }
+    if (type === 'focusin' || type === 'keydown' || type === 'keyup') return true;
+    // Everything else is state Plyr re-evaluates on media events - a seek's
+    // 'waiting', its recent-touch-seek grace. Not a reason on its own.
+    return false;
+}
+
+function scrayInstallControlsPolicy(player) {
+    if (!player || player.__scrayControlsPolicy) return;
+    const plyrToggle = player.toggleControls;
+    if (typeof plyrToggle !== 'function') return;
+    player.__scrayControlsPolicy = true;
+    player.toggleControls = (toggle) => {
+        const container = player.elements && player.elements.container;
+        if (!container) return plyrToggle(toggle);
+        const hidden = container.classList.contains('plyr--hide-controls');
+        const show = toggle === undefined ? hidden : Boolean(toggle);
+        const railUp = !!document.getElementById(window.SCRAY_RAIL_ID || 'bookmarkTooltipRail');
+        if (!show) {
+            if (hidden) return plyrToggle(toggle);
+            // The tooltip rail is inside the bar - hiding the bar takes it too.
+            // dismissBookmarkRail removes the rail before it hides the bar.
+            if (railUp) return true;
+            // Held up by a control-area touch (see scrayRaiseControlsForTouch).
+            if (Date.now() < scrayControlsHeldUntil && !player.paused) return true;
+            return plyrToggle(toggle);
+        }
+        // Already up, or a mouse-only device: nothing to decide.
+        if (!hidden || !player.touch) return plyrToggle(toggle);
+        return scrayControlsMayShow(player, railUp) ? plyrToggle(toggle) : false;
+    };
+}
+
 function createPlayerElement() {
 let container = document.getElementById("inlineVideoContainer");
 
@@ -4760,6 +4986,8 @@ fullscreen: { enabled: true, fallback: true, iosNative: false, container: null }
 keyboard: { focused: false, global: false }, // Disable Plyr's keyboard shortcuts
 loop: { active: true } // Enable video looping
 });
+// Touches on the picture no longer raise the bar - see CONTROLS POLICY.
+scrayInstallControlsPolicy(window.plyrPlayer);
 
 // Listen for user volume/mute changes
 window.plyrPlayer.on('volumechange', () => {
@@ -5522,6 +5750,17 @@ const jumpTo = (entry) => {
 };
 
 let fadeTimer = null;
+// Which marker the rail is currently up for, and that rail element - a second
+// tap on the same marker while it's still showing jumps. Identity-checked
+// against the live rail, so anything else that replaced or dismissed it (a
+// jump-to-next flash, the fade, a tap on the bar) makes the next tap a raise
+// again.
+let raisedEntry = null;
+let raisedRail = null;
+const railUpFor = (entry) => raisedEntry === entry
+    && !!raisedRail
+    && document.getElementById(RAIL_ID) === raisedRail
+    && raisedRail.style.opacity !== '0';   // mid-fade counts as gone
 const raise = (entry) => {
     if (fadeTimer) clearTimeout(fadeTimer);
     // A lone bookmark points at its own marker. A fanned cluster stays put
@@ -5534,7 +5773,8 @@ const raise = (entry) => {
         .sort((a, b) => Math.abs(a.percent - entry.percent) - Math.abs(b.percent - entry.percent))
         .slice(0, BOOKMARK_RAIL_MAX_CHIPS)
         .sort((a, b) => a.percent - b.percent);
-    showBookmarkRail(shown, jumpTo);
+    raisedRail = showBookmarkRail(shown, jumpTo);
+    raisedEntry = entry;
     fadeTimer = setTimeout(dismissBookmarkRail, RAIL_FADE_MS);
 };
 
@@ -5548,15 +5788,33 @@ entries.forEach(entry => {
     marker.addEventListener('mousedown', (e) => e.stopPropagation());
     marker.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
 
-    // The marker only ever RAISES the rail. It deliberately never jumps, on
-    // any number of taps: two taps to reach a bookmark and the second is
-    // always on a chip, so there's no armed state to remember and no way to
-    // seek by accident while trying to read a note.
-    marker.addEventListener('click', (e) => {
+    // First tap raises the rail so the note can be read; a second tap on the
+    // SAME marker while that rail is still up jumps to it, the same as
+    // tapping its chip. A tap on a different marker only switches the rail,
+    // so reading around a cluster never seeks by accident.
+    //
+    // Acts on touchend, like the chips: handleDoubleTap on .plyr calls
+    // preventDefault on a second touch inside 300ms, and iOS then drops the
+    // synthesised click - which is exactly what a quick tap-tap would be.
+    // A click that follows a handled touchend is the same tap, so it's
+    // ignored - but only the click: a quick second TOUCH still counts, which
+    // a plain time lock on both would have swallowed.
+    let touchHandledAt = 0;
+    const tapMarker = (e) => {
         e.stopPropagation();
         e.preventDefault();
-        raise(entry);
-    });
+        if (e.type === 'touchend') touchHandledAt = Date.now();
+        else if (Date.now() - touchHandledAt < 600) return;
+        if (railUpFor(entry)) {
+            if (fadeTimer) clearTimeout(fadeTimer);
+            raisedEntry = null;
+            jumpTo(entry);
+        } else {
+            raise(entry);
+        }
+    };
+    marker.addEventListener('touchend', tapMarker, { passive: false });
+    marker.addEventListener('click', tapMarker);
 
     if (!isTouchDevice) {
         marker.addEventListener('mouseenter', () => raise(entry));

@@ -620,7 +620,17 @@ function scrayBuildListRow(video, index, cfg) {
     [studio, perf, file].forEach(el => applyHighlightingToElement(el, window.currentSearchTerms));
   }
 
-  line.addEventListener('click', () => toggleListRow(li));
+  // Closed: the line opens the row. Open: the line plays it, through the P
+  // button's own handler - the open row's text is what closes it again (see
+  // ensureListRowDetail). Swapped round in 13.35: the line you tapped to open
+  // a row is where your thumb already is, so it's the one that plays.
+  line.addEventListener('click', (e) => {
+    if (li.classList.contains('lc-open') && li._scrayPlaySpec && li._scrayPlaySpec.onClick) {
+      li._scrayPlaySpec.onClick(e);
+      return;
+    }
+    toggleListRow(li);
+  });
 
   // Right-click still gives the overflow menu on a closed row. The buttons
   // are built for it if the row has never been opened - the menu reads the
@@ -820,20 +830,21 @@ function ensureListRowDetail(li) {
   const visible = buttons.findIndex(b => b && b.label === 'R') + 1 || 6;
   detail.appendChild(createCompactButtonGroup(buttons, visible, video));
 
-  // Tapping the open row's text plays it, through the P button's own handler
-  // (held back from the row above) so it plays exactly what P would. Only the
-  // text lines count - a thumb landing in the padding under the buttons
-  // shouldn't start a video. Buttons and tags (underlined, and they stop
-  // propagation anyway) don't.
+  // Tapping the open row's text closes the row; the line above it is what
+  // plays now (see scrayBuildListRow). Only the text lines count - a thumb
+  // landing in the padding under the buttons shouldn't fold the row away.
+  // Buttons and tags (underlined, and they stop propagation anyway) don't.
   detail.addEventListener('click', (e) => {
     if (!e.target.closest('.lc-d-line')) return;
     if (e.target.closest('button')) return;
     if (e.target.style && e.target.style.textDecoration === 'underline') return;
-    if (playSpec && playSpec.onClick) playSpec.onClick(e);
+    toggleListRow(li);
   });
 
   li.appendChild(detail);
   li._scrayButtons = buttons;
+  // P's handler, held back from the row, for the line to play with.
+  li._scrayPlaySpec = playSpec;
   return buttons;
 }
 

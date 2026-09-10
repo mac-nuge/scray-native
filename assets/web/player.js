@@ -184,12 +184,18 @@ const FLS_TITLE_EDGE_INSET_PX = 70;
  * names wrap, stepping from a one-line to a two-line title changes the
  * thickness mid-session and the block would otherwise drift off its inset.
  */
+// ⚙️ How much further down from the top of the screen (holding the phone
+// upright) the title/now-playing bar sits, on top of the inset above. Keep in
+// step with the MPFS `top` in style.css (NOW-PLAYING STRIP AS THE FLS / MPFS
+// TITLE), which does the same for MPFS.
+const NOW_PLAYING_DROP_PX = 20;
+
 function applyFlsTitleInset(title) {
     if (!title) return;
     const titleThickness = title.offsetHeight || 34;
     title.style.setProperty(
         'left',
-        (FLS_TITLE_EDGE_INSET_PX + (titleThickness / 2)) + 'px',
+        (FLS_TITLE_EDGE_INSET_PX + NOW_PLAYING_DROP_PX + (titleThickness / 2)) + 'px',
         'important'
     );
 }
@@ -218,6 +224,10 @@ function ensureVideoTitleBar() {
             // button in the controls row.
             title.addEventListener('click', (e) => {
                 e.stopPropagation();
+                // The now-playing strip sits in here in FLS/MPFS. Its filename
+                // renames on its own; the rest of it (score, size, gaps
+                // between buttons) shouldn't.
+                if (e.target.closest && e.target.closest('#currentVideoInfo')) return;
                 const v = window.currentPlayingVideo;
                 if (!v || typeof window.showRenameModal !== 'function') return;
                 Promise.resolve(window.showRenameModal(v))
@@ -257,6 +267,7 @@ function syncVideoTitleBar(video) {
         textEl.textContent = (stashName || v.filename || '') + scoreText;
     }
     syncFullscreenFilterPill();
+    syncNowPlayingStripPlacement();
 
     // Re-measure after the text changed - a wrapped two-line title is thicker
     // than a one-line one, and the rotated block is positioned off that.
@@ -417,6 +428,123 @@ window.startFullscreenFilterEdit = startFullscreenFilterEdit;
 
 window.ensureVideoTitleBar = ensureVideoTitleBar;
 window.syncVideoTitleBar = syncVideoTitleBar;
+
+// ---------------------------------------------------------------
+// FLS / MPFS: the now-playing strip stands in for the title.
+//
+// The strip MPB shows under the player (#currentVideoInfo - folders, name,
+// score, size and its P D ★ B BM … buttons) is MOVED into the title bar while
+// FLS or MPFS is on, above the filter pill, and moved back under the player
+// when they end. Moving rather than copying keeps every listener, and
+// everything that rebuilds or highlights the strip finds it by id wherever it
+// sits, so it can never go stale. The bar's own filename text stays as the
+// fallback for when nothing is loaded - CSS hides it while the strip has
+// content. See NOW-PLAYING STRIP AS THE FLS / MPFS TITLE in style.css.
+// ---------------------------------------------------------------
+function scrayStripBelongsInTitle() {
+    const b = document.body.classList;
+    return b.contains('manual-rotate-landscape') || b.contains('portrait-fullscreen');
+}
+
+/** Put the strip back directly under the player, where MPB expects it. */
+function scrayReturnNowPlayingStrip() {
+    const strip = document.getElementById('currentVideoInfo');
+    if (!strip || !strip.closest('.fls-video-title')) return;
+    const container = document.getElementById('inlineVideoContainer');
+    if (container) container.insertAdjacentElement('afterend', strip);
+}
+
+// FLS positions the rotated title off its own thickness (applyFlsTitleInset),
+// and the strip changes that thickness whenever it's rebuilt - a new video, a
+// longer name, a score. Re-measure whenever the bar changes size.
+let scrayFlsTitleResizeObserver = null;
+function scrayWatchFlsTitleThickness(bar) {
+    if (typeof ResizeObserver !== 'function') return;
+    if (!scrayFlsTitleResizeObserver) {
+        scrayFlsTitleResizeObserver = new ResizeObserver(entries => {
+            if (!document.body.classList.contains('manual-rotate-landscape')) return;
+            entries.forEach(entry => applyFlsTitleInset(entry.target));
+        });
+    }
+    scrayFlsTitleResizeObserver.observe(bar);
+}
+
+// FLS / MPFS: the strip's buttons (P D ★ B S BM …) are hidden in the bar, and
+// all of them - with the rest of its overflow - sit behind one "..." next to
+// the filter pill. rebuildVideoInfoDisplay leaves the full spec list on the
+// strip as _scrayButtons; the menu is built from it each time it opens, so it
+// is never out of step with the strip.
+// ⚙️ Menu names for the actions that are single letters in the row.
+const SCRAY_NP_MENU_NAMES = { P: 'Play', D: 'Download', '★': 'Score', S: 'Stash', BM: 'Bookmarks' };
+// ⚙️ The row's yellow ★ and pale BM can't be read as text on the white menu.
+const SCRAY_NP_MENU_COLOURS = { '★': '#c79100', BM: '#6f42c1' };
+
+function scrayNowPlayingMenuActions(strip) {
+    const video = window.currentPlayingVideo;
+    return (strip._scrayButtons || []).filter(Boolean).map(spec => {
+        const action = { ...spec };
+        if (spec.label === 'B') {
+            const id = video && (video.oneDriveId ?? video.idFromAPI);
+            const inBasket = !!id && (window.basketVideos || []).some(v => v.oneDriveId === id);
+            action.label = inBasket ? 'Remove from Basket' : 'Add to Basket';
+        } else if (SCRAY_NP_MENU_NAMES[spec.label]) {
+            action.label = SCRAY_NP_MENU_NAMES[spec.label];
+        }
+        if (SCRAY_NP_MENU_COLOURS[spec.label]) action.color = SCRAY_NP_MENU_COLOURS[spec.label];
+        return action;
+    });
+}
+
+function ensureNowPlayingMoreButton(bar) {
+    let btn = bar.querySelector(':scope > .fls-np-more');
+    if (btn) return btn;
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'fls-np-more';
+    btn.textContent = '...';
+    btn.title = 'Actions for this video';
+    // Same as the pill: in FLS the bar renames on tap, and none of this
+    // button's gestures should reach it (or the player's own handlers).
+    ['mousedown', 'touchstart', 'touchend'].forEach(type => {
+        btn.addEventListener(type, ev => ev.stopPropagation());
+    });
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const strip = document.getElementById('currentVideoInfo');
+        if (!strip || typeof showContextMenu !== 'function') return;
+        showContextMenu(scrayNowPlayingMenuActions(strip), e);
+    });
+    return btn;
+}
+
+function syncNowPlayingStripPlacement() {
+    const strip = document.getElementById('currentVideoInfo');
+    if (!strip) return;
+    if (!scrayStripBelongsInTitle()) {
+        scrayReturnNowPlayingStrip();
+        return;
+    }
+    const bar = ensureVideoTitleBar();
+    if (!bar) return;
+    const pill = bar.querySelector(':scope > .fls-filter-pill');
+    const placed = strip.parentElement === bar && (!pill || strip.nextElementSibling === pill);
+    if (!placed) bar.insertBefore(strip, pill);
+    // "..." straight after the pill (or the strip, until the pill exists -
+    // the next sync moves it along).
+    const more = ensureNowPlayingMoreButton(bar);
+    const anchor = pill || strip;
+    if (anchor.nextElementSibling !== more) anchor.insertAdjacentElement('afterend', more);
+    scrayWatchFlsTitleThickness(bar);
+}
+window.syncNowPlayingStripPlacement = syncNowPlayingStripPlacement;
+
+// updatePlayerStateClass already syncs the title synchronously on every mode
+// change (so computeBottomDock measures the strip in the right place on the
+// way out). This catches the class changes that don't pass through there.
+document.addEventListener('DOMContentLoaded', () => {
+    new MutationObserver(syncNowPlayingStripPlacement)
+        .observe(document.body, { attributes: true, attributeFilter: ['class'] });
+});
 
 function getManualRotationTargets() {
     const container = getManualRotationFullscreenElement();
@@ -947,9 +1075,12 @@ function applyManualRotationStyles() {
         'max-height': screenW + 'px',
         margin: '0',
         padding: '0',
-        transform: 'translate(-50%, -50%) rotate(90deg)',
+        // Peek slides the rotated box off to the right (see setFlsPeek).
+        transform: (flsPeekActive ? `translateX(${flsPeekShiftPx()}px) ` : '') +
+            'translate(-50%, -50%) rotate(90deg)',
         'transform-origin': 'center center',
-        'z-index': '2147483647'
+        // Just under a history/basket panel opened over FLS.
+        'z-index': scrayFsPanelOpen() ? SCRAY_FS_PANEL_PLAYER_Z : '2147483647'
     });
 
     setImportantStyles(wrapper, {
@@ -1140,6 +1271,20 @@ if (manualRotationActive) {
 }  
 
 function resetManualRotation() {
+    // Leaving FLS ends a peek. The body lock goes back first, so a switch to
+    // MPFS keeps its fullscreen layout; a full exit clears it afterwards anyway.
+    // A new FLS session starts from wherever the page is when it begins.
+    flsPeekScrollY = null;
+    if (flsPeekActive) {
+        flsPeekActive = false;
+        document.body.classList.remove('fls-peek');
+        if (flsPeekSavedBodyStyle) {
+            document.body.style.overflow = flsPeekSavedBodyStyle.overflow;
+            document.body.style.position = flsPeekSavedBodyStyle.position;
+            document.body.style.width = flsPeekSavedBodyStyle.width;
+            flsPeekSavedBodyStyle = null;
+        }
+    }
     // Leaving FLS drops the zoom. removeManualRotationStyles() strips the
     // transform property either way, so keeping the state would only desync
     // the badge from what is actually on screen.
@@ -1153,6 +1298,201 @@ function resetManualRotation() {
     const rotateBtn = document.querySelector('.plyr-manual-rotate');
     if (rotateBtn) rotateBtn.classList.remove('active');
 }
+
+// =========================================================
+// FLS PEEK + PANELS OVER FULLSCREEN
+// =========================================================
+// Peek: swiping "up" in FLS (a physical swipe to the right - the rotated
+// video's top is the right-hand side of the portrait screen) slides the
+// whole rotated player off to the right, leaving a sliver of it showing so
+// it's clear FLS is still on. The page underneath - the main list, the
+// corner buttons - is usable as normal. Tapping the sliver brings the player
+// back, and so does playing anything: playVideoInline ends the peek first,
+// so the next video loads into FLS as it always has.
+//
+// Nothing about FLS itself changes while peeking. manualRotationActive stays
+// true, the fullscreen stays on, and the rotation styles are the same ones
+// with a translateX in front - so returning is just taking it off again.
+
+// ⚙️ How much of the player stays on screen while peeking, in px.
+const FLS_PEEK_SLIVER_PX = 28;
+// ⚙️ Slide duration, in ms.
+const FLS_PEEK_ANIM_MS = 280;
+
+let flsPeekActive = false;
+// The body's inline lock (position:fixed / overflow:hidden, set on entering
+// portrait fullscreen) is lifted while peeking so the page scrolls, and put
+// back exactly as it was on return.
+let flsPeekSavedBodyStyle = null;
+// Where the page was scrolled to when the last peek ended - by playing a video
+// from it or tapping the sliver. Putting the body lock back collapses the
+// page, so the browser's own scroll position is gone by the next peek; this
+// is what brings the list back to the same place. Null until the first peek
+// of an FLS session, which falls back to where the page was when fullscreen
+// began (Plyr keeps that for its own exit).
+let flsPeekScrollY = null;
+
+function restoreFlsPeekScroll() {
+    const y = flsPeekScrollY !== null
+        ? flsPeekScrollY
+        : (window.plyrPlayer?.fullscreen?.scrollPosition?.y || 0);
+    if (!y) return;
+    window.scrollTo(0, y);
+    // Once more on the next frame, in case the unlocked page hadn't finished
+    // growing back to full height and the first one was clamped.
+    requestAnimationFrame(() => {
+        if (flsPeekActive && Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);
+    });
+}
+
+function flsPeekShiftPx() {
+    return Math.max(0, window.innerWidth - FLS_PEEK_SLIVER_PX);
+}
+
+/** The invisible layer over the sliver that turns any tap on it into "come back". */
+function ensureFlsPeekCatcher() {
+    const el = getManualRotationFullscreenElement();
+    if (!el) return;
+    let catcher = el.querySelector(':scope > .fls-peek-catcher');
+    if (!catcher) {
+        catcher = document.createElement('div');
+        catcher.className = 'fls-peek-catcher';
+        const back = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            setFlsPeek(false);
+        };
+        catcher.addEventListener('touchend', back, { passive: false });
+        catcher.addEventListener('click', back);
+        // Keep the sliver's touches away from the player's own tap zones and
+        // scrub handlers underneath.
+        ['touchstart', 'touchmove', 'mousedown', 'pointerdown'].forEach(type => {
+            catcher.addEventListener(type, ev => ev.stopPropagation(), { passive: true });
+        });
+    }
+    // Always the last child, so it sits over everything else in the player.
+    el.appendChild(catcher);
+}
+
+function setFlsPeek(on) {
+    on = !!on;
+    if (on && !manualRotationActive) return;
+    if (on === flsPeekActive) return;
+    flsPeekActive = on;
+
+    const body = document.body;
+    if (on) {
+        // A panel opened over FLS belongs to the full-screen view, not the page.
+        // Only if one is actually open: toggleBasket pins the scroll position
+        // it saw on the next frame, and here that's the locked page's 0 - it
+        // would undo restoreFlsPeekScroll below.
+        if (document.getElementById('historyPanel')?.classList.contains('history-open')
+            && typeof window.toggleHistory === 'function') window.toggleHistory(false);
+        if (document.getElementById('basketPanel')?.classList.contains('basket-open')
+            && typeof window.toggleBasket === 'function') window.toggleBasket(false);
+        flsPeekSavedBodyStyle = {
+            overflow: body.style.overflow,
+            position: body.style.position,
+            width: body.style.width
+        };
+        body.style.overflow = '';
+        body.style.position = '';
+        body.style.width = '';
+        body.classList.add('fls-peek');
+        ensureFlsPeekCatcher();
+    } else {
+        // Before the lock goes back - it collapses the page to the top.
+        flsPeekScrollY = window.scrollY;
+        body.classList.remove('fls-peek');
+        if (flsPeekSavedBodyStyle) {
+            body.style.overflow = flsPeekSavedBodyStyle.overflow;
+            body.style.position = flsPeekSavedBodyStyle.position;
+            body.style.width = flsPeekSavedBodyStyle.width;
+            flsPeekSavedBodyStyle = null;
+        }
+    }
+
+    // Slide rather than jump. Only for this move: the transition is put back
+    // to the opacity fade toggleManualRotation uses, so resizes and the next
+    // FLS entry don't animate the rotation.
+    const el = getManualRotationFullscreenElement();
+    if (el) {
+        el.style.setProperty('transition', `transform ${FLS_PEEK_ANIM_MS}ms ease, opacity 0.15s ease`, 'important');
+        setTimeout(() => el.style.setProperty('transition', 'opacity 0.15s ease', 'important'), FLS_PEEK_ANIM_MS + 50);
+    }
+    applyManualRotationStyles();
+    // Last, so the page is unlocked and at full height before it's scrolled.
+    if (on) restoreFlsPeekScroll();
+}
+window.scraySetFlsPeek = setFlsPeek;
+window.scrayFlsPeekActive = () => flsPeekActive;
+
+// Panels over fullscreen: the pause menu's H and B circles open the ordinary
+// history and basket panels ON TOP of FLS (or MPFS) - the same panels, in
+// their normal portrait layout. While one is open the player drops just
+// below it, a dimmed backdrop covers what's left of the player (tap it to
+// close), and popups that open from a panel's rows are lifted above it.
+
+// ⚙️ Stacking while a panel is open. The panel and backdrop must sit above
+// the player, and the player above FLS's black ::before backdrop.
+const SCRAY_FS_PANEL_PLAYER_Z = '2147483100';
+
+function scrayFsPanelOpen() {
+    return document.body.classList.contains('scray-fs-panel-open');
+}
+
+function scraySyncFullscreenPanels() {
+    const anyOpen = !!document.querySelector('#historyPanel.history-open, #basketPanel.basket-open');
+    const fullscreen = document.body.classList.contains('fullscreen-active');
+    const on = anyOpen && fullscreen && !flsPeekActive;
+    if (on === scrayFsPanelOpen()) return;
+
+    document.body.classList.toggle('scray-fs-panel-open', on);
+
+    let backdrop = document.getElementById('scrayFsPanelBackdrop');
+    if (on && !backdrop) {
+        backdrop = document.createElement('div');
+        backdrop.id = 'scrayFsPanelBackdrop';
+        const close = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (typeof window.toggleHistory === 'function') window.toggleHistory(false);
+            if (typeof window.toggleBasket === 'function') window.toggleBasket(false);
+        };
+        backdrop.addEventListener('touchend', close, { passive: false });
+        backdrop.addEventListener('click', close);
+        ['touchstart', 'touchmove'].forEach(type => {
+            backdrop.addEventListener(type, ev => ev.stopPropagation(), { passive: true });
+        });
+        document.body.appendChild(backdrop);
+    }
+
+    // FLS writes the player's z-index inline; everything else is CSS.
+    if (manualRotationActive) {
+        const el = getManualRotationFullscreenElement();
+        if (el) el.style.setProperty('z-index', on ? SCRAY_FS_PANEL_PLAYER_Z : '2147483647', 'important');
+    }
+}
+
+function scrayOpenPanelOverFullscreen(which) {
+    const wantHistory = which === 'history';
+    if (typeof window.toggleHistory === 'function') window.toggleHistory(wantHistory);
+    if (typeof window.toggleBasket === 'function') window.toggleBasket(!wantHistory);
+    scraySyncFullscreenPanels();
+}
+window.scrayOpenPanelOverFullscreen = scrayOpenPanelOverFullscreen;
+
+// Panels open and close from many places - their own swipe-to-close, a P tap
+// that plays and closes, the corner buttons - so the state is followed rather
+// than set at each one.
+document.addEventListener('DOMContentLoaded', () => {
+    const observer = new MutationObserver(scraySyncFullscreenPanels);
+    ['historyPanel', 'basketPanel'].forEach(id => {
+        const panel = document.getElementById(id);
+        if (panel) observer.observe(panel, { attributes: true, attributeFilter: ['class'] });
+    });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+});
 
 // FLS -> MPFS: leave forced landscape but STAY in fullscreen, landing in
 // ordinary mobile-portrait fullscreen.
@@ -1915,6 +2255,9 @@ if (!zoomBlocksSwipe && isDetermined && !isHorizontalDrag && e && e.changedTouch
                 window.plyrPlayer.fullscreen.exit();
             }
             showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
+        } else if (deltaXPhysical > SWIPE_EXIT_THRESHOLD_PX) {
+            // "Up" in FLS: slide the player out of the way to the page below.
+            setFlsPeek(true);
         }
     } else if (isForcedOrRealLandscapeMobile() && window.plyrPlayer.fullscreen.active) {
         // Genuine device landscape: no rotation involved, so a real
@@ -2300,6 +2643,8 @@ function setupMpfsSwipeExit() {
         if (target?.closest?.('.plyr__progress')) return;
         if (target?.closest?.('#permanentProgressBar')) return;
         if (target?.closest?.('.plyr-frame-step-group')) return;
+        // ...or a panel opened over MPFS - scrolling its list is a downward drag.
+        if (target?.closest?.('#historyPanel, #basketPanel, #scrayFsPanelBackdrop')) return;
 
         startX = touch.clientX;
         startY = touch.clientY;
@@ -3535,11 +3880,14 @@ function attachFrameStepButtons() {
         if (typeof window.startFullscreenFilterEdit === 'function') window.startFullscreenFilterEdit();
     });
 
-    // 2 - basket modal (was the FLS top-left triple tap)
+    // 2 - history panel, opened over the fullscreen player
+    const historyBtn = makeCircle('plyr-frame-history', 'History', 'H');
+    setupTapButton(historyBtn, () => scrayOpenPanelOverFullscreen('history'));
+
+    // 3 - basket panel, opened over the fullscreen player. Replaced the old
+    // basket modal, which had its own copies of the history and basket views.
     const basketBtn = makeCircle('plyr-frame-basket', 'Basket', 'B');
-    setupTapButton(basketBtn, () => {
-        if (typeof window.showPlayerBasketModal === 'function') window.showPlayerBasketModal();
-    });
+    setupTapButton(basketBtn, () => scrayOpenPanelOverFullscreen('basket'));
 
     // 3 - bookmark modal (took over the old orange play/pause circle)
     const bookmarkBtn = makeCircle('plyr-frame-bookmark', 'Bookmarks', 'BM');
@@ -3570,6 +3918,7 @@ function attachFrameStepButtons() {
     attachFrameStepHoldHandlers(rightBtn, 1);
 
     group.appendChild(filterBtn);
+    group.appendChild(historyBtn);
     group.appendChild(basketBtn);
     group.appendChild(bookmarkBtn);
     group.appendChild(scoreBtn);
@@ -3687,310 +4036,9 @@ function attachColumnFrameStepZones() {
     console.log('Column frame-step tap zones attached (left half)');
 }
 
-async function downloadCurrentVideoFromModal(video) {
-    try {
-        let vid = video;
-        vid = await window.refreshVideoBeforeUse(vid);
-        if (vid && vid.downloadUrl) {
-            window.location.href = vid.downloadUrl;
-        } else if (typeof window.showDownloadError === 'function') {
-            window.showDownloadError("Missing or expired download URL", video);
-        }
-    } catch (err) {
-        console.error("Download failed", err);
-        if (typeof window.showDownloadError === 'function') {
-            window.showDownloadError(err.message || 'Download failed', video);
-        }
-    }
-}
-
-function showPlayerBasketModal() {
-    const existing = document.getElementById('playerBasketModal');
-    if (existing) existing.remove();
-
-    const basketVideosList = window.basketVideos || [];
-    const isForcedLandscape = document.body.classList.contains('manual-rotate-landscape');
-
-    // ✅ Prevent mobile WebKit text-autosizing from randomly enlarging text
-    // when the list content changes/reflows inside the rotated fullscreen box.
-    const NO_AUTOSIZE = '-webkit-text-size-adjust: 100%; text-size-adjust: 100%;';
-
-    const overlay = document.createElement('div');
-    overlay.id = 'playerBasketModal';
-    overlay.style.cssText = `
-        position: fixed;
-        top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0,0,0,0.75);
-        z-index: 2147483647;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        ${NO_AUTOSIZE}
-    `;
-
-    const inner = document.createElement('div');
-    inner.style.cssText = `
-        background: #1a1a1a;
-        color: #fff;
-        border-radius: 8px;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        padding: 6px;
-        box-sizing: border-box;
-        ${NO_AUTOSIZE}
-    `;
-
-    if (isForcedLandscape) {
-        const screenW = window.innerWidth;
-        const screenH = window.innerHeight;
-        // ⚙️ ADJUSTABLE SETTINGS - tweak these to resize/reposition the modal
-        // within the rotated (forced landscape) player. Left 50%/top 50% with
-        // translate(-50%,-50%) keeps it centered exactly within the player
-        // (which fills almost the entire screen in this mode).
-        // Final visual HEIGHT (stretches toward top of player) - higher = taller.
-        const FORCED_LANDSCAPE_MODAL_HEIGHT_FACTOR = 0.98;
-        // Final visual WIDTH - higher = wider.
-        const FORCED_LANDSCAPE_MODAL_WIDTH_FACTOR = 0.9;
-        // 50 = perfectly centered. Lower = shifted left, higher = shifted right.
-        const FORCED_LANDSCAPE_MODAL_LEFT_PERCENT = 50;
-        // ⚙️ Extra push to shift the modal further left from the FLS
-        // (rotated) point of view - since the modal is rotated 90deg, a
-        // local vertical offset becomes a horizontal on-screen shift, and
-        // SUBTRACTING here is what actually shifts it left on screen.
-        // Increase this value to shift further left.
-        const FORCED_LANDSCAPE_MODAL_LEFT_SHIFT_PX = 60;
-        inner.style.position = 'fixed';
-        // ✅ The rotated player's on-screen center is shifted by
-        // manualRotationOffsetY (a pre-rotation vertical offset, which
-        // becomes a horizontal shift once rotated 90deg). Match that same
-        // offset here so the modal lines up with wherever the player
-        // actually sits, instead of plain viewport center, then subtract
-        // the extra left-shift constant on top.
-        inner.style.top = `calc(50% + ${manualRotationOffsetY - FORCED_LANDSCAPE_MODAL_LEFT_SHIFT_PX}px)`;
-        inner.style.left = FORCED_LANDSCAPE_MODAL_LEFT_PERCENT + '%';
-        inner.style.width = Math.round(screenH * FORCED_LANDSCAPE_MODAL_HEIGHT_FACTOR) + 'px';
-        inner.style.height = Math.round(screenW * FORCED_LANDSCAPE_MODAL_WIDTH_FACTOR) + 'px';
-        inner.style.transform = 'translate(-50%, -50%) rotate(90deg)';
-        inner.style.maxWidth = '98vw';
-        inner.style.maxHeight = '98vh';
-    } else {
-        inner.style.width = '80vw';
-        inner.style.maxWidth = '500px';
-        inner.style.maxHeight = '80vh';
-    }
-
-    const title = document.createElement('h3');
-    title.style.cssText = `margin: 0 0 10px 0; font-size: 0.9rem; flex-shrink: 0; ${NO_AUTOSIZE}`;
-    inner.appendChild(title);
-
-    const currentVideo = window.currentPlayingVideo;
-
-    // ✅ Toolbar: score / download current video, and switch which list
-    // is shown below (main filtered list / 10 random / basket).
-    const actionRow = document.createElement('div');
-    actionRow.style.cssText = `display: flex; gap: 6px; margin-bottom: 4px; flex-shrink: 0; ${NO_AUTOSIZE}`;
-
-    const scoreBtn = document.createElement('button');
-    scoreBtn.textContent = '★';
-    scoreBtn.title = 'Score current video';
-    scoreBtn.disabled = !currentVideo;
-    scoreBtn.style.cssText = `flex: 1; padding: 5px 8px; background: #ffc107; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; ${NO_AUTOSIZE}`;
-    scoreBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!currentVideo) return;
-        if (typeof window.showVideoScoringModal === 'function') {
-            window.showVideoScoringModal(currentVideo, e);
-        }
-    });
-    actionRow.appendChild(scoreBtn);
-
-    const downloadBtn = document.createElement('button');
-    downloadBtn.textContent = 'D';
-    downloadBtn.title = 'Download current video';
-    downloadBtn.disabled = !currentVideo;
-    downloadBtn.style.cssText = `flex: 1; padding: 5px 8px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; ${NO_AUTOSIZE}`;
-    downloadBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!currentVideo) return;
-        downloadCurrentVideoFromModal(currentVideo);
-    });
-    actionRow.appendChild(downloadBtn);
-
-    const addToBasketBtn = document.createElement('button');
-    addToBasketBtn.textContent = '+B';
-    addToBasketBtn.title = 'Add current video to basket';
-    addToBasketBtn.disabled = !currentVideo;
-    addToBasketBtn.style.cssText = `flex: 1; padding: 5px 8px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; ${NO_AUTOSIZE}`;
-    addToBasketBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!currentVideo) return;
-        if (typeof window.addToBasket === 'function') {
-            window.addToBasket(currentVideo);
-        }
-        const originalText = addToBasketBtn.textContent;
-        addToBasketBtn.textContent = '✅';
-        setTimeout(() => { addToBasketBtn.textContent = originalText; }, 1000);
-        // Refresh the list view if basket is currently being shown
-        if (currentMode === 'basket') {
-            renderList();
-        }
-    });
-    actionRow.appendChild(addToBasketBtn);
-
-    const historyBtn = document.createElement('button');
-    historyBtn.textContent = 'H';
-    historyBtn.title = 'Show history - same as corner H button';
-    historyBtn.style.cssText = `flex: 1; padding: 5px 8px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; ${NO_AUTOSIZE}`;
-    historyBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        currentMode = 'history';
-        renderList();
-    });
-    actionRow.appendChild(historyBtn);
-
-    const listBtn = document.createElement('button');
-    listBtn.textContent = 'L';
-    listBtn.title = 'Show main list (filtered) - same as corner L button';
-    listBtn.style.cssText = `flex: 1; padding: 5px 8px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; ${NO_AUTOSIZE}`;
-    listBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        listBtn.disabled = true;
-        listBtn.textContent = '...';
-        try {
-            if (typeof window.listAllVideos === 'function') {
-                await window.listAllVideos();
-            }
-        } catch (err) {
-            console.error('Failed to run listAllVideos from player basket modal:', err);
-        }
-        listBtn.disabled = false;
-        listBtn.textContent = 'L';
-        currentMode = 'main';
-        renderList();
-    });
-    actionRow.appendChild(listBtn);
-
-    const randomBtn = document.createElement('button');
-    randomBtn.textContent = 'R';
-    randomBtn.title = 'Show random videos - same as corner R button';
-    randomBtn.style.cssText = `flex: 1; padding: 5px 8px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; ${NO_AUTOSIZE}`;
-    randomBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        randomBtn.disabled = true;
-        randomBtn.textContent = '...';
-        try {
-            if (typeof window.generateRandomPlaylistByTags === 'function') {
-                await window.generateRandomPlaylistByTags();
-            }
-        } catch (err) {
-            console.error('Failed to run generateRandomPlaylistByTags from player basket modal:', err);
-        }
-        randomBtn.disabled = false;
-        randomBtn.textContent = 'R';
-        currentMode = 'random';
-        renderList();
-    });
-    actionRow.appendChild(randomBtn);
-
-    const basketBtn = document.createElement('button');
-    basketBtn.textContent = 'B';
-    basketBtn.title = 'Show basket';
-    basketBtn.style.cssText = `flex: 1; padding: 5px 8px; background: #e91e63; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.7rem; ${NO_AUTOSIZE}`;
-    basketBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        currentMode = 'basket';
-        renderList();
-    });
-    actionRow.appendChild(basketBtn);
-
-    const listContainer = document.createElement('div');
-    listContainer.style.cssText = `flex: 1 1 auto; min-height: 0; overflow-y: auto; ${NO_AUTOSIZE}`;
-    inner.appendChild(listContainer);
-
-    // Buttons at the bottom. The list is flex:1 so it absorbs the slack, and
-    // actionRow keeps flex-shrink:0 so a long list can't squeeze it away.
-    actionRow.style.marginBottom = '0';
-    actionRow.style.marginTop = '6px';
-    inner.appendChild(actionRow);
-
-    let currentMode = 'basket';
-
-    // ✅ Pull directly from the same data the corner L/R buttons populate,
-    // instead of re-sampling locally - guarantees identical results.
-    function getListForMode(mode) {
-        if (mode === 'main') {
-            return (window.paginationState && window.paginationState.allVideos) || [];
-        }
-        if (mode === 'random') {
-            return window.filteredVideosGlobal || [];
-        }
-        if (mode === 'history') {
-            return window.historyVideos || [];
-        }
-        return window.basketVideos || [];
-    }
-
-    function renderList() {
-        const videos = getListForMode(currentMode);
-        const modeLabel = currentMode === 'main' ? 'Main List' : currentMode === 'random' ? 'Random' : currentMode === 'history' ? 'History' : 'Basket';
-        title.textContent = `${modeLabel} (${videos.length})`;
-
-        listContainer.innerHTML = '';
-
-        if (videos.length === 0) {
-            const empty = document.createElement('div');
-            empty.textContent = `${modeLabel} is empty`;
-            empty.style.cssText = `color: #999; text-align: center; padding: 20px; font-size: 0.75rem; ${NO_AUTOSIZE}`;
-            listContainer.appendChild(empty);
-            return;
-        }
-
-        const list = document.createElement('ul');
-        list.style.cssText = `list-style: none; margin: 0; padding: 0; ${NO_AUTOSIZE}`;
-
-        videos.forEach((video, idx) => {
-            const item = document.createElement('li');
-            // Same list, just drawn inside the player - so it names rows the
-            // same way the grid behind it does.
-            const itemName =
-                (window.scrayStashDisplayName && window.scrayStashDisplayName(video))
-                || video.filename || 'Unknown';
-            item.textContent = `${idx + 1}. ${itemName}`;
-            item.style.cssText = `
-                padding: 8px 6px;
-                border-bottom: 1px solid #333;
-                cursor: pointer;
-                font-size: 0.7rem;
-                word-break: break-word;
-                ${NO_AUTOSIZE}
-            `;
-            item.addEventListener('click', (e) => {
-                e.stopPropagation();
-                overlay.remove();
-                if (window.inlineVideoPlayer) {
-                    window.inlineVideoPlayer.play(video, currentMode, idx);
-                }
-            });
-            list.appendChild(item);
-        });
-
-        listContainer.appendChild(list);
-    }
-
-    renderList();
-
-    overlay.appendChild(inner);
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) {
-            overlay.remove();
-        }
-    });
-
-    document.body.appendChild(overlay);
-}
-
-window.showPlayerBasketModal = showPlayerBasketModal;
+// The FLS basket modal (showPlayerBasketModal) and its download helper are
+// gone: the pause menu's H and B circles open the real history and basket
+// panels over the player instead - see scrayOpenPanelOverFullscreen.
 
 /**
  * Keeps playback paused for as long as the bookmark modal is on screen.
@@ -8195,6 +8243,9 @@ const resolvedStartAt = (typeof startAt === 'number' && startAt > 0)
     ? startAt
     : (typeof video.__bmStartAt === 'number' && video.__bmStartAt > 0 ? video.__bmStartAt : null);
 window.scrayPendingStartAt = resolvedStartAt;
+// Picked from the page while FLS was peeking: slide the player back down
+// before anything else, so the preview and the load happen in FLS as normal.
+if (flsPeekActive) setFlsPeek(false);
 // ⚙️ PLAY PREVIEW DELAY - see scrayPlayPreviewDelayMs above.
 // The token is what makes tapping X / > again during the wait work: every
 // request takes the next number, and any request that wakes up to find a
@@ -8258,7 +8309,10 @@ console.log('Reset H< button - playing from non-history context');
 }
 
 // ✅ Mobile: auto-scroll to player IMMEDIATELY upon play request
-if (window.innerWidth <= 1024) {
+// Not in FLS: the player covers the page and the page is locked, so there's
+// nothing to bring into view - and a smooth scroll still running when you
+// swipe up to peek would carry the list away from where you played from.
+if (window.innerWidth <= 1024 && !manualRotationActive) {
 const container = document.getElementById("inlineVideoContainer");
 if (container) {
     // A smooth scroll is a ~400ms animation that carries on after the
@@ -8748,6 +8802,21 @@ onClick: (e) => {
   if (window.updateBasketHighlights) window.updateBasketHighlights();
 }
 },
+// S is listed here, straight after B, so createCompactButtonGroup finds one
+// and skips its S/B swap - which would otherwise put S in B's slot and move B
+// into the overflow menu as "Add to Basket". This is a copy of the spec in
+// context-menu.js (the same in both apps); keep them in step.
+{
+   label: "S",
+   title: "Look up scene data and timestamps",
+   color: "#6c5ce7",
+   onClick: (e) => {
+       e.stopPropagation();
+       if (typeof window.showStashModal === 'function') {
+           window.showStashModal(video);
+       }
+   }
+},
 {
    label: "BM",
    title: "Bookmarks",
@@ -8848,7 +8917,10 @@ onClick: async (e) => {
 }
 ];
 
-const btnContainer = createCompactButtonGroup(buttons, 5, video);
+// P D ★ B S BM in the row, the rest behind the overflow button.
+const btnContainer = createCompactButtonGroup(buttons, 6, video);
+// The whole list, for the "..." menu that replaces the row in FLS/MPFS.
+videoInfoEl._scrayButtons = buttons;
 btnContainer.style.marginLeft = '8px';
 btnContainer.style.display = 'inline-flex';
 videoInfoEl.appendChild(btnContainer);
@@ -8867,7 +8939,7 @@ if (oldListener) {
 const contextMenuListener = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    showContextMenu(buttons.slice(5), e); // Show overflow menu (buttons after first 5)
+    showContextMenu(buttons.slice(6), e); // Show overflow menu (buttons after the first 6)
 };
 
 videoInfoEl.addEventListener('contextmenu', contextMenuListener);

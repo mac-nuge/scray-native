@@ -3076,7 +3076,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         // the rail it describes.
         if (topNotes.length > 0 && hasPlayhead) {
             html += `
-                <div style="flex: 0 0 auto; font-size: 0.7rem; color: #999; margin-bottom: 4px;">Quick notes (tap one to save a bookmark with it):</div>
+                <div style="flex: 0 0 auto; font-size: 0.7rem; color: #999; margin-bottom: 4px;">Quick notes (tap one to save a bookmark with it - or, while typing a note, to add it to the note):</div>
                 <div id="qnWrap" style="${SCROLL_WRAP_STYLE} flex: 0 1 auto; margin-bottom: 12px;">
                     <div id="qnScroll" style="${SCROLL_STYLE}">
                         <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px;">
@@ -3120,6 +3120,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         html += `
                 <div class="file-operation-buttons" style="flex: 0 0 auto; display: flex; flex-direction: row; gap: 8px; padding-top: 10px; background: #fff;">
                     <button type="button" id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="flex: 1; background: #28a745;">Save${pending ? ` (${pending})` : ''}</button>
+                    ${hasPlayhead ? `<button type="button" id="addNoteBtn" class="modal-btn" style="flex: 1.3; background: #007bff; color: #fff; white-space: nowrap; padding-left: 4px !important; padding-right: 4px !important;">Add note</button>` : ''}
                     <button type="button" id="deleteBookmarksBtn" class="modal-btn" style="flex: 1; background: ${mode === 'delete' ? '#a71d2a' : '#dc3545'}; color: #fff;">Delete</button>
                     <button type="button" id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1;">Close</button>
                 </div>
@@ -3226,6 +3227,27 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         });
 
         newNoteEl?.addEventListener('input', () => { newNote = newNoteEl.value; });
+
+        // Whether the new-note field is being typed in: it was tapped, typed
+        // in, or opened with Add note - see the quick notes below. The
+        // auto-focus on opening deliberately doesn't count: wherever that
+        // focus sticks (desktop), quick notes would otherwise never save.
+        let noteFieldActive = false;
+        const focusNoteField = () => {
+            if (!newNoteEl) return;
+            noteFieldActive = true;
+            // preventScroll for the same reason as the row edit below: WebKit
+            // scrolls the page, not the panel, and inflates offsetTop.
+            newNoteEl.focus({ preventScroll: true });
+            const end = newNoteEl.value.length;
+            try { newNoteEl.setSelectionRange(end, end); } catch (_) {}
+        };
+        if (newNoteEl) {
+            ['touchstart', 'mousedown', 'input'].forEach(type => {
+                newNoteEl.addEventListener(type, () => { noteFieldActive = true; }, { passive: true });
+            });
+            newNoteEl.addEventListener('blur', () => { noteFieldActive = false; });
+        }
         if (newNoteEl) {
             window.scrayAttachNoteAutocomplete?.(newNoteEl, () => allNotes, {
                 onPick: (v) => { newNote = v; }
@@ -3243,6 +3265,16 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         modal.querySelector('#swapBmBtn')?.addEventListener('click', (e) => {
             e.stopPropagation();
             setMode('swap');
+        });
+
+        // Add note: the field sits at the top of the panel, out of thumb reach.
+        // Focusing from inside the tap is also what lets iOS raise the keyboard
+        // at all - the auto-focus on opening runs after an await, outside any
+        // gesture, so the keyboard never came up for it.
+        modal.querySelector('#addNoteBtn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            flushOpenEdit(false);
+            focusNoteField();
         });
 
         modal.querySelector('#deleteBookmarksBtn')?.addEventListener('click', (e) => {
@@ -3309,13 +3341,33 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
 
         // A quick note is the "instead of typing" path: it saves the new
         // bookmark straight away. While swap or delete is armed it only fills
-        // the field, since the mode is waiting on a row tap.
+        // the field, since the mode is waiting on a row tap. While you're
+        // typing a note, it's added to the end of what you've typed instead,
+        // and the field stays active.
+        //
+        // "Typing" is read at the PRESS, not at the click: on a phone the tap
+        // takes focus off the field before the click lands. On desktop the
+        // press is also stopped from taking focus, so the caret never leaves.
         modal.querySelectorAll('.quick-note-btn').forEach(btn => {
+            let pressedWhileTyping = false;
+            const notePress = (e) => {
+                pressedWhileTyping = noteFieldActive && document.activeElement === newNoteEl;
+                if (pressedWhileTyping && e.type === 'mousedown') e.preventDefault();
+            };
+            btn.addEventListener('touchstart', notePress, { passive: true });
+            btn.addEventListener('mousedown', notePress);
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 flushOpenEdit(false);
                 const text = topNotes[parseInt(btn.dataset.noteIndex, 10)];
-                if (mode === 'normal') {
+                const typing = pressedWhileTyping
+                    || (noteFieldActive && document.activeElement === newNoteEl);
+                pressedWhileTyping = false;
+                if (mode === 'normal' && typing && newNoteEl) {
+                    const typed = newNoteEl.value.replace(/\s+$/, '');
+                    newNoteEl.value = newNote = typed ? `${typed} ${text}` : text;
+                    focusNoteField();
+                } else if (mode === 'normal') {
                     commitAndClose({ time: newTime, note: text });
                 } else if (newNoteEl) {
                     newNoteEl.value = newNote = text;

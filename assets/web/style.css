@@ -1527,21 +1527,26 @@ pointer-events: none;  /* disable all siblings while fullscreen */
 FULLSCREEN MODE - UNIFIED RULES FOR ALL ENTRY METHODS
 ========================================= */
 
-/* Hide ALL page elements when in fullscreen */
-body.fullscreen-active #cornerButtons,
-body.fullscreen-active .dropdown-row,
-body.fullscreen-active #basketPanel,
-body.fullscreen-active #historyPanel,
-body.fullscreen-active #pipPlayerContainer,
-body.fullscreen-active #randomPlaylistPanel,
-body.fullscreen-active #inlineConsole,
-body.fullscreen-active #inlineConsoleToolbar,
-body.fullscreen-active #floatingTagPillsBar,
-body.fullscreen-active #currentVideoInfo,
-body.fullscreen-active #accountLoadButtons,
-body.fullscreen-active .top-buttons-row,
-body.fullscreen-active .auto-track-label,
-body.fullscreen-active #versionCorner {
+/* Hide ALL page elements when in fullscreen.
+   Not while FLS is peeking (body.fls-peek): the player has slid aside and
+   the page is meant to be usable as normal. And the history/basket panels
+   stay available while one is opened over fullscreen from the pause menu
+   (body.scray-fs-panel-open). See FLS PEEK + PANELS OVER FULLSCREEN at the
+   end of this file. */
+body.fullscreen-active:not(.fls-peek) #cornerButtons,
+body.fullscreen-active:not(.fls-peek) .dropdown-row,
+body.fullscreen-active:not(.fls-peek):not(.scray-fs-panel-open) #basketPanel,
+body.fullscreen-active:not(.fls-peek):not(.scray-fs-panel-open) #historyPanel,
+body.fullscreen-active:not(.fls-peek) #pipPlayerContainer,
+body.fullscreen-active:not(.fls-peek) #randomPlaylistPanel,
+body.fullscreen-active:not(.fls-peek) #inlineConsole,
+body.fullscreen-active:not(.fls-peek) #inlineConsoleToolbar,
+body.fullscreen-active:not(.fls-peek) #floatingTagPillsBar,
+body.fullscreen-active:not(.fls-peek) #currentVideoInfo,
+body.fullscreen-active:not(.fls-peek) #accountLoadButtons,
+body.fullscreen-active:not(.fls-peek) .top-buttons-row,
+body.fullscreen-active:not(.fls-peek) .auto-track-label,
+body.fullscreen-active:not(.fls-peek) #versionCorner {
 display: none !important;
 visibility: hidden !important;
 opacity: 0 !important;
@@ -2379,7 +2384,7 @@ transition: opacity 0.15s ease;
    both edges. This is a plain black backdrop sitting just below the player
    (2147483647) and above everything else - it can't change the player's
    geometry, so the video doesn't resize or letterbox differently. */
-body.manual-rotate-landscape::before {
+body.manual-rotate-landscape:not(.fls-peek)::before {
 content: '';
 position: fixed;
 inset: 0;
@@ -2388,8 +2393,8 @@ z-index: 2147483000;
 pointer-events: none;
 }
 
-body.manual-rotate-landscape,
-body.manual-rotate-landscape html {
+body.manual-rotate-landscape:not(.fls-peek),
+body.manual-rotate-landscape:not(.fls-peek) html {
 background: #000 !important;
 }
 
@@ -2572,7 +2577,7 @@ display: block !important;
 /* ⚙️ Forced landscape: hide the mobile filter bar entirely - it isn't
    inside the fullscreen element, so it can otherwise render on top of
    the loading overlay/video depending on stacking context. */
-body.manual-rotate-landscape #mobileElements .search-wrapper {
+body.manual-rotate-landscape:not(.fls-peek) #mobileElements .search-wrapper {
 display: none !important;
 }
 
@@ -6843,3 +6848,267 @@ specificity (the extra .lc-row class). */
 
 /* Clear has nothing to clear. */
 .sort-btn.sort-btn-idle { opacity: 0.55; }
+
+/* =========================================
+FLS PEEK + PANELS OVER FULLSCREEN
+=========================================
+Peek - an "up" swipe in FLS (setFlsPeek in player.js) slides the rotated
+player off to the right, leaving a sliver of it on screen. FLS itself stays
+on, so body keeps fullscreen-active and manual-rotate-landscape; body.fls-peek
+is what gives the page back. The page-element hides and FLS's black backdrop
+above are switched off with :not(.fls-peek), and these lift the rest. */
+
+/* The fullscreen body lock (the inline position:fixed is lifted in JS). */
+body.fullscreen-active.fls-peek {
+overflow: visible;
+height: auto;
+}
+
+/* The player's container is still a full-screen fixed layer at the top of
+   the stack - it just has nothing on screen now but the sliver. Let taps go
+   through it to the page, everywhere except the catcher. */
+body.fullscreen-active.fls-peek #inlineVideoContainer,
+body.fullscreen-active.fls-peek #inlineVideoContainer * {
+pointer-events: none !important;
+}
+
+/* Tapping the sliver brings the player back. Added by JS as the player's
+   last child; hidden whenever the player isn't peeking. */
+.fls-peek-catcher {
+display: none;
+}
+body.fls-peek .fls-peek-catcher,
+body.fullscreen-active.fls-peek #inlineVideoContainer .fls-peek-catcher {
+display: block;
+position: absolute;
+inset: 0;
+z-index: 2147483647;
+background: transparent;
+pointer-events: auto !important;
+touch-action: none !important;
+}
+
+/* Panels over fullscreen - the pause menu's H and B circles open the normal
+   history/basket panel on top of FLS or MPFS (scrayOpenPanelOverFullscreen).
+   Stack, bottom to top:
+     FLS black backdrop       2147483000  (body::before, unchanged)
+     player                   2147483100  (FLS writes this inline)
+     dim backdrop             2147483500  (tap to close)
+     panel                    2147483600
+     popups from panel rows   2147483647 */
+body.scray-fs-panel-open #historyPanel.history-open,
+body.scray-fs-panel-open #basketPanel.basket-open {
+z-index: 2147483600 !important;
+}
+
+#scrayFsPanelBackdrop {
+display: none;
+}
+body.scray-fs-panel-open #scrayFsPanelBackdrop {
+display: block;
+position: fixed;
+inset: 0;
+/* ⚙️ How much the player behind a panel is dimmed. */
+background: rgba(0, 0, 0, 0.45);
+z-index: 2147483500;
+touch-action: none;
+}
+
+body.scray-fs-panel-open.fullscreen-active #inlineVideoContainer,
+body.scray-fs-panel-open.fullscreen-active .plyr--fullscreen,
+body.scray-fs-panel-open.fullscreen-active .plyr--fullscreen-fallback,
+body.scray-fs-panel-open.manual-rotate-landscape #inlineVideoContainer.bottom-docked:not(.mini-player) {
+z-index: 2147483100 !important;
+}
+
+/* Everything a panel row - or the now-playing strip in the title bar (see
+   below) - can open: rename, bookmarks, score, tags, the context menu, stash
+   chips. These normally sit well below a fullscreen player, so lift them to
+   the top whenever fullscreen is on. (Not the video error overlays: they
+   aren't opened from either, and one left over from a failed load would sit
+   on top of a panel.) */
+body.fullscreen-active .basket-json-modal,
+body.fullscreen-active .file-operation-modal,
+body.fullscreen-active .score-modal-overlay,
+body.fullscreen-active .score-context-menu,
+body.fullscreen-active .tag-selection-overlay,
+body.fullscreen-active .context-menu,
+body.fullscreen-active .copy-feedback-tooltip,
+body.fullscreen-active .stash-chip-menu,
+body.fullscreen-active .search-pill-popup {
+z-index: 2147483647 !important;
+}
+
+/* FLS fades its pause-menu modals so the frame shows through. Opened from a
+   panel there's no frame to see, just the panel, so show them solid. */
+body.scray-fs-panel-open.manual-rotate-landscape .basket-json-modal,
+body.scray-fs-panel-open.manual-rotate-landscape .score-context-menu {
+opacity: 1;
+}
+
+/* FLS turns .basket-json-modal-content 90deg to read with the phone held
+   sideways. A panel over FLS is read upright, so its popups are too - put
+   back the base sizes the rotation swapped. */
+body.scray-fs-panel-open.manual-rotate-landscape .basket-json-modal {
+padding: 20px;
+}
+body.scray-fs-panel-open.manual-rotate-landscape .basket-json-modal-content {
+transform: none;
+width: 100%;
+max-width: 400px;
+max-height: 90vh;
+}
+body.scray-fs-panel-open.manual-rotate-landscape .basket-json-modal-wide {
+max-width: 600px;
+}
+
+/* =========================================
+NOW-PLAYING STRIP AS THE FLS / MPFS TITLE
+=========================================
+syncNowPlayingStripPlacement (player.js) moves #currentVideoInfo - the strip
+MPB shows under the player - into .fls-video-title while FLS or MPFS is on,
+above the filter pill, and back out when they end. Everything here keys off
+the strip being in the bar AND having content, so with nothing loaded the bar
+falls back to its plain filename. */
+
+/* The strip replaces the bar's own filename. */
+.fls-video-title:has(> #currentVideoInfo:not(:empty)) > .fls-video-title-text {
+display: none;
+}
+
+/* The bar keeps the old title's look - white text on its dark translucent
+   background, at the base opacity of 0.5 - with the strip and then the filter
+   pill stacked inside it, and it keeps its fade with the controls. */
+.fls-video-title:has(> #currentVideoInfo:not(:empty)) {
+/* As wide as the strip wants, up to the bar's own 80% cap - otherwise MPFS's
+   left:50% anchor shrink-wraps it to half the screen. */
+width: max-content;
+white-space: normal;
+overflow: visible;
+}
+
+/* iOS text autosizing: WebKit inflates small text in a block it thinks is
+   wide, and the FLS player is laid out 844px wide before it is rotated. The
+   old one-line title was exempt (nowrap + overflow hidden); the wrapping
+   strip isn't, which is why its text came up oversized. Opt the whole bar
+   out, so the sizes below are the sizes you get. */
+.fls-video-title {
+-webkit-text-size-adjust: 100%;
+text-size-adjust: 100%;
+}
+
+/* Undo everything that places and hides the strip on the page: the
+   fullscreen hide list, MPB's full-bleed width and bottom dock, and the
+   keyboard rule - and swap its light MPB look for the bar's. Buttons keep
+   their colours. */
+body.fullscreen-active .fls-video-title > #currentVideoInfo:not(:empty),
+body.fls-filter-editing .fls-video-title > #currentVideoInfo:not(:empty) {
+display: block !important;
+visibility: visible !important;
+opacity: 1 !important;
+position: static !important;
+z-index: auto !important;
+/* MPB gives it order 2 to sit after the player; here it goes above the pill. */
+order: 0 !important;
+width: auto !important;
+max-width: 100% !important;
+margin: 0 !important;
+padding: 0 !important;
+border: none !important;
+border-radius: 0 !important;
+box-sizing: border-box;
+/* The bar's dark background shows through; the strip's light MPB one and its
+   hover grey don't. */
+background: transparent !important;
+color: #fff !important;
+/* ⚙️ Text size in the bar - the old title's 0.65rem. */
+font-size: 0.65rem !important;
+line-height: 1.3 !important;
+white-space: normal;
+cursor: default;
+}
+
+/* Every bit of text white, like the old title: crumbs (blue), separators and
+   size (grey), filename (dark grey) and score (orange) all set their colour
+   inline. Buttons keep their own colours. */
+body.fullscreen-active .fls-video-title > #currentVideoInfo *:not(button),
+body.fls-filter-editing .fls-video-title > #currentVideoInfo *:not(button) {
+color: #fff !important;
+}
+
+/* In-basket highlight: the strip's pale pink can't sit under white text, so
+   use the basket button's pink instead. */
+body.fullscreen-active .fls-video-title > #currentVideoInfo span[style*="249, 215, 221"],
+body.fls-filter-editing .fls-video-title > #currentVideoInfo span[style*="249, 215, 221"] {
+background-color: rgba(233, 30, 99, 0.75) !important;
+}
+
+/* Tappable in both modes (the bar itself is display-only in MPFS)... */
+body.fullscreen-active:not(.fls-peek) .fls-video-title > #currentVideoInfo:not(:empty) {
+pointer-events: auto !important;
+}
+/* ...but not while it's faded out with the controls, unless a load is holding
+   the bar up. */
+body.fullscreen-active .plyr--hide-controls .fls-video-title > #currentVideoInfo:not(:empty) {
+pointer-events: none !important;
+}
+body.fullscreen-active.scray-video-loading:not(.fls-peek) .plyr--hide-controls .fls-video-title > #currentVideoInfo:not(:empty) {
+pointer-events: auto !important;
+}
+
+/* ⚙️ MPFS: a little further down from the top of the screen than the old
+   title's 8px. Keep in step with NOW_PLAYING_DROP_PX in player.js, which moves
+   the FLS bar by the same amount. */
+body.portrait-fullscreen:not(.manual-rotate-landscape) .fls-video-title {
+top: calc(env(safe-area-inset-top, 0px) + 28px);
+}
+
+/* The strip takes a full line; the filter pill and the "..." share the one
+   under it. */
+.fls-video-title:has(> #currentVideoInfo:not(:empty)) {
+flex-direction: row;
+flex-wrap: wrap;
+justify-content: center;
+}
+body.fullscreen-active .fls-video-title > #currentVideoInfo:not(:empty),
+body.fls-filter-editing .fls-video-title > #currentVideoInfo:not(:empty) {
+flex: 0 0 100% !important;
+}
+
+/* No button row in the bar - its actions are in the "..." menu. */
+body.fullscreen-active .fls-video-title > #currentVideoInfo .compact-btn-group,
+body.fls-filter-editing .fls-video-title > #currentVideoInfo .compact-btn-group {
+display: none !important;
+}
+
+/* "...", shaped like the filter pill beside it. Only while the strip has
+   something in it. */
+.fls-np-more {
+display: none;
+}
+.fls-video-title:has(> #currentVideoInfo:not(:empty)) > .fls-np-more {
+display: inline-flex;
+align-items: center;
+flex: 0 0 auto;
+width: auto;
+margin: 0;
+padding: 1px 8px;
+background: transparent;
+border: 1px solid rgba(255, 255, 255, 0.35);
+border-radius: 10px;
+color: #fff;
+font-size: 0.6rem;
+font-weight: bold;
+line-height: 1.4;
+cursor: pointer;
+pointer-events: auto;
+-webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
+}
+/* Faded out with the controls means untappable, unless a load is holding the
+   bar up. !important to beat the fullscreen `#inlineVideoContainer *` rule. */
+.plyr--hide-controls .fls-video-title:has(> #currentVideoInfo:not(:empty)) > .fls-np-more {
+pointer-events: none !important;
+}
+body.scray-video-loading:not(.fls-peek) .plyr--hide-controls .fls-video-title:has(> #currentVideoInfo:not(:empty)) > .fls-np-more {
+pointer-events: auto !important;
+}

@@ -2423,8 +2423,10 @@ display: flex;
 flex-direction: column;
 align-items: center;
 gap: 4px;
+/* Still catches taps (so they don't fall through to the double-tap zones
+   under it), but it isn't a rename button any more (13.62). */
 pointer-events: auto;
-cursor: pointer;
+cursor: default;
 }
 
 /* MP fullscreen: same bar, same styling, but display only - pointer-events
@@ -6362,12 +6364,19 @@ display: none;
 }
 
 @media (max-width: 768px) and (orientation: portrait) {
+/* 13.62: two lines - the three filter cycles, then Uncat / names / CSV. The
+   .secondary-row-break in the markup is a full-width flex item that forces
+   the wrap, so each line shares its width out on its own. */
 #secondaryButtonsRow {
   display: flex !important;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 3px;
   margin: 4px 0 8px 0;
   width: 100%;
+}
+#secondaryButtonsRow > .secondary-row-break {
+  flex: 0 0 100%;
+  height: 0;
 }
 
 #secondaryButtonsRow button {
@@ -7173,6 +7182,58 @@ pointer-events: auto;
 pointer-events: none !important;
 }
 body.scray-video-loading:not(.fls-peek) .plyr--hide-controls .fls-video-title:has(> #currentVideoInfo:not(:empty)) > .fls-np-more {
+pointer-events: auto !important;
+}
+
+/* =========================================
+TAG PILLS IN THE FLS / MPFS TITLE (13.62)
+=========================================
+syncNowPlayingStripPlacement (player.js) moves #floatingTagPillsBar into
+.fls-video-title with the strip, as the bar's last line - so the pills show
+and fade with the title and the controls, and never sit over a control.
+Everything here undoes the bar's page placement: fixed near the bottom,
+behind the player, and on the fullscreen hide list. */
+body.fullscreen-active .fls-video-title > #floatingTagPillsBar,
+body.fullscreen-active:not(.fls-peek) .fls-video-title > #floatingTagPillsBar,
+body.fls-filter-editing .fls-video-title > #floatingTagPillsBar {
+display: flex !important;
+visibility: visible !important;
+opacity: 1 !important;
+position: static !important;
+top: auto !important;
+right: auto !important;
+bottom: auto !important;
+left: auto !important;
+transform: none !important;
+z-index: auto !important;
+flex: 0 0 100% !important;
+flex-wrap: wrap;
+justify-content: center;
+gap: 3px;
+width: auto !important;
+max-width: 100% !important;
+margin: 2px 0 0 !important;
+padding: 0 !important;
+background: transparent !important;
+pointer-events: none !important;
+}
+body.fullscreen-active .fls-video-title > #floatingTagPillsBar:empty,
+body.fullscreen-active:not(.fls-peek) .fls-video-title > #floatingTagPillsBar:empty {
+display: none !important;
+}
+/* ⚙️ Pill size in the bar - a notch under the page's 0.75rem, to sit with the
+   strip's 0.65rem text. */
+.fls-video-title > #floatingTagPillsBar .floating-tag-pill {
+font-size: 0.6rem;
+line-height: 1.2;
+padding: 2px 6px;
+}
+/* Faded out with the controls means untappable, like the rest of the bar,
+   unless a load is holding the bar up. */
+body.fullscreen-active .plyr--hide-controls .fls-video-title > #floatingTagPillsBar * {
+pointer-events: none !important;
+}
+body.fullscreen-active.scray-video-loading:not(.fls-peek) .plyr--hide-controls .fls-video-title > #floatingTagPillsBar * {
 pointer-events: auto !important;
 }
 

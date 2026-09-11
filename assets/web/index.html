@@ -501,9 +501,11 @@
 
 <!-- ✅ Secondary compact row (mobile portrait only) -->
 <div id="secondaryButtonsRow">
-<button id="orientationToggleBtn" title="Cycle orientation filter">Orientation: All</button>
-<button id="stashFilterToggleBtn" data-state="any" title="Cycle StashDB match filter">Stash: All</button>
-<button id="bookmarkFilterToggleBtn" data-state="any" title="Cycle bookmark filter">BM Both</button>
+<button id="orientationToggleBtn" title="Cycle orientation filter">Orientation</button>
+<button id="stashFilterToggleBtn" data-state="any" title="Cycle StashDB match filter">Stash</button>
+<button id="bookmarkFilterToggleBtn" data-state="any" title="Cycle bookmark filter">BM</button>
+<!-- 13.62: filters on the first line; Uncat, names and CSV on the second -->
+<div class="secondary-row-break" aria-hidden="true"></div>
 <button id="uncataloguedToggleBtn" data-active="0" title="Show only files on this phone that aren't in the catalogue">Uncat: All</button>
 <button id="mobileExportCsvBtn">Export CSV</button>
 </div>

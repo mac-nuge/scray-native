@@ -216,22 +216,12 @@ function ensureVideoTitleBar() {
         } else {
             title = document.createElement('div');
             title.className = 'fls-video-title';
-            title.title = 'Rename this file';
-            // Tapping opens the rename modal, matching what the filename does
-            // in every list. Only reachable in FLS - pointer-events is none by
-            // default and CSS only re-enables it under
-            // body.manual-rotate-landscape. The basket modal moved to the "B"
-            // button in the controls row.
+            // 13.62: no longer a rename button - the pause menu's RN is. A tap
+            // on the bar still stops here (FLS gives it pointer-events), so it
+            // can't fall through to the double-tap zones underneath; the
+            // strip's chips and the tag pills in it handle their own taps.
             title.addEventListener('click', (e) => {
                 e.stopPropagation();
-                // The now-playing strip sits in here in FLS/MPFS. Its filename
-                // renames on its own; the rest of it (score, size, gaps
-                // between buttons) shouldn't.
-                if (e.target.closest && e.target.closest('#currentVideoInfo')) return;
-                const v = window.currentPlayingVideo;
-                if (!v || typeof window.showRenameModal !== 'function') return;
-                Promise.resolve(window.showRenameModal(v))
-                    .catch(err => console.error('[fls] rename modal failed:', err));
             });
         }
         host.appendChild(title);
@@ -517,11 +507,41 @@ function ensureNowPlayingMoreButton(bar) {
     return btn;
 }
 
+// 13.62: the tag pills (#floatingTagPillsBar) ride in the title bar with the
+// strip while FLS or MPFS is on - as its last line, under the filter pill and
+// "..." - so they show and fade with the controls and never cover one. The
+// page's copy is on the fullscreen hide list, so the element itself is moved
+// (randomiser.js rebuilds it by id wherever it is); a comment node marks its
+// place on the page for the way back.
+let scrayTagPillsHome = null;
+function scrayPlaceTagPillsInTitle(bar) {
+    const pills = document.getElementById('floatingTagPillsBar');
+    if (!pills || !bar) return;
+    if (!pills.closest('.fls-video-title') && pills.parentNode) {
+        if (!scrayTagPillsHome || !scrayTagPillsHome.parentNode) {
+            scrayTagPillsHome = document.createComment(' floatingTagPillsBar ');
+        }
+        pills.parentNode.insertBefore(scrayTagPillsHome, pills);
+    }
+    if (pills.parentElement !== bar || bar.lastElementChild !== pills) bar.appendChild(pills);
+}
+function scrayReturnTagPills() {
+    const pills = document.getElementById('floatingTagPillsBar');
+    if (!pills || !pills.closest('.fls-video-title')) return;
+    if (scrayTagPillsHome && scrayTagPillsHome.parentNode) {
+        scrayTagPillsHome.parentNode.insertBefore(pills, scrayTagPillsHome);
+    } else {
+        document.body.appendChild(pills);
+    }
+}
+window.scrayReturnTagPills = scrayReturnTagPills;
+
 function syncNowPlayingStripPlacement() {
     const strip = document.getElementById('currentVideoInfo');
     if (!strip) return;
     if (!scrayStripBelongsInTitle()) {
         scrayReturnNowPlayingStrip();
+        scrayReturnTagPills();
         return;
     }
     const bar = ensureVideoTitleBar();
@@ -534,6 +554,7 @@ function syncNowPlayingStripPlacement() {
     const more = ensureNowPlayingMoreButton(bar);
     const anchor = pill || strip;
     if (anchor.nextElementSibling !== more) anchor.insertAdjacentElement('afterend', more);
+    scrayPlaceTagPillsInTitle(bar);
     scrayWatchFlsTitleThickness(bar);
 }
 window.syncNowPlayingStripPlacement = syncNowPlayingStripPlacement;
@@ -4188,7 +4209,7 @@ function attachFrameStepButtons() {
         if (typeof window.scrayOpenScoreModal === 'function') window.scrayOpenScoreModal();
     });
 
-    // 5 - rename modal, the same one the FLS title bar opens
+    // 5 - rename modal (the FLS title bar used to open it too, until 13.62)
     const renameBtn = makeCircle('plyr-frame-rename', 'Rename', 'RN');
     setupTapButton(renameBtn, () => {
         const v = window.currentPlayingVideo;
@@ -9335,6 +9356,9 @@ updateNowPlayingHighlight();
 // Open rename modal when clicking filename
 filenameSpan.addEventListener('click', async (e) => {
 e.stopPropagation();
+// 13.62: not while the strip is the FLS / MPFS title - the pause menu's RN
+// renames there. The chips inside still filter; they stop their own clicks.
+if (filenameSpan.closest('.fls-video-title')) return;
 
 // Only open rename modal (basket toggle now handled by B button)
 if (typeof window.showRenameModal === 'function') {

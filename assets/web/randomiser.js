@@ -3347,10 +3347,12 @@ searchBox.addEventListener("keydown", (e) => {
   }
 
   // ✅ Mobile portrait secondary row: orientation toggle + CSV buttons
+  // 13.62: bare labels. The idle one names the filter; once it's on, the blue
+  // says a filter is armed and the value alone says which.
   const ORIENTATION_CYCLE = [
-      { value: "any", label: "Orientation: All" },
-      { value: "L",   label: "Orientation: Landscape" },
-      { value: "P",   label: "Orientation: Portrait" }
+      { value: "any", label: "Orientation" },
+      { value: "L",   label: "Landscape" },
+      { value: "P",   label: "Portrait" }
   ];
 
   window.syncOrientationToggleLabel = function () {
@@ -3366,9 +3368,9 @@ searchBox.addEventListener("keydown", (e) => {
   // button's own dataset, like the offline toggle - there is no filter-panel
   // control to mirror here, so a hidden <select> would be dead weight.
   const STASH_FILTER_CYCLE = [
-      { value: "any",       label: "Stash: All" },
-      { value: "matched",   label: "Stash: Matched" },
-      { value: "unmatched", label: "Stash: Unmatched" }
+      { value: "any",       label: "Stash" },
+      { value: "matched",   label: "Matched" },
+      { value: "unmatched", label: "Unmatched" }
   ];
 
   window.syncStashFilterToggleLabel = function () {
@@ -3410,9 +3412,9 @@ searchBox.addEventListener("keydown", (e) => {
   }
 
   const BOOKMARK_FILTER_CYCLE = [
-      { value: "any",  label: "BM Both" },
-      { value: "only", label: "BM Only" },
-      { value: "none", label: "BM None" }
+      { value: "any",  label: "BM" },
+      { value: "only", label: "Bookmarked" },
+      { value: "none", label: "No BM" }
   ];
 
   window.syncBookmarkFilterToggleLabel = function () {

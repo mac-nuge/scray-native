@@ -1457,13 +1457,35 @@ async function executeBulkOperationsWithProgress(operations, modal) {
       if (statusEl) statusEl.textContent = text;
   };
   
+  // Native 13.60: phone files that are also in the catalogue can be renamed
+  // everywhere. Asked once for the whole batch rather than per file; Cancel
+  // skips the renames. Picker has no scrayAskRenameScope, so nothing changes there.
+  let renameOpts = {};
+  if (typeof window.scrayAskRenameScope === 'function' && typeof window.isLocalVideo === 'function' &&
+      operations.renames.some(op => op.video && window.isLocalVideo(op.video) && op.video.inCatalogue === true)) {
+      renameOpts = { scope: await window.scrayAskRenameScope({ count: operations.renames.length }) };
+  }
+
   // Execute renames
+  let renamedCopies = 0;     // OneDrive copies renamed along the way (13.61)
+  let renamedSome = 0, renamedScope = null, renamedOnPhone = false;
   for (let i = 0; i < operations.renames.length; i++) {
       const op = operations.renames[i];
+      if (renameOpts.scope === null) {
+          errors.push(`Rename skipped: ${op.currentName}`);
+          failed++;
+          continue;
+      }
       try {
           updateStatus(`Renaming ${i + 1}/${operations.renames.length}: ${op.currentName}`);
           console.log(`Renaming: ${op.currentName} -> ${op.newName}`);
-          await renameFile(op.video, op.newName);
+          const res = await renameFile(op.video, op.newName, renameOpts);
+          if (res && res.scope) {
+              renamedSome++;
+              renamedCopies += Number(res.onedrive) || 0;
+              renamedScope = res.scope;
+              renamedOnPhone = renamedOnPhone || !!res.onPhone;
+          }
           completed++;
       } catch (err) {
           console.error(`Failed to rename ${op.currentName}:`, err);
@@ -1497,6 +1519,15 @@ async function executeBulkOperationsWithProgress(operations, modal) {
               ❌ Failed: ${failed}
           </div>
   `;
+  // 13.61 (Native): where the renames went. Picker's renameFile resolves with
+  // nothing, so this never shows there.
+  if (renamedSome && typeof window.scrayRenameWhere === 'function') {
+      const w = window.scrayRenameWhere({ scope: renamedScope, onedrive: renamedCopies, onPhone: renamedOnPhone });
+      if (w) {
+          summaryHTML += `<div class="rn-summary" style="font-size: 0.9rem; color: #2e7d32; margin-bottom: 10px;">
+              ${w.title}<br><span style="font-size: 0.8rem; color: #4f7a58;">${w.detail}</span></div>`;
+      }
+  }
   
   if (errors.length > 0) {
       summaryHTML += `

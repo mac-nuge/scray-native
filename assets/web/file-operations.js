@@ -553,7 +553,8 @@ confirmBtn.disabled = true;
 confirmBtn.textContent = 'Renaming...';
 
 try {
-    await renameFile(video, fullNewName);
+    // 13.61: what renameFile resolves with says where it was renamed.
+    const renameResult = await renameFile(video, fullNewName);
     
     // ✅ Auto-refresh after rename
     confirmBtn.textContent = 'Refreshing...';
@@ -613,13 +614,17 @@ try {
 modal.remove();
 
 // ✅ Show score-confirmation-style tooltip
-showScoreConfirmation(`✅ Renamed to:<br><span style="font-size: 0.5em; opacity: 0.9;">${fullNewName}</span>`);
+showScoreConfirmation(typeof window.scrayRenameConfirmHtml === 'function'
+    ? window.scrayRenameConfirmHtml(renameResult, fullNewName)
+    : `✅ Renamed to:<br><span style="font-size: 0.5em; opacity: 0.9;">${fullNewName}</span>`);
 
 } catch (err) {
-console.error('Rename failed:', err);
-alert(`Rename failed: ${err.message}`);
 confirmBtn.disabled = false;
 confirmBtn.textContent = 'Rename';
+// "Cancel" on the Everywhere / This phone only question: back to editing.
+if (err && err.cancelled) return;
+console.error('Rename failed:', err);
+alert(`Rename failed: ${err.message}`);
 }
 });
 
@@ -848,10 +853,23 @@ async function deleteLocalFile(video) {
    if (typeof renderFolderPills === "function") renderFolderPills();
 }
 
-async function renameFile(video, newName) {
+async function renameFile(video, newName, opts = {}) {
    // ✅ Local files bypass Graph entirely
    if (isLocalVideo(video)) {
+       // 13.60: a phone file that's in the catalogue can be renamed everywhere -
+       // scray-rename.js asks, and does OneDrive and the catalogue through the
+       // server. opts.scope ('everywhere' | 'phone') skips the question.
+       if (video.inCatalogue === true && typeof window.scrayRenameLocal === 'function') {
+           return window.scrayRenameLocal(video, newName, opts);
+       }
        return renameLocalFile(video, newName);
+   }
+
+   // 13.60: a catalogue row - the server renames every OneDrive copy AND moves
+   // the catalogue row (this used to rename OneDrive only, and the catalogue
+   // waited for Picker's next scan). No Graph token needed on the phone.
+   if (typeof window.scrayRenameCatalogueRow === 'function') {
+       return window.scrayRenameCatalogueRow(video, newName);
    }
 
    // Get account info and refresh token

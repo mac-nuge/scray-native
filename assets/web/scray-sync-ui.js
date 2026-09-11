@@ -302,6 +302,11 @@ async function flagUncatalogued(allKeys) {
   // uploaded - inOneDrive: false. An older api.php leaves this empty, and
   // every catalogued file then counts as in OneDrive, as before.
   const noOneDrive = new Set();
+  // 13.60 (browse 13.32): where a missing key went when the catalogue renamed
+  // it, and the catalogue's own spelling of each live name - see
+  // scray-rename.js. Both empty from an older api.php.
+  const renamedTo = {};
+  const catalogueNames = {};
   const keycheck = async (keys) => {
     for (let i = 0; i < keys.length; i += 400) {
       const res = await window.scrayApiCall("keycheck", {
@@ -309,9 +314,29 @@ async function flagUncatalogued(allKeys) {
       });
       (res.missing || []).forEach(k => missing.add(k));
       (res.no_onedrive || []).forEach(k => noOneDrive.add(k));
+      Object.assign(renamedTo, res.renamed || {});
+      Object.assign(catalogueNames, res.filenames || {});
     }
   };
   await keycheck(allKeys);
+
+  const adoptions = new Map();   // local row id -> catalogue video_key
+
+  // Renamed in the catalogue (Picker, bulk stash, a scan, another phone): the
+  // server followed the old key to the new one, so adopt it outright rather
+  // than guessing by size below.
+  if (missing.size && Object.keys(renamedTo).length) {
+    const followed = new Set();
+    for (const v of await getAllVideos()) {
+      const k = v.videoKey || window.scrayVideoKey(v.filename);
+      const localId = v.oneDriveId ?? v.idFromAPI ?? null;
+      if (!k || !localId || !missing.has(k) || !renamedTo[k]) continue;
+      adoptions.set(localId, renamedTo[k]);
+      followed.add(k);
+      console.log(`[sync] "${v.filename}": renamed in the catalogue to "${renamedTo[k]}" — following it`);
+    }
+    followed.forEach(k => missing.delete(k));
+  }
 
   // Before flagging, give every orphan one size-anchored lookup. The row may
   // well exist under a different name - renamed outside Picker, or imported
@@ -322,10 +347,9 @@ async function flagUncatalogued(allKeys) {
   // the server row onto the local filename. Picker derives its key from the
   // OneDrive filename on every push AND every scan, so moving the row here
   // just makes Picker mint a second row under the old name.
-  const adoptions = new Map();   // local row id -> catalogue video_key
   if (missing.size) {
     const locals = await getAllVideos();
-    const claimedKeys = new Set();
+    const claimedKeys = new Set(adoptions.values());
     for (const v of locals) {
       const k = v.videoKey || window.scrayVideoKey(v.filename);
       if (!k || !missing.has(k) || !v.sizeBytes) continue;
@@ -355,7 +379,9 @@ async function flagUncatalogued(allKeys) {
         console.warn(`[sync] lookup failed for "${k}":`, err.message);
       }
     }
+  }
 
+  {
     // The adopted key has to be on the local row BEFORE pulling:
     // scrayApplyPulledRow resolves rows through the videoKey index, so pulling
     // first would find nothing and silently drop the metadata.
@@ -372,7 +398,7 @@ async function flagUncatalogued(allKeys) {
       await new Promise((r2, rej) => { txA.oncomplete = r2; txA.onerror = () => rej(txA.error); });
 
       await pullScoped([...adoptions.values()], 0);
-      console.log(`[sync] ${adoptions.size} local video(s) matched to catalogue rows by size`);
+      console.log(`[sync] ${adoptions.size} local video(s) matched to catalogue rows (followed a rename, or by size)`);
       // Whether the adopted rows have a OneDrive copy - a size match can
       // just as well land on a row that has none.
       const before = new Set(missing);
@@ -392,14 +418,19 @@ async function flagUncatalogued(allKeys) {
     const k = adopted || v.videoKey || window.scrayVideoKey(v.filename);
     const inCat = adopted ? true : !missing.has(k);
     const inOneDrive = inCat && !noOneDrive.has(k);
-    if (v.inCatalogue !== inCat || v.inOneDrive !== inOneDrive || (adopted && v.videoKey !== adopted)) {
-      store.put({ ...v, videoKey: k, inCatalogue: inCat, inOneDrive });
+    // The catalogue's spelling of the name (13.60), kept from the last sync
+    // when this api.php doesn't send one.
+    const catalogueFilename = inCat ? (catalogueNames[k] ?? v.catalogueFilename ?? null) : null;
+    if (v.inCatalogue !== inCat || v.inOneDrive !== inOneDrive || v.catalogueFilename !== catalogueFilename ||
+        (adopted && v.videoKey !== adopted)) {
+      store.put({ ...v, videoKey: k, inCatalogue: inCat, inOneDrive, catalogueFilename });
     }
   });
   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
 
   if (missing.size) console.log(`[sync] ${missing.size} local video(s) not in the catalogue — flagged`);
   if (noOneDrive.size) console.log(`[sync] ${noOneDrive.size} local video(s) catalogued with no OneDrive copy — offered for upload`);
+  if (typeof window.scrayRenameRefresh === "function") window.scrayRenameRefresh().catch(() => {});
   return missing.size;
 }
 

@@ -910,16 +910,222 @@ if (!window.__scrayZoomInstalled) {
 }
 
 // =========================================
-// ⚙️ MPFS: one-finger drag along the controls bar pans the zoomed video
+// ⚙️ ONE-FINGER ZOOM  (13.55: tap, then touch again and drag, in the left zone)
 // =========================================
-// In MPFS the picture is letterboxed into a portrait box, so a zoomed frame
-// has far more horizontal range than there is screen to two-finger pan
-// across - the pinch fingers run out of room long before the picture does.
-// The controls bar is dead space the rest of the time, so a single-finger
-// horizontal drag along it slides the PICTURE sideways instead.
+// The left zone is the slice of the picture left of the grid's leftmost line.
+// It is measured exactly the way handleDoubleTap measures its zones, so it
+// always matches the grid you see:
+//   FLS and device landscape: the left third.
+//   MPFS: the left quarter, inside the double-tap band.
+//   MPB:  the left quarter, full height.
+// In that zone:
+//   tap, then touch again and drag UP   -> zoom in
+//   tap, then touch again and drag DOWN -> zoom out
+//   while zoomed, any drag starting there pans the picture (and a
+//   tap-then-drag sideways pans too)
+// "Up" is the picture's own up, so in FLS it is along the screen's long edge -
+// every delta goes through scrayZoomScreenToLocalDelta, like the pinch.
 //
-// Deliberately MPFS-only: FLS has a whole rotated screen to pan across, and
-// MPB's bar is too short to be worth the click suppression this needs.
+// Nothing is taken until the finger has moved ONE_FINGER_ZOOM_COMMIT_PX. A
+// plain tap, the MPB/MPFS double tap (fullscreen) and the FLS triple tap never
+// move, so they reach handleDoubleTap untouched. Once it commits it owns the
+// touch the same way the pinch does: capture phase on document,
+// stopPropagation, and scrayZoomGestureActive raised - so the scrub, both
+// swipe-to-exits and the double/triple-tap counters all stand down.
+const ONE_FINGER_ZOOM_TAP_MS = 250;           // ⚙️ the first touch must lift within this to count as the tap
+const ONE_FINGER_ZOOM_TAP_SLOP_PX = 10;       // ⚙️ ...having moved less than this
+const ONE_FINGER_ZOOM_GAP_MS = 300;           // ⚙️ the second touch must land within this of the tap lifting
+const ONE_FINGER_ZOOM_COMMIT_PX = 8;          // ⚙️ drag this far before it takes over - keep under the scrub's 10px
+const ONE_FINGER_ZOOM_PX_PER_DOUBLING = 120;   // ⚙️ finger travel that doubles (up) or halves (down) the zoom
+// ⚙️ true: zoom about the middle of what's on screen. false: about the point
+// the finger went down - which is always near the left edge, by design.
+const ONE_FINGER_ZOOM_ABOUT_VIEW_CENTRE = true;
+
+let ofzLastTapAt = 0;   // when the last left-zone tap lifted
+let ofzTouch = null;    // the touch being watched, until it lifts
+
+// Which part of the picture a screen point is in, by handleDoubleTap's rules.
+function scrayOneFingerZoomInZone(x, y) {
+    const t = scrayZoomTargets(true);
+    if (!t) return false;
+    const rect = t.container.getBoundingClientRect();
+    if (!rect.width || !rect.height) return false;
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return false;
+    const remap = manualRotationActive ? remapForManualRotation(x, y, rect) : null;
+    const lx = remap ? remap.x : x - rect.left;
+    const ly = remap ? remap.y : y - rect.top;
+    const w = remap ? remap.width : rect.width;
+    const h = remap ? remap.height : rect.height;
+    // FLS and device landscape: thirds - the left third is left of the first line.
+    if (isForcedOrRealLandscapeMobile() && window.innerWidth <= 1024) return lx < w / 3;
+    // MPFS keeps its zones inside the band (see MPFS_BAND_* in handleDoubleTap).
+    if (document.body.classList.contains('portrait-fullscreen')) {
+        const top = h / 3;
+        const bottom = Math.max(top + 1, h - 152);
+        if (ly < top || ly > bottom) return false;
+    }
+    // MPB and MPFS: quarters - the left quarter is left of the first line.
+    return lx < w / 4;
+}
+
+// Things on the picture that run their own touch.
+function scrayOneFingerZoomExcluded(target, x, y) {
+    if (target && target.closest && target.closest(
+        '.plyr__controls, .plyr__progress, #permanentProgressBar, .plyr-frame-step-group, ' +
+        '#plyr-zoom-badge, #historyPanel, #basketPanel, #scrayFsPanelBackdrop')) return true;
+    return typeof scrayPointInControlArea === 'function' && scrayPointInControlArea(x, y);
+}
+
+// A committed drag has lifted (or been cancelled): settle the zoom and stand
+// the other gestures back up after the same grace the pinch gives them.
+function scrayOneFingerZoomSettle() {
+    if (zoomScale <= ZOOM_SNAP_OUT) {
+        scrayZoomReset();
+    } else {
+        scrayZoomClampPan();
+        scrayZoomApply();
+    }
+    window.scrayZoomGestureActive = false;
+    window.scrayZoomSuppressUntil = Date.now() + 400;
+}
+
+function scrayOneFingerZoomStart(e) {
+    const prev = ofzTouch;
+    ofzTouch = null;
+    if (!e.touches || e.touches.length !== 1) {
+        // A second finger landed: the pinch has already taken the gesture in
+        // its own touchstart, so only a drag of ours with no pinch behind it
+        // needs settling here.
+        if (prev && prev.mode && !zoomPinchActive) scrayOneFingerZoomSettle();
+        return;
+    }
+    if (!scrayZoomModeActive() || zoomPinchActive) return;
+    if (window.scrayZoomBlocksGestures()) return;
+    const t = e.touches[0];
+    const targets = scrayZoomTargets(true);
+    if (!targets || !targets.container.contains(e.target)) return;
+    if (scrayOneFingerZoomExcluded(e.target, t.clientX, t.clientY)) return;
+    if (!scrayOneFingerZoomInZone(t.clientX, t.clientY)) return;
+
+    const now = Date.now();
+    ofzTouch = {
+        id: t.identifier,
+        startX: t.clientX,
+        startY: t.clientY,
+        at: now,
+        armed: now - ofzLastTapAt <= ONE_FINGER_ZOOM_GAP_MS,
+        moved: false,
+        mode: null,        // 'zoom' | 'pan' once committed
+        last: null,        // local delta at the previous move
+        commitY: 0,
+        startScale: zoomScale,
+        anchor: { x: 0, y: 0 }
+    };
+    ofzLastTapAt = 0;
+}
+
+function scrayOneFingerZoomMove(e) {
+    const g = ofzTouch;
+    if (!g) return;
+    if (!e.touches || e.touches.length !== 1 || zoomPinchActive) {
+        ofzTouch = null;
+        if (g.mode && !zoomPinchActive) scrayOneFingerZoomSettle();
+        return;
+    }
+    const t = e.touches[0];
+    if (t.identifier !== g.id) return;
+    const d = scrayZoomScreenToLocalDelta(t.clientX - g.startX, t.clientY - g.startY);
+
+    if (!g.mode) {
+        const far = Math.max(Math.abs(d.x), Math.abs(d.y));
+        if (far > ONE_FINGER_ZOOM_TAP_SLOP_PX) g.moved = true;
+        if (far < ONE_FINGER_ZOOM_COMMIT_PX) {
+            // A tap-then-touch is heading for a zoom: don't let MPB's list
+            // start scrolling under it. Not stopped - the scrub still sees it.
+            if (g.armed && e.cancelable) e.preventDefault();
+            return;
+        }
+        g.moved = true;
+        const vertical = Math.abs(d.y) > Math.abs(d.x);
+        if (g.armed && vertical) g.mode = 'zoom';
+        else if (zoomScale > 1) g.mode = 'pan';
+        else { ofzTouch = null; return; }   // an ordinary drag - the scrub's
+        g.commitY = d.y;
+        g.last = d;
+        g.startScale = zoomScale;
+        if (!ONE_FINGER_ZOOM_ABOUT_VIEW_CENTRE) g.anchor = scrayZoomScreenToLocalPoint(g.startX, g.startY);
+        window.scrayZoomGestureActive = true;
+        // Grid away, and a bar this touch raised goes back down - as a scrub does.
+        if (typeof window.scrayOnScrubBegin === 'function') window.scrayOnScrubBegin();
+    }
+
+    e.stopPropagation();
+    if (e.cancelable) e.preventDefault();
+
+    if (g.mode === 'zoom') {
+        const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX,
+            g.startScale * Math.pow(2, -(d.y - g.commitY) / ONE_FINGER_ZOOM_PX_PER_DOUBLING)));
+        // Same anchoring as the pinch: t' = a - ((a - t) / s) * s'.
+        if (zoomScale > 0) {
+            zoomTx = g.anchor.x - ((g.anchor.x - zoomTx) / zoomScale) * next;
+            zoomTy = g.anchor.y - ((g.anchor.y - zoomTy) / zoomScale) * next;
+        }
+        zoomScale = next;
+    } else {
+        zoomTx += d.x - g.last.x;
+        zoomTy += d.y - g.last.y;
+    }
+    g.last = d;
+    scrayZoomClampPan();
+    scrayZoomScheduleApply();
+}
+
+function scrayOneFingerZoomEnd(e) {
+    const g = ofzTouch;
+    if (!g) return;
+    if (![...(e.changedTouches || [])].some(t => t.identifier === g.id)) return;
+    ofzTouch = null;
+    if (g.mode) {
+        e.stopPropagation();
+        if (e.cancelable) e.preventDefault();
+        scrayOneFingerZoomSettle();
+        return;
+    }
+    // A quick, still touch is the tap that arms the next one. Recorded AFTER
+    // everything else has seen it - this listener never swallows a tap.
+    if (e.type === 'touchend' && !g.moved && Date.now() - g.at <= ONE_FINGER_ZOOM_TAP_MS) {
+        ofzLastTapAt = Date.now();
+    }
+}
+
+// Registered after the pinch's listeners on purpose: on a second finger the
+// pinch's touchstart has already claimed the gesture by the time ours runs.
+if (!window.__scrayOneFingerZoomInstalled) {
+    window.__scrayOneFingerZoomInstalled = true;
+    document.addEventListener('touchstart', scrayOneFingerZoomStart, { passive: false, capture: true });
+    document.addEventListener('touchmove', scrayOneFingerZoomMove, { passive: false, capture: true });
+    document.addEventListener('touchend', scrayOneFingerZoomEnd, { passive: false, capture: true });
+    document.addEventListener('touchcancel', scrayOneFingerZoomEnd, { passive: false, capture: true });
+}
+
+// =========================================
+// ⚙️ Controls bar: one-finger drag along it pans the zoomed video
+// =========================================
+// A zoomed frame has more sideways range than two pinch fingers have room to
+// pan across, and the controls bar is dead space the rest of the time - so a
+// single-finger drag ALONG the bar slides the PICTURE sideways instead.
+//
+// MPFS first (13.x); MPB and FLS as well since 13.57. Device landscape and the
+// mini-player are left out. "Along the bar" is the picture's own horizontal,
+// so in FLS it is the screen's long edge - every delta goes through
+// scrayZoomScreenToLocalDelta, like the pinch.
+//
+// FLS: at 100% a drag on the bar still moves the rotated player up and down
+// (the repositioning drag in enableAnywhereScrubbing). While zoomed that same
+// drag pans instead - both run along the same axis, so from touchdown every
+// bar touchmove is kept away from it.
+//
+// The mpfs* names are from when this was MPFS-only.
 
 const MPFS_CONTROLS_PAN_GAIN = 1;             // ⚙️ px of pan per px of finger
 const MPFS_CONTROLS_PAN_COMMIT_PX = 8;        // ⚙️ drag this far before it commits
@@ -929,15 +1135,23 @@ let mpfsPanArmed = false;
 let mpfsPanActive = false;
 let mpfsPanStartX = 0;
 let mpfsPanStartY = 0;
-let mpfsPanLastX = 0;
+let mpfsPanLastLocalX = 0;
 let mpfsPanClickBlockUntil = 0;
+
+// Which player the bar pan runs in, or null.
+function mpfsControlsPanMode() {
+    if (manualRotationActive) return 'FLS';
+    if (window.plyrPlayer?.fullscreen?.active) {
+        return window.matchMedia('(orientation: portrait)').matches ? 'MPFS' : null;
+    }
+    return scrayIsMpb() ? 'MPB' : null;
+}
 
 function mpfsControlsPanEligible() {
     if (zoomScale <= 1) return false;        // nothing to pan at 100%
     if (zoomPinchActive) return false;       // the pinch owns the gesture
-    if (manualRotationActive) return false;  // FLS, not MPFS
-    if (!window.plyrPlayer?.fullscreen?.active) return false;
-    return window.matchMedia('(orientation: portrait)').matches;
+    if (!scrayZoomModeActive()) return false; // not the mini-player
+    return !!mpfsControlsPanMode();
 }
 
 function mpfsControlsPanStart(e) {
@@ -956,7 +1170,7 @@ function mpfsControlsPanStart(e) {
 
     mpfsPanStartX = e.touches[0].clientX;
     mpfsPanStartY = e.touches[0].clientY;
-    mpfsPanLastX = mpfsPanStartX;
+    mpfsPanLastLocalX = 0;
     mpfsPanArmed = true;
 }
 
@@ -968,30 +1182,34 @@ function mpfsControlsPanMove(e) {
         return;
     }
 
-    const x = e.touches[0].clientX;
+    const d = scrayZoomScreenToLocalDelta(
+        e.touches[0].clientX - mpfsPanStartX,
+        e.touches[0].clientY - mpfsPanStartY
+    );
 
     if (!mpfsPanActive) {
-        const dx = Math.abs(x - mpfsPanStartX);
-        const dy = Math.abs(e.touches[0].clientY - mpfsPanStartY);
-        // Commit only on a clearly horizontal drag. A tap has to stay a tap so
-        // the buttons keep working, and a vertical drag is the exit swipe.
-        if (dx < MPFS_CONTROLS_PAN_COMMIT_PX || dx <= dy) return;
+        // FLS: the bar's repositioning drag runs along this same axis, so it
+        // doesn't get even the first few px of a zoomed bar touch. A tap has
+        // no moves to lose, so the buttons are unaffected.
+        if (manualRotationActive) {
+            e.stopPropagation();
+            if (e.cancelable) e.preventDefault();
+        }
+        // Commit only on a drag clearly along the bar. A tap has to stay a tap
+        // so the buttons keep working, and across the bar is the exit swipe.
+        if (Math.abs(d.x) < MPFS_CONTROLS_PAN_COMMIT_PX || Math.abs(d.x) <= Math.abs(d.y)) return;
         mpfsPanActive = true;
         // Measure from the commit point, not the touchdown, or the picture
         // jumps by the whole threshold the instant it engages.
-        mpfsPanLastX = x;
+        mpfsPanLastLocalX = d.x;
     }
 
     // Owned from here - keep Plyr's own bar handlers out of it.
     e.stopPropagation();
     if (e.cancelable) e.preventDefault();
 
-    const delta = (x - mpfsPanLastX) * MPFS_CONTROLS_PAN_GAIN;
-    mpfsPanLastX = x;
-    // Same conversion the pinch pan uses. Identity in MPFS, but going through
-    // it keeps one definition of "which way is sideways" if this is ever
-    // opened up to FLS.
-    zoomTx += scrayZoomScreenToLocalDelta(delta, 0).x;
+    zoomTx += (d.x - mpfsPanLastLocalX) * MPFS_CONTROLS_PAN_GAIN;
+    mpfsPanLastLocalX = d.x;
     scrayZoomClampPan();
     scrayZoomScheduleApply();
 }
@@ -1014,14 +1232,17 @@ if (!window.__scrayMpfsControlsPanInstalled) {
     // gesture and the rule that makes it possible are one thing, and this way a
     // single patch covers both bundles. The global `manipulation` still lets the
     // browser claim a one-finger horizontal drag on the bar and cancel the touch
-    // sequence mid-drag. Keyed on .scray-zoomed so the bar is untouched at 100%,
-    // and :not(.manual-rotate-landscape) because FLS carries
-    // body.portrait-fullscreen too. The progress bar keeps today's behaviour.
+    // sequence mid-drag. Keyed on .scray-zoomed so the bar is untouched at 100%.
+    //   MPFS and FLS: none (FLS carries body.portrait-fullscreen too).
+    //   MPB: pan-y - sideways is ours, but the page still scrolls through it.
+    // The progress bar keeps today's behaviour everywhere.
     const panStyle = document.createElement('style');
     panStyle.id = 'scray-mpfs-controls-pan-style';
     panStyle.textContent =
-        'body.scray-zoomed.portrait-fullscreen:not(.manual-rotate-landscape) .plyr__controls{touch-action:none !important;}' +
-        'body.scray-zoomed.portrait-fullscreen:not(.manual-rotate-landscape) .plyr__controls .plyr__progress{touch-action:manipulation !important;}';
+        'body.scray-zoomed.portrait-fullscreen .plyr__controls,' +
+        'body.scray-zoomed.manual-rotate-landscape .plyr__controls{touch-action:none !important;}' +
+        'body.scray-zoomed.portrait-inline:not(.manual-rotate-landscape):not(.portrait-fullscreen) .plyr__controls{touch-action:pan-y !important;}' +
+        'body.scray-zoomed .plyr__controls .plyr__progress{touch-action:manipulation !important;}';
     (document.head || document.documentElement).appendChild(panStyle);
 
     // Capture phase on document, for the same reasons the zoom module is: it

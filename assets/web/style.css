@@ -6707,9 +6707,15 @@ specificity (the extra .lc-row class). */
 :is(#taggedVideosContainer, #playlist) li.lc-row.lc-variants .lc-size { color: #2f6fd6; font-weight: 600; }
 :is(#taggedVideosContainer, #playlist) .lc-variant-chip {
   font: inherit !important;
-  font-size: 0.95em !important;
-  line-height: 1.35 !important;
-  padding: 0 6px !important;
+  /* 13.56: small and side by side. The mobile rule gives every button
+     width:100%, which stacked the chips one per line across the whole row. */
+  display: inline-block !important;
+  width: auto !important;
+  min-width: 0 !important;
+  white-space: nowrap;
+  font-size: 0.78em !important;
+  line-height: 1.3 !important;
+  padding: 0 5px !important;
   margin: 0 !important;
   min-height: 0 !important;
   border: 1px solid #9fb4d8 !important;

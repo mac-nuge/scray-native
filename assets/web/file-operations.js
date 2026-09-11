@@ -3765,7 +3765,7 @@ async function showStashModal(video) {
           // footer back out of view no matter what overflow says.
           '<div id="stashBody" style="flex:1 1 auto;min-height:0;overflow-y:auto;' +
                '-webkit-overflow-scrolling:touch;">Looking up&hellip;</div>' +
-          '<div style="display:flex;gap:8px;margin-top:14px;flex:0 0 auto;">' +
+          '<div id="stashFooter" style="display:flex;gap:8px;margin-top:14px;flex:0 0 auto;">' +
             '<button id="stashAddBtn" class="modal-btn modal-btn-primary" ' +
                     'style="flex:1;background:#28a745;" disabled>Add timestamps</button>' +
             '<button id="stashRecheckBtn" class="modal-btn modal-btn-secondary">Re-check</button>' +
@@ -3778,7 +3778,10 @@ async function showStashModal(video) {
     const addBtn    = modal.querySelector('#stashAddBtn');
     const close     = () => { window.scrayStashUrlFromBrowser = null; modal.remove(); };
     modal.querySelector('#stashCloseBtn').addEventListener('click', close);
-    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    // While the details form is open a stray tap on the backdrop would throw
+    // away everything typed, so only Cancel (or Save) leaves it.
+    let editCtl = null;
+    modal.addEventListener('click', (e) => { if (e.target === modal && !editCtl) close(); });
 
     let markers = [];
 
@@ -3786,6 +3789,42 @@ async function showStashModal(video) {
         const n = modal.querySelectorAll('.stash-mk:checked').length;
         addBtn.disabled = n === 0;
         addBtn.textContent = n ? `Add ${n} timestamp${n === 1 ? '' : 's'}` : 'Add timestamps';
+    };
+
+    // Hand-entered details and StashDB corrections (13.63), from
+    // scray-stash-edit.js. The form borrows the body and the footer: Cancel
+    // puts back exactly what was there, listeners and ticked boxes included;
+    // Save reloads, so what is shown is what the server now holds.
+    const openEditor = () => {
+        if (editCtl) return;
+        if (!window.scrayStashEdit) {
+            console.error('[stash] scray-stash-edit.js is not loaded');
+            return;
+        }
+        const footer   = modal.querySelector('#stashFooter');
+        const heading  = modal.querySelector('h3');
+        const defaults = [...footer.children];
+        const kept     = [...body.childNodes];
+        const scrollWas = body.scrollTop;
+        defaults.forEach(b => { b.dataset.sseDisplay = b.style.display; b.style.display = 'none'; });
+        body.replaceChildren();
+        body.scrollTop = 0;
+        heading.textContent = 'Stash details';
+        editCtl = window.scrayStashEdit.open({
+            host: body,
+            actions: footer,
+            overlay: modal,
+            video,
+            videoKey: video.videoKey || window.scrayVideoKey(video.filename),
+            onDone: (saved) => {
+                editCtl = null;
+                defaults.forEach(b => { b.style.display = b.dataset.sseDisplay || ''; });
+                heading.textContent = 'Stash lookup';
+                if (saved) { load(false); return; }
+                body.replaceChildren(...kept);
+                body.scrollTop = scrollWas;
+            }
+        });
     };
 
     async function load(force) {
@@ -3807,6 +3846,16 @@ async function showStashModal(video) {
         const sc = r.scene;
         const notes = (r.notes || []).map(n => '<p style="opacity:.75;margin:4px 0;">' + esc(n) + '</p>').join('');
 
+        // Offered wherever there is no match yet. A file that is only on this
+        // phone has no catalogue row for the details to belong to.
+        const manualOffer = video.inCatalogue === false ? '' :
+            '<div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(128,128,128,.3);">' +
+              '<p style="margin:0 0 6px;">Not on StashDB? Enter the details yourself &mdash; studio, ' +
+              'performers, tags and the rest, the same fields as the Manual Stash page.</p>' +
+              '<button id="stashManualBtn" class="modal-btn modal-btn-secondary" ' +
+                      'style="flex:0 0 auto;width:auto;margin:0;padding:6px 14px;">&#9998; Enter details by hand</button>' +
+            '</div>';
+
         if (!r.stash_id) {
             // No fingerprint means stash_scene found no OneDrive instance for
             // this key, and stash_submit looks up the same row before it does
@@ -3816,7 +3865,9 @@ async function showStashModal(video) {
                 body.innerHTML = (notes || '<p>No match.</p>') +
                     '<p style="opacity:.8;margin-top:10px;">There is no OneDrive copy of this file on ' +
                     'record, so it has no fingerprint on the server and there is nothing for a StashDB ' +
-                    'scene id to attach to. Submitting only works for catalogued files.</p>';
+                    'scene id to attach to. Submitting only works for catalogued files.</p>' +
+                    manualOffer;
+                modal.querySelector('#stashManualBtn')?.addEventListener('click', openEditor);
                 return;
             }
             body.innerHTML = (notes || '<p>No match.</p>') +
@@ -3856,11 +3907,13 @@ async function showStashModal(video) {
                   '<div id="stashSubmitMsg" style="margin-top:6px;font-size:.9em;"></div>' +
                   '<div style="margin-top:6px;font-size:.8em;opacity:.6;">Fingerprint: ' +
                     esc(r.oshash || '(none)') + '</div>' +
-                '</div>';
+                '</div>' +
+                manualOffer;
 
             const sBtn = modal.querySelector('#stashSubmitBtn');
             const sMsg = modal.querySelector('#stashSubmitMsg');
             const sUrl = modal.querySelector('#stashSubmitId');
+            modal.querySelector('#stashManualBtn')?.addEventListener('click', openEditor);
 
             // --- search-term builder ---------------------------------------
             const termBox = modal.querySelector('#stashSearchTerm');
@@ -4059,7 +4112,7 @@ async function showStashModal(video) {
               'background:#efe9fb;border-left:3px solid #8b7cf0;font-size:.8rem;">' +
                 '<strong>Your labelling</strong> &mdash; ' +
                 esc(ovFields.map(f => OV_LABEL[f] || f).join(', ')) +
-                ' overridden on the Manual Stash page.' +
+                ' corrected by you.' +
                 (Object.keys(ovSaid).length
                     ? '<details style="margin-top:4px;">' +
                       '<summary style="cursor:pointer;">What StashDB says</summary>' +
@@ -4071,6 +4124,17 @@ async function showStashModal(video) {
                     : '') +
               '</div>'
             : '';
+
+        // Hand-entered scenes are edited outright; a real match is corrected,
+        // which keeps StashDB's copy underneath for Revert.
+        const isManual = String(r.stash_id || '').startsWith('manual:');
+        const editRow =
+            '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 8px;">' +
+              '<button id="stashManualBtn" class="modal-btn modal-btn-secondary" ' +
+                      'style="flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;">' +
+                (isManual ? '&#9998; Edit details' : '&#9998; Correct details') + '</button>' +
+              (isManual ? '<span style="font-size:.78rem;opacity:.65;">Entered by hand</span>' : '') +
+            '</div>';
 
         const meta = sc ? (
             (sc.cover ? '<div id="stashCoverWrap" ' +
@@ -4089,6 +4153,7 @@ async function showStashModal(video) {
                         '</div>' : '') +
             '<div style="font-size:1.1em;font-weight:600;margin-bottom:4px;">' +
                 esc(sc.title || '(untitled scene)') + '</div>' +
+            editRow +
             ovLine +
             row('Studio', window.scrayMapName ? window.scrayMapName('studio', sc.studio) : sc.studio) +
             row('Released', (sc.release_date || '').slice(0, 10)) +
@@ -4110,7 +4175,7 @@ async function showStashModal(video) {
                   '<div style="opacity:.85;margin-top:4px;">' + esc(sc.details) + '</div></details>'
                 : '') +
             (links.length ? '<div style="margin-top:8px;display:flex;gap:12px;">' + links.join('') + '</div>' : '')
-        ) : '<div>Matched, but no scene detail returned.</div>';
+        ) : '<div>Matched, but no scene detail returned.</div>' + editRow;
 
         // Distinguishes "StashDB has little on this scene" from "our query was
         // refused and fell back", which otherwise look identical.
@@ -4156,6 +4221,8 @@ async function showStashModal(video) {
             // scroll region, and a nested one here meant a drag over the
             // markers moved a different thing to a drag two pixels above them.
             '<div>' + list + '</div>';
+
+        modal.querySelector('#stashManualBtn')?.addEventListener('click', openEditor);
 
         modal.querySelector('#stashAll')?.addEventListener('click', (e) => {
             e.preventDefault();

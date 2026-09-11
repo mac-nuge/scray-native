@@ -98,9 +98,14 @@ final class ScrayRunMonitor: NSObject {
     func update() {
         let downloading = ScrayDownloadCenter.shared.activeCount > 0
         let busy = runIsLive || downloading
+        // Uploads started from Native (13.47, ScrayUploads) hold the screen on
+        // as well - a locked phone suspends them just the same - but get no
+        // ring: their progress is on the page that started them, and the ring
+        // opens the browser, which has nothing to show about them.
+        let uploading = ScrayUploads.shared.activeCount > 0
 
-        setScreenAwake(busy)
-        if busy { startTicker() } else { stopTicker() }
+        setScreenAwake(busy || uploading)
+        if busy || uploading { startTicker() } else { stopTicker() }
         refreshRing(visible: busy && !ScrayBrowser.shared.isShowing)
     }
 

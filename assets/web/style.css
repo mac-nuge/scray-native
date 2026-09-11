@@ -7273,3 +7273,82 @@ bookmark and adds a Note column (render.js, scrayListNoteCell). html gets
 body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor > .permanent-progress-timestamp {
   opacity: 0 !important;
 }
+
+/* =========================================================================
+   ⬆ UPLOAD TO ONEDRIVE (native 13.47) - scray-upload.js
+   The sheet reuses .basket-json-modal; these are its insides, and the
+   floating UPLOADS panel that shows the queue.
+   ========================================================================= */
+.up-sheet { max-width: 560px; padding: 18px; }
+/* Native's mobile rule makes every button and input full width with 12px of
+   padding; nothing in here wants that. */
+.up-sheet button, .up-sheet input, #scrayUploadPanel button { width: auto; margin-bottom: 0; }
+.up-sheet input[type=checkbox] { padding: 0; }
+.up-top { display: flex; align-items: center; gap: 8px; }
+.up-top h3 { margin: 0; flex: 1; font-size: 1.05rem; }
+.up-x { background: none; border: 0; font-size: 1.05rem; color: #666; cursor: pointer; padding: 4px 8px; }
+.up-steps { display: flex; gap: 14px; margin: 6px 0 12px; font-size: 0.68rem; letter-spacing: .08em; color: #aaa; font-weight: 600; }
+.up-steps .on { color: #0078d4; }
+.up-lead { font-size: 0.82rem; color: #666; margin: 0 0 10px; }
+.up-warn { background: #fff4e5; color: #8a5300; border-radius: 6px; padding: 8px 10px; font-size: 0.8rem; margin-bottom: 10px; }
+.up-sheet .up-err, #scrayUploadPanel .up-err { color: #c62828; font-size: 0.78rem; margin: 2px 0 8px; word-break: break-word; }
+.up-loading, .up-empty { color: #888; font-size: 0.82rem; padding: 12px 4px; list-style: none; }
+.up-tools { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.up-find { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.85rem; }
+.up-link { background: none; border: 0; color: #0078d4; font-size: 0.8rem; padding: 4px 6px; cursor: pointer; white-space: nowrap; }
+.up-files, .up-accounts, .up-folders, .up-list { list-style: none; margin: 0; padding: 0; }
+.up-files { max-height: 46vh; overflow-y: auto; border: 1px solid #eee; border-radius: 6px; }
+.up-files li { border-bottom: 1px solid #f2f2f2; }
+.up-files li:last-child { border-bottom: 0; }
+.up-files label { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; font-size: 0.82rem; }
+.up-files input { width: auto; margin: 0; flex: none; }
+.up-fn { flex: 1; min-width: 0; word-break: break-word; }
+.up-size { color: #888; font-size: 0.75rem; white-space: nowrap; }
+.up-files li.is-queued { opacity: .55; }
+.up-accounts li, .up-folders li { margin-bottom: 6px; }
+.up-accounts button, .up-folders button {
+  display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left; background: #f7f7f7;
+  border: 0; border-radius: 6px; padding: 12px 14px; font-size: 0.92rem; color: #222; cursor: pointer; }
+.up-accounts button:disabled { opacity: .5; cursor: default; }
+.up-count { color: #777; font-size: 0.85rem; }
+.up-folder { flex: 1; min-width: 0; word-break: break-word; }
+.up-go { color: #aaa; }
+.up-last { display: block; width: 100%; text-align: left; background: #e8f2fc; color: #0b4f8a; border: 0; border-radius: 6px;
+  padding: 10px 12px; margin-bottom: 10px; font-size: 0.85rem; cursor: pointer; }
+.up-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-bottom: 10px; font-size: 0.85rem; }
+.up-crumb { background: none; border: 0; color: #0078d4; padding: 3px 4px; cursor: pointer; font-size: 0.85rem; }
+.up-trail .up-crumb:last-child { color: #222; font-weight: 600; }
+.up-sep { color: #aaa; }
+.up-folders { max-height: 46vh; overflow-y: auto; }
+.up-buttons { display: flex; gap: 8px; margin-top: 14px; }
+.up-buttons .modal-btn { flex: 1; }
+
+#scrayUploadPanel {
+  position: fixed; right: 10px; left: 10px; bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  max-width: 460px; margin-left: auto; z-index: 2147482000;
+  background: #fff; color: #222; border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.35);
+  padding: 10px 12px; font-size: 0.82rem; max-height: 55vh; overflow-y: auto; box-sizing: border-box; }
+#scrayUploadPanel.is-min { left: auto; padding: 0; background: none; box-shadow: none; overflow: visible; }
+#scrayUploadPanel .up-pill { background: #0078d4; color: #fff; border: 0; border-radius: 999px; padding: 9px 14px;
+  font-size: 0.85rem; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.35); cursor: pointer; }
+#scrayUploadPanel .up-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+#scrayUploadPanel .up-head b { font-size: 0.72rem; letter-spacing: .1em; color: #0078d4; }
+#scrayUploadPanel .up-grow { flex: 1; }
+#scrayUploadPanel .up-name { font-weight: 600; word-break: break-word; }
+#scrayUploadPanel .up-dest, #scrayUploadPanel .up-sub { color: #777; font-size: 0.75rem; word-break: break-word; }
+#scrayUploadPanel .up-bar { height: 8px; background: #e6eef6; border-radius: 4px; overflow: hidden; margin: 6px 0 4px; }
+#scrayUploadPanel .up-bar.thin { height: 4px; }
+#scrayUploadPanel .up-bar i { display: block; height: 100%; background: #0078d4; transition: width .4s ease; }
+#scrayUploadPanel .up-stat { font-variant-numeric: tabular-nums; }
+#scrayUploadPanel .up-note { color: #8a5300; font-size: 0.75rem; }
+#scrayUploadPanel .up-batch { margin-top: 8px; padding-top: 6px; border-top: 1px solid #eee; color: #555; }
+#scrayUploadPanel .up-list { margin-top: 8px; border-top: 1px solid #eee; }
+#scrayUploadPanel .up-toggle { display: block; margin: 6px 0 0 -6px; }
+#scrayUploadPanel .up-list li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f4f4f4; }
+#scrayUploadPanel .up-ico { width: 14px; text-align: center; color: #888; flex: none; }
+#scrayUploadPanel .st-done .up-ico { color: #2e7d32; }
+#scrayUploadPanel .st-failed .up-ico { color: #c62828; }
+#scrayUploadPanel .st-uploading .up-ico, #scrayUploadPanel .st-starting .up-ico, #scrayUploadPanel .st-finishing .up-ico { color: #0078d4; }
+#scrayUploadPanel .up-li { flex: 1; min-width: 0; }
+#scrayUploadPanel .up-li-name { word-break: break-word; }
+#scrayUploadPanel .st-cancelled .up-li-name { color: #999; text-decoration: line-through; }

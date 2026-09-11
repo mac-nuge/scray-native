@@ -190,6 +190,26 @@ function createCompactButtonGroup(buttons, visibleCount = 2, video = null) {
      }
    }
    
+   // ⬆ Upload to OneDrive (native 13.47): only for a file that is on the phone
+   // and not in the catalogue, and injected here for the same reason as S -
+   // every per-video menu gets it without touching seven call sites. Just above
+   // delete, and never above the fold, like S.
+   if (video && video.inCatalogue === false && typeof window.scrayShowUploadSheet === 'function' &&
+       !buttons.some(b => b && b.label === 'Upload to OneDrive…')) {
+     const uploadBtn = {
+       label: "Upload to OneDrive…",
+       title: "Upload this file (and others not in the catalogue) to a OneDrive folder",
+       color: "#0078d4",
+       onClick: (e) => {
+         if (e) e.stopPropagation();
+         window.scrayShowUploadSheet(video);
+       }
+     };
+     const xAt = buttons.findIndex(b => b && b.label === 'X');
+     if (xAt >= visibleCount) buttons.splice(xAt, 0, uploadBtn);
+     else buttons.push(uploadBtn);
+   }
+
    // ⚙️ BM colour is decided here, not at the seven call sites. Each of them
    // still passes its own ternary; this overwrites it, so "purple when
    // bookmarked, grey when not" only has to be right in one file. Done

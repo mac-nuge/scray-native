@@ -35,6 +35,12 @@ window.ScrayBridge = {
   // ✅ Filesystem writes inside the security-scoped folder
   renameFile: (relativePath, newName) => callNative('renameFile', { path: relativePath, newName }),
   deleteFile: (relativePath) => callNative('deleteFile', { path: relativePath }),
+  // ✅ Uploads to OneDrive (13.47) - ScrayUploads.swift. uploadUrl comes from
+  // api.php's upload_session; status reports sent/total/bytesPerSecond per id.
+  uploadStart: (job) => callNative('uploadStart', job),
+  uploadStatus: (ids) => callNative('uploadStatus', { ids: ids || null }),
+  uploadCancel: (id) => callNative('uploadCancel', { id }),
+  uploadForget: (id) => callNative('uploadForget', { id }),
   // ✅ In-app browser. Pass nothing to resume where it was left.
   openBrowser: (url) => callNative('openBrowser', {
     url: url || null,

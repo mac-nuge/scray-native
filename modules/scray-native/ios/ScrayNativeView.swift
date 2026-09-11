@@ -264,6 +264,38 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
                 }
             }
             resolve(id: id, result: storage)
+        // ---- Uploads to OneDrive (13.47) - see ScrayUploads.swift ----
+        case "uploadStart":
+            guard let d = payload as? [String: Any],
+                  let uploadId = d["id"] as? String,
+                  let relativePath = d["path"] as? String,
+                  let uploadUrl = d["uploadUrl"] as? String,
+                  let size = (d["size"] as? NSNumber)?.int64Value else {
+                reject(id: id, error: "Invalid upload payload")
+                return
+            }
+            do {
+                try ScrayUploads.shared.start(id: uploadId, relativePath: relativePath,
+                                              uploadURL: uploadUrl, size: size)
+                resolve(id: id, result: ["success": true])
+            } catch {
+                reject(id: id, error: error.localizedDescription)
+            }
+        case "uploadStatus":
+            let ids = (payload as? [String: Any])?["ids"] as? [String]
+            resolve(id: id, result: ["jobs": ScrayUploads.shared.status(ids: ids)])
+        case "uploadCancel":
+            guard let uploadId = (payload as? [String: Any])?["id"] as? String else {
+                reject(id: id, error: "Invalid cancel payload")
+                return
+            }
+            ScrayUploads.shared.cancel(id: uploadId)
+            resolve(id: id, result: ["success": true])
+        case "uploadForget":
+            if let uploadId = (payload as? [String: Any])?["id"] as? String {
+                ScrayUploads.shared.forget(id: uploadId)
+            }
+            resolve(id: id, result: ["success": true])
         case "debugBundle":
             let resourcePath = Bundle.main.resourcePath ?? "nil"
             let rootContents = (try? FileManager.default.contentsOfDirectory(atPath: resourcePath)) ?? []

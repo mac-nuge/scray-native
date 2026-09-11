@@ -6512,6 +6512,17 @@ body.portrait-fullscreen:not(.manual-rotate-landscape) #plyr-feedback {
     cursor: help;
 }
 
+/* Native 13.53: in the catalogue but not in OneDrive yet - tap to upload.
+   OneDrive blue, like the menu's "Upload to OneDrive…". */
+.not-in-onedrive-badge {
+    margin-left: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #0078d4;
+    display: inline;
+    cursor: pointer;
+}
+
 /* =========================================
 LISTS - column rows (render.js, scrayBuildListRow)
 =========================================
@@ -6655,6 +6666,7 @@ specificity (the extra .lc-row class). */
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file { color: #222; }
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file.lc-non-mp4 { color: #be7b7b; }
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file.lc-uncatalogued::before { content: "\26A0  "; color: #f39c12; }
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file.lc-no-onedrive::before { content: "\2B06\FE0E  "; color: #0078d4; font-weight: 700; }
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-open > .lc-line .lc-file { font-weight: 600; }
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-row .lc-score {
   text-align: right;
@@ -7311,6 +7323,13 @@ body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor >
   border: 0; border-radius: 6px; padding: 12px 14px; font-size: 0.92rem; color: #222; cursor: pointer; }
 .up-accounts button:disabled { opacity: .5; cursor: default; }
 .up-count { color: #777; font-size: 0.85rem; }
+/* 13.54: free space under the account name */
+.up-accounts button { flex-wrap: wrap; row-gap: 3px; }
+.up-space { flex-basis: 100%; font-size: 0.78rem; color: #2e7d32; }
+.up-space:empty { display: none; }
+.up-space.is-wait { color: #999; }
+.up-space.is-low { color: #b26a00; }
+.up-space.is-short { color: #c62828; }
 .up-folder { flex: 1; min-width: 0; word-break: break-word; }
 .up-go { color: #aaa; }
 .up-last { display: block; width: 100%; text-align: left; background: #e8f2fc; color: #0b4f8a; border: 0; border-radius: 6px;

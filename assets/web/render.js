@@ -103,6 +103,8 @@ if (window.currentSearchTerms && window.currentSearchTerms.length > 0) {
      notInCatSpan.onclick = (e) => { e.stopPropagation(); window.scrayTryFingerprintMatch(video, notInCatSpan); };
      li.appendChild(notInCatSpan);
  }
+ // Catalogued, but nothing in OneDrive yet (native 13.53) - see scrayNeedsOneDriveCopy.
+ if (scrayNeedsOneDriveCopy(video)) li.appendChild(scrayNoOneDriveBadge(video, "4px 6px"));
 
 // Size + Duration
  const sizeDurSpan = document.createElement("span");
@@ -360,6 +362,31 @@ const SCRAY_LIST_ONE_OPEN = true;
 const scrayOpenListRows = { main: new Set(), random: new Set(), history: new Set(), basket: new Set() };
 
 /** The score this app displays, or null when there isn't one. */
+// Native 13.53: on this phone and in the catalogue, but with no OneDrive copy
+// on record (inOneDrive false - flagUncatalogued, from keycheck's no_onedrive).
+// Its own blue ⬆ rather than the ⚠: the ⚠ means "look for a catalogue match",
+// and this file already has its row - what it needs is uploading. Tapping the
+// ⬆ opens the upload sheet with it ticked. Never true in Picker, which has no
+// phone rows.
+function scrayNeedsOneDriveCopy(video) {
+  return !!video && video.inCatalogue === true && video.inOneDrive === false &&
+    (typeof window.scrayIsPhoneOnly !== 'function' || window.scrayIsPhoneOnly(video));
+}
+window.scrayNeedsOneDriveCopy = scrayNeedsOneDriveCopy;
+
+function scrayNoOneDriveBadge(video, padding) {
+  const badge = document.createElement('span');
+  badge.className = 'not-in-onedrive-badge';
+  badge.textContent = '\u2B06\uFE0E';
+  badge.title = 'In the catalogue but not in OneDrive — tap to upload';
+  badge.style.padding = padding;
+  badge.onclick = (e) => {
+    e.stopPropagation();
+    if (typeof window.scrayShowUploadSheet === 'function') window.scrayShowUploadSheet(video);
+  };
+  return badge;
+}
+
 function scrayListScore(video) {
   const s = video ? (video.user_score ?? video.userScore) : null;
   return (s === undefined || s === null || s === '') ? null : s;
@@ -642,6 +669,8 @@ function scrayBuildListRow(video, index, cfg) {
   // Native only: on this device but not in the catalogue. The tappable ⚠ that
   // looks for a match lives in the open row.
   if (video.inCatalogue === false) file.classList.add('lc-uncatalogued');
+  // In the catalogue with no OneDrive copy (13.53): a blue ⬆, tappable in the open row.
+  if (scrayNeedsOneDriveCopy(video)) file.classList.add('lc-no-onedrive');
 
   const scoreCell = cell('lc-score', scrayListScoreText(score));
   if (score == null) scoreCell.classList.add('lc-blank');
@@ -836,6 +865,7 @@ function ensureListRowDetail(li) {
     warn.onclick = (e) => { e.stopPropagation(); window.scrayTryFingerprintMatch(video, warn); };
     fileLine.appendChild(warn);
   }
+  if (scrayNeedsOneDriveCopy(video)) fileLine.appendChild(scrayNoOneDriveBadge(video, '0 6px'));
 
   if (!scrayListIsYetToUpload(video)) {
     const sizeDur = document.createElement('span');

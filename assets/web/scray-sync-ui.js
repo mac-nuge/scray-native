@@ -297,12 +297,21 @@ async function pullScoped(keys, since, received = null) {
  */
 async function flagUncatalogued(allKeys) {
   const missing = new Set();
-  for (let i = 0; i < allKeys.length; i += 400) {
-    const res = await window.scrayApiCall("keycheck", {
-      method: "POST", body: { keys: allKeys.slice(i, i + 400) }
-    });
-    (res.missing || []).forEach(k => missing.add(k));
-  }
+  // Catalogue rows with no OneDrive copy on record (13.52, browse 13.30). A
+  // file whose row is one of these is in the catalogue but still has to be
+  // uploaded - inOneDrive: false. An older api.php leaves this empty, and
+  // every catalogued file then counts as in OneDrive, as before.
+  const noOneDrive = new Set();
+  const keycheck = async (keys) => {
+    for (let i = 0; i < keys.length; i += 400) {
+      const res = await window.scrayApiCall("keycheck", {
+        method: "POST", body: { keys: keys.slice(i, i + 400) }
+      });
+      (res.missing || []).forEach(k => missing.add(k));
+      (res.no_onedrive || []).forEach(k => noOneDrive.add(k));
+    }
+  };
+  await keycheck(allKeys);
 
   // Before flagging, give every orphan one size-anchored lookup. The row may
   // well exist under a different name - renamed outside Picker, or imported
@@ -364,6 +373,11 @@ async function flagUncatalogued(allKeys) {
 
       await pullScoped([...adoptions.values()], 0);
       console.log(`[sync] ${adoptions.size} local video(s) matched to catalogue rows by size`);
+      // Whether the adopted rows have a OneDrive copy - a size match can
+      // just as well land on a row that has none.
+      const before = new Set(missing);
+      await keycheck([...new Set(adoptions.values())]);
+      [...missing].forEach(k => { if (!before.has(k)) missing.delete(k); });
     }
   }
 
@@ -377,13 +391,15 @@ async function flagUncatalogued(allKeys) {
     const adopted = adoptions.get(v.oneDriveId);
     const k = adopted || v.videoKey || window.scrayVideoKey(v.filename);
     const inCat = adopted ? true : !missing.has(k);
-    if (v.inCatalogue !== inCat || (adopted && v.videoKey !== adopted)) {
-      store.put({ ...v, videoKey: k, inCatalogue: inCat });
+    const inOneDrive = inCat && !noOneDrive.has(k);
+    if (v.inCatalogue !== inCat || v.inOneDrive !== inOneDrive || (adopted && v.videoKey !== adopted)) {
+      store.put({ ...v, videoKey: k, inCatalogue: inCat, inOneDrive });
     }
   });
   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
 
   if (missing.size) console.log(`[sync] ${missing.size} local video(s) not in the catalogue — flagged`);
+  if (noOneDrive.size) console.log(`[sync] ${noOneDrive.size} local video(s) catalogued with no OneDrive copy — offered for upload`);
   return missing.size;
 }
 

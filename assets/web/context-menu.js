@@ -194,7 +194,8 @@ function createCompactButtonGroup(buttons, visibleCount = 2, video = null) {
    // and not in the catalogue, and injected here for the same reason as S -
    // every per-video menu gets it without touching seven call sites. Just above
    // delete, and never above the fold, like S.
-   if (video && video.inCatalogue === false && typeof window.scrayShowUploadSheet === 'function' &&
+   if (video && typeof window.scrayShowUploadSheet === 'function' &&
+       (typeof window.scrayIsPhoneOnly === 'function' ? window.scrayIsPhoneOnly(video) : video.inCatalogue === false) &&
        !buttons.some(b => b && b.label === 'Upload to OneDrive…')) {
      const uploadBtn = {
        label: "Upload to OneDrive…",

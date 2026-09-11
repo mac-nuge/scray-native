@@ -1039,7 +1039,28 @@ if (!opts.fromSync && typeof window.scrayEnqueueOp === "function") {
         if (!isMeta) remaining[k] = v;
     }
     if (Object.keys(remaining).length) {
-        await window.scrayEnqueueOp(oneDriveId, remaining);
+        // Native 13.52: file facts of a copy on this phone - its size, its
+        // dimensions, the tags and path of the folder it sits in here - are
+        // not the catalogue's to take. The catalogue's file facts come from
+        // OneDrive. These used to be pushed anyway, addressed by the relative
+        // path; for a file at the top of the folder that IS its filename, so
+        // the server minted a catalogue row for a file that was never
+        // uploaded, and the phone then saw it as catalogued and stopped
+        // offering the upload. Your own data (score, notes, views) still goes
+        // through saveVideoMeta above, which checks the catalogue first.
+        const srcRow = await new Promise((res) => {
+            openDB().then(db2 => {
+                const r = db2.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(oneDriveId);
+                r.onsuccess = () => res(r.result || null);
+                r.onerror = () => res(null);
+            }).catch(() => res(null));
+        });
+        if (!srcRow || isLocalVideo(srcRow)) {
+            console.log(`[sync] ${Object.keys(remaining).join(", ")} for ${oneDriveId} kept on this phone, not pushed`);
+        } else {
+            const key = srcRow.videoKey || (srcRow.filename ? window.scrayVideoKey(srcRow.filename) : null);
+            if (key) await window.scrayEnqueueOp(key, remaining);
+        }
     }
 }
 }

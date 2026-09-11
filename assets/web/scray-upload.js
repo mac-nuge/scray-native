@@ -61,7 +61,10 @@
   const api = (action, body) => window.scrayApiCall(action, { method: "POST", body: body || {} });
   const bridge = () => window.ScrayBridge || {};
   const localId = v => v.oneDriveId ?? v.idFromAPI ?? null;
-  const isPhoneOnly = v => v && v.inCatalogue === false && !!localId(v);
+  // Needs uploading (13.52): not in the catalogue, or in it with no OneDrive
+  // copy on record (inOneDrive false - see flagUncatalogued). Strictly false
+  // both ways, so a row the sync hasn't judged yet isn't offered.
+  const isPhoneOnly = v => !!v && !!localId(v) && (v.inCatalogue === false || (v.inCatalogue === true && v.inOneDrive === false));
 
   function load(key, fallback) {
     try { const v = JSON.parse(localStorage.getItem(key) || "null"); return v ?? fallback; } catch { return fallback; }
@@ -223,7 +226,7 @@
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
       const row = await new Promise(r => { const q = store.get(rel); q.onsuccess = () => r(q.result); q.onerror = () => r(null); });
-      if (row) store.put({ ...row, videoKey: key, inCatalogue: true });
+      if (row) store.put({ ...row, videoKey: key, inCatalogue: true, inOneDrive: true });
       await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
     } catch (err) {
       console.warn("[upload] local adopt failed:", err.message);
@@ -245,13 +248,13 @@
       }
     }
 
-    // The row on screen: drop the ⚠ without a rescan.
+    // The row on screen: drop the ⚠ (or the 13.53 ⬆) without a rescan.
     const live = window.paginationState?.allVideos || [];
-    live.forEach(x => { if (localId(x) === rel) { x.videoKey = key; x.inCatalogue = true; } });
+    live.forEach(x => { if (localId(x) === rel) { x.videoKey = key; x.inCatalogue = true; x.inOneDrive = true; } });
     document.querySelectorAll("li[data-video-id]").forEach(li => {
       if (li.dataset.videoId !== rel) return;
-      li.querySelectorAll(".not-in-catalogue-badge").forEach(b => b.remove());
-      li.querySelectorAll(".lc-uncatalogued").forEach(b => b.classList.remove("lc-uncatalogued"));
+      li.querySelectorAll(".not-in-catalogue-badge, .not-in-onedrive-badge").forEach(b => b.remove());
+      li.querySelectorAll(".lc-uncatalogued, .lc-no-onedrive").forEach(b => b.classList.remove("lc-uncatalogued", "lc-no-onedrive"));
     });
   }
 
@@ -431,7 +434,7 @@
   async function openSheet(video) {
     closeSheet();
     S = { step: "files", ticked: new Set(), files: [], filter: "", targets: null, account: null, path: null,
-          folders: null, loading: false, error: null, needsBuild: false };
+          folders: null, loading: false, error: null, needsBuild: false, quota: {} };
     const start = localId(video);
     if (start) S.ticked.add(start);
 
@@ -466,6 +469,46 @@
   }
 
   const tickedFiles = () => S.files.filter(v => S.ticked.has(localId(v)));
+
+  // Free space per account (13.54): "324 GB free of 1 TB", red when the ticked
+  // files won't fit. Asked for once per sheet, all accounts at once, after the
+  // list is on screen (upload_quota, browse 13.31).
+  function spaceLine(id, size, count) {
+    const q = S.quota[id];
+    if (!q) return { cls: "", text: "", title: "" };
+    if (q.loading) return { cls: "is-wait", text: "Checking space…", title: "" };
+    if (q.error || !Number.isFinite(q.remaining)) return { cls: "is-wait", text: "Free space unknown", title: q.error || "" };
+    const of = Number.isFinite(q.total) && q.total > 0 ? ` of ${fmtBytes(q.total)}` : "";
+    if (q.remaining < size) {
+      return { cls: "is-short", text: `${fmtBytes(q.remaining)} free${of} — not enough for ${count === 1 ? "this file" : `these ${count} files`}`, title: "" };
+    }
+    return { cls: q.state && q.state !== "normal" ? "is-low" : "", text: `${fmtBytes(q.remaining)} free${of}`, title: q.state && q.state !== "normal" ? `OneDrive says: ${q.state}` : "" };
+  }
+  const spaceHtml = (id, size, count) => {
+    const l = spaceLine(id, size, count);
+    return `<span class="up-space ${l.cls}" data-space="${esc(id)}" title="${esc(l.title)}">${esc(l.text)}</span>`;
+  };
+
+  function loadQuotas() {
+    const mine = S;
+    (S.targets || []).forEach(a => {
+      const id = a.account_id;
+      if (mine.quota[id] && !mine.quota[id].error) return;
+      mine.quota[id] = { loading: true };
+      api("upload_quota", { account: id })
+        .then(r => { mine.quota[id] = { remaining: Number(r.remaining ?? NaN), total: Number(r.total ?? NaN), state: r.state || null }; })
+        .catch(err => { mine.quota[id] = { error: friendlyError(err) }; })
+        .finally(() => {
+          // In place, not a redraw: a redraw landing mid-tap would swallow the tap.
+          if (S !== mine || S.step !== "account") return;
+          const el = [...S.modal.querySelectorAll("[data-space]")].find(x => x.dataset.space === id);
+          if (!el) return;
+          const picked = tickedFiles();
+          const l = spaceLine(id, picked.reduce((n, v) => n + (Number(v.sizeBytes) || 0), 0), picked.length);
+          el.className = `up-space ${l.cls}`; el.textContent = l.text; el.title = l.title;
+        });
+    });
+  }
 
   function renderSheet() {
     if (!S) return;
@@ -515,6 +558,7 @@
           <li><button data-act="account" data-account="${esc(a.account_id)}" ${a.stacks.length ? "" : "disabled"}>
             <span class="up-acct">${esc(a.account_id)}</span>
             <span class="up-count">${a.stacks.length ? `(${a.stacks.length} folder${a.stacks.length === 1 ? "" : "s"})` : "no catalogued folders"}</span>
+            ${spaceHtml(a.account_id, size, picked.length)}
           </button></li>`).join("") || `<li class="up-empty">No OneDrive accounts are connected on the server.</li>`}</ul>`;
       }
       buttons = `<button class="modal-btn modal-btn-secondary" data-act="to-files">Back</button>`;
@@ -563,6 +607,7 @@
       if (!S) return;
       S.targets = []; S.error = `Couldn't load accounts: ${friendlyError(err)}`;
     }
+    loadQuotas();
     renderSheet();
   }
 

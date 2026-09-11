@@ -2426,12 +2426,14 @@ if (bookmarkFilterState !== "any" && typeof window.scrayHasBookmarks === "functi
  videos = videos.filter(v => window.scrayHasBookmarks(v) === wantBookmarked);
 }
 
-// ✅ Native (13.50): only the files on this phone that aren't in the catalogue -
-// the ones with the ⚠, and the ones "Upload to OneDrive…" offers. Strictly
-// false, the same test as the badge: a row the sync hasn't judged yet isn't
-// counted as uncatalogued.
+// ✅ Native (13.50): only the files on this phone that still need uploading -
+// the ones "Upload to OneDrive…" offers: not in the catalogue, or (13.52) in
+// it with no OneDrive copy. Strictly false, so a row the sync hasn't judged
+// yet isn't counted.
 if (document.getElementById("uncataloguedToggleBtn")?.dataset.active === "1") {
- videos = videos.filter(v => v.inCatalogue === false);
+ videos = videos.filter(v => typeof window.scrayIsPhoneOnly === "function"
+     ? window.scrayIsPhoneOnly(v)
+     : v.inCatalogue === false);
 }
 
 // ✅ NEW: MIME type filter

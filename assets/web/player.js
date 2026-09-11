@@ -5148,6 +5148,14 @@ console.log('Clock added to player (tap to change timezone)');
 // ========================
 // Create and update permanent minimal progress bar below video
 // ========================
+// ⚙️ PROGRESS TIMESTAMP (picker 13.49 / native 13.46). The elapsed / remaining
+// time sits on the progress bar's left end, just above where the bar starts,
+// and shows whenever the bar does. It used to fade out with Plyr's controls,
+// and since the controls policy (13.35) keeps those hidden unless you touch the
+// control area or pause, it had in effect disappeared. Set this true to tie it
+// back to the controls (body.scray-ts-with-controls, in style.css).
+const PROGRESS_TIMESTAMP_WITH_CONTROLS = false;
+
 function setupPermanentProgressBar() {
 const plyrContainer = document.querySelector('.plyr');
 if (!plyrContainer) {
@@ -5161,8 +5169,13 @@ if (existing) existing.remove();
 
 const permanentProgress = document.createElement('div');
 permanentProgress.id = 'permanentProgressBar';
+// The timestamp sits in a zero-height anchor laid out directly above the bar
+// (13.49 / 13.46), so it lines up with the bar's start wherever MPB, MPFS, FLS or
+// PIP put the bar. Not inside the bar itself: the bar runs at
+// --scray-progress-bar-opacity (30%), and a child would be dimmed with it.
+document.body.classList.toggle('scray-ts-with-controls', PROGRESS_TIMESTAMP_WITH_CONTROLS);
 permanentProgress.innerHTML = `
-<div class="permanent-progress-timestamp">0:00 / 0:00</div>
+<div class="permanent-progress-ts-anchor"><div class="permanent-progress-timestamp">0:00 / 0:00</div></div>
 <div class="permanent-progress-bar">
 <div class="permanent-progress-filled"></div>
 </div>
@@ -5951,11 +5964,13 @@ console.log('Permanent progress bar ready');
 
 // Hide timestamp when controls are hidden
 window.plyrPlayer.on('controlshidden', () => {
+if (!PROGRESS_TIMESTAMP_WITH_CONTROLS) return;   // ⚙️ see PROGRESS TIMESTAMP
 const timestamp = document.querySelector('.permanent-progress-timestamp');
 if (timestamp) timestamp.style.opacity = '0';
 });
 
 window.plyrPlayer.on('controlsshown', () => {
+if (!PROGRESS_TIMESTAMP_WITH_CONTROLS) return;
 const timestamp = document.querySelector('.permanent-progress-timestamp');
 if (timestamp) timestamp.style.opacity = '1';
 });

@@ -7233,3 +7233,43 @@ bookmark and adds a Note column (render.js, scrayListNoteCell). html gets
 .floating-tag-note { background-color: #6f42c1; color: white; }
 .floating-tag-fexclude.fx-note { border-left-color: #6f42c1; }
 .scray-cloud-note.is-on { background: #6f42c1; color: #fff; }
+
+/* =========================================
+   ⚙️ PROGRESS TIMESTAMP ON THE BAR'S LEFT END (picker 13.49 / native 13.46)
+   Elapsed / remaining, just above where the progress bar starts, in every
+   player. player.js puts it in .permanent-progress-ts-anchor: a full-width,
+   zero-height flex item directly above the bar in #permanentProgressBar, so
+   its left edge IS the bar's start and its bottom IS the bar's top, whatever
+   padding MPB, MPFS, FLS or PIP give the container. (Not inside the bar: the
+   bar is drawn at --scray-progress-bar-opacity, and would dim it to 30%.)
+   The older rules above (left: 10%, bottom: 13-17px) are overridden here
+   rather than deleted, so this block is the one to edit. It shows whenever
+   the bar shows; the old fade with the controls only comes back with
+   PROGRESS_TIMESTAMP_WITH_CONTROLS = true in player.js.
+   ========================================= */
+.permanent-progress-ts-anchor {
+  position: relative;
+  align-self: stretch;
+  width: 100%;
+  height: 0;
+  margin-bottom: -4px;                      /* cancels #permanentProgressBar's gap: no layout change */
+  pointer-events: none;
+}
+@media (max-width: 768px) {
+  .permanent-progress-ts-anchor { margin-bottom: -3px; }
+}
+.permanent-progress-ts-anchor > .permanent-progress-timestamp {
+  position: absolute !important;
+  left: 0 !important;                       /* ⚙️ nudge right from the bar's start */
+  right: auto !important;
+  bottom: 3px !important;                   /* ⚙️ gap between the text and the bar */
+  top: auto !important;
+  transform: none !important;
+  opacity: 1 !important;
+  line-height: 1;
+  text-align: left;
+  pointer-events: none;                     /* never takes a tap meant for the bar */
+}
+body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor > .permanent-progress-timestamp {
+  opacity: 0 !important;
+}

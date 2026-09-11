@@ -2611,6 +2611,16 @@ function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
     let list = null;
     let items = [];
     let active = -1;
+    // Where in the field the showing suggestions apply from (13.50). A pick
+    // replaces only the words it was matched against, so after a quick note,
+    // "kiss bj dou" completes to "kiss double bj" - the words before stay.
+    let from = 0;
+
+    // ⚙️ When the whole field matches nothing, how many of its last words are
+    // tried on their own, and how short the last word may be before that
+    // stops being worth a suggestion.
+    const MAX_TAIL_WORDS = 3;
+    const MIN_TAIL_CHARS = 2;
 
     const close = () => {
         if (list) { list.remove(); list = null; }
@@ -2648,12 +2658,24 @@ function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
     };
 
     const accept = (value) => {
-        input.value = value;
+        input.value = input.value.slice(0, from) + value;
         close();
         input.dispatchEvent(new Event('input', { bubbles: true }));
-        if (typeof opts.onPick === 'function') opts.onPick(value);
+        if (typeof opts.onPick === 'function') opts.onPick(input.value);
     };
 
+    // Case- and accent-blind, so "cafe" finds "Café".
+    const fold = (s) => String(s).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+
+    /**
+     * Fuzzy by word (13.50): every word typed has to appear somewhere in the
+     * note, in any order, so "bj double" finds "double bj". Ranked so the old
+     * behaviour still leads - notes that START with what's typed, then notes
+     * that contain it as typed, then the any-order ones - and within each, the
+     * more typed words that land on the start of a word in the note, the
+     * higher. Ties keep the vocabulary's own order (most used first). An exact
+     * match is dropped - suggesting what is already typed is just noise.
+     */
     const rank = (term) => {
         const all = (getNotes() || []).filter(Boolean);
         const seen = new Set();
@@ -2663,18 +2685,43 @@ function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
             seen.add(k);
             return true;
         });
-        if (!term) return unique.slice(0, MAX_ITEMS);
-        const t = term.toLowerCase();
-        // Prefix matches first, then anything containing the term. An exact
-        // match is dropped - suggesting what is already typed is just noise.
-        const starts = unique.filter(n => n.toLowerCase().startsWith(t) && n.toLowerCase() !== t);
-        const contains = unique.filter(n => !n.toLowerCase().startsWith(t) && n.toLowerCase().includes(t));
-        return starts.concat(contains).slice(0, MAX_ITEMS);
+        const t = fold(term || '').replace(/\s+/g, ' ').trim();
+        if (!t) return unique.slice(0, MAX_ITEMS);
+        const tokens = t.split(' ');
+        return unique.map((note, i) => {
+            const n = fold(note);
+            if (n === t || !tokens.every(tok => n.includes(tok))) return null;
+            const words = n.split(/[\s,;/|]+/).filter(Boolean);
+            const tier = n.startsWith(t) ? 3 : n.includes(t) ? 2 : 1;
+            const atWordStart = tokens.filter(tok => words.some(w => w.startsWith(tok))).length;
+            return { note, i, score: tier * 100 + Math.min(99, atWordStart * 10) };
+        })
+            .filter(Boolean)
+            .sort((a, b) => b.score - a.score || a.i - b.i)
+            .slice(0, MAX_ITEMS)
+            .map(x => x.note);
+    };
+
+    /** The whole field if anything matches it, otherwise its last few words. */
+    const suggest = () => {
+        const raw = input.value;
+        const words = [...raw.matchAll(/\S+/g)];
+        if (!words.length) return { matches: rank(''), start: 0 };
+        const whole = rank(raw);
+        if (whole.length) return { matches: whole, start: words[0].index };
+        if (words[words.length - 1][0].length < MIN_TAIL_CHARS) return { matches: [], start: 0 };
+        for (let k = Math.min(MAX_TAIL_WORDS, words.length - 1); k >= 1; k--) {
+            const start = words[words.length - k].index;
+            const matches = rank(raw.slice(start));
+            if (matches.length) return { matches, start };
+        }
+        return { matches: [], start: 0 };
     };
 
     const open = () => {
-        const matches = rank(input.value.trim());
+        const { matches, start } = suggest();
         if (!matches.length) { close(); return; }
+        from = start;
 
         if (!list) {
             list = document.createElement('ul');
@@ -2712,6 +2759,31 @@ function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
         paint();
     };
 
+    /** Step the highlight, opening the list first if it isn't up. Wraps at both ends. */
+    const move = (delta) => {
+        if (!list || !items.length) open();
+        if (!list || !items.length) return false;
+        active = active < 0
+            ? (delta > 0 ? 0 : items.length - 1)
+            : (active + delta + items.length) % items.length;
+        paint();
+        list.children[active]?.scrollIntoView({ block: 'nearest' });
+        return true;
+    };
+
+    // For on-screen controls that drive the list without a keyboard - the
+    // bookmark modal's ▲ ▼ buttons (13.50).
+    input.__scrayAc = {
+        move,
+        close,
+        isOpen: () => !!list && items.length > 0,
+        pickActive: () => {
+            if (!list || active < 0 || !items[active]) return false;
+            accept(items[active]);
+            return true;
+        }
+    };
+
     input.addEventListener('input', open);
     input.addEventListener('focus', () => { if (opts.openOnFocus || input.value.trim()) open(); });
     input.addEventListener('blur', () => setTimeout(close, 150));
@@ -2721,14 +2793,11 @@ function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault();
             e.stopImmediatePropagation();
-            active += (e.key === 'ArrowDown' ? 1 : -1);
-            if (active < 0) active = items.length - 1;
-            if (active >= items.length) active = 0;
-            paint();
-            list.children[active]?.scrollIntoView({ block: 'nearest' });
+            move(e.key === 'ArrowDown' ? 1 : -1);
         } else if (e.key === 'Enter' && active >= 0) {
             // stopImmediatePropagation so the modal's own Enter-to-save handler
-            // doesn't fire on the keystroke that picks a suggestion.
+            // doesn't fire on the keystroke that picks a suggestion. The
+            // on-screen keyboard's Return is this same key.
             e.preventDefault();
             e.stopImmediatePropagation();
             accept(items[active]);
@@ -3035,6 +3104,18 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         vvWatch.observe(document.body, { childList: true });
     }
 
+    // ▲ ▼ beside Add note (13.50). Narrow on purpose - the footer row was
+    // already full - and not .modal-btn, whose mobile padding would undo it.
+    // Every size is !important for the same global `button` rule as PILL_BTN.
+    // The footer's four buttons give up some side padding and a little type
+    // so the arrows fit beside them on a phone; min-width: 0 lets the row
+    // shrink rather than push Close off the edge on the narrowest screens.
+    const FOOT_BTN = 'min-width: 0; padding-left: 6px !important; padding-right: 6px !important; font-size: 0.9rem !important;';
+    const AC_ARROW = (id, glyph, title) => `<button type="button" id="${id}" title="${title}" aria-label="${title}" `
+        + 'style="flex: 0 0 auto !important; width: 26px !important; min-width: 0 !important; margin: 0 !important; '
+        + 'padding: 0 !important; border: none; border-radius: 6px; background: #d3e4fb; color: #004a99; '
+        + `font-size: 0.7rem !important; line-height: 1; cursor: pointer;">${glyph}</button>`;
+
     const renderContent = () => {
         // Row colours are the mode indicator: blue = swap is armed, red =
         // delete is armed. Pending deletions stay struck through in every
@@ -3118,11 +3199,12 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
 
         const pending = working.filter(b => b.deleted).length;
         html += `
-                <div class="file-operation-buttons" style="flex: 0 0 auto; display: flex; flex-direction: row; gap: 8px; padding-top: 10px; background: #fff;">
-                    <button type="button" id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="flex: 1; background: #28a745;">Save${pending ? ` (${pending})` : ''}</button>
-                    ${hasPlayhead ? `<button type="button" id="addNoteBtn" class="modal-btn" style="flex: 1.3; background: #007bff; color: #fff; white-space: nowrap; padding-left: 4px !important; padding-right: 4px !important;">Add note</button>` : ''}
-                    <button type="button" id="deleteBookmarksBtn" class="modal-btn" style="flex: 1; background: ${mode === 'delete' ? '#a71d2a' : '#dc3545'}; color: #fff;">Delete</button>
-                    <button type="button" id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1;">Close</button>
+                <div class="file-operation-buttons" style="flex: 0 0 auto; display: flex; flex-direction: row; gap: 6px; padding-top: 10px; background: #fff;">
+                    <button type="button" id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="flex: 1; background: #28a745; ${FOOT_BTN}">Save${pending ? ` (${pending})` : ''}</button>
+                    ${hasPlayhead ? `<button type="button" id="addNoteBtn" class="modal-btn" style="flex: 1.3; background: #007bff; color: #fff; white-space: nowrap; ${FOOT_BTN} padding-left: 4px !important; padding-right: 4px !important;">Add note</button>` : ''}
+                    ${(hasPlayhead || editingIndex !== null) ? `<div class="bm-ac-arrows" style="flex: 0 0 auto; display: flex; gap: 2px;">${AC_ARROW('bmAcUp', '&#9650;', 'Previous suggestion')}${AC_ARROW('bmAcDown', '&#9660;', 'Next suggestion')}</div>` : ''}
+                    <button type="button" id="deleteBookmarksBtn" class="modal-btn" style="flex: 1; background: ${mode === 'delete' ? '#a71d2a' : '#dc3545'}; color: #fff; ${FOOT_BTN}">Delete</button>
+                    <button type="button" id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1; ${FOOT_BTN}">Close</button>
                 </div>
                 </form>
             </div>
@@ -3277,6 +3359,49 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             focusNoteField();
         });
 
+        /** A quick note or an existing bookmark's note, added to the end of what's typed. */
+        const appendToNewNote = (text) => {
+            const typed = newNoteEl.value.replace(/\s+$/, '');
+            newNoteEl.value = newNote = typed ? `${typed} ${text}` : text;
+            newNoteEl.__scrayAc?.close();
+            focusNoteField();
+        };
+
+        // ▲ ▼ (13.50): step through the note suggestions, for a keyboard with
+        // no arrow keys; Return then adds the highlighted one. They work on
+        // the row note being edited if there is one, otherwise the new note.
+        // While that field has focus they act on the PRESS and cancel it, so
+        // focus - and the on-screen keyboard - never leaves the field. From
+        // cold they wait for the click, because iOS only raises the keyboard
+        // for a focus() made inside one.
+        const acField = () => modal.querySelector('.bm-note-edit') || newNoteEl;
+        ['bmAcUp', 'bmAcDown'].forEach(id => {
+            const btn = modal.querySelector('#' + id);
+            if (!btn) return;
+            const step = id === 'bmAcDown' ? 1 : -1;
+            let pressedAt = 0;
+            const press = (e) => {
+                const field = acField();
+                if (!field || document.activeElement !== field) { pressedAt = 0; return; }
+                e.preventDefault();
+                e.stopPropagation();
+                pressedAt = Date.now();
+                field.__scrayAc?.move(step);
+            };
+            btn.addEventListener('touchstart', press, { passive: false });
+            btn.addEventListener('mousedown', press);
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (Date.now() - pressedAt < 700) return;      // already stepped on the press
+                const field = acField();
+                if (!field) return;
+                if (field === newNoteEl) focusNoteField();
+                else field.focus({ preventScroll: true });
+                field.__scrayAc?.move(step);
+            });
+        });
+
         modal.querySelector('#deleteBookmarksBtn')?.addEventListener('click', (e) => {
             e.stopPropagation();
             setMode('delete');
@@ -3307,17 +3432,31 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             }
         };
 
-        modal.querySelectorAll('.bm-jump').forEach(btn => {
+        // While a new note is being typed, tapping an existing bookmark - either
+        // half - adds that bookmark's note to it instead of jumping or opening
+        // the row (13.50), the same as a quick note. "Typing" is read at the
+        // press, for the reason given at the quick notes below.
+        const typingNewNote = () => mode === 'normal' && noteFieldActive
+            && !!newNoteEl && document.activeElement === newNoteEl;
+        modal.querySelectorAll('.bm-jump, .bm-note-btn').forEach(btn => {
+            let pressedWhileTyping = false;
+            const press = (e) => {
+                pressedWhileTyping = typingNewNote();
+                if (pressedWhileTyping && e.type === 'mousedown') e.preventDefault();
+            };
+            btn.addEventListener('touchstart', press, { passive: true });
+            btn.addEventListener('mousedown', press);
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                rowAction(parseInt(btn.dataset.index, 10), 'time');
-            });
-        });
-
-        modal.querySelectorAll('.bm-note-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                rowAction(parseInt(btn.dataset.index, 10), 'note');
+                const idx = parseInt(btn.dataset.index, 10);
+                const typing = pressedWhileTyping || typingNewNote();
+                pressedWhileTyping = false;
+                if (typing && newNoteEl) {
+                    const text = working[idx] && !working[idx].deleted ? (working[idx].note || '').trim() : '';
+                    if (text) appendToNewNote(text); else focusNoteField();
+                    return;
+                }
+                rowAction(idx, btn.classList.contains('bm-jump') ? 'time' : 'note');
             });
         });
 
@@ -3364,9 +3503,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                     || (noteFieldActive && document.activeElement === newNoteEl);
                 pressedWhileTyping = false;
                 if (mode === 'normal' && typing && newNoteEl) {
-                    const typed = newNoteEl.value.replace(/\s+$/, '');
-                    newNoteEl.value = newNote = typed ? `${typed} ${text}` : text;
-                    focusNoteField();
+                    appendToNewNote(text);
                 } else if (mode === 'normal') {
                     commitAndClose({ time: newTime, note: text });
                 } else if (newNoteEl) {

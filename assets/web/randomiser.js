@@ -639,6 +639,10 @@ window.scrayClearAllFilters = function (ev) {
    if (bmBtn) bmBtn.dataset.state = "any";
    window.syncBookmarkFilterToggleLabel?.();
 
+   const uncatBtn = document.getElementById("uncataloguedToggleBtn");
+   if (uncatBtn) uncatBtn.dataset.active = "0";
+   window.syncUncataloguedToggleLabel?.();
+
    window.skipSearchScroll = true;
    scrayRefreshFilters();
 };
@@ -2422,6 +2426,14 @@ if (bookmarkFilterState !== "any" && typeof window.scrayHasBookmarks === "functi
  videos = videos.filter(v => window.scrayHasBookmarks(v) === wantBookmarked);
 }
 
+// ✅ Native (13.50): only the files on this phone that aren't in the catalogue -
+// the ones with the ⚠, and the ones "Upload to OneDrive…" offers. Strictly
+// false, the same test as the badge: a row the sync hasn't judged yet isn't
+// counted as uncatalogued.
+if (document.getElementById("uncataloguedToggleBtn")?.dataset.active === "1") {
+ videos = videos.filter(v => v.inCatalogue === false);
+}
+
 // ✅ NEW: MIME type filter
 const mimeTypeFilter = $('#mimeTypeFilter').val() || [];
 if (mimeTypeFilter.length > 0) {
@@ -2660,6 +2672,11 @@ if (typeof window.syncStashFilterToggleLabel === "function") window.syncStashFil
 const bookmarkFilterBtn = document.getElementById("bookmarkFilterToggleBtn");
 if (bookmarkFilterBtn) bookmarkFilterBtn.dataset.state = "any";
 if (typeof window.syncBookmarkFilterToggleLabel === "function") window.syncBookmarkFilterToggleLabel();
+
+// ✅ Native: reset the uncatalogued toggle
+const uncataloguedBtn = document.getElementById("uncataloguedToggleBtn");
+if (uncataloguedBtn) uncataloguedBtn.dataset.active = "0";
+if (typeof window.syncUncataloguedToggleLabel === "function") window.syncUncataloguedToggleLabel();
 
 // ✅ NEW: Reset MIME type filter
 $('#mimeTypeFilter').val(null).trigger('change');
@@ -3416,6 +3433,27 @@ searchBox.addEventListener("keydown", (e) => {
           filterDisplayedByFilename();
       });
       window.syncBookmarkFilterToggleLabel();
+  }
+
+  // ✅ Native (13.50): uncatalogued-only toggle. Two states on the button's
+  // own dataset, grey off / blue on like the others.
+  window.syncUncataloguedToggleLabel = function () {
+      const b = document.getElementById("uncataloguedToggleBtn");
+      if (!b) return;
+      const on = b.dataset.active === "1";
+      b.textContent = on ? "Uncat only" : "Uncat: All";
+      b.style.background = on ? "#007bff" : "#555";
+  };
+
+  const uncataloguedToggleBtn = document.getElementById("uncataloguedToggleBtn");
+  if (uncataloguedToggleBtn) {
+      uncataloguedToggleBtn.addEventListener("click", () => {
+          uncataloguedToggleBtn.dataset.active = uncataloguedToggleBtn.dataset.active === "1" ? "0" : "1";
+          window.syncUncataloguedToggleLabel();
+          window.skipSearchScroll = true;
+          filterDisplayedByFilename();
+      });
+      window.syncUncataloguedToggleLabel();
   }
 
   const orientationToggleBtn = document.getElementById("orientationToggleBtn");

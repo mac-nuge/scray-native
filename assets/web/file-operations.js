@@ -2587,8 +2587,10 @@ function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
     input.dataset.scrayAc = '1';
     input.setAttribute('autocomplete', 'off');
 
-    // ⚙️ How many suggestions to show at once.
+    // ⚙️ How many suggestions to offer, and how many rows of them show at once
+    // (13.51) - the rest are a scroll, or a ▼, away.
     const MAX_ITEMS = opts.maxItems || 8;
+    const VISIBLE_ROWS = opts.visibleRows || 4;
 
     // The bookmarks modal sits at z-index 2147483647 - the 32-bit ceiling - so
     // a sibling in <body> can never paint above it. Inside the modal instead,
@@ -2646,7 +2648,9 @@ function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
         // Shrink rather than flip above the field if the keyboard has eaten the
         // space below - the list stays where you expect it either way.
         const room = window.innerHeight - r.bottom - 12;
-        list.style.maxHeight = `${Math.max(90, Math.min(220, room))}px`;
+        const rowH = list.firstElementChild ? list.firstElementChild.offsetHeight : 28;
+        const cap = rowH * VISIBLE_ROWS + 2;             // + the list's border
+        list.style.maxHeight = `${Math.max(Math.min(cap, rowH * 2 + 2), Math.min(cap, room))}px`;
     };
 
     const paint = () => {
@@ -2767,7 +2771,15 @@ function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
             ? (delta > 0 ? 0 : items.length - 1)
             : (active + delta + items.length) % items.length;
         paint();
-        list.children[active]?.scrollIntoView({ block: 'nearest' });
+        // Scrolled by hand, inside the list only. scrollIntoView would also
+        // scroll whatever it can find above - in WKWebView, the page itself.
+        const li = list.children[active];
+        if (li) {
+            if (li.offsetTop < list.scrollTop) list.scrollTop = li.offsetTop;
+            else if (li.offsetTop + li.offsetHeight > list.scrollTop + list.clientHeight) {
+                list.scrollTop = li.offsetTop + li.offsetHeight - list.clientHeight;
+            }
+        }
         return true;
     };
 
@@ -2777,6 +2789,7 @@ function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
         move,
         close,
         isOpen: () => !!list && items.length > 0,
+        hasActive: () => !!list && active >= 0 && !!items[active],
         pickActive: () => {
             if (!list || active < 0 || !items[active]) return false;
             accept(items[active]);
@@ -2849,7 +2862,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     // was capped short the button row simply scrolled off the bottom of it.
     // Now the panel is a column, only the middle scrolls, and the buttons are
     // a fixed footer that cannot move.
-    const CONTENT_STYLE = `max-width: 500px; width: 100%; transform: none; `
+    const CONTENT_STYLE = `position: relative; max-width: 500px; width: 100%; transform: none; `
         + `max-height: calc(${100 - PANEL_BOTTOM_GAP_VH}vh - ${PANEL_TOP_PAD_PX}px); `
         + 'display: flex; flex-direction: column; overflow: hidden;';
     const FORM_STYLE = 'display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden;';
@@ -3009,80 +3022,81 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     // WKWebView doesn't shrink the layout viewport for the on-screen
     // keyboard, so a centred modal stays centred and Save/Delete/Close end up
     // behind the keys. visualViewport does report the covered strip - feed it
-    // back as bottom padding so the modal centres in what's actually visible,
-    // and cap the panel so its own scroll takes over instead of overflowing.
+    // back as bottom padding and cap the panel so its own scroll takes over
+    // instead of overflowing.
     const vv = window.visualViewport;
+    // ⚙️ Clear space kept between the panel's bottom edge and the keyboard.
+    const KEYBOARD_GAP_PX = 12;
+    // ⚙️ How much of the screen has to go before it counts as the keyboard,
+    // rather than a rounding difference or a toolbar.
+    const KEYBOARD_MIN_PX = 80;
+    // The page height with no field in here focused (13.53). In MPB the page
+    // can be shortened along with the visual viewport when the keyboard comes
+    // up, so innerHeight minus visualViewport.height reads zero there - and the
+    // panel was sized as if there were no keyboard: 75% of the strip above it,
+    // not all of it. Only ever raised, so a keyboard can't lower it.
+    let restInnerH = window.innerHeight;
+    const typingHere = () => {
+        const a = document.activeElement;
+        return !!a && a.tagName === 'INPUT' && modal.contains(a);
+    };
     const applyKeyboardInset = () => {
         if (!modal.isConnected) return;
-        // Two separate quantities, conflated before. kb is the keyboard's own
-        // height. offsetTop is how far iOS has shifted the VISUAL viewport to
-        // reveal the focused field - subtracting it from kb (as this used to)
-        // under-reads the keyboard and leaves the panel short.
-        const visH = vv ? vv.height : window.innerHeight;
-        const kb = vv ? Math.max(0, window.innerHeight - visH) : 0;
-        const shift = vv ? Math.round(vv.offsetTop || 0) : 0;
-        const KEYBOARD_GAP_PX = 12;
-        // iOS positions fixed elements against the LAYOUT viewport. In MPB the
-        // document scrolls to reveal the field, so offsetTop stays 0 and this
-        // is a no-op. In MPFS/FLS body.fullscreen-active sets overflow: hidden,
-        // so there's nothing to scroll and iOS shifts the visual viewport
-        // instead - taking the visible strip away from the fixed overlay.
-        // Translating by offsetTop puts the overlay back over it. That's the
-        // whole reason this was cut off in those two modes and not in MPB.
-        // Gated on kb > 0. This handler is bound to visualViewport's scroll
-        // event as well as resize, and offsetTop drifts during an ordinary
-        // rubber-band - so without the gate, scrolling the bookmark list
-        // translated the entire panel. The correction is only ever needed
-        // when the keyboard has taken the visual viewport away from us.
-        modal.style.transform = (kb > 0 && shift) ? `translateY(${shift}px)` : 'none';
-        // Top-anchored in EVERY state. The panel's top edge never moves; the
-        // keyboard is absorbed entirely by shortening the panel from the
-        // bottom (see the height budget below). Bottom-anchoring is what let
-        // the footer drift under the keys - the panel was being repositioned
-        // as well as resized, and the two corrections fought each other.
+        if (!typingHere()) restInnerH = Math.max(restInnerH, window.innerHeight);
+        // Measured against the overlay itself rather than innerHeight, so it
+        // holds whether the keyboard covers the page or shortens it: how far
+        // down the overlay the visible strip reaches, and how much is below.
+        const ov = modal.getBoundingClientRect();
+        const visBottomAbs = vv ? vv.offsetTop + vv.height : window.innerHeight;
+        const visBottom = Math.max(0, Math.min(ov.height, visBottomAbs - ov.top));
+        const hiddenBelow = Math.max(0, ov.height - visBottom);
+        const keyboardUp = hiddenBelow > KEYBOARD_MIN_PX
+            || restInnerH - window.innerHeight > KEYBOARD_MIN_PX;
+        // Never translated. Moving the overlay to follow visualViewport.offsetTop
+        // fed itself - the move scrolled the page, which grew offsetTop, which
+        // moved it again - and in MPB, where the page scrolls, that pushed the
+        // panel down behind the keyboard instead of up above it (13.53; Picker
+        // measured the same climb earlier). The panel's top edge stays put and
+        // the keyboard is absorbed by shortening it from the bottom.
+        modal.style.transform = 'none';
         modal.style.alignItems = 'flex-start';
         modal.style.paddingTop = PANEL_TOP_PAD_PX + 'px';
-        modal.style.paddingBottom = kb > 0
-            ? (kb + KEYBOARD_GAP_PX) + 'px'
+        modal.style.paddingBottom = keyboardUp
+            ? (hiddenBelow + KEYBOARD_GAP_PX) + 'px'
             : (20 + MODAL_LIFT_PX) + 'px';
         const panel = modal.querySelector('.basket-json-modal-content');
         if (panel) {
-            // Only #bmScroll gives way when this shrinks - the header, the
-            // new-bookmark row and the button row are all flex: 0 0 auto.
-            // With the keyboard up the panel is pinned GAP above the keys and
-            // GAP below the top of the visible strip, so it fills that strip
-            // rather than sitting in the middle of it. The 40 + MODAL_LIFT_PX
-            // reserve only applies to the centred resting position.
-            // Both branches measure DOWN from the same fixed top edge, which
-            // is what keeps the panel anchored while the keyboard opens.
-            // At rest it runs to the PANEL_BOTTOM_GAP_VH line, leaving the
-            // bottom quarter clear. With the keyboard up, visH has already
-            // shrunk to the visible strip, so the budget is simply that strip
-            // less the top padding and a gap above the keys - the gap stops
-            // being the point and the buttons stay on screen.
-            const usable = kb > 0
-                ? visH - PANEL_TOP_PAD_PX - KEYBOARD_GAP_PX
-                : (visH * (100 - PANEL_BOTTOM_GAP_VH)) / 100 - PANEL_TOP_PAD_PX;
+            // With the keyboard up the panel runs from its fixed top edge to
+            // GAP above the keys; at rest, to the PANEL_BOTTOM_GAP_VH line,
+            // leaving the bottom quarter clear.
+            const usable = keyboardUp
+                ? visBottom - PANEL_TOP_PAD_PX - KEYBOARD_GAP_PX
+                : (visBottom * (100 - PANEL_BOTTOM_GAP_VH)) / 100 - PANEL_TOP_PAD_PX;
             // ⚙️ Floor is lower with the keyboard up: forcing 180px there
-            // would push the button row back under the keys, which is the
-            // exact failure this is meant to prevent.
-            panel.style.maxHeight = Math.max(kb > 0 ? 120 : 180, usable) + 'px';
-            // The panel just changed height, so the 60/40 split needs
-            // remeasuring against the new space.
+            // would push the button row back under the keys.
+            panel.style.maxHeight = Math.max(keyboardUp ? 120 : 180, usable) + 'px';
+            // The panel just changed height, so the 60/40 split and the
+            // arrows under Add note need remeasuring.
             modal.__sizeQuickNotes?.();
+            modal.__placeAcArrows?.();
         }
-        // The field being edited lives inside #bmScroll, its own scroll
-        // context - WebKit's native focus scroll doesn't reach it (that's
-        // switched off above via preventScroll). Do it ourselves, scoped to
-        // #bmScroll, once the panel has settled at its post-keyboard size.
+        // Keep a row note being edited in view - by hand, inside #bmScroll
+        // only. scrollIntoView walks up to the page when #bmScroll has nothing
+        // to scroll, and a page scroll is what used to start the climb above.
+        const scroller = modal.querySelector('#bmScroll');
+        const thumb = modal.querySelector('#bmScrollThumb');
         const active = modal.querySelector('.bm-note-edit');
-        if (active && document.activeElement === active) {
-            active.scrollIntoView({ block: 'nearest' });
+        if (active && document.activeElement === active && scroller) {
+            const sRect = scroller.getBoundingClientRect();
+            const aRect = active.getBoundingClientRect();
+            if (aRect.top < sRect.top) {
+                scroller.scrollTop -= (sRect.top - aRect.top);
+            } else if (aRect.bottom > sRect.bottom) {
+                scroller.scrollTop += (aRect.bottom - sRect.bottom);
+            }
         }
         // Keep the scroll-position thumb in sync too - the panel's usable
         // height (and so #bmScroll's overflow) just changed.
-        const scroller = modal.querySelector('#bmScroll');
-        const thumb = modal.querySelector('#bmScrollThumb');
         if (scroller && thumb) {
             const overflowing = scroller.scrollHeight > scroller.clientHeight + 1;
             thumb.style.display = overflowing ? 'block' : 'none';
@@ -3104,17 +3118,17 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         vvWatch.observe(document.body, { childList: true });
     }
 
-    // ▲ ▼ beside Add note (13.50). Narrow on purpose - the footer row was
-    // already full - and not .modal-btn, whose mobile padding would undo it.
-    // Every size is !important for the same global `button` rule as PILL_BTN.
-    // The footer's four buttons give up some side padding and a little type
-    // so the arrows fit beside them on a phone; min-width: 0 lets the row
-    // shrink rather than push Close off the edge on the narrowest screens.
-    const FOOT_BTN = 'min-width: 0; padding-left: 6px !important; padding-right: 6px !important; font-size: 0.9rem !important;';
+    // ▼ ▲ under Add note (13.50, moved under it in 13.51, split in 13.52): ▼
+    // spans Add note's width, ▲ sits just right of it under Delete. Not .modal-btn,
+    // whose mobile padding would undo the sizing; every size is !important
+    // for the same global `button` rule as PILL_BTN. They sit in the panel's
+    // own bottom padding - the white under the button row - so the panel is
+    // no taller for them: positioned against the panel (not inside the form,
+    // whose overflow: hidden would clip them) by placeAcArrows() below.
     const AC_ARROW = (id, glyph, title) => `<button type="button" id="${id}" title="${title}" aria-label="${title}" `
-        + 'style="flex: 0 0 auto !important; width: 26px !important; min-width: 0 !important; margin: 0 !important; '
-        + 'padding: 0 !important; border: none; border-radius: 6px; background: #d3e4fb; color: #004a99; '
-        + `font-size: 0.7rem !important; line-height: 1; cursor: pointer;">${glyph}</button>`;
+        + 'style="flex: 0 0 auto !important; width: 30px !important; height: 100% !important; min-width: 0 !important; '
+        + 'margin: 0 !important; padding: 0 !important; border: none; border-radius: 5px; background: #d3e4fb; '
+        + `color: #004a99; font-size: 0.65rem !important; line-height: 1; cursor: pointer;">${glyph}</button>`;
 
     const renderContent = () => {
         // Row colours are the mode indicator: blue = swap is armed, red =
@@ -3134,12 +3148,11 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
 
         if (hasPlayhead) {
             html += `
-                <div class="bookmark-item" style="flex: 0 0 auto; display: flex; gap: 6px; align-items: center; margin-bottom: 4px; background: #f9f9f9; padding: 8px; border-radius: 4px; width: 100%; box-sizing: border-box;">
-                    <button type="button" id="newBmTimeBtn" class="modal-btn modal-btn-secondary" title="Save this bookmark now" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 8px !important; font-family: monospace; font-size: 0.75rem; white-space: nowrap; margin-bottom: 0 !important;">${formatDuration(newTime * 1000)}</button>
+                <div class="bookmark-item" style="flex: 0 0 auto; display: flex; gap: 6px; align-items: center; margin-bottom: 8px; background: #f9f9f9; padding: 8px; border-radius: 4px; width: 100%; box-sizing: border-box;">
+                    <button type="button" id="newBmTimeBtn" class="modal-btn modal-btn-secondary" title="Save this bookmark now (tap without a note to save it with none)" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 8px !important; font-family: monospace; font-size: 0.75rem; white-space: nowrap; margin-bottom: 0 !important;">${formatDuration(newTime * 1000)}</button>
                     <input type="text" id="newBmNote" value="${esc(newNote)}" placeholder="Add a note..." style="flex: 1 1 auto !important; width: auto !important; min-width: 0; padding: 6px !important; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; margin-bottom: 0 !important;">
                     <button type="button" id="swapBmBtn" class="modal-btn" title="Swap: move an existing bookmark's note to this timestamp" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 10px !important; min-width: 0; margin-bottom: 0 !important; background: ${mode === 'swap' ? '#0056b3' : '#007bff'}; color: #fff; font-size: 1rem; line-height: 1;">&#8644;</button>
                 </div>
-                <div id="newBmHint" style="flex: 0 0 auto; font-size: 0.65rem; color: #999; margin: 0 0 12px 2px;">Tap timestamp to save without note</div>
             `;
         }
 
@@ -3157,11 +3170,10 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         // the rail it describes.
         if (topNotes.length > 0 && hasPlayhead) {
             html += `
-                <div style="flex: 0 0 auto; font-size: 0.7rem; color: #999; margin-bottom: 4px;">Quick notes (tap one to save a bookmark with it - or, while typing a note, to add it to the note):</div>
-                <div id="qnWrap" style="${SCROLL_WRAP_STYLE} flex: 0 1 auto; margin-bottom: 12px;">
+                <div id="qnWrap" title="Quick notes: tap one to save a bookmark with it - or, while typing a note, to add it to the note" style="${SCROLL_WRAP_STYLE} flex: 0 1 auto; margin: 0 0 10px;">
                     <div id="qnScroll" style="${SCROLL_STYLE}">
                         <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px;">
-                            ${topNotes.map((n, i) => `<button type="button" class="quick-note-btn modal-btn modal-btn-secondary" data-note-index="${i}" style="flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.75rem; margin: 0;">${esc(n)}</button>`).join('')}
+                            ${topNotes.map((n, i) => `<button type="button" class="quick-note-btn modal-btn modal-btn-secondary" data-note-index="${i}" style="flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.69rem; margin: 0;">${esc(n)}</button>`).join('')}
                         </div>
                     </div>
                     <div id="qnScrollThumb" style="${THUMB_STYLE}"></div>
@@ -3182,12 +3194,12 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                 const pillBorder = bm.source === 'stash' ? '#6c5ce7' : '#ccc';
                 html += `
                 <div class="bm-pill" style="display: inline-flex; flex: 0 0 auto; width: auto; max-width: 100%; align-items: stretch; border: 2px solid ${pillBorder}; border-radius: 4px; overflow: hidden; box-sizing: border-box; ${struck}">
-                    <button type="button" class="bm-jump" data-index="${idx}" style="${PILL_BTN}border-right: 1px solid #ccc; background: ${timeBg}; color: ${fg}; font-family: monospace; font-size: 0.72rem; white-space: nowrap;">${formatDuration(bm.time * 1000)}</button>
+                    <button type="button" class="bm-jump" data-index="${idx}" style="${PILL_BTN}border-right: 1px solid #ccc; background: ${timeBg}; color: ${fg}; font-family: monospace; font-size: 0.66rem; white-space: nowrap;">${formatDuration(bm.time * 1000)}</button>
                 `;
                 if (editingIndex === idx && mode === 'normal') {
-                    html += `<input type="text" class="bm-note-edit" data-index="${idx}" value="${esc(bm.note)}" placeholder="Add a note..." style="flex: 0 1 auto; width: auto; min-width: 110px; margin: 0; padding: 5px 8px; border: none; font-size: 0.78rem; line-height: 1.25; background: #fff; color: #333;">`;
+                    html += `<input type="text" class="bm-note-edit" data-index="${idx}" value="${esc(bm.note)}" placeholder="Add a note..." style="flex: 0 1 auto; width: auto; min-width: 110px; margin: 0; padding: 5px 8px; border: none; font-size: 0.72rem; line-height: 1.25; background: #fff; color: #333;">`;
                 } else {
-                    html += `<button type="button" class="bm-note-btn" data-index="${idx}" title="${esc(bm.note || '')}" style="${PILL_BTN}flex-shrink: 1; min-width: 0; max-width: ${NOTE_MAX_PX}px; text-align: left; background: ${noteBg}; color: ${bm.note ? fg : '#999'}; font-size: 0.78rem; font-style: ${bm.note ? 'normal' : 'italic'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${bm.note ? esc(bm.note) : 'no note'}</button>`;
+                    html += `<button type="button" class="bm-note-btn" data-index="${idx}" title="${esc(bm.note || '')}" style="${PILL_BTN}flex-shrink: 1; min-width: 0; max-width: ${NOTE_MAX_PX}px; text-align: left; background: ${noteBg}; color: ${bm.note ? fg : '#999'}; font-size: 0.72rem; font-style: ${bm.note ? 'normal' : 'italic'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${bm.note ? esc(bm.note) : 'no note'}</button>`;
                 }
                 html += `</div>`;
             });
@@ -3199,14 +3211,14 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
 
         const pending = working.filter(b => b.deleted).length;
         html += `
-                <div class="file-operation-buttons" style="flex: 0 0 auto; display: flex; flex-direction: row; gap: 6px; padding-top: 10px; background: #fff;">
-                    <button type="button" id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="flex: 1; background: #28a745; ${FOOT_BTN}">Save${pending ? ` (${pending})` : ''}</button>
-                    ${hasPlayhead ? `<button type="button" id="addNoteBtn" class="modal-btn" style="flex: 1.3; background: #007bff; color: #fff; white-space: nowrap; ${FOOT_BTN} padding-left: 4px !important; padding-right: 4px !important;">Add note</button>` : ''}
-                    ${(hasPlayhead || editingIndex !== null) ? `<div class="bm-ac-arrows" style="flex: 0 0 auto; display: flex; gap: 2px;">${AC_ARROW('bmAcUp', '&#9650;', 'Previous suggestion')}${AC_ARROW('bmAcDown', '&#9660;', 'Next suggestion')}</div>` : ''}
-                    <button type="button" id="deleteBookmarksBtn" class="modal-btn" style="flex: 1; background: ${mode === 'delete' ? '#a71d2a' : '#dc3545'}; color: #fff; ${FOOT_BTN}">Delete</button>
-                    <button type="button" id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1; ${FOOT_BTN}">Close</button>
+                <div class="file-operation-buttons" style="flex: 0 0 auto; display: flex; flex-direction: row; gap: 8px; padding-top: 10px; background: #fff;">
+                    <button type="button" id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="flex: 1; background: #28a745;">Save${pending ? ` (${pending})` : ''}</button>
+                    ${hasPlayhead ? `<button type="button" id="addNoteBtn" class="modal-btn" style="flex: 1.3; background: #007bff; color: #fff; white-space: nowrap; padding-left: 4px !important; padding-right: 4px !important;">Add note</button>` : ''}
+                    <button type="button" id="deleteBookmarksBtn" class="modal-btn" style="flex: 1; background: ${mode === 'delete' ? '#a71d2a' : '#dc3545'}; color: #fff;">Delete</button>
+                    <button type="button" id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1;">Close</button>
                 </div>
                 </form>
+                ${hasPlayhead ? `<div id="bmAcArrows" style="position: absolute; display: flex; gap: 3px; height: 22px;">${AC_ARROW('bmAcDown', '&#9660;', 'Next suggestion')}${AC_ARROW('bmAcUp', '&#9650;', 'Previous suggestion')}</div>` : ''}
             </div>
         `;
 
@@ -3353,11 +3365,66 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         // Focusing from inside the tap is also what lets iOS raise the keyboard
         // at all - the auto-focus on opening runs after an await, outside any
         // gesture, so the keyboard never came up for it.
-        modal.querySelector('#addNoteBtn')?.addEventListener('click', (e) => {
+        // While ▲ ▼ have a suggestion highlighted in the new note, Add note adds
+        // it with a space after, ready for the next word (13.51). Done on the
+        // press and the press cancelled, like the arrows, so the field keeps
+        // focus and the keyboard stays up; otherwise Add note is unchanged.
+        const addNoteBtn = modal.querySelector('#addNoteBtn');
+        let addPressedAt = 0;
+        const addPress = (e) => {
+            const ac = newNoteEl && newNoteEl.__scrayAc;
+            if (!ac || document.activeElement !== newNoteEl || !ac.hasActive()) { addPressedAt = 0; return; }
+            e.preventDefault();
             e.stopPropagation();
+            addPressedAt = Date.now();
+            ac.pickActive();
+            newNoteEl.value = newNote = newNoteEl.value.replace(/\s+$/, '') + ' ';
+            ac.close();
+            noteFieldActive = true;
+            const end = newNoteEl.value.length;
+            try { newNoteEl.setSelectionRange(end, end); } catch (_) {}
+        };
+        addNoteBtn?.addEventListener('touchstart', addPress, { passive: false });
+        addNoteBtn?.addEventListener('mousedown', addPress);
+        addNoteBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (Date.now() - addPressedAt < 700) return;      // already added on the press
             flushOpenEdit(false);
             focusNoteField();
         });
+
+        // In the panel's bottom padding: ▼ under Add note and as wide as it, ▲
+        // just to its right, lined up with Delete's left edge (13.52).
+        // Re-placed whenever the panel changes size (the keyboard).
+        const placeAcArrows = () => {
+            const arrows = modal.querySelector('#bmAcArrows');
+            const panel = modal.querySelector('.basket-json-modal-content');
+            const down = modal.querySelector('#bmAcDown');
+            const up = modal.querySelector('#bmAcUp');
+            if (!arrows || !addNoteBtn || !panel || !down || !up) return;
+            const p = panel.getBoundingClientRect();
+            const b = addNoteBtn.getBoundingClientRect();
+            const del = modal.querySelector('#deleteBookmarksBtn')?.getBoundingClientRect();
+            // ⚙️ Gap under the button, the height the arrows may take, and ▲'s
+            // width - the size each arrow was when they shared Add note's width.
+            const GAP_PX = 2, MAX_H = 24, MIN_H = 16;
+            const upW = Math.round((b.width - 3) / 2);
+            const between = del ? Math.max(2, del.left - b.right) : 3;
+            down.style.setProperty('width', `${b.width}px`, 'important');
+            up.style.setProperty('width', `${upW}px`, 'important');
+            arrows.style.gap = `${between}px`;
+            arrows.style.left = `${b.left - p.left}px`;
+            arrows.style.width = `${b.width + between + upW}px`;
+            arrows.style.top = `${b.bottom - p.top + GAP_PX}px`;
+            arrows.style.height = `${Math.max(MIN_H, Math.min(MAX_H, p.bottom - b.bottom - GAP_PX * 2))}px`;
+        };
+        modal.__placeAcArrows = placeAcArrows;
+        placeAcArrows();
+        requestAnimationFrame(() => { if (modal.isConnected) placeAcArrows(); });
+        if (typeof ResizeObserver === 'function') {
+            const panelEl = modal.querySelector('.basket-json-modal-content');
+            if (panelEl) new ResizeObserver(() => { if (modal.isConnected) placeAcArrows(); }).observe(panelEl);
+        }
 
         /** A quick note or an existing bookmark's note, added to the end of what's typed. */
         const appendToNewNote = (text) => {
@@ -3525,7 +3592,9 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         });
 
         if (autoAddTimestamp && hasPlayhead && newNoteEl && mode === 'normal' && editingIndex === null) {
-            newNoteEl.focus();
+            // preventScroll: in MPB the page scrolls, and a focus that scrolls
+            // it is where the keyboard maths above goes wrong.
+            newNoteEl.focus({ preventScroll: true });
             autoAddTimestamp = false;
         }
 

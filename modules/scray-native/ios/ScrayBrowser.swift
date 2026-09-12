@@ -151,6 +151,19 @@ final class ScrayBrowserViewController: UIViewController,
     private weak var popupController: UIViewController?
 
     private let addressField = UITextField()
+    /// The row the address field sits in. Held because the collapsed chrome
+    /// (see setChrome) tightens its margins and hides its buttons.
+    private var headerStack: UIStackView!
+    private var addressHeight: NSLayoutConstraint!
+    private var toolbarHeight: NSLayoutConstraint!
+    /// Whether the page is scrolled far enough down that the chrome has got
+    /// out of the way, the way Safari's does.
+    private var chromeCollapsed = false
+    /// stashButton's own reason to be hidden, kept apart from the collapsed
+    /// state so the two cannot fight over the same flag.
+    private var stashEligible = false
+    private var lastScrollY: CGFloat = 0
+    private var scrollObservation: NSKeyValueObservation?
     private let progressView = UIProgressView(progressViewStyle: .bar)
     private let webContainer = UIView()
     private let toolbar = UIToolbar()
@@ -304,9 +317,11 @@ final class ScrayBrowserViewController: UIViewController,
         addressField.returnKeyType = .go
         addressField.delegate = self
         addressField.placeholder = "Search or enter address"
-        addressField.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        addressHeight = addressField.heightAnchor.constraint(equalToConstant: 34)
+        addressHeight.isActive = true
 
         let header = UIStackView(arrangedSubviews: [addressField, stashButton, homeButton, moreButton])
+        headerStack = header
         header.axis = .horizontal
         header.alignment = .center
         header.spacing = 4
@@ -381,6 +396,9 @@ final class ScrayBrowserViewController: UIViewController,
         view.addSubview(toastView)
         toastBottom = toastView.bottomAnchor.constraint(equalTo: toolbar.topAnchor, constant: -6)
 
+        toolbar.clipsToBounds = true        // its items must not spill out of a 0pt bar
+        toolbarHeight = toolbar.heightAnchor.constraint(equalToConstant: 44)
+
         let guide = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: guide.topAnchor),
@@ -417,9 +435,86 @@ final class ScrayBrowserViewController: UIViewController,
             toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             toolbar.bottomAnchor.constraint(equalTo: guide.bottomAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: 44)
+            toolbarHeight
         ])
     }
+
+    // MARK: - Chrome that gets out of the way
+    //
+    // The same bargain every mobile browser makes: scrolling down hands the
+    // page the screen, scrolling up hands the controls back. The address bar
+    // shrinks to a strip with the URL still on it - so you can always see
+    // where you are - and the bottom bar goes altogether.
+    //
+    // The web view is LAID OUT between the two (webContainer is pinned to the
+    // progress bar and to the toolbar), not overlaid by them, so collapsing
+    // the chrome genuinely gives the page those points: its viewport grows,
+    // it fires a resize, and anything the page positions from the top of the
+    // screen - Picker's fullscreen title bar, for one - moves up with it.
+
+    // ⚙️ The collapsed strip's height, and how far you have to scroll before
+    // anything happens. The thresholds are deliberately uneven: coming back
+    // should take a more definite gesture than going away.
+    private static let chromeStripHeight: CGFloat = 20
+    private static let chromeFullHeight:  CGFloat = 34
+    private static let chromeHideAfter:   CGFloat = 6
+    private static let chromeShowAfter:   CGFloat = 10
+
+    /// Follows the page's scroll without taking its delegate. WKWebView's
+    /// scroll view already has one - its own - and replacing it is what
+    /// breaks pinch-zoom and rubber-banding in other people's browsers.
+    private func observeScroll(of wv: WKWebView) {
+        scrollObservation?.invalidate()
+        lastScrollY = wv.scrollView.contentOffset.y
+        scrollObservation = wv.scrollView.observe(\.contentOffset, options: [.new]) { [weak self] sv, _ in
+            self?.scrollChanged(sv)
+        }
+    }
+
+    private func scrollChanged(_ sv: UIScrollView) {
+        let y = sv.contentOffset.y
+        defer { lastScrollY = y }
+
+        // The top of a page always shows the chrome, however you got there.
+        if y <= 4 { setChrome(collapsed: false); return }
+        // Only a finger moves it: a page that scrolls itself - an anchor, a
+        // restored position, the player seeking - is not a request for room.
+        guard sv.isDragging || sv.isDecelerating else { return }
+        // Nothing to get out of the way of on a page that barely scrolls.
+        guard sv.contentSize.height > sv.bounds.height + 120 else { return }
+
+        let dy = y - lastScrollY
+        if dy > Self.chromeHideAfter { setChrome(collapsed: true) }
+        else if dy < -Self.chromeShowAfter { setChrome(collapsed: false) }
+    }
+
+    private func setChrome(collapsed: Bool) {
+        guard collapsed != chromeCollapsed, isViewLoaded else { return }
+        // Never while you are typing in it, and never with something on top.
+        if collapsed && (addressField.isFirstResponder || presentedViewController != nil) { return }
+        chromeCollapsed = collapsed
+
+        addressHeight.constant = collapsed ? Self.chromeStripHeight : Self.chromeFullHeight
+        toolbarHeight.constant = collapsed ? 0 : 44
+
+        UIView.animate(withDuration: 0.22, delay: 0,
+                       options: [.curveEaseOut, .beginFromCurrentState]) {
+            self.addressField.font = .systemFont(ofSize: collapsed ? 10.5 : 13)
+            self.headerStack.layoutMargins = UIEdgeInsets(top: collapsed ? 1 : 4, left: 6,
+                                                          bottom: collapsed ? 1 : 4, right: 6)
+            // isHidden inside a stack view animates the width away, which is
+            // what makes the strip go full width rather than leaving gaps.
+            self.homeButton.isHidden  = collapsed
+            self.moreButton.isHidden  = collapsed
+            self.stashButton.isHidden = collapsed || !self.stashEligible
+            self.toolbar.alpha = collapsed ? 0 : 1
+            self.view.layoutIfNeeded()
+        }
+    }
+
+    /// Put the chrome back. Anything that changes what the page IS - a new
+    /// URL, a new tab, coming back to the browser - starts from the top.
+    private func showChrome() { setChrome(collapsed: false) }
 
     // MARK: - Tabs
 
@@ -464,6 +559,8 @@ final class ScrayBrowserViewController: UIViewController,
         ])
 
         bindObservations(to: wv)
+        observeScroll(of: wv)
+        showChrome()
 
         if let pending = tab.pending {
             tab.pending = nil
@@ -576,6 +673,7 @@ final class ScrayBrowserViewController: UIViewController,
             wv.observe(\.url, options: [.new]) { [weak self] _, _ in
                 self?.refreshChrome()
                 self?.persistTabs()
+                self?.showChrome()      // a new page starts with its controls
             },
             wv.observe(\.canGoBack, options: [.new]) { [weak self] w, _ in
                 self?.backItem.isEnabled = w.canGoBack
@@ -594,7 +692,9 @@ final class ScrayBrowserViewController: UIViewController,
         // visibility has nothing to do with whether the address bar is being
         // edited, and hiding it mid-edit would be a nasty surprise.
         let stashHost = (currentTab?.displayURL?.host ?? "").lowercased()
-        stashButton.isHidden = !(stashHost == "stashdb.org" || stashHost.hasSuffix(".stashdb.org"))
+        stashEligible = (stashHost == "stashdb.org" || stashHost.hasSuffix(".stashdb.org"))
+        // Two reasons to be hidden, and only one of them is about the host.
+        stashButton.isHidden = !stashEligible || chromeCollapsed
         guard !addressField.isFirstResponder else { return }
         addressField.text = compactAddress(currentTab?.displayURL)
     }

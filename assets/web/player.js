@@ -6804,17 +6804,65 @@ function detectPlayerState() {
  * the real ScrayBridge, which has no chromeLock and no chrome to lock.
  */
 let scrayChromeLockState = null;
+let scrayChromeLockWarned = false;
 
-function scraySyncBrowserChrome(stateClass) {
-    const want = stateClass === 'landscape-fullscreen' || stateClass === 'portrait-fullscreen';
-    if (want === scrayChromeLockState) return;
+/**
+ * 13.74: this used to read the single state label passed in by
+ * updatePlayerStateClass, which turned out to be the wrong source. That
+ * function returns early while an FLS video is still loading, MPFS does not
+ * always arrive through it, and detectPlayerState() only reports
+ * '*-fullscreen' when Plyr itself says it is fullscreen. The body classes are
+ * what every one of those paths actually sets, so ask them instead.
+ */
+function scrayWantsChromeLock() {
+    const c = document.body.classList;
+    return c.contains('fullscreen-active')
+        || c.contains('manual-rotate-landscape')
+        || c.contains('portrait-fullscreen')
+        || c.contains('landscape-fullscreen');
+}
+
+function scraySyncBrowserChrome(force) {
+    const want = scrayWantsChromeLock();
+    if (!force && want === scrayChromeLockState) return;
     scrayChromeLockState = want;
+
     const lock = window.ScrayBridge && window.ScrayBridge.chromeLock;
-    if (typeof lock !== 'function') return;
-    try { lock.call(window.ScrayBridge, want); } catch (err) {
+    if (typeof lock !== 'function') {
+        // Said once, and only when it would have mattered: an older build of
+        // the in-app browser has the collapse-on-scroll but not the lock.
+        if (want && !scrayChromeLockWarned && window.SCRAY_IN_APP_BROWSER) {
+            scrayChromeLockWarned = true;
+            console.warn('[chrome] fullscreen, but this browser has no chromeLock - the app needs rebuilding');
+        }
+        return;
+    }
+    try {
+        console.log('[chrome] lock', want);
+        Promise.resolve(lock.call(window.ScrayBridge, want)).catch((err) => {
+            console.warn('[chrome] the browser refused the lock:', err);
+        });
+    } catch (err) {
         console.warn('[chrome] could not ask the browser to collapse:', err);
     }
 }
+
+// Every route into and out of a fullscreen surface ends in a body class
+// change, so watching that catches all of them - including the ones that
+// never reach updatePlayerStateClass.
+(function watchChromeLock() {
+    const start = () => {
+        try {
+            new MutationObserver(() => scraySyncBrowserChrome(false))
+                .observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        } catch (err) {
+            console.warn('[chrome] no class observer; the explicit calls still cover most of it:', err);
+        }
+        scraySyncBrowserChrome(true);
+    };
+    if (document.body) start();
+    else document.addEventListener('DOMContentLoaded', start, { once: true });
+})();
 
 function updatePlayerStateClass() {
     // While an FLS video is loading, the browser drops real fullscreen for a
@@ -6834,7 +6882,7 @@ function updatePlayerStateClass() {
     if (stateClass) document.body.classList.add(stateClass);
     window.currentPlayerState = stateClass;
     // Fullscreen means the in-app browser's chrome stays out of the way.
-    scraySyncBrowserChrome(stateClass);
+    scraySyncBrowserChrome(false);
     // Every surface change funnels through here - fullscreen enter and exit,
     // orientation, FLS on and off - so this is the one place that catches all
     // of them for the zoom. No-op unless the mode actually changed.

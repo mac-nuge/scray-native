@@ -1353,9 +1353,7 @@ final class ScrayBrowserViewController: UIViewController,
             runStatus: function (status) { return callNative('runStatus', status || {}); },
             // Hold this browser's address bar and toolbar out of the way, for
             // a page surface that does not scroll (FLS / MPFS).
-            chromeLock: function (on) { return callNative('chromeLock', { on: !!on }); },
-            // A picture of the page as it is right now, for a bug report.
-            screenshot: function () { return callNative('screenshot'); }
+            chromeLock: function (on) { return callNative('chromeLock', { on: !!on }); }
           };
         })();
         """
@@ -1516,35 +1514,6 @@ final class ScrayBrowserViewController: UIViewController,
             let active = (status["active"] as? NSNumber)?.boolValue ?? false
             ScrayRunMonitor.shared.heartbeat(active: active, progress: progress, from: webView)
             bridgeResolve(webView, id: id, result: ["success": true])
-
-        case "screenshot":
-            // The WEB VIEW only - this browser's own chrome is not part of
-            // the app being reported. afterScreenUpdates: false so it is what
-            // is on screen at the moment of asking rather than after whatever
-            // the page does next; JPEG because a phone screenshot as PNG is
-            // several megabytes and this has to travel through a JSON bridge.
-            DispatchQueue.main.async { [weak self] in
-                guard let wv = webView ?? self?.currentWebView else {
-                    self?.bridgeReject(webView, id: id, error: "No page to photograph")
-                    return
-                }
-                let cfg = WKSnapshotConfiguration()
-                cfg.afterScreenUpdates = false
-                wv.takeSnapshot(with: cfg) { image, error in
-                    guard let image = image,
-                          let data = image.jpegData(compressionQuality: 0.8) else {
-                        self?.bridgeReject(webView, id: id,
-                                           error: error?.localizedDescription ?? "Could not take the screenshot")
-                        return
-                    }
-                    self?.bridgeResolve(webView, id: id, result: [
-                        "base64": data.base64EncodedString(),
-                        "type":   "image/jpeg",
-                        "width":  Int(image.size.width),
-                        "height": Int(image.size.height)
-                    ])
-                }
-            }
 
         case "chromeLock":
             let locked = ((body["payload"] as? [String: Any])?["on"] as? Bool) ?? false

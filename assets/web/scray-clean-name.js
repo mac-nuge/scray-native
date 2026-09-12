@@ -69,9 +69,17 @@
     return String(hit || '').trim() || word.slice(0, 1);
   }
 
-  /** Text -> the words a field is built from. Punctuation is a separator. */
+  /**
+   * Text -> the words a field is built from. Punctuation is a separator.
+   *
+   * LOWER-CASED here rather than by the caller: in the apps the stash parts
+   * arrive lower-cased already, but manage-data gets them straight out of the
+   * database with StashDB's own capitals on them, and the two have to produce
+   * the same name.
+   */
   function words(text) {
     return String(text || '')
+      .toLowerCase()
       .replace(ILLEGAL, ' ')
       .replace(/[,;_]+/g, ' ')     // '_' too: it is the field separator here
       .replace(/[’']/g, '')        // don't -> dont, rather than dont-t

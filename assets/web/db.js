@@ -1009,9 +1009,35 @@ async function refreshVideoFromDb(video, { silent = false } = {}) {
   ]);
 
   // Key gone usually means the file was renamed on the OneDrive side, so the
-  // row moved out from under this device's filename. Same size-anchored
-  // lookup the sync uses - adopt the catalogue's key rather than failing and
-  // making the user wait for a full sync to notice.
+  // row moved out from under this device's filename.
+  //
+  // ASK WHERE IT WENT FIRST (13.69): keycheck follows sync_log and answers
+  // exactly, where the size lookup below is a guess that fails whenever two
+  // files share a size. Only the KEY is adopted - the phone's own filename is
+  // left alone, and the difference shows up in the ✎ names review list the
+  // way any other rename made elsewhere does.
+  if (!row.video) {
+    const moved = await window.scrayApiCall("keycheck", { method: "POST", body: { keys: [key] } })
+      .catch(() => null);
+    const to = moved && moved.renamed && moved.renamed[key];
+    if (to) {
+      console.log(`↻ "${video.filename}" renamed upstream — following to "${to}"`);
+      [row, bm] = await Promise.all([
+        window.scrayApiCall("get", { params: { id: to } }),
+        window.scrayApiCall("bookmarks_get", { params: { id: to } }),
+      ]);
+      if (row.video) {
+        await saveVideoMeta(video.oneDriveId, {
+          videoKey: to, inCatalogue: true,
+          catalogueFilename: (moved.filenames && moved.filenames[to]) || row.video.filename || null
+        }, "sync");
+        video.videoKey = to;
+      }
+    }
+  }
+
+  // Still nothing: fall back to the size-anchored lookup, which also covers a
+  // rename made in OneDrive itself, where there is no sync_log record to follow.
   if (!row.video && video.sizeBytes) {
     const fp = await window.scrayApiCall("fingerprint_lookup", {
       method: "POST",

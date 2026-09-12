@@ -1315,6 +1315,14 @@ fillSelect("tagFilterAllSelect", "includeTagsAllContainer", allTagsSet);
 // the popup once and then leaves it alone.
 // ---------------------------------------------------------------
 function ensureSearchPillPopup() {
+    // Retired in 13.80. The pill carries its own x now, so there is nothing
+    // left for this to offer - it only ever held a bin. Kept as a function
+    // rather than deleted because the keyboard and viewport handlers call it
+    // on every event; it now just makes sure nothing is left on screen.
+    dismissSearchPillPopup();
+    return;
+
+    /* eslint-disable no-unreachable */
     const pill = document.querySelector('.floating-tag-search');
     const editing = document.body.classList.contains('keyboard-active') &&
                     document.body.classList.contains('search-pill-active');
@@ -1443,10 +1451,269 @@ window.clearSearchPillFilter = function (e) {
     }
 };
 
+/* =========================================================================
+   THE SEARCH PILL  (13.84)
+   =========================================================================
+   The pill IS the filter box on a phone now.
+
+   #filenameSearchBox is still the single source of truth - the context
+   menu's "search this", Clear all, the panel box and the fullscreen filter
+   pill all read and write it, and its own input listener is the only thing
+   that knows how to filter - but on a phone it is hidden, and what you type
+   into is a real <input> living inside the pill. Two things fall out of that
+   which were awkward before:
+
+     - the caret is the browser's own, so it blinks where the text actually
+       is. It used to be a '|' glued on with ::after, which sat after the x.
+     - the pill grows with the text, because an input can be sized in ch.
+
+   Empty and unfocused, it collapses to a grey stub with just the magnifier,
+   at the same text size as every other pill in the bar. Tapping it wakes it
+   up: full pink, and the text two steps larger for as long as you are typing
+   in it.
+
+   The one rule this imposes on the rest of the bar: the pill must SURVIVE a
+   rebuild. The bar is rebuilt on every keystroke, and detaching a focused
+   input blurs it - which on a phone shuts the keyboard mid-word. So the
+   rebuilds empty the bar AROUND it; see clearPillsExceptSearch.
+   ====================================================================== */
+
+/** Empty the pills bar without touching the search pill. */
+function clearPillsExceptSearch(container) {
+    Array.from(container.children).forEach((child) => {
+        if (!child.classList.contains('floating-tag-search-wrap')) child.remove();
+    });
+}
+
+/** The real box. Still where the filter lives, hidden or not. */
+function mainSearchEl() { return document.getElementById('filenameSearchBox'); }
+
+/**
+ * Collapsed or open, and how wide. ch is relative to the input's own
+ * font-size, so this measures in the input's characters whatever the pill's
+ * font happens to be.
+ */
+// ⚙️ px kept past the last character so the caret has somewhere to sit.
+const SEARCH_PILL_CARET_PX = 3;
+
+/**
+ * How wide the text actually is, in the input's own font.
+ *
+ * 13.86 sized this in ch, which is the width of a "0" - fine for a monospace
+ * font and wrong for Arial. A term of thin letters ("jjjjjjjjjj") measured
+ * far wider than it drew, leaving a pool of empty pill to the right of the
+ * text that grew with the term. Measuring the string settles it.
+ *
+ * One offscreen span, reused: creating one per keystroke would be a layout
+ * thrash on every character.
+ */
+function searchPillTextWidth(input, text) {
+    let sizer = document.getElementById('scraySearchPillSizer');
+    if (!sizer) {
+        sizer = document.createElement('span');
+        sizer.id = 'scraySearchPillSizer';
+        sizer.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(sizer);
+    }
+    const cs = getComputedStyle(input);
+    // The `font` shorthand is empty in a few browsers; the parts always work.
+    sizer.style.font = cs.font || `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    sizer.style.letterSpacing = cs.letterSpacing;
+    sizer.textContent = text;
+    return sizer.getBoundingClientRect().width;
+}
+
+function sizeSearchPill(input) {
+    const wrap = input.closest('.floating-tag-search-wrap');
+    if (!wrap) return;
+    const text = input.value;
+    const open = !!text || wrap.classList.contains('is-focused');
+    wrap.classList.toggle('is-idle', !open);
+    wrap.classList.toggle('is-empty', !text);
+    // Idle and empty: the CSS gives the stub its own width, so leave it be.
+    // That width - the couple of characters beside the magnifier - applies
+    // ONLY here, because its rule needs both is-idle and is-empty. The moment
+    // a term arrives the rule stops matching and the width below takes over,
+    // so the stub's extra room is never carried into a pill that has text.
+    if (!open && !text) { input.style.width = ''; return; }
+    // The caret's own place past the last character is only wanted while there
+    // IS a caret. At rest it was 3px of nothing on the end of every term, so
+    // the pill now hugs the text exactly once you stop typing (13.94).
+    const caret = wrap.classList.contains('is-focused') ? SEARCH_PILL_CARET_PX : 0;
+    input.style.width = Math.ceil(searchPillTextWidth(input, text) + caret) + 'px';
+}
+
+function buildSearchPill() {
+    const wrap = document.createElement('span');
+    wrap.className = 'floating-tag-search-wrap is-idle';
+
+    const pill = document.createElement('span');
+    pill.className = 'floating-tag-pill floating-tag-search';
+    pill.title = 'Filter by filename';
+
+    const glass = document.createElement('span');
+    glass.className = 'search-pill-glass';
+    glass.textContent = '🔍';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'scraySearchPillInput';
+    input.className = 'search-pill-input';
+    input.autocomplete = 'off';
+    input.autocapitalize = 'off';
+    input.setAttribute('autocorrect', 'off');
+    input.spellcheck = false;
+    input.setAttribute('aria-label', 'Filter by filename');
+
+    const clearX = document.createElement('span');
+    clearX.className = 'search-pill-x';
+    clearX.textContent = '×';
+    clearX.setAttribute('role', 'button');
+    clearX.setAttribute('aria-label', 'Clear the filter');
+
+    // preventDefault on the press stops the x stealing focus from the input -
+    // otherwise the keyboard closes the moment you reach for it. But on iOS
+    // preventDefault on touchstart also cancels the synthesized mouse
+    // sequence, click included, so the work happens on touchend there and on
+    // click everywhere else.
+    clearX.addEventListener('mousedown', (ev) => ev.preventDefault());
+    clearX.addEventListener('touchstart', (ev) => ev.preventDefault(), { passive: false });
+    let xFiring = false;
+    const clearFromX = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (xFiring) return;      // a browser that sends both must not clear twice
+        xFiring = true;
+        setTimeout(() => { xFiring = false; }, 400);
+        input.value = '';
+        sizeSearchPill(input);
+        window.clearSearchPillFilter?.(ev);
+    };
+    clearX.addEventListener('touchend', clearFromX, { passive: false });
+    clearX.addEventListener('click', clearFromX);
+
+    // Typing here drives the real box, and the real box's own listener does
+    // the filtering - so there is still exactly one place that knows how.
+    input.addEventListener('input', () => {
+        const box = mainSearchEl();
+        if (box && box.value !== input.value) {
+            box.value = input.value;
+            box.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        sizeSearchPill(input);
+    });
+    // The class change and the measurement have to happen in that order, and
+    // the measurement has to see the settled font - hence no transition on
+    // font-size in the CSS. The second pass on the next frame is belt and
+    // braces: if a font is still loading, or anything else moves the text
+    // after this tick, the width follows it rather than staying wrong.
+    const resize = () => { sizeSearchPill(input); requestAnimationFrame(() => sizeSearchPill(input)); };
+
+    // Waking the pill puts the caret at the END, wherever the finger landed.
+    //
+    // Hung on FOCUS, not on the tap. Focus fires only when the pill was not
+    // already being edited, which is exactly "waking it up" - and a tap while
+    // you are already editing fires none, so that still repositions the caret
+    // the ordinary way. The first attempt at this keyed off pointerdown and
+    // acted on the click, which turned out to be unreliable for a reason worth
+    // recording: focusing grows the text from 0.75rem to 1.1rem, the pill
+    // re-lays out under the finger, and the click can then land on the page
+    // behind it - target BODY, handler never runs.
+    //
+    // Three passes because the browser sets its own caret AFTER focus, and
+    // when varies by platform: same tick, next frame, or on touchend.
+    input.addEventListener('focus', () => {
+        wrap.classList.add('is-focused');
+        resize();
+        const end = input.value.length;
+        const toEnd = () => { try { input.setSelectionRange(end, end); } catch (_) {} };
+        toEnd();
+        requestAnimationFrame(toEnd);
+        setTimeout(toEnd, 60);
+    });
+    input.addEventListener('blur',  () => { wrap.classList.remove('is-focused'); resize(); });
+    input.addEventListener('keydown', (e) => {
+        // ui.js binds bare letters on window; it exempts inputs, but the tag
+        // buttons behind this are one stray keystroke away either way.
+        e.stopPropagation();
+        if (e.key === 'Enter' || e.key === 'Return') { e.preventDefault(); input.blur(); }
+    });
+
+    // Tapping anywhere that is not the x puts the caret in the text.
+    //
+    // 13.92: waking the pill puts the caret at the END, not wherever the
+    // finger landed. Tapping a word in the middle of a term you are already
+    // editing is a deliberate act and still works; tapping a pill at rest is
+    // not - you are reaching for the filter, and what you want next is to
+    // carry on typing.
+    //
+    // The state has to be read on POINTERDOWN. By the time click fires the
+    // browser has already focused the input and placed its own caret, so
+    // "was it focused?" can no longer be asked - which is why this looked
+    // like it was following the tap.
+    // Focus from the DOWN event, not the click: by click time the text has
+    // grown and the pill may no longer be under the finger (see above). This
+    // matters for a tap on the magnifier, which is not the input itself and so
+    // gets no focus of its own.
+    pill.addEventListener('pointerdown', (e) => {
+        if (e.target === clearX) return;
+        if (document.activeElement !== input) input.focus();
+    }, true);
+
+    // Kept as the fallback for anything that delivers no pointer events.
+    pill.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (e.target !== clearX && document.activeElement !== input) input.focus();
+    });
+
+    pill.append(glass, input, clearX);
+    wrap.appendChild(pill);
+    return wrap;
+}
+
+/**
+ * Build the pill once, then keep it. Called on every rebuild of the bar; it
+ * is the reuse that keeps focus and the caret alive while you type.
+ */
+function ensureSearchPill(container) {
+    let wrap = container.querySelector('.floating-tag-search-wrap');
+    if (!wrap) {
+        wrap = buildSearchPill();
+        container.appendChild(wrap);
+    }
+    // Deliberately NOT re-appended to put it last in the DOM. appendChild on a
+    // node that is already a child MOVES it, and moving a focused element
+    // blurs it - which is the whole thing this function exists to avoid. It
+    // cost a keyboard after one character when this was written. The CSS
+    // `order: 99` puts it last on screen, which is all that was wanted.
+    const input = wrap.querySelector('.search-pill-input');
+    const box = mainSearchEl();
+    // Follow the box whenever the two disagree, focused or not. This looked
+    // like it needed a "not while typing" guard, and it does not: the input
+    // handler writes the box BEFORE it dispatches, so during a keystroke the
+    // two already agree and this is a no-op. Guarding on focus instead left a
+    // stale pill whenever something else changed the filter while the caret
+    // was still in it - Clear all, or the context menu's "search this".
+    if (box && input.value !== box.value) {
+        const wasFocused = document.activeElement === input;
+        input.value = box.value;
+        // Adopting a value out from under the caret would otherwise drop it
+        // back to position 0 on some browsers.
+        if (wasFocused) {
+            const end = input.value.length;
+            try { input.setSelectionRange(end, end); } catch (_) { /* not all types allow it */ }
+        }
+    }
+    sizeSearchPill(input);
+    return wrap;
+}
+
 function updateFloatingTagPillsFromCommon() {
 const container = document.getElementById("floatingTagPillsBar");
 if (!container) return;
-container.innerHTML = '';
+// Not innerHTML = '': the search pill holds a focused input and has to live
+// through this. See the block above.
+clearPillsExceptSearch(container);
 
 // Include pills
 Array.from(window.commonSelectedTags).forEach(tag => {
@@ -1543,117 +1810,9 @@ if (typeof window.scrayTotalFilterTerms === 'function' && window.scrayTotalFilte
    container.appendChild(clearPill);
 }
 
-// ✅ Search filter pill - PINK (only shown when search is active)
-const searchBox = document.getElementById("filenameSearchBox");
-const searchText = searchBox?.value.trim() || '';
-if (searchText.length > 0) {
-const searchPill = document.createElement("span");
-searchPill.className = "floating-tag-pill floating-tag-search";
-searchPill.textContent = `🔍 ${searchText}`;
-searchPill.title = "Tap to edit";
-searchPill.addEventListener("click", (e) => {
-e.stopPropagation();
-
-// ✅ Tapping the pill immediately activates Edit (no more E/C choice popup)
-// ✅ Custom focus logic (NOT the jumpSearchBtn path) - deliberately
-// avoids calling .select(), which would highlight all existing text
-// and cause the next keystroke to wipe it out instead of appending.
-// Places the cursor at the end of the existing text instead, so
-// typing continues/adds onto the current search term.
-const isLandscape = window.matchMedia('(orientation: landscape)').matches;
-const isMobile = window.innerWidth <= 1024;
-
-if (isLandscape && isMobile) {
-    const panelSearchBox = document.getElementById("panelSearchBox");
-    if (panelSearchBox) {
-        panelSearchBox.focus();
-        panelSearchBox.click();
-        setTimeout(() => {
-            const len = panelSearchBox.value.length;
-            panelSearchBox.setSelectionRange(len, len);
-        }, 50);
-    }
-    if (typeof window.toggleRandomPlaylistPanel === 'function') {
-        const panel = document.getElementById("randomPlaylistPanel");
-        if (panel && !panel.classList.contains("random-panel-open")) {
-            window.toggleRandomPlaylistPanel(true);
-        }
-    }
-    if (typeof filterDisplayedByFilename === 'function') {
-        window.skipSearchScroll = true;
-        filterDisplayedByFilename();
-    }
-} else {
-    const searchBox = document.getElementById("filenameSearchBox");
-    if (searchBox) {
-        const isMobilePortrait = window.innerWidth <= 768 && window.matchMedia('(orientation: portrait)').matches;
-        if (!isMobilePortrait && typeof scrollToSearchBox === 'function') {
-            scrollToSearchBox(searchBox);
-        }
-        searchBox.focus({ preventScroll: true });
-        setTimeout(() => {
-            const len = searchBox.value.length;
-            searchBox.setSelectionRange(len, len);
-        }, 50);
-    }
-}
-
-// The popup itself is created by ensureSearchPillPopup, which the keyboard
-// state handlers also call. Calling it here covers the case where the
-// keyboard was already open before the pill was tapped.
-
-
-});
-
-// The bin is a CHILD of the pill, not a fixed element positioned against it.
-//
-// The previous approach measured the pill with getBoundingClientRect and set
-// fixed coordinates - but the pills bar is simultaneously being moved by CSS
-// (bottom: var(--keyboard-offset) plus a translateY) while iOS resizes the
-// visual viewport, and the bar rebuilds itself on every keystroke. Any frame
-// that measured mid-move produced a bad number and the bin shot to the top
-// of the screen.
-//
-// As a child, the browser positions it. No measuring, no rAF loop, no
-// viewport maths, and it moves with the pill for free.
-const searchWrap = document.createElement("span");
-searchWrap.className = "floating-tag-search-wrap";
-searchWrap.appendChild(searchPill);
-
-const binBtn = document.createElement("button");
-binBtn.className = "search-pill-bin";
-binBtn.textContent = '🗑️';
-binBtn.title = 'Clear search';
-// preventDefault on the press stops the button stealing focus - otherwise
-// the search box blurs, the keyboard closes, and the CSS hides the bin
-// before the tap resolves.
-//
-// But on iOS, preventDefault on touchstart also cancels the whole
-// synthesized mouse sequence, click included. So the action runs on
-// touchend instead. touchend still fires even though the default was
-// prevented: the touch target is fixed at touchstart and doesn't change
-// if the element is hidden or moved mid-gesture.
-binBtn.addEventListener('mousedown', (ev) => ev.preventDefault());
-binBtn.addEventListener('touchstart', (ev) => ev.preventDefault(), { passive: false });
-
-let binFiring = false;
-const clearFromBin = (ev) => {
-    ev.preventDefault();
-    ev.stopPropagation();
-    // On desktop only click fires; on iOS only touchend. Guard anyway so a
-    // browser that delivers both can't clear twice.
-    if (binFiring) return;
-    binFiring = true;
-    setTimeout(() => { binFiring = false; }, 400);
-    window.clearSearchPillFilter?.(ev);
-};
-
-binBtn.addEventListener('touchend', clearFromBin, { passive: false });
-binBtn.addEventListener('click', clearFromBin);
-searchWrap.appendChild(binBtn);
-
-container.appendChild(searchWrap);
-}
+// ✅ Search filter pill - PINK. Always on screen now (13.84): pale and stubby
+// until you tap it, then it is the filter box. See ensureSearchPill above.
+ensureSearchPill(container);
 
 // Re-check keyboard/search-pill state now that pills have been rebuilt
 setTimeout(() => {
@@ -3849,9 +4008,24 @@ const adjustForKeyboard = () => {
    // translateY repositions element to stay fixed relative to keyboard
    const vpTop = window.visualViewport.offsetTop || window.visualViewport.pageTop || 0;
    document.documentElement.style.setProperty('--keyboard-scroll-offset', `${vpTop}px`);
+
+   // 13.82: the same problem, from the other end. `position: fixed` is laid
+   // out against the LAYOUT viewport, and when iOS opens the keyboard it
+   // scrolls the page to bring the focused input above it - so a bar pinned
+   // to top:0 ends up above what you can actually see, and the pills vanish
+   // exactly when you are typing the filter they describe.
+   //
+   // The gap between the two viewports is what has to be added back.
+   // offsetTop is the direct answer where a browser reports it; iOS Safari
+   // usually leaves it at 0 and moves pageTop instead, which is measured
+   // from the top of the DOCUMENT, so the page's own scroll comes off it.
+   const vv = window.visualViewport;
+   const seenTop = vv.offsetTop || Math.max(0, (vv.pageTop || 0) - (window.scrollY || 0));
+   document.documentElement.style.setProperty('--pills-top-offset', `${seenTop}px`);
  } else {
    document.documentElement.style.removeProperty('--keyboard-offset');
    document.documentElement.style.removeProperty('--keyboard-scroll-offset');
+   document.documentElement.style.removeProperty('--pills-top-offset');
  }
 
  // Nudge ONLY the filter bar above the keyboard, without touching

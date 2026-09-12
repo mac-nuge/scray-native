@@ -1161,6 +1161,8 @@ let mpfsPanStartY = 0;
 let mpfsPanLastLocal = { x: 0, y: 0 };
 let mpfsPanClickBlockUntil = 0;
 let mpfsPanFromBar = false;  // started on the bar, not above the grid
+// A control-area touch whose raise is waiting to see if it is a tap (13.88).
+let scrayGesturePendingRaise = false;
 
 // Which player the bar pan runs in, or null.
 function mpfsControlsPanMode() {
@@ -1219,7 +1221,16 @@ function mpfsControlsPanStart(e) {
     // Never the things that already own a drag, or the tap-to-reset badge.
     if (target.closest('.plyr__progress, #permanentProgressBar, #plyr-zoom-badge, .plyr-frame-step-group')) return;
     // The controls bar, or the picture above the grid's top edge.
-    const onBar = !!target.closest('.plyr__controls');
+    //
+    // 13.88: by POSITION as well as by target. A hidden bar carries
+    // pointer-events:none, so the touch lands on the video underneath and
+    // closest('.plyr__controls') finds nothing - which is why this only ever
+    // panned while the controls happened to be showing. scrayPointInControlArea
+    // already accounts for the hidden bar being parked below its own height,
+    // so it answers the question the target cannot.
+    const onBar = !!target.closest('.plyr__controls') ||
+        (typeof scrayPointInControlArea === 'function' &&
+         scrayPointInControlArea(e.touches[0].clientX, e.touches[0].clientY));
     if (!onBar) {
         // Not the leftover finger of a pinch, nor straight after one.
         if (window.scrayZoomBlocksGestures()) return;
@@ -5091,8 +5102,12 @@ const SCRAY_CONTROL_AREA_SLOP_PX = 6;
 // ⚙️ How long after a touch the mouse events a phone synthesises are still
 // treated as that touch.
 const SCRAY_TOUCH_MOUSE_WINDOW_MS = 1000;
-// Plyr's hide delay on touch devices, for the bar raised from a control area.
-const SCRAY_CONTROLS_HIDE_MS = 3000;
+// ⚙️ How long the control bar stays up before it hides itself. Halved from
+// 3000 in 13.90. This is the one number for it: scrayRaiseControlsForTouch
+// arms it for a bar raised from a control area, and scrayArmControlsHide arms
+// it for every other way the bar comes up - which is what stops Plyr's own
+// hardcoded 2000ms being the one that actually decides.
+const SCRAY_CONTROLS_HIDE_MS = 1500;
 
 let scrayGestureInControls = false;
 // The current touch started on the picture rather than the control bar or the
@@ -5218,9 +5233,20 @@ document.addEventListener('touchstart', (e) => {
     // MPB: the whole player is the control area - a tap anywhere shows the bar.
     scrayGestureInControls = !scrayGestureOnPicture || scrayIsMpb();
     scrayGestureRaisedBar = false;
+    scrayGesturePendingRaise = false;
     if (scrayGestureInControls) {
-        scrayGestureRaisedBar = plyr.classList.contains('plyr--hide-controls');
-        scrayRaiseControlsForTouch();
+        // 13.88: while a pan is possible, a touch on the bar is as likely to
+        // be a pan as a tap - and raising the controls on touchDOWN made every
+        // pan flash them up before the drag had said anything. So hold the
+        // raise until the finger lifts: a tap still gets the controls, a drag
+        // never does. Unzoomed, nothing can pan, and the bar comes up on
+        // touchdown as it always has.
+        if (typeof mpfsControlsPanEligible === 'function' && mpfsControlsPanEligible()) {
+            scrayGesturePendingRaise = true;
+        } else {
+            scrayGestureRaisedBar = plyr.classList.contains('plyr--hide-controls');
+            scrayRaiseControlsForTouch();
+        }
     }
     // MPB does both: the bar comes up AND the grid shows.
     if (scrayGestureOnPicture) scrayWakeTapGuides();
@@ -5228,14 +5254,17 @@ document.addEventListener('touchstart', (e) => {
 
 document.addEventListener('touchmove', (e) => {
     scrayLastTouchAt = Date.now();
-    if (!scrayGestureOnPicture || !e.touches || !e.touches[0]) return;
+    if (!e.touches || !e.touches[0]) return;
     const t = e.touches[0];
+    const dragged = Math.abs(t.clientX - scrayGestureStartX) > SCRAY_GUIDES_DRAG_PX ||
+                    Math.abs(t.clientY - scrayGestureStartY) > SCRAY_GUIDES_DRAG_PX;
+    // A held-back raise, now that the finger has moved: this is a pan, so the
+    // controls it was waiting on never appear at all.
+    if (scrayGesturePendingRaise && dragged) scrayGesturePendingRaise = false;
+    if (!scrayGestureOnPicture) return;
     // A drag, not a tap: the grid is for tapping. In MPB that includes a
     // swipe scrolling the list through the player.
-    if (Math.abs(t.clientX - scrayGestureStartX) > SCRAY_GUIDES_DRAG_PX ||
-        Math.abs(t.clientY - scrayGestureStartY) > SCRAY_GUIDES_DRAG_PX) {
-        scraySleepTapGuides(0);
-    }
+    if (dragged) scraySleepTapGuides(0);
 }, { capture: true, passive: true });
 
 // A scrub - on the picture or dragged along the progress bar - keeps the bar
@@ -5259,6 +5288,14 @@ window.scrayOnScrubBegin = function () {
 
 document.addEventListener('touchend', (e) => {
     scrayLastTouchAt = Date.now();
+    // A bar touch that never became a drag was a tap after all, so the
+    // controls it was holding back come up now. See the touchstart above.
+    if (scrayGesturePendingRaise) {
+        scrayGesturePendingRaise = false;
+        const plyrNow = document.querySelector('.plyr');
+        scrayGestureRaisedBar = !!plyrNow && plyrNow.classList.contains('plyr--hide-controls');
+        scrayRaiseControlsForTouch();
+    }
     // Last finger up: the grid lingers just long enough for a second tap.
     if (!e.touches || e.touches.length === 0) {
         if (document.body.classList.contains('scray-guides-awake')) scraySleepTapGuides(SCRAY_GUIDES_LINGER_MS);
@@ -5313,9 +5350,73 @@ function scrayInstallControlsPolicy(player) {
             return plyrToggle(toggle);
         }
         // Already up, or a mouse-only device: nothing to decide.
-        if (!hidden || !player.touch) return plyrToggle(toggle);
-        return scrayControlsMayShow(player, railUp) ? plyrToggle(toggle) : false;
+        if (!hidden || !player.touch) {
+            const r = plyrToggle(toggle);
+            if (show) scrayArmControlsHide(player);
+            return r;
+        }
+        if (!scrayControlsMayShow(player, railUp)) return false;
+        const shown = plyrToggle(toggle);
+        scrayArmControlsHide(player);
+        return shown;
     };
+}
+
+/**
+ * Re-arm the auto-hide at OUR delay whenever the bar comes up.
+ *
+ * Plyr's own hide timer is hardcoded at 2000ms in its source - there is no
+ * option for it - so halving SCRAY_CONTROLS_HIDE_MS alone would only have
+ * shortened the one path that sets the timer itself, and everything else
+ * would have gone on waiting for Plyr. This replaces that timer at the moment
+ * the bar is shown, so one constant governs the lot.
+ *
+ * It goes through toggleControls rather than touching the class directly, so
+ * the policy above still gets its say - a bar held up by a control-area touch,
+ * or one with the bookmark rail open, is not yanked away.
+ */
+function scrayArmControlsHide(player) {
+    if (!player || !player.timers) return;
+    clearTimeout(player.timers.controls);
+    player.timers.controls = setTimeout(() => {
+        if (player.paused) return;   // paused means the bar is wanted
+        try { player.toggleControls(false); } catch (err) {}
+    }, SCRAY_CONTROLS_HIDE_MS);
+}
+
+/**
+ * Take Plyr's own hide timer over. This is what actually halves the wait.
+ *
+ * 13.90 halved SCRAY_CONTROLS_HIDE_MS and armed it from the toggleControls
+ * wrapper, and it made no difference - because that is not the path Plyr
+ * uses. In plyr 3.7.8's listeners, a handler bound to elements.container for
+ * 'mousemove mouseleave touchstart touchmove enterfullscreen exitfullscreen'
+ * does its own clearTimeout/setTimeout on player.timers.controls, at
+ * `player.touch ? 3000 : 2000`, and hides by calling ui.toggleControls
+ * DIRECTLY rather than through the public player.toggleControls. So the
+ * wrapper never saw the show or the hide, and Plyr's 3000 was the number that
+ * decided - which is exactly the 2-3 seconds that was still being felt.
+ *
+ * A listener added here on the same element and phase runs after Plyr's, so
+ * by the time this fires Plyr has already set its timer and ours replaces it.
+ *
+ * Only the three events Plyr treats as "show" are re-timed. For mouseleave
+ * and the fullscreen pair it sets a delay of 0 - a near-immediate hide that
+ * should stay immediate.
+ */
+function scrayInstallControlsHideOverride(player) {
+    const els = player && player.elements;
+    const container = els && els.container;
+    if (!container || container.__scrayHideOverride) return;
+    container.__scrayHideOverride = true;
+
+    ['touchstart', 'touchmove', 'mousemove'].forEach((type) => {
+        container.addEventListener(type, () => scrayArmControlsHide(player), { passive: true });
+    });
+    // The bar's own focusin gets 3000/4000 from Plyr; same treatment.
+    if (els.controls) {
+        els.controls.addEventListener('focusin', () => scrayArmControlsHide(player), { passive: true });
+    }
 }
 
 function createPlayerElement() {
@@ -5367,6 +5468,8 @@ loop: { active: true } // Enable video looping
 });
 // Touches on the picture no longer raise the bar - see CONTROLS POLICY.
 scrayInstallControlsPolicy(window.plyrPlayer);
+// ...and the bar hides on OUR clock rather than Plyr's 3000ms one.
+scrayInstallControlsHideOverride(window.plyrPlayer);
 
 // Listen for user volume/mute changes
 window.plyrPlayer.on('volumechange', () => {

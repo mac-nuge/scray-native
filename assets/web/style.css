@@ -227,32 +227,45 @@ FLOATING TAG PILLS
 ========================================= */
 #floatingTagPillsBar {
 position: fixed;
-bottom: calc(env(safe-area-inset-bottom,0px) + 103px);
+/* 13.80: the bar lives at the TOP of the screen now, not above the corner
+   buttons. Tag / score / exclude pills fill from the left; the search pill is
+   pushed to the right by its own rule further down. One bar, one flex flow,
+   so the two groups can never overlap - when the left side fills the row the
+   search pill wraps to the next one and stays right-aligned there. */
+top: calc(env(safe-area-inset-top, 0px) + 6px);
+bottom: auto;
 left: 0;
 width: 100%;
 display: flex;
 flex-wrap: wrap;
 gap: 4px;
 background: transparent;
-padding: 0;
+/* ⚙️ Side gutters. This used to be `padding: 0`, which quietly cancelled the
+   `padding-right: 10px` set in the overflow guard near the top of this file -
+   so pills sat flush against the screen edge. It went unnoticed while the bar
+   was at the bottom and everything was left-aligned; with the search pill hard
+   right it is the first thing you see. */
+padding: 0 8px;
 z-index: 2600;
 font-size: 0.8rem;
 pointer-events: none;
 }
 
-/* ⚙️ Portrait mobile: sit the pills DIRECTLY above the single corner-button
-   row. 36px = the corner block's own bottom offset, 34px = one button row,
-   6px = the gap. Tweak the 6px for more/less breathing room. */
+/* ⚙️ Both orientations now anchor to the top, same as the base rule - the
+   offsets that used to lift the bar clear of the corner buttons have nothing
+   left to clear. Kept as their own rules so the notch inset can differ by
+   orientation if it ever needs to. */
 @media (max-width: 768px) and (orientation: portrait) {
 #floatingTagPillsBar {
-bottom: calc(env(safe-area-inset-bottom,0px) + 36px + 34px + 6px) !important;
+top: calc(env(safe-area-inset-top, 0px) + 6px) !important;
+bottom: auto !important;
 }
 }
 
-/* ⚙️ Landscape mobile: same idea - corner block sits at bottom:10px there. */
 @media (max-width: 1024px) and (orientation: landscape) {
 #floatingTagPillsBar {
-bottom: calc(env(safe-area-inset-bottom,0px) + 10px + 34px + 6px) !important;
+top: calc(env(safe-area-inset-top, 0px) + 4px) !important;
+bottom: auto !important;
 }
 }
 
@@ -282,52 +295,106 @@ align-items: center;
 .floating-tag-exclude { background-color: #f94144; color: white; }
 .floating-tag-search { background-color: hsl(330, 100%, 84%); color: #333; }
 
-/* Anchor for the bin. inline-flex so the wrapper hugs the pill exactly -
-   a block would stretch and the bin would centre on the wrong thing. */
+/* The search pill's slot. inline-flex so the wrapper hugs the pill exactly.
+   order + margin-left:auto are what put it on the right: the auto margin eats
+   the free space on its line, and order sends it last however the pills were
+   built. When the left-hand pills fill the row it wraps to the next one and is
+   still right-aligned there, so the two groups cannot collide. */
 .floating-tag-search-wrap {
 position: relative;
 display: inline-flex;
+order: 99;
+margin-left: auto;
 pointer-events: none;   /* matches the bar; children opt back in */
 }
 
-/* Sits directly above the pill, centred on it. bottom:100% means "the top
-   edge of the pill", so it tracks the pill automatically - no JS. */
-.search-pill-bin {
-position: absolute;
-bottom: calc(100% + 6px);
-left: 50%;
-transform: translateX(-50%);
-display: none;
-pointer-events: auto;
-background: #222;
+/* ---- the pill's own parts (13.84) ------------------------------------- */
+/* The pill is a row: magnifier, the text you are typing, the x. */
+.floating-tag-search {
+display: inline-flex;
+align-items: center;
+gap: 2px;
+transition: background-color 0.12s ease;
+}
+.search-pill-glass { font-size: 0.72rem; line-height: 1; }
+
+/* ⚙️ The text itself. At rest it matches every other pill in the bar; while
+   you are actually typing in it, it goes two steps up so the thing you are
+   looking at is the thing you can read. The width is set in ch by
+   sizeSearchPill, so the pill is exactly as wide as the term.
+   (The usual reason to pin an input at 16px is iOS zooming the page on focus
+   below that. It does not apply here - the viewport meta on both pages
+   carries maximum-scale=1.0, which is what suppresses that zoom.) */
+.search-pill-input {
 border: none;
-border-radius: 6px;
-padding: 8px 14px;      /* ⚙️ generous on purpose - it's a small target above a small pill */
-font-size: 0.9rem;
+outline: none;
+background: transparent;
+color: inherit;
+font-family: inherit;
+font-size: 0.75rem;
 line-height: 1;
+padding: 0;
+margin: 0;
+min-width: 0;
+/* Deliberately NOT transitioned. sizeSearchPill measures the term in the
+   input's CURRENT font, and blur runs it immediately - so with a transition
+   here the measurement was taken while the text was still most of the way
+   through the larger size, and the box kept that width after the text had
+   shrunk. That was the leftover slack at rest. */
+}
+.floating-tag-search-wrap.is-focused .search-pill-input { font-size: 1.1rem; }
+
+/* Idle AND empty: no term to show, so the pill is the magnifier plus a couple
+   of characters of room - enough to be an easy target rather than a sliver.
+   ⚙️ The stub's spare width. Kept as width rather than display:none, because
+   a display:none input cannot take focus and tapping the pill is exactly how
+   you get into it. */
+.floating-tag-search-wrap.is-idle.is-empty .search-pill-input { width: 2ch !important; }
+
+/* The offscreen ruler sizeSearchPill measures the term with. pre keeps the
+   spaces, which are part of what is being measured. */
+#scraySearchPillSizer {
+position: absolute;
+left: -9999px;
+top: 0;
+white-space: pre;
+visibility: hidden;
+pointer-events: none;
+}
+
+/* Collapsed: no filter set and not being typed in, so it sits out of the way
+   as a grey stub. Pink is reserved for "this pill is actually filtering
+   something", which is what the rest of the bar's colours mean too.
+   ⚙️ The idle grey. */
+.floating-tag-search-wrap.is-idle .floating-tag-search {
+background-color: #dcdcdc;
+color: #5a5a5a;
+}
+.floating-tag-search-wrap.is-idle .search-pill-x { display: none; }
+
+/* ⚙️ The always-there x at the tail of the search pill. Sized for a thumb
+   without making the pill tall: the padding does the work, not the glyph. */
+.search-pill-x {
+pointer-events: auto;
 cursor: pointer;
-box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-white-space: nowrap;
--webkit-tap-highlight-color: rgba(255,255,255,0.15);
+font-size: 0.95rem;
+line-height: 1;
+font-weight: 700;
+color: #8a3d60;
+/* On the RIGHT of the pill (13.82), so the margins mirror what they were.
+   The negative top and bottom let the tap target grow past the pill's own
+   height without making the pill any taller. */
+margin: -4px -2px -4px 4px;
+padding: 4px 5px;
+border-radius: 10px;
+-webkit-tap-highlight-color: rgba(0,0,0,0.15);
 }
-.search-pill-bin:active { background: #444; }
+.search-pill-x:active { background: rgba(0, 0, 0, 0.18); }
 
-/* Shown only while the pill is actually being edited. Visibility is driven
-   entirely by this class, which the keyboard handlers already maintain. */
-body.keyboard-active .search-pill-bin { display: block; }
-
-/* Blinking cursor on the search pill while the on-screen keyboard is
-   active, so it's clear the search box is still focused/typing */
-body.keyboard-active .floating-tag-search::after {
-content: '|';
-margin-left: -1px; /* ⚙️ tune this to nudge the fake cursor closer/further from the text */
-animation: searchPillCursorBlink 1s step-end infinite;
-}
-
-@keyframes searchPillCursorBlink {
-0%, 50% { opacity: 1; }
-50.01%, 100% { opacity: 0; }
-}
+/* The fake '|' cursor that used to be glued on here with ::after is gone
+   (13.84). The pill contains a real <input>, so the caret is the browser's
+   own and blinks where the text is - rather than after the x, which is where
+   a trailing pseudo-element ends up once the x moved to the right. */
 
 /* Compact Edit/Clear popup for the search pill */
 .search-pill-popup {
@@ -1063,8 +1130,19 @@ white-space: normal;
 @media (max-width: 768px) {
 .keyboard-active #floatingTagPillsBar {
 position: fixed !important;
-bottom: calc(env(safe-area-inset-bottom,0px) + var(--keyboard-offset, 0px)) !important;
-transform: translateY(var(--keyboard-scroll-offset, 0px)) !important;
+/* The bar used to be lifted to sit on top of the on-screen keyboard. From the
+   top of the screen there is nothing to dodge - the keyboard comes up from the
+   bottom.
+
+   It does still have to dodge the SCROLL, though. iOS scrolls the page to lift
+   the focused input above the keyboard, and `fixed` is measured against the
+   layout viewport, not against what you can see - so without this the bar sits
+   above the visible area and the pills disappear the moment you start typing.
+   --pills-top-offset is the distance between the two viewports, set by
+   adjustForKeyboard in randomiser.js on every resize and scroll. */
+top: calc(env(safe-area-inset-top, 0px) + 6px) !important;
+bottom: auto !important;
+transform: translateY(var(--pills-top-offset, 0px)) !important;
 /* ⚙️ #cornerButtons is z-index 9999 and the pills bar creates its own
    stacking context, so at 2600 the clear-filter bin was rendering behind
    the buttons. Lift the whole bar over them while the keyboard is up. */
@@ -2322,25 +2400,6 @@ top: var(--scray-mpb-tier-upper, 33.333%) !important;
 }
 body.portrait-inline:not(.manual-rotate-landscape) .mpfs-tap-tier.scray-tap-tier-lower {
 top: var(--scray-mpb-tier-lower, 66.667%) !important;
-}
-
-/* MPB (13.76): Q1 is two halves - MPFS above this line, FLS below. Drawn only
-   here; MPFS and FLS keep a single, undivided mode zone. Same alpha as every
-   other rule in the grid, and the same px-from-JS treatment as the tiers,
-   since it divides .plyr's height rather than the wrapper's. */
-.mpb-q1-split {
-position: absolute;
-display: none;
-left: 0;
-width: 25%;
-height: 1px;
-margin-top: -0.5px;
-background: rgba(255, 255, 255, 0.22);
-pointer-events: none !important;
-}
-body.portrait-inline:not(.manual-rotate-landscape) .mpb-q1-split {
-display: block;
-top: var(--scray-mpb-q1-split, 50%);
 }
 
 /* =========================================
@@ -7511,3 +7570,12 @@ body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor >
 #scrayUploadPanel .up-li { flex: 1; min-width: 0; }
 #scrayUploadPanel .up-li-name { word-break: break-word; }
 #scrayUploadPanel .st-cancelled .up-li-name { color: #999; text-decoration: line-through; }
+
+/* ---- the Filter box, on a phone (13.84) --------------------------------
+   The pill took this over. With +B gone as well (13.86) there is nothing else
+   in the row, so the whole row goes rather than just the input. Desktop keeps
+   the ordinary box: there is room for it, and a wide field is easier to type
+   a long filter into with a real keyboard. */
+@media (max-width: 1024px) {
+#searchFilterRow { display: none !important; }
+}

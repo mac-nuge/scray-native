@@ -316,6 +316,20 @@ window.scrayPathSep = scrayPathSep;
 function createClickablePath(video, includeFilename = true, useCataloguePath = false) {
 const container = document.createDocumentFragment();
 
+// ♦ in front when the file has bookmarks (13.65). Only when this fragment is
+// naming the FILE - the open row draws its path and scene lines through here
+// too, and a marker on each of them would just be the same thing three times.
+//
+// It goes in a slot span rather than straight into the fragment: a fragment
+// empties itself into whatever appends it, so there would be nothing left to
+// find when a bookmark is added later. The slot stays in the row, empty
+// until there is something to show.
+if (includeFilename && window.scrayMountBookmarkDiamond) {
+  const bmSlot = document.createElement('span');
+  window.scrayMountBookmarkDiamond(bmSlot, video);
+  container.appendChild(bmSlot);
+}
+
 // A StashDB-matched video is named by its scene, not its path: studio,
 // female cast and title, all lower case, with the filename bracketed after
 // it. Done HERE rather than in each list renderer because every list - main,

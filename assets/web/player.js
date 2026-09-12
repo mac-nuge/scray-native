@@ -255,6 +255,9 @@ function syncVideoTitleBar(video) {
         // and all.
         const stashName = window.scrayStashDisplayName ? window.scrayStashDisplayName(v) : '';
         textEl.textContent = (stashName || v.filename || '') + scoreText;
+        // ♦ in front when the file has bookmarks (13.65). After the text is
+        // set - setting textContent would wipe the marker straight back out.
+        if (window.scrayMountBookmarkDiamond) window.scrayMountBookmarkDiamond(textEl, v);
     }
     syncFullscreenFilterPill();
     syncNowPlayingStripPlacement();
@@ -4713,7 +4716,11 @@ if (!pipContainer) {
  const title = document.createElement('div');
  title.className = 'pip-title';
  title.textContent = window.currentLoadingFilename || 'Video Player';
- 
+ // ♦ in front when the file has bookmarks (13.65).
+ if (window.scrayMountBookmarkDiamond && window.currentPlayingVideo) {
+     window.scrayMountBookmarkDiamond(title, window.currentPlayingVideo);
+ }
+
  const closeBtn = document.createElement('button');
  closeBtn.className = 'pip-close';
  closeBtn.innerHTML = '×';
@@ -4775,6 +4782,10 @@ updatePIPButtonState();
 const pipTitle = pipContainer.querySelector('.pip-title');
 if (pipTitle) {
  pipTitle.textContent = window.currentLoadingFilename || 'Video Player';
+ // ♦ in front when the file has bookmarks (13.65).
+ if (window.scrayMountBookmarkDiamond && window.currentPlayingVideo) {
+     window.scrayMountBookmarkDiamond(pipTitle, window.currentPlayingVideo);
+ }
 }
 
 console.log('✅ Entered PIP mode');
@@ -5009,10 +5020,16 @@ function stopResize(e) {
 }
 
 // Update PIP title when video changes
-function updatePIPTitle(filename) {
+function updatePIPTitle(filename, video = null) {
 const pipTitle = document.querySelector('.pip-title');
 if (pipTitle && pipMode) {
  pipTitle.textContent = filename || 'Video Player';
+ // ♦ in front when the file has bookmarks (13.65). The caller passes the
+ // video where it has one; window.currentPlayingVideo covers the rest.
+ const bmVideo = video || window.currentPlayingVideo;
+ if (window.scrayMountBookmarkDiamond && bmVideo) {
+     window.scrayMountBookmarkDiamond(pipTitle, bmVideo);
+ }
 }
 }
 
@@ -7135,12 +7152,12 @@ if (buffered && buffered.length) {
         loadingOverlay.innerHTML = `
             ${progressLabel}
             <div style="font-size: 0.65rem; opacity: 0.8; margin-bottom: 4px;">Loading from: ${window.currentLoadingPath} &mdash; ${percent}%</div>
-            <div style="font-size: 0.9rem; font-weight: bold;">${window.currentLoadingFilename || ''}</div>
+            <div style="font-size: 0.9rem; font-weight: bold;">${window.currentLoadingDiamond || ''}${window.currentLoadingFilename || ''}</div>
         `;
     } else {
         loadingOverlay.innerHTML = `
             ${progressLabel}
-            <div style="font-size: 0.9rem; font-weight: bold;">Loading: ${window.currentLoadingFilename || ''} &mdash; ${percent}% buffered</div>
+            <div style="font-size: 0.9rem; font-weight: bold;">Loading: ${window.currentLoadingDiamond || ''}${window.currentLoadingFilename || ''} &mdash; ${percent}% buffered</div>
         `;
     }
 }
@@ -8590,6 +8607,10 @@ function scrayShowPreviewTitle(video) {
     // first buffered-range update.
     const stashPreviewName = scrayPlayerStashName(video);
     window.currentLoadingFilename = stashPreviewName || video.filename || '';
+    // ♦ for a bookmarked file (13.65). Held as markup beside the name because
+    // the cards below rebuild from these globals on every buffered update.
+    window.currentLoadingDiamond = window.scrayBookmarkDiamondHtml
+        ? window.scrayBookmarkDiamondHtml(video) : '';
     // The path IS the name for an unmatched video, and it still is for a
     // studio-only one - the studio says who made it, not which file this is.
     // Only a scene name (cast and/or title) earns dropping the folder crumbs,
@@ -8604,7 +8625,7 @@ function scrayShowPreviewTitle(video) {
     ov.innerHTML = `
         ${label}
         ${window.currentLoadingPath ? pathLine : ''}
-        <div style="font-size: 0.9rem; font-weight: bold;">${window.currentLoadingFilename}</div>
+        <div style="font-size: 0.9rem; font-weight: bold;">${window.currentLoadingDiamond || ''}${window.currentLoadingFilename}</div>
     `;
     ov.style.display = 'block';
     ov.style.background = 'rgba(0,0,0,0.7)';
@@ -9000,6 +9021,9 @@ window.beginVideoLoadHold?.();
 const loadingOverlay = document.getElementById('plyr-loading-overlay');
 if (loadingOverlay) {
 window.currentLoadingFilename = video.filename || '';
+// ♦ for a bookmarked file (13.65), as markup - see scrayShowPreviewTitle.
+window.currentLoadingDiamond = window.scrayBookmarkDiamondHtml
+    ? window.scrayBookmarkDiamondHtml(video) : '';
 // `path` is the iOS folder; the OneDrive address the catalogue holds lives on
 // `cataloguePath`. Catalogue first, iOS folder as a bracketed aside - and it
 // goes on window so the 'progress' handler's overlay rebuild reuses it.
@@ -9041,18 +9065,18 @@ if (window.currentLoadingPath) {
     loadingOverlay.innerHTML = `
         ${playSourceLabel}
         <div style="font-size: 0.65rem; opacity: 0.8; margin-bottom: 4px;">Loading from: ${window.currentLoadingPath}</div>
-        <div style="font-size: 0.9rem; font-weight: bold;">${window.currentLoadingFilename}</div>
+        <div style="font-size: 0.9rem; font-weight: bold;">${window.currentLoadingDiamond || ''}${window.currentLoadingFilename}</div>
     `;
 } else {
     loadingOverlay.innerHTML = `
         ${playSourceLabel}
-        <div style="font-size: 0.9rem; font-weight: bold;">Loading: ${window.currentLoadingFilename}</div>
+        <div style="font-size: 0.9rem; font-weight: bold;">Loading: ${window.currentLoadingDiamond || ''}${window.currentLoadingFilename}</div>
     `;
 }
 
 // Update PIP title if in PIP mode
 if (typeof updatePIPTitle === 'function') {
-   updatePIPTitle(window.currentLoadingFilename);
+   updatePIPTitle(window.currentLoadingFilename, video);
 }
 loadingOverlay.style.display = 'block';
 loadingOverlay.style.background = 'rgba(0,0,0,0.7)';
@@ -9986,6 +10010,7 @@ try {
   currentListContext = null;
   currentVideoIndex = null;
   window.currentLoadingFilename = '';
+  window.currentLoadingDiamond = '';
   
   // Exit mini-player mode if active
     const container = document.getElementById('inlineVideoContainer');

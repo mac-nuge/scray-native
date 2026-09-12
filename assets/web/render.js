@@ -663,6 +663,9 @@ function scrayBuildListRow(video, index, cfg) {
   const filename = video.filename || '';
   const file = cell('lc-file', filename);
   file.title = filename;
+  // ♦ in front when the file has bookmarks (13.65). Not in the title - that
+  // is the filename itself, and it is there to be read and copied.
+  if (window.scrayMountBookmarkDiamond) window.scrayMountBookmarkDiamond(file, video);
   if (filename.split('.').pop().toLowerCase() !== 'mp4') file.classList.add('lc-non-mp4');
   // A class, never an inline underline - see scray-offline-title in style.css.
   if (window.scrayIsOffline && window.scrayIsOffline(video)) file.classList.add('scray-offline-title');
@@ -848,6 +851,8 @@ function ensureListRowDetail(li) {
   if ((video.filename || '').split('.').pop().toLowerCase() !== 'mp4') fname.classList.add('lc-non-mp4');
   if (window.scrayIsOffline && window.scrayIsOffline(video)) fname.classList.add('scray-offline-title');
   fname.appendChild(createClickableFilename(video.filename));
+  // ♦ in front when the file has bookmarks (13.65).
+  if (window.scrayMountBookmarkDiamond) window.scrayMountBookmarkDiamond(fname, video);
   fileLine.appendChild(fname);
 
   const scoreBadge = document.createElement('span');

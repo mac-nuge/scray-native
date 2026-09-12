@@ -6673,6 +6673,17 @@ specificity (the extra .lc-row class). */
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-studio.lc-from-path,
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-perf.lc-from-path { color: #9a9a9a; }
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file { color: #222; }
+/* ⚙️ Has bookmarks: a ♦ in front of the filename, wherever one is drawn to be
+   read (13.65). Its own colour rule, so it keeps the purple inside rows that
+   set a colour of their own - non-mp4s, the clickable-path wrapper. The
+   purple is the BM button's on state, SCRAY_BM_COLOURS.on. */
+.scray-bm-diamond {
+  color: #6f42c1;
+  margin-right: 0.3em;
+  font-weight: 700;
+  text-decoration: none;      /* never picks up the offline underline */
+  cursor: default;
+}
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file.lc-non-mp4 { color: #be7b7b; }
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file.lc-uncatalogued::before { content: "\26A0  "; color: #f39c12; }
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file.lc-no-onedrive::before { content: "\2B06\FE0E  "; color: #0078d4; font-weight: 700; }

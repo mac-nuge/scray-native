@@ -118,6 +118,73 @@ function scrayHasBookmarks(video) {
 }
 window.scrayHasBookmarks = scrayHasBookmarks;
 
+/* ⚙️ The bookmarked marker (stg-native 13.65): a purple ♦ in front of the
+   filename wherever one is drawn to be read - list rows, the open row, the
+   now-playing bar, the fullscreen title, PIP and the loading card. A quick
+   way to see what has bookmarks without reading the BM button on each row.
+
+   Two shapes, because the call sites split two ways: a NODE for anything
+   building DOM (the colour is a class, so it survives the inline colours
+   those rows set on their wrappers), and an HTML STRING for the places that
+   assemble innerHTML. Anything handing out the raw name - rename, Copy Name,
+   exports, the search haystack - deliberately gets neither. */
+const SCRAY_BM_DIAMOND = '♦';
+window.SCRAY_BM_DIAMOND = SCRAY_BM_DIAMOND;
+
+/** A ♦ node for `video`, or null when it has no bookmarks. */
+function scrayBookmarkDiamond(video) {
+    if (!scrayHasBookmarks(video)) return null;
+    const span = document.createElement('span');
+    span.className = 'scray-bm-diamond';
+    span.textContent = SCRAY_BM_DIAMOND;
+    span.title = 'Has bookmarks';
+    return span;
+}
+window.scrayBookmarkDiamond = scrayBookmarkDiamond;
+
+/** The same marker as markup, for the innerHTML callers. '' when there are none. */
+function scrayBookmarkDiamondHtml(video) {
+    return scrayHasBookmarks(video)
+        ? '<span class="scray-bm-diamond" title="Has bookmarks">' + SCRAY_BM_DIAMOND + '</span>'
+        : '';
+}
+window.scrayBookmarkDiamondHtml = scrayBookmarkDiamondHtml;
+
+/**
+ * Put the marker at the front of `host` (the element holding the filename),
+ * and remember the video on it so bookmarking from an open row can repaint
+ * the marker without a full re-render - the same trick the BM buttons use.
+ * Idempotent: any marker already there is dropped first.
+ */
+function scrayMountBookmarkDiamond(host, video) {
+    if (!host) return host;
+    host._scrayVideo = video;
+    host.classList.add('scray-bm-host');
+    host.querySelectorAll(':scope > .scray-bm-diamond').forEach(n => n.remove());
+    const dia = scrayBookmarkDiamond(video);
+    if (dia) host.prepend(dia);
+    return host;
+}
+window.scrayMountBookmarkDiamond = scrayMountBookmarkDiamond;
+
+/**
+ * Re-mark every filename on screen. Called by scrayRefreshBookmarkButtons,
+ * so anything that already repaints the BM buttons after an edit gets the
+ * markers put right too.
+ */
+function scrayRefreshBookmarkDiamonds(changed = null) {
+    const id = changed ? (changed.oneDriveId ?? null) : null;
+    const list = Array.isArray(changed?.bookmarks) ? changed.bookmarks : null;
+
+    document.querySelectorAll('.scray-bm-host').forEach(host => {
+        const v = host._scrayVideo;
+        if (!v) return;
+        if (id && list && v.oneDriveId === id) v.bookmarks = list;
+        scrayMountBookmarkDiamond(host, v);
+    });
+}
+window.scrayRefreshBookmarkDiamonds = scrayRefreshBookmarkDiamonds;
+
 /* ⚙️ StashDB match state, ported from Picker's excel-sheets.js so the Stash
    filter toggle has something to filter against. Same shape as the BM block
    above: one place decides "has this file been matched", everything else asks.
@@ -314,6 +381,9 @@ function scrayRefreshBookmarkButtons(changed = null) {
             el._scrayBtnSpec.textColor = state.fg;
         }
     });
+
+    // The ♦ in front of the filenames tracks the same state (13.65).
+    scrayRefreshBookmarkDiamonds(changed);
 }
 window.scrayRefreshBookmarkButtons = scrayRefreshBookmarkButtons;
 

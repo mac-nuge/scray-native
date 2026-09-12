@@ -402,14 +402,18 @@ window.scrayNameMap = (function () {
   const CACHE_KEY = "scray_name_maps_v2";
   const TTL_MS    = 10 * 60 * 1000;
 
-  let dict     = { studio: {}, note: {} };
-  let attrs    = { studio: {}, note: {} };
-  let defs     = { studio: [], note: [] };
+  // 'censor' joined studio and note in 13.68: the words a suggested filename
+  // shortens to a first letter. It is a dictionary like the other two, so it
+  // rides along here rather than needing a fetch of its own - scray-clean-name.js
+  // reads it through dump().
+  let dict     = { studio: {}, note: {}, censor: {} };
+  let attrs    = { studio: {}, note: {}, censor: {} };
+  let defs     = { studio: [], note: [], censor: [] };
   // raw_key AND the fold key of the mapped spelling both point at the same
   // attribute object. A caller asks by whichever name it happens to be
   // holding - the lists print the mapped one, the database carries the raw
   // one - and neither has to know whether a studio was ever renamed.
-  let index    = { studio: {}, note: {} };
+  let index    = { studio: {}, note: {}, censor: {} };
   let loadedAt = 0;
   let inFlight = null;
 
@@ -436,9 +440,12 @@ window.scrayNameMap = (function () {
   // only ever be got wrong in a single place.
   function adopt(payload) {
     const p = payload || {};
-    dict  = { studio: (p.maps      && p.maps.studio)      || {}, note: (p.maps      && p.maps.note)      || {} };
-    attrs = { studio: (p.attrs     && p.attrs.studio)     || {}, note: (p.attrs     && p.attrs.note)     || {} };
-    defs  = { studio: (p.attr_defs && p.attr_defs.studio) || [], note: (p.attr_defs && p.attr_defs.note) || [] };
+    dict  = { studio: (p.maps      && p.maps.studio)      || {}, note: (p.maps      && p.maps.note)      || {},
+              censor: (p.maps      && p.maps.censor)      || {} };
+    attrs = { studio: (p.attrs     && p.attrs.studio)     || {}, note: (p.attrs     && p.attrs.note)     || {},
+              censor: (p.attrs     && p.attrs.censor)     || {} };
+    defs  = { studio: (p.attr_defs && p.attr_defs.studio) || [], note: (p.attr_defs && p.attr_defs.note) || [],
+              censor: (p.attr_defs && p.attr_defs.censor) || [] };
     reindex();
   }
 

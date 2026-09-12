@@ -59,6 +59,20 @@ const currentName = video.filename || '';
 const extension = currentName.includes('.') ? '.' + currentName.split('.').pop() : '';
 const nameWithoutExt = currentName.replace(new RegExp(extension + '$'), '');
 
+// The clean-name suggestion (13.66), built from the file's stash data by
+// scray-clean-name.js. Null when the file has no stash data, or when it is
+// already named what the rule would name it - the row only appears when
+// there is something to change.
+const cleanSuggestion = window.scrayCleanNameSuggestion
+    ? window.scrayCleanNameSuggestion(video) : null;
+// The input holds the name WITHOUT its extension and the span beside it holds
+// the extension, so the suggestion is split the same way before it goes in.
+// endsWith/slice rather than a regular expression: an extension is free text
+// off a filename and '.mp4(1)' would be a broken pattern, not a match.
+const cleanSuggestionBase = (cleanSuggestion && extension && cleanSuggestion.endsWith(extension))
+    ? cleanSuggestion.slice(0, -extension.length)
+    : (cleanSuggestion || '');
+
 const modal = document.createElement('div');
 modal.className = 'basket-json-modal';
 modal.innerHTML = `
@@ -77,6 +91,13 @@ modal.innerHTML = `
            style="flex: 1; padding: 10px; font-size: 1rem; border: 2px solid #ddd; border-radius: 4px; box-sizing: border-box;">
     <span style="font-size: 1rem; color: #666; font-weight: bold; white-space: nowrap;">${extension}</span>
 </div>
+
+<!-- Suggested name from the stash data (13.66). Fills the box, nothing more. -->
+${cleanSuggestion ? `
+<div class="rename-suggest" id="renameSuggestRow">
+    <span class="rename-suggest-name" id="renameSuggestName"></span>
+    <button type="button" id="useCleanNameBtn" class="rename-suggest-btn" title="Put this in the box - you can still edit it before renaming">Use suggested</button>
+</div>` : ''}
 
 <!-- Non-editable word selector by itself -->
 <div style="margin-bottom: 12px;">
@@ -517,6 +538,25 @@ renderRenameTags();
 
 // ✅ Initial render of word selector
 renderWordSelector(nameWithoutExt);
+
+// Suggested name (13.66). textContent, never innerHTML - a filename is user
+// data. Filling the box is ALL it does: the word selector, the bracket
+// buttons and Rename itself work on it exactly as if it had been typed, so
+// Everywhere / This phone only is asked at the same point as always.
+if (cleanSuggestion) {
+    const suggestNameEl = document.getElementById('renameSuggestName');
+    const useCleanBtn   = document.getElementById('useCleanNameBtn');
+    if (suggestNameEl) {
+        suggestNameEl.textContent = cleanSuggestion;
+        suggestNameEl.title = cleanSuggestion;
+    }
+    if (useCleanBtn) useCleanBtn.addEventListener('click', () => {
+        input.value = cleanSuggestionBase;
+        renderWordSelector(input.value);
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+    });
+}
 
 // Only auto-focus on desktop
 if (window.innerWidth > 768) {

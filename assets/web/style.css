@@ -5599,6 +5599,49 @@ cursor: pointer;
 white-space: pre;
 }
 
+/* ⚙️ The rename modal's suggested name (13.66). Only drawn when the file has
+   stash data and is not already named that way, so it is never a dead row.
+
+   STACKED, not a flex row (13.67): a suggested name is one long unbroken
+   token, and beside a button that refuses to shrink it was squeezed to a
+   single character per line and spilled out of the modal. The name gets the
+   full width, the button sits under it. */
+.rename-suggest {
+  display: block;
+  margin-bottom: 12px;
+  padding: 8px;
+  background: #f4f1fa;                 /* the BM purple, at reading strength */
+  border: 1px solid #e0d8f2;
+  border-radius: 4px;
+}
+.rename-suggest-name {
+  display: block;
+  min-width: 0;                        /* never let it overflow its box */
+  margin-bottom: 8px;
+  font-size: 0.78rem;
+  color: #444;
+  line-height: 1.35;
+  overflow-wrap: anywhere;             /* breaks inside a long hyphenated run */
+  word-break: break-word;
+  max-height: 5.4em;                   /* ~4 lines; a huge name scrolls rather
+                                          than pushing Rename off the screen */
+  overflow-y: auto;
+}
+.rename-suggest-btn {
+  display: block;
+  width: 100%;
+  background: #6f42c1;
+  color: #fff;
+  border: none;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.rename-suggest-btn:hover { background: #5a35a0; }
+
 .bracket-btn {
 background: #17a2b8;
 color: white;

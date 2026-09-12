@@ -41,6 +41,8 @@ window.ScrayBridge = {
   uploadStatus: (ids) => callNative('uploadStatus', { ids: ids || null }),
   uploadCancel: (id) => callNative('uploadCancel', { id }),
   uploadForget: (id) => callNative('uploadForget', { id }),
+  // ✅ A picture of the app as it is right now, for a bug report.
+  screenshot: () => callNative('screenshot'),
   // ✅ In-app browser. Pass nothing to resume where it was left.
   openBrowser: (url) => callNative('openBrowser', {
     url: url || null,

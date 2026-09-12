@@ -159,6 +159,9 @@ final class ScrayBrowserViewController: UIViewController,
     /// Whether the page is scrolled far enough down that the chrome has got
     /// out of the way, the way Safari's does.
     private var chromeCollapsed = false
+    /// The page has asked for the chrome to stay out of the way - it is on a
+    /// surface that does not scroll, so scrolling cannot be what dismisses it.
+    private var chromeLocked = false
     /// stashButton's own reason to be hidden, kept apart from the collapsed
     /// state so the two cannot fight over the same flag.
     private var stashEligible = false
@@ -214,6 +217,7 @@ final class ScrayBrowserViewController: UIViewController,
 
     deinit {
         observations.forEach { $0.invalidate() }
+        scrollObservation?.invalidate()
         webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayDownload")
         webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayBridge")
     }
@@ -475,6 +479,9 @@ final class ScrayBrowserViewController: UIViewController,
         let y = sv.contentOffset.y
         defer { lastScrollY = y }
 
+        // Fullscreen holds it collapsed, including at the top of the page.
+        if chromeLocked { return }
+
         // The top of a page always shows the chrome, however you got there.
         if y <= 4 { setChrome(collapsed: false); return }
         // Only a finger moves it: a page that scrolls itself - an anchor, a
@@ -488,7 +495,26 @@ final class ScrayBrowserViewController: UIViewController,
         else if dy < -Self.chromeShowAfter { setChrome(collapsed: false) }
     }
 
-    private func setChrome(collapsed: Bool) {
+    /**
+     * Hold the chrome out of the way regardless of scrolling, or stop.
+     *
+     * A fullscreen player fills the web view and never scrolls, so there is
+     * no gesture left to collapse the chrome with - and entering one handed
+     * it straight back, because the page sits at offset 0 and "the top of a
+     * page always shows the chrome". The page knows which surface it is on,
+     * so it says so: window.ScrayBridge.chromeLock(true) on the way into
+     * FLS/MPFS, false on the way out.
+     */
+    func setChromeLock(_ on: Bool) {
+        guard chromeLocked != on else { return }
+        chromeLocked = on
+        setChrome(collapsed: on, force: true)
+    }
+
+    private func setChrome(collapsed: Bool, force: Bool = false) {
+        // While locked, only the lock decides - the scroll observer and the
+        // per-page resets are both asking about a state they no longer own.
+        guard force || !chromeLocked else { return }
         guard collapsed != chromeCollapsed, isViewLoaded else { return }
         // Never while you are typing in it, and never with something on top.
         if collapsed && (addressField.isFirstResponder || presentedViewController != nil) { return }
@@ -709,6 +735,9 @@ final class ScrayBrowserViewController: UIViewController,
     // MARK: - Address bar
 
     func textFieldDidBeginEditing(_ textField: UITextField) {
+        // You cannot type into a 20pt strip: editing always gets the full bar
+        // and the toolbar back, even while a fullscreen page holds the lock.
+        setChrome(collapsed: false, force: true)
         textField.textAlignment = .left
         textField.text = currentTab?.displayURL?.absoluteString ?? ""
         DispatchQueue.main.async { textField.selectAll(nil) }
@@ -1321,7 +1350,12 @@ final class ScrayBrowserViewController: UIViewController,
             downloadStatus: function (ids) { return callNative('downloadStatus', { ids: ids || null }); },
             forgetDownload: function (id) { return callNative('forgetDownload', { id: id }); },
             refreshLibrary: function () { return callNative('refreshLibrary'); },
-            runStatus: function (status) { return callNative('runStatus', status || {}); }
+            runStatus: function (status) { return callNative('runStatus', status || {}); },
+            // Hold this browser's address bar and toolbar out of the way, for
+            // a page surface that does not scroll (FLS / MPFS).
+            chromeLock: function (on) { return callNative('chromeLock', { on: !!on }); },
+            // A picture of the page as it is right now, for a bug report.
+            screenshot: function () { return callNative('screenshot'); }
           };
         })();
         """
@@ -1482,6 +1516,40 @@ final class ScrayBrowserViewController: UIViewController,
             let active = (status["active"] as? NSNumber)?.boolValue ?? false
             ScrayRunMonitor.shared.heartbeat(active: active, progress: progress, from: webView)
             bridgeResolve(webView, id: id, result: ["success": true])
+
+        case "screenshot":
+            // The WEB VIEW only - this browser's own chrome is not part of
+            // the app being reported. afterScreenUpdates: false so it is what
+            // is on screen at the moment of asking rather than after whatever
+            // the page does next; JPEG because a phone screenshot as PNG is
+            // several megabytes and this has to travel through a JSON bridge.
+            DispatchQueue.main.async { [weak self] in
+                guard let wv = webView ?? self?.currentWebView else {
+                    self?.bridgeReject(webView, id: id, error: "No page to photograph")
+                    return
+                }
+                let cfg = WKSnapshotConfiguration()
+                cfg.afterScreenUpdates = false
+                wv.takeSnapshot(with: cfg) { image, error in
+                    guard let image = image,
+                          let data = image.jpegData(compressionQuality: 0.8) else {
+                        self?.bridgeReject(webView, id: id,
+                                           error: error?.localizedDescription ?? "Could not take the screenshot")
+                        return
+                    }
+                    self?.bridgeResolve(webView, id: id, result: [
+                        "base64": data.base64EncodedString(),
+                        "type":   "image/jpeg",
+                        "width":  Int(image.size.width),
+                        "height": Int(image.size.height)
+                    ])
+                }
+            }
+
+        case "chromeLock":
+            let locked = ((body["payload"] as? [String: Any])?["on"] as? Bool) ?? false
+            DispatchQueue.main.async { [weak self] in self?.setChromeLock(locked) }
+            bridgeResolve(webView, id: id, result: ["success": true, "locked": locked])
 
         case "deleteFile":
             guard let payload = body["payload"] as? [String: Any],

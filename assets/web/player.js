@@ -6793,6 +6793,29 @@ function detectPlayerState() {
     return stateClass;
 }
 
+/**
+ * In Native's in-app browser the address bar and toolbar collapse as you
+ * scroll. A fullscreen surface does not scroll - it fills the web view - so
+ * there is no gesture left to collapse them with, and entering one handed the
+ * chrome straight back because the page sits at offset 0. FLS and MPFS
+ * therefore say so, and the browser holds them out of the way until we leave.
+ *
+ * A no-op anywhere else: desktop has no bridge, and Native's own web view has
+ * the real ScrayBridge, which has no chromeLock and no chrome to lock.
+ */
+let scrayChromeLockState = null;
+
+function scraySyncBrowserChrome(stateClass) {
+    const want = stateClass === 'landscape-fullscreen' || stateClass === 'portrait-fullscreen';
+    if (want === scrayChromeLockState) return;
+    scrayChromeLockState = want;
+    const lock = window.ScrayBridge && window.ScrayBridge.chromeLock;
+    if (typeof lock !== 'function') return;
+    try { lock.call(window.ScrayBridge, want); } catch (err) {
+        console.warn('[chrome] could not ask the browser to collapse:', err);
+    }
+}
+
 function updatePlayerStateClass() {
     // While an FLS video is loading, the browser drops real fullscreen for a
     // stretch of the load - so detectPlayerState() reports 'portrait-inline'
@@ -6810,6 +6833,8 @@ function updatePlayerStateClass() {
     );
     if (stateClass) document.body.classList.add(stateClass);
     window.currentPlayerState = stateClass;
+    // Fullscreen means the in-app browser's chrome stays out of the way.
+    scraySyncBrowserChrome(stateClass);
     // Every surface change funnels through here - fullscreen enter and exit,
     // orientation, FLS on and off - so this is the one place that catches all
     // of them for the zoom. No-op unless the mode actually changed.

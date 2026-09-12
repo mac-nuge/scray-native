@@ -417,6 +417,84 @@ console.log("scray-bugreport.js loaded");
   // -------------------------------------------------------------
   // UI
   // -------------------------------------------------------------
+  // ---------------------------------------------------------------
+  // The screenshot
+  //
+  // What the app looked like when you pressed the button, which is the one
+  // thing a written description never quite carries. Two ways in:
+  //
+  //   the bridge   inside Native, and inside its in-app browser, Swift can
+  //                snapshot the web view - so the picture is the app as it
+  //                was BEFORE this dialog opened, taken the moment the
+  //                button was tapped.
+  //   a photo      anywhere else, or when the snapshot is not the shot you
+  //                want: an ordinary file input. On a phone iOS offers the
+  //                photo library and the camera; on a desktop, a file.
+  //
+  // Either way it is shrunk here rather than on the server: a phone
+  // screenshot is 3-4 MB of PNG, and nobody needs a ticket attachment at
+  // retina resolution.
+  // ---------------------------------------------------------------
+
+  // ⚙️ The longest edge, and the JPEG quality, of what actually gets sent.
+  const SHOT_MAX_EDGE = 1400;
+  const SHOT_QUALITY  = 0.72;
+
+  /** A data: URL, shrunk and re-encoded. Returns the original if it cannot. */
+  async function shrinkShot(dataUrl) {
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error("could not read that image"));
+        i.src = dataUrl;
+      });
+      const scale = Math.min(1, SHOT_MAX_EDGE / Math.max(img.width, img.height));
+      if (scale >= 1 && dataUrl.length < 900000) return dataUrl;
+      const c = document.createElement("canvas");
+      c.width  = Math.max(1, Math.round(img.width  * scale));
+      c.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = c.getContext("2d");
+      // A JPEG has no transparency, and without this the unpainted parts of
+      // a snapshot come out black.
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", SHOT_QUALITY);
+    } catch (err) {
+      push("warn", "[bug] could not shrink the screenshot: " + err.message);
+      return dataUrl;
+    }
+  }
+
+  /** The bridge's own snapshot of the app, or null where there is no bridge. */
+  async function captureShot() {
+    const grab = window.ScrayBridge && window.ScrayBridge.screenshot;
+    if (typeof grab !== "function") return null;
+    try {
+      const res = await grab.call(window.ScrayBridge);
+      const b64 = res && (res.base64 || res.data);
+      if (!b64) return null;
+      const type = (res && res.type) || "image/jpeg";
+      return await shrinkShot(b64.startsWith("data:") ? b64 : `data:${type};base64,${b64}`);
+    } catch (err) {
+      push("warn", "[bug] no screenshot from the bridge: " + err.message);
+      return null;
+    }
+  }
+
+  /** A picked file, read and shrunk. */
+  async function shotFromFile(file) {
+    if (!file || !/^image\//.test(file.type || "")) return null;
+    const dataUrl = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload  = () => resolve(String(r.result || ""));
+      r.onerror = () => reject(new Error("could not read that file"));
+      r.readAsDataURL(file);
+    });
+    return await shrinkShot(dataUrl);
+  }
+
   function injectStyles() {
     if (document.getElementById("scrayBugStyles")) return;
     const el = document.createElement("style");
@@ -457,6 +535,22 @@ console.log("scray-bugreport.js loaded");
 #scrayBugPanel .check { display: flex; align-items: flex-start; gap: 8px; font-size: 0.82rem; color: #bbb; }
 #scrayBugPanel .check input { margin-top: 2px; }
 #scrayBugPanel details { margin-top: 8px; }
+#scrayBugShotBox { display: flex; flex-direction: column; gap: 8px; }
+#scrayBugShotImg {
+  display: none; max-width: 100%; max-height: 190px; width: auto;
+  border: 1px solid #454545; border-radius: 6px; background: #000;
+  object-fit: contain; align-self: flex-start;
+}
+#scrayBugShotImg.on { display: block; }
+#scrayBugShotNone { font-size: 0.78rem; color: #888; }
+#scrayBugShotBtns { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#scrayBugShotBtns .filebtn, #scrayBugShotClear {
+  background: #2a2a2a; color: #ddd; border: 1px solid #4a4a4a; border-radius: 6px;
+  padding: 5px 10px; font-size: 0.78rem; cursor: pointer; display: inline-block; margin: 0;
+  font-weight: normal;
+}
+#scrayBugShotBtns .filebtn:hover, #scrayBugShotClear:hover { background: #3a3a3a; color: #fff; }
+#scrayBugShotNote { font-size: 0.72rem; color: #888; }
 #scrayBugPanel summary { cursor: pointer; font-size: 0.78rem; color: #888; }
 #scrayBugPanel pre {
   background: #141414; border: 1px solid #333; border-radius: 6px;
@@ -499,6 +593,11 @@ console.log("scray-bugreport.js loaded");
     open = true;
     injectStyles();
 
+    // FIRST, before a single pixel of this dialog is on screen: the picture
+    // has to be of the app you are reporting, not of the form you report it
+    // with. Everything below can wait the few milliseconds it takes.
+    let shot = await captureShot();
+
     const dom   = domSnapshot();
     const state = await snapshot();
     const lines = consoleLines();
@@ -523,6 +622,19 @@ console.log("scray-bugreport.js loaded");
         <div class="row">
           <label for="scrayBugDetails">What happened?</label>
           <textarea id="scrayBugDetails" placeholder="What you did, what you expected, what you got."></textarea>
+        </div>
+        <div class="row" id="scrayBugShotRow">
+          <label>Screenshot</label>
+          <div id="scrayBugShotBox">
+            <img id="scrayBugShotImg" alt="">
+            <div id="scrayBugShotNone">No screenshot</div>
+            <div id="scrayBugShotBtns">
+              <label class="filebtn" for="scrayBugShotFile">Attach a photo</label>
+              <input type="file" id="scrayBugShotFile" accept="image/*" hidden>
+              <button type="button" id="scrayBugShotClear" hidden>Remove</button>
+              <span id="scrayBugShotNote"></span>
+            </div>
+          </div>
         </div>
         <div class="row">
           <div class="check">
@@ -560,6 +672,41 @@ console.log("scray-bugreport.js loaded");
     const status  = document.getElementById("scrayBugStatus");
     const sendBtn = document.getElementById("scrayBugSend");
     const summary = document.getElementById("scrayBugSummary");
+
+    // ---- the screenshot row ----
+    const shotImg   = document.getElementById("scrayBugShotImg");
+    const shotNone  = document.getElementById("scrayBugShotNone");
+    const shotClear = document.getElementById("scrayBugShotClear");
+    const shotNote  = document.getElementById("scrayBugShotNote");
+    const shotFile  = document.getElementById("scrayBugShotFile");
+
+    function paintShot(source) {
+      const has = !!shot;
+      shotImg.classList.toggle("on", has);
+      if (has) shotImg.src = shot;
+      shotNone.style.display = has ? "none" : "";
+      shotClear.hidden = !has;
+      shotNote.textContent = has
+        ? `${Math.round(shot.length * 0.75 / 1024)} KB · ${source || "attached"}`
+        : "";
+    }
+    paintShot(shot ? "the app as it was" : "");
+
+    shotFile.addEventListener("change", async () => {
+      const file = shotFile.files && shotFile.files[0];
+      shotFile.value = "";
+      if (!file) return;
+      shotNote.textContent = "reading…";
+      try {
+        const next = await shotFromFile(file);
+        if (!next) { shotNote.textContent = "that file is not an image"; return; }
+        shot = next;
+        paintShot("from your photos");
+      } catch (err) {
+        shotNote.textContent = String(err && err.message ? err.message : err);
+      }
+    });
+    shotClear.addEventListener("click", () => { shot = null; paintShot(""); });
 
     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
     document.getElementById("scrayBugCancel").addEventListener("click", close);
@@ -605,6 +752,9 @@ console.log("scray-bugreport.js loaded");
           state:   include ? state : null,
           console: include ? lines : null,
           dom:     include ? dom   : null,
+          // Deliberately outside the include checkbox: a screenshot is
+          // something you chose to attach, not part of the diagnostics bundle.
+          shot:    shot || null,
         });
         status.className = "good";
         status.textContent = `Filed as ${res.key}. ${res.attached ? "State attached." : ""}`;
@@ -689,11 +839,15 @@ console.log("scray-bugreport.js loaded");
       const panel = panelEl
         ? redact(Array.from(panelEl.children).map((d) => d.textContent).join("\n")).slice(-REPORT_PANEL_CHARS)
         : "";
+      // No dialog here by design, so there is nothing to pick a photo with -
+      // but where the bridge can take the shot itself, the report gets one.
+      const shot = await captureShot();
       const res = await call("save_report", {
         note: "",
         state: await snapshot(),
         console: consoleLines(),
         panel: panel,
+        shot: shot || null,
       });
       btn.textContent = "sent ✓";
       out.style.color = "#070";

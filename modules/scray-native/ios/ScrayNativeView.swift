@@ -247,6 +247,27 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
             }
             ScrayBrowser.shared.present(url: browserURL, home: browserHome)
             resolve(id: id, result: ["success": true])
+        case "screenshot":
+            // What the app looks like right now, for a bug report. The web
+            // view IS the app here, so a snapshot of it is the whole picture.
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                let cfg = WKSnapshotConfiguration()
+                cfg.afterScreenUpdates = false
+                self.webView.takeSnapshot(with: cfg) { image, error in
+                    guard let image = image,
+                          let data = image.jpegData(compressionQuality: 0.8) else {
+                        self.reject(id: id, error: error?.localizedDescription ?? "Could not take the screenshot")
+                        return
+                    }
+                    self.resolve(id: id, result: [
+                        "base64": data.base64EncodedString(),
+                        "type":   "image/jpeg",
+                        "width":  Int(image.size.width),
+                        "height": Int(image.size.height)
+                    ])
+                }
+            }
         case "deviceStorage":
             // ForImportantUsage counts purgeable space, which is what iOS
             // actually frees up when a write needs room. The raw free-bytes

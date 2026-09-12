@@ -157,13 +157,10 @@ console.log("scray-bugreport.js loaded");
   //                   outerHTML serialises attributes and nothing else - a
   //                   typed-in search box is empty in a naive dump.
   //
-  // No picture is ever taken for you. There is no screenshot API reachable
-  // from JS inside a WKWebView, and html2canvas re-renders rather than
-  // captures, which is worse than useless for a bug about how something
-  // looks. Native could do it properly with WKWebView.takeSnapshot, and did
-  // for one version - it was removed in 13.74 because most reports do not
-  // want a picture, and the ones that do are better served by a photo you
-  // chose. Attach one below, or with the console report's own dialog.
+  // There is no screenshot API reachable from JS inside a WKWebView, and
+  // html2canvas re-renders rather than captures, which is worse than useless
+  // for a bug about how something looks. Native can do it properly with
+  // WKWebView.takeSnapshot.
 
   // ⚙️ ADJUSTABLE
   const MAX_DOM_CHARS = 400000;  // ceiling on the serialised HTML
@@ -427,12 +424,12 @@ console.log("scray-bugreport.js loaded");
   // thing a written description never quite carries. Two ways in:
   //
   //   the bridge   inside Native, and inside its in-app browser, Swift can
-  //   a photo      an ordinary file input, and the only way in. On a phone
-  //                iOS offers the photo library and the camera; on a desktop,
-  //                a file. There was once an automatic snapshot through the
-  //                bridge as well; it was removed on request (13.74) because
-  //                most reports do not want one, and the ones that do are
-  //                better served by a picture you chose.
+  //                snapshot the web view - so the picture is the app as it
+  //                was BEFORE this dialog opened, taken the moment the
+  //                button was tapped.
+  //   a photo      anywhere else, or when the snapshot is not the shot you
+  //                want: an ordinary file input. On a phone iOS offers the
+  //                photo library and the camera; on a desktop, a file.
   //
   // Either way it is shrunk here rather than on the server: a phone
   // screenshot is 3-4 MB of PNG, and nobody needs a ticket attachment at
@@ -467,6 +464,22 @@ console.log("scray-bugreport.js loaded");
     } catch (err) {
       push("warn", "[bug] could not shrink the screenshot: " + err.message);
       return dataUrl;
+    }
+  }
+
+  /** The bridge's own snapshot of the app, or null where there is no bridge. */
+  async function captureShot() {
+    const grab = window.ScrayBridge && window.ScrayBridge.screenshot;
+    if (typeof grab !== "function") return null;
+    try {
+      const res = await grab.call(window.ScrayBridge);
+      const b64 = res && (res.base64 || res.data);
+      if (!b64) return null;
+      const type = (res && res.type) || "image/jpeg";
+      return await shrinkShot(b64.startsWith("data:") ? b64 : `data:${type};base64,${b64}`);
+    } catch (err) {
+      push("warn", "[bug] no screenshot from the bridge: " + err.message);
+      return null;
     }
   }
 
@@ -537,40 +550,7 @@ console.log("scray-bugreport.js loaded");
   font-weight: normal;
 }
 #scrayBugShotBtns .filebtn:hover, #scrayBugShotClear:hover { background: #3a3a3a; color: #fff; }
-/* The id rule above sets display, which outranks the UA sheet's
-   [hidden]{display:none} - so Remove stayed on screen with nothing to
-   remove. Put it back explicitly. */
-#scrayBugShotClear[hidden] { display: none; }
 #scrayBugShotNote { font-size: 0.72rem; color: #888; }
-#scrayShotAskOverlay {
-  position: fixed; inset: 0; z-index: ${Z_MODAL};
-  background: rgba(0,0,0,0.72);
-  display: flex; align-items: center; justify-content: center; padding: 16px;
-  font-family: Arial, Helvetica, sans-serif;
-}
-#scrayShotAskPanel {
-  background: #1e1e1e; color: #eee; border: 1px solid #3a3a3a; border-radius: 10px;
-  width: min(420px, 100%); max-height: 88vh; overflow-y: auto;
-  padding: 18px; box-shadow: 0 10px 40px rgba(0,0,0,0.6);
-}
-#scrayShotAskPanel h2 { margin: 0 0 8px; font-size: 1.02rem; font-weight: 600; }
-#scrayShotAskHint { margin: 0 0 12px; font-size: 0.8rem; color: #999; line-height: 1.45; }
-#scrayShotAskImg {
-  display: none; max-width: 100%; max-height: 200px; width: auto; margin-bottom: 8px;
-  border: 1px solid #454545; border-radius: 6px; background: #000;
-  object-fit: contain;
-}
-#scrayShotAskImg.on { display: block; }
-#scrayShotAskNote { font-size: 0.74rem; color: #888; min-height: 1.1em; margin-bottom: 12px; }
-#scrayShotAskActions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
-#scrayShotAskActions button, #scrayShotAskActions .filebtn {
-  padding: 9px 14px; border-radius: 6px; border: 1px solid #4a4a4a;
-  background: #2f2f2f; color: #ddd; font-size: 0.86rem; font-family: inherit;
-  cursor: pointer; display: inline-block; margin: 0; font-weight: normal;
-  -webkit-tap-highlight-color: transparent;
-}
-#scrayShotAskActions .filebtn:hover, #scrayShotAskActions button:hover { background: #3a3a3a; color: #fff; }
-#scrayShotAskActions button.primary { background: #2d6cdf; border-color: #2d6cdf; color: #fff; font-weight: 600; }
 #scrayBugPanel summary { cursor: pointer; font-size: 0.78rem; color: #888; }
 #scrayBugPanel pre {
   background: #141414; border: 1px solid #333; border-radius: 6px;
@@ -613,9 +593,10 @@ console.log("scray-bugreport.js loaded");
     open = true;
     injectStyles();
 
-    // Nothing is captured for you. A screenshot is only ever a photo you
-    // attach below, so this starts empty.
-    let shot = null;
+    // FIRST, before a single pixel of this dialog is on screen: the picture
+    // has to be of the app you are reporting, not of the form you report it
+    // with. Everything below can wait the few milliseconds it takes.
+    let shot = await captureShot();
 
     const dom   = domSnapshot();
     const state = await snapshot();
@@ -709,7 +690,7 @@ console.log("scray-bugreport.js loaded");
         ? `${Math.round(shot.length * 0.75 / 1024)} KB · ${source || "attached"}`
         : "";
     }
-    paintShot("");
+    paintShot(shot ? "the app as it was" : "");
 
     shotFile.addEventListener("change", async () => {
       const file = shotFile.files && shotFile.files[0];
@@ -846,96 +827,9 @@ console.log("scray-bugreport.js loaded");
     return out;
   }
 
-  /**
-   * One question before anything is sent: do you want a picture with it?
-   * Resolves to { cancelled } or { cancelled: false, shot }. "Send without"
-   * is the default action, so the fast path is still two taps.
-   */
-  function askForShot() {
-    return new Promise((resolve) => {
-      injectStyles();
-      const overlay = document.createElement("div");
-      overlay.id = "scrayShotAskOverlay";
-      overlay.innerHTML = `
-        <div id="scrayShotAskPanel" role="dialog" aria-modal="true">
-          <h2>Include a screenshot?</h2>
-          <p id="scrayShotAskHint">
-            The console, app state and diagnostics are sent either way.
-            A photo is optional - iOS will offer your photo library or the camera.
-          </p>
-          <img id="scrayShotAskImg" alt="">
-          <div id="scrayShotAskNote"></div>
-          <div id="scrayShotAskActions">
-            <button type="button" id="scrayShotAskCancel">Cancel</button>
-            <label class="filebtn" for="scrayShotAskFile" id="scrayShotAskPick">Add a photo</label>
-            <input type="file" id="scrayShotAskFile" accept="image/*" hidden>
-            <button type="button" id="scrayShotAskSend" class="primary">Send without</button>
-          </div>
-        </div>`;
-      // <html> for the same reason the bug modal uses it: the Floating Menu
-      // is a sibling at the same z-index, and the later child paints on top.
-      document.documentElement.appendChild(overlay);
-
-      const img  = overlay.querySelector("#scrayShotAskImg");
-      const note = overlay.querySelector("#scrayShotAskNote");
-      const pick = overlay.querySelector("#scrayShotAskPick");
-      const file = overlay.querySelector("#scrayShotAskFile");
-      const send = overlay.querySelector("#scrayShotAskSend");
-      let shot = null;
-      let settled = false;
-
-      function done(value) {
-        if (settled) return;
-        settled = true;
-        overlay.remove();
-        resolve(value);
-      }
-
-      file.addEventListener("change", async () => {
-        const f = file.files && file.files[0];
-        file.value = "";
-        if (!f) return;
-        note.textContent = "reading\u2026";
-        try {
-          const next = await shotFromFile(f);
-          if (!next) { note.textContent = "that file is not an image"; return; }
-          shot = next;
-          img.src = shot;
-          img.classList.add("on");
-          note.textContent = `${Math.round(shot.length * 0.75 / 1024)} KB attached`;
-          pick.textContent = "Choose another";
-          send.textContent = "Send with photo";
-        } catch (err) {
-          note.textContent = String(err && err.message ? err.message : err);
-        }
-      });
-
-      send.addEventListener("click", () => done({ cancelled: false, shot: shot }));
-      overlay.querySelector("#scrayShotAskCancel").addEventListener("click", () => done({ cancelled: true }));
-      overlay.addEventListener("click", (e) => { if (e.target === overlay) done({ cancelled: true }); });
-      // ui.js binds bare letters on window; swallow them while this is up.
-      overlay.addEventListener("keydown", (e) => {
-        e.stopPropagation();
-        if (e.key === "Escape") done({ cancelled: true });
-      });
-      setTimeout(() => send.focus(), 50);
-    });
-  }
-
   async function sendConsoleReport(btn) {
     const label = btn.textContent;
     const out = reportOut(btn.parentNode);
-
-    // Ask first. A tap on "send report" no longer sends anything by itself.
-    const answer = await askForShot();
-    if (answer.cancelled) {
-      out.style.color = "#666";
-      out.textContent = "cancelled";
-      setTimeout(() => { if (out.textContent === "cancelled") out.textContent = ""; }, 2500);
-      return;
-    }
-    const shot = answer.shot || null;
-
     btn.disabled = true;
     btn.textContent = "sending…";
     out.style.color = "#666";
@@ -945,6 +839,9 @@ console.log("scray-bugreport.js loaded");
       const panel = panelEl
         ? redact(Array.from(panelEl.children).map((d) => d.textContent).join("\n")).slice(-REPORT_PANEL_CHARS)
         : "";
+      // No dialog here by design, so there is nothing to pick a photo with -
+      // but where the bridge can take the shot itself, the report gets one.
+      const shot = await captureShot();
       const res = await call("save_report", {
         note: "",
         state: await snapshot(),
@@ -952,9 +849,19 @@ console.log("scray-bugreport.js loaded");
         panel: panel,
         shot: shot || null,
       });
+      // res.shot is the number of bytes the SERVER decoded and wrote. A photo
+      // that leaves here and arrives as nothing is the difference between a
+      // broken image and a bug worth chasing, so it is worth one word.
+      const stored = Number(res.shot || 0);
       btn.textContent = "sent ✓";
-      out.style.color = "#070";
+      out.style.color = shot && !stored ? "#a60" : "#070";
       out.textContent = "";
+      if (shot && !stored) {
+        const warn = document.createElement("span");
+        warn.textContent = "photo not stored · ";
+        out.appendChild(warn);
+        push("warn", "[report] the photo was sent but the server stored 0 bytes of it");
+      }
       const a = document.createElement("a");
       a.href = res.url; a.target = "_blank"; a.rel = "noopener";
       a.textContent = res.url; a.style.color = "inherit";

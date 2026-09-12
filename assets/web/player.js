@@ -4251,7 +4251,8 @@ function attachFrameStepButtons() {
     //        into a minus sixth and a plus sixth.
     //   MPFS (portrait branch):  quarters - fullscreen, play/pause, minus,
     //        plus.
-    //   MPB  (portrait branch too): the MPFS set, full height. Its tier
+    //   MPB  (portrait branch too): the MPFS set, full height, plus one
+    //        extra rule halving Q1 - MPFS above it, FLS below. Its tier
     //        lines are moved by scrayPlaceMpbTapTiers - see there.
     // Change one, change the other.
     if (!wrapper.querySelector('.fls-tap-guides')) {
@@ -4298,6 +4299,14 @@ function attachFrameStepButtons() {
                 guides.appendChild(tier);
             });
         });
+
+        // MPB only: the rule splitting Q1 into MPFS (above) and FLS (below).
+        // Placed in px by scrayPlaceMpbTapTiers for the same reason the tier
+        // lines are - MPB's zones divide .plyr, the guides live in the
+        // picture's wrapper, and the two differ by the progress bar.
+        const q1Split = document.createElement('div');
+        q1Split.className = 'mpb-q1-split';
+        guides.appendChild(q1Split);
 
         wrapper.appendChild(guides);
     }
@@ -5156,6 +5165,9 @@ function scrayPlaceMpbTapTiers() {
     if (!p.height || !w.height) return;
     guides.style.setProperty('--scray-mpb-tier-upper', (p.top + p.height / 3 - w.top) + 'px');
     guides.style.setProperty('--scray-mpb-tier-lower', (p.top + p.height * 2 / 3 - w.top) + 'px');
+    // Q1's own divider. handleDoubleTap halves the same height, so this is
+    // the line it is actually testing against.
+    guides.style.setProperty('--scray-mpb-q1-split', (p.top + p.height / 2 - w.top) + 'px');
 }
 
 function scrayWakeTapGuides() {
@@ -7588,7 +7600,7 @@ if (isLandscape && isMobile) {
 if (false) {
 } else {
     // ✅ MPB: four vertical quarters.
-    //   Q1 (0-25%)   fullscreen toggle
+    //   Q1 (0-25%)   mode: MPFS in its top half, FLS in its bottom half
     //   Q2 (25-50%)  play/pause  <- deliberate dead space in the middle,
     //                               so there's somewhere safe to double-tap
     //   Q3 (50-75%)  minus seeks (-3 / -10 / -30, bottom to top)
@@ -7629,23 +7641,55 @@ if (false) {
     const bottomThird = (bandH / 3) * 2;
     
     if (effTapX < q1) {
-        // Left third toggles fullscreen. Which KIND of fullscreen depends on
-        // the video's own shape:
-        //  - Portrait video: plain Plyr fullscreen. Rotating a portrait frame
-        //    into a landscape box only letterboxes it, so FLS is pointless
-        //    here. FLS is still reachable via the ↻ control button.
-        //  - Landscape video: forced-landscape (FLS), as before - that's the
-        //    whole reason the rotate path exists on a portrait-locked phone.
-        const isPortraitVideo = window.currentVideoOrientation === 'P';
-
-        if (!isPortraitVideo && typeof window.toggleManualRotation === 'function') {
-            window.toggleManualRotation();
-        } else if (window.plyrPlayer.fullscreen.active) {
-            window.plyrPlayer.fullscreen.exit();
-            showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
+        // Q1 is the MODE zone - the one zone here that changes what surface
+        // you are on rather than what the video is doing.
+        if (!inMpfs) {
+            // MPB (13.76): two horizontal halves, and you choose.
+            //   TOP    -> MPFS, plain portrait fullscreen
+            //   BOTTOM -> FLS, forced landscape
+            // Until now this was a single zone whose destination was picked
+            // FOR you from the video's own shape - portrait clips to MPFS,
+            // landscape clips to FLS - on the reasoning that rotating a
+            // portrait frame into a landscape box only letterboxes it. True,
+            // but it also meant a portrait clip could not reach FLS from the
+            // picture at all. Naming the half says which you want, so the
+            // shape rule is gone with it.
+            //
+            // intoBand and bandH are the full picture in MPB (the band is
+            // MPFS-only), so this halves what you can actually see.
+            if (intoBand < bandH / 2) {
+                window.plyrPlayer.fullscreen.enter();
+                showPlayerFeedback('⛶ Fullscreen', 'top-left');
+            } else if (typeof window.toggleManualRotation === 'function') {
+                window.toggleManualRotation();
+                showPlayerFeedback('↻ Landscape fullscreen', 'top-left');
+            } else {
+                // No rotate path on this build: ordinary fullscreen beats
+                // a tap that does nothing.
+                window.plyrPlayer.fullscreen.enter();
+                showPlayerFeedback('⛶ Fullscreen', 'top-left');
+            }
         } else {
-            window.plyrPlayer.fullscreen.enter();
-            showPlayerFeedback('⛶ Enter Fullscreen', 'top-left');
+            // MPFS: still one zone, still shape-aware. There is only one
+            // surface left to move to from here, and the band has already
+            // taken most of this zone's height - halving what remains would
+            // make both targets too small to hit.
+            //  - Landscape video: across to FLS, which is the whole reason
+            //    the rotate path exists on a portrait-locked phone.
+            //  - Portrait video: back out. Rotating a portrait frame into a
+            //    landscape box only letterboxes it; the ↻ control button is
+            //    still there if that is what you actually want.
+            const isPortraitVideo = window.currentVideoOrientation === 'P';
+
+            if (!isPortraitVideo && typeof window.toggleManualRotation === 'function') {
+                window.toggleManualRotation();
+            } else if (window.plyrPlayer.fullscreen.active) {
+                window.plyrPlayer.fullscreen.exit();
+                showPlayerFeedback('⛶ Exit Fullscreen', 'top-left');
+            } else {
+                window.plyrPlayer.fullscreen.enter();
+                showPlayerFeedback('⛶ Enter Fullscreen', 'top-left');
+            }
         }
     } else if (effTapX < q2) {
         // Q2: play/pause. No vertical sub-split - the whole point of this

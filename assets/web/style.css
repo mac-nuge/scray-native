@@ -2324,6 +2324,25 @@ body.portrait-inline:not(.manual-rotate-landscape) .mpfs-tap-tier.scray-tap-tier
 top: var(--scray-mpb-tier-lower, 66.667%) !important;
 }
 
+/* MPB (13.76): Q1 is two halves - MPFS above this line, FLS below. Drawn only
+   here; MPFS and FLS keep a single, undivided mode zone. Same alpha as every
+   other rule in the grid, and the same px-from-JS treatment as the tiers,
+   since it divides .plyr's height rather than the wrapper's. */
+.mpb-q1-split {
+position: absolute;
+display: none;
+left: 0;
+width: 25%;
+height: 1px;
+margin-top: -0.5px;
+background: rgba(255, 255, 255, 0.22);
+pointer-events: none !important;
+}
+body.portrait-inline:not(.manual-rotate-landscape) .mpb-q1-split {
+display: block;
+top: var(--scray-mpb-q1-split, 50%);
+}
+
 /* =========================================
 SINGLE-TAP FRAME-STEP ZONES (landscape mobile only)
 Invisible overlays over the LEFT half of the player (previously the

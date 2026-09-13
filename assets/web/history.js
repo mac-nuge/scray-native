@@ -108,7 +108,13 @@ title: "Play video",
 color: "#28a745",
 onClick: () => {
   const vid = historyVideos[idx];
-  window.inlineVideoPlayer?.play(vid);
+  // 'history' as the context, not nothing: that is the door into
+  // scrayPlaceHistoryPlay (player.js), which puts < and > back on this file's
+  // spot in the MAIN list. Its position in this panel is not walkable.
+  window.inlineVideoPlayer?.play(vid, 'history', idx);
+  // Still reset the play-through sequence, as passing no context used to do
+  // for us: picking a row by hand is not carrying on through history.
+  if (typeof window.resetHistoryPlayIndex === 'function') window.resetHistoryPlayIndex();
   // ✅ Close history panel after playing
   if (typeof toggleHistory === 'function') {
       toggleHistory(false);

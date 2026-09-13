@@ -2140,6 +2140,38 @@ return [];
 }
 
 /**
+* Where < and > should walk from, for a video played out of history.
+*
+* History records the ORDER YOU WATCHED IN, and that is not a list you can
+* step through: the same file sits in it several times over, and the entries
+* either side of one are whatever you happened to play before and after it,
+* from anywhere. So "next" landed somewhere arbitrary.
+*
+* What you actually mean by next, after picking something out of history, is
+* the next file in the list you originally found it in. So a play from the
+* history panel, from H< or from H^ is placed back at that file's own
+* position in the MAIN list, and < and > walk from there - as if you had
+* played it from the list in the first place. Its place in the history panel
+* is ignored entirely.
+*
+* The fallback is history's own position, for a file the main list does not
+* currently hold - filtered out, on another page of a filter, or gone. A walk
+* through history beats no walk at all, and it is what used to happen.
+*/
+function scrayPlaceHistoryPlay(video, index) {
+   const mainList = (window.paginationState && window.paginationState.allVideos) || [];
+   const id = video ? (video.oneDriveId ?? video.idFromAPI ?? null) : null;
+   const at = id == null ? -1 : mainList.findIndex(v => (v.oneDriveId ?? v.idFromAPI) === id);
+   if (at < 0) {
+       console.log(`[history] ${video?.filename} is not in the main list - < and > walk history instead`);
+       return { context: 'history', index };
+   }
+   console.log(`[history] ${video?.filename} placed at ${at + 1}/${mainList.length} in the main list`);
+   return { context: 'main', index: at };
+}
+window.scrayPlaceHistoryPlay = scrayPlaceHistoryPlay;
+
+/**
 * Play next video in current list context
 * If nothing is playing, play first item from main list
 */
@@ -9171,8 +9203,18 @@ if (previewDelayMs > 0) {
     }
 }
 console.log("playVideoInline CALLED with video =", video);
+// A play out of history walks the MAIN list from here on - see
+// scrayPlaceHistoryPlay. Note this rewrites what is REMEMBERED, not the
+// listContext this function was called with: the H< reset guard further down
+// still reads the original, so the play-through sequence is unaffected.
+if (listContext === 'history') {
+const placed = scrayPlaceHistoryPlay(video, index);
+currentListContext = placed.context;
+currentVideoIndex = placed.index;
+} else {
 currentListContext = listContext;
 currentVideoIndex = index;
+}
 window.currentPlayingVideo = video; // Store for highlight updates
 
 // TEMP DIAGNOSTIC - remove once bookmark marker issue is resolved

@@ -2035,6 +2035,11 @@ function computeBottomDock() {
     const shouldDock = isMobilePortrait &&
         !window.plyrPlayer?.fullscreen?.active &&
         !container.classList.contains('mini-player') &&
+        // Floating over the page (wholesale mode's preview popup). Excluded
+        // here rather than handled in CSS so the whole dock goes with it: the
+        // backdrop, the body padding and the top spacer are all released by
+        // the !shouldDock branch below, which is exactly what a popup wants.
+        !container.classList.contains('float-player') &&
         // ✅ Nothing loaded - the player is display:none, so its
         // offsetHeight is 0 and docking it would just reserve empty space.
         !document.body.classList.contains('player-idle');
@@ -9025,6 +9030,7 @@ let scrayWatchBound   = false;   // plyr listeners attach once, not per video
  */
 function scrayWatchFlushTime(s) {
     if (!s) return;
+    if (s.noCount) return;                             // a preview reports nothing
     if (s.watched < SCRAY_TIME_THRESHOLD_S) return;    // gate still shut
     const secs = Math.floor(s.watched - s.flushed);
     if (secs < 1) return;
@@ -9040,6 +9046,7 @@ function scrayWatchTrackingOn() {
 }
 
 function scrayWatchCountView(s) {
+    if (s.noCount) return;                             // a preview is not a view
     if (!scrayWatchTrackingOn()) return;
     console.log(`[watch] ${Math.round(s.watched)}s watched — counting a view of ${s.video?.filename}`);
     window.queueExcelUpdate(s.video, { increment_views: true, played_now: true })
@@ -9101,14 +9108,21 @@ function scrayWatchAttach() {
  * the next video is the commonest way a watch ends, and its unreported
  * seconds would otherwise die with the session object.
  */
-window.scrayWatchBegin = function (video) {
+window.scrayWatchBegin = function (video, { count = true } = {}) {
     scrayWatchFlushTime(scrayWatchSession);
     scrayWatchSession = {
         video,
         watched: 0,        // seconds of real playback this load
         flushed: 0,        // of those, how many have reached the server
         lastTime: null,    // last currentTime seen, for the step calculation
-        viewCounted: false
+        viewCounted: false,
+        // count: false is a PREVIEW (wholesale mode's play). The seconds are
+        // still counted here, so scrayWatchState can show them, but nothing is
+        // ever sent - see the guards in scrayWatchFlushTime and
+        // scrayWatchCountView. A preview opens a session rather than skipping
+        // one so that the PREVIOUS video's session is still flushed and
+        // closed; without that its seconds keep accruing underneath.
+        noCount: !count
     };
     scrayWatchAttach();
 };
@@ -9124,6 +9138,7 @@ window.scrayWatchState = () => scrayWatchSession && {
     watched: Math.round(scrayWatchSession.watched * 10) / 10,
     flushed: scrayWatchSession.flushed,
     viewCounted: scrayWatchSession.viewCounted,
+    preview: !!scrayWatchSession.noCount,
     listening: scrayWatchBound
 };
 
@@ -9168,7 +9183,7 @@ function scrayLoadingBookmarkLine() {
     return `<div class="scray-loading-bookmark" style="font-size: 0.8rem; margin-bottom: 4px;">🔖 ${name} <span style="opacity: 0.75;">@ ${time}</span></div>`;
 }
 
-async function playVideoInline(video, listContext = null, index = null, startAt = null) {
+async function playVideoInline(video, listContext = null, index = null, startAt = null, opts = {}) {
 // ⚙️ Where to start this video, in seconds. Stashed here and applied once on
 // 'loadedmetadata' below, then cleared - so it survives the load without
 // leaking into whatever plays next. Replaces the old
@@ -9351,15 +9366,25 @@ loadingOverlay.style.wordBreak = 'break-word';
 loadingOverlay.onclick = null;
 }
 
+// opts.preview is a LOOK, not a watch - wholesale mode's play button, where
+// you are judging a file rather than watching it. It is the same player with
+// everything working, and it leaves no trace: no history entry, no view, no
+// last_played, no watched time.
+const previewOnly = !!(opts && opts.preview);
+
 // 📝 ADD TO HISTORY IMMEDIATELY (before attempting play)
-if (typeof window.addToHistory === 'function') {
+if (!previewOnly && typeof window.addToHistory === 'function') {
 window.addToHistory(video);
 }
 
 // Open a watch session. Nothing is recorded here - view_count and
 // last_played wait for SCRAY_VIEW_THRESHOLD_S seconds of real playback, and
 // time_viewed for SCRAY_TIME_THRESHOLD_S. See WATCH TRACKING above.
-window.scrayWatchBegin(video);
+//
+// A preview still opens one, with counting off. Skipping the call instead
+// would leave the PREVIOUS video's session open, and every second spent
+// previewing would be banked against whatever you were watching before.
+window.scrayWatchBegin(video, { count: !previewOnly });
 
 // Extract video info building into reusable global function
 window.rebuildVideoInfoDisplay = function(video) {
@@ -10234,6 +10259,10 @@ function setPlayerIdle(isIdle) {
     console.log(isIdle ? 'Player hidden (idle)' : 'Player shown (video loading)');
 }
 window.setPlayerIdle = setPlayerIdle;
+// Anything that moves the player in or out of the dock has to be able to make
+// it recalculate - wholesale mode's preview popup toggles .float-player and
+// needs the dock handed back in the same tick.
+window.computeBottomDock = computeBottomDock;
 
 // ========================
 // Reset player to initial blank state

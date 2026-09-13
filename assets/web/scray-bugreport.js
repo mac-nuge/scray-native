@@ -426,13 +426,17 @@ console.log("scray-bugreport.js loaded");
   // What the app looked like when you pressed the button, which is the one
   // thing a written description never quite carries. Two ways in:
   //
-  //   the bridge   inside Native, and inside its in-app browser, Swift can
-  //   a photo      an ordinary file input, and the only way in. On a phone
-  //                iOS offers the photo library and the camera; on a desktop,
-  //                a file. There was once an automatic snapshot through the
-  //                bridge as well; it was removed on request (13.74) because
-  //                most reports do not want one, and the ones that do are
-  //                better served by a picture you chose.
+  //   the clipboard  Paste, or an ordinary paste into the panel. Added in
+  //                  13.106 so a screenshot never has to be SAVED to report
+  //                  it: shoot it, tap Copy and Delete in the preview, paste
+  //                  it here, and it is gone with the ticket rather than left
+  //                  in Photos to tidy up later.
+  //   a photo        an ordinary file input. On a phone iOS offers the photo
+  //                  library and the camera; on a desktop, a file. There was
+  //                  once an automatic snapshot through the bridge as well; it
+  //                  was removed on request (13.74) because most reports do
+  //                  not want one, and the ones that do are better served by a
+  //                  picture you chose.
   //
   // Either way it is shrunk here rather than on the server: a phone
   // screenshot is 3-4 MB of PNG, and nobody needs a ticket attachment at
@@ -470,16 +474,49 @@ console.log("scray-bugreport.js loaded");
     }
   }
 
-  /** A picked file, read and shrunk. */
-  async function shotFromFile(file) {
-    if (!file || !/^image\//.test(file.type || "")) return null;
-    const dataUrl = await new Promise((resolve, reject) => {
+  /**
+   * The clipboard's image, if it is holding one.
+   *
+   * This exists so a screenshot never has to be SAVED to report it. Take the
+   * shot, tap Copy and Delete in the preview, paste it here: it lives on the
+   * clipboard and is gone once the ticket is sent, rather than sitting in
+   * Photos waiting to be tidied up.
+   *
+   * navigator.clipboard.read() is called with no await before it, deliberately.
+   * WebKit only honours a clipboard read inside the gesture that asked for it,
+   * and anything awaited first spends that gesture - the read then rejects
+   * rather than prompting. Caller passes the promise straight in.
+   *
+   * Returns null when the clipboard holds no image at all, and THROWS when the
+   * read was refused - the two want different things said about them.
+   */
+  async function shotFromClipboardRead(readPromise) {
+    const items = await readPromise;
+    for (const item of items || []) {
+      // iOS reports 'image/png' here, but check by prefix rather than by an
+      // exact list - a pasted JPEG or webp is just as good a screenshot.
+      const type = (item.types || []).find((t) => /^image\//.test(t));
+      if (!type) continue;
+      const blob = await item.getType(type);
+      if (blob) return await shrinkShot(await blobToDataUrl(blob));
+    }
+    return null;
+  }
+
+  /** A Blob or File as a data: URL. */
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
       const r = new FileReader();
       r.onload  = () => resolve(String(r.result || ""));
-      r.onerror = () => reject(new Error("could not read that file"));
-      r.readAsDataURL(file);
+      r.onerror = () => reject(new Error("could not read that image"));
+      r.readAsDataURL(blob);
     });
-    return await shrinkShot(dataUrl);
+  }
+
+  /** A picked file - or a pasted blob - read and shrunk. */
+  async function shotFromFile(file) {
+    if (!file || !/^image\//.test(file.type || "")) return null;
+    return await shrinkShot(await blobToDataUrl(file));
   }
 
   function injectStyles() {
@@ -531,12 +568,14 @@ console.log("scray-bugreport.js loaded");
 #scrayBugShotImg.on { display: block; }
 #scrayBugShotNone { font-size: 0.78rem; color: #888; }
 #scrayBugShotBtns { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-#scrayBugShotBtns .filebtn, #scrayBugShotClear {
+#scrayBugShotBtns .filebtn, #scrayBugShotClear, #scrayBugShotPaste {
   background: #2a2a2a; color: #ddd; border: 1px solid #4a4a4a; border-radius: 6px;
   padding: 5px 10px; font-size: 0.78rem; cursor: pointer; display: inline-block; margin: 0;
   font-weight: normal;
 }
-#scrayBugShotBtns .filebtn:hover, #scrayBugShotClear:hover { background: #3a3a3a; color: #fff; }
+#scrayBugShotBtns .filebtn:hover, #scrayBugShotClear:hover,
+#scrayBugShotPaste:hover { background: #3a3a3a; color: #fff; }
+#scrayBugShotPaste[hidden] { display: none; }
 /* The id rule above sets display, which outranks the UA sheet's
    [hidden]{display:none} - so Remove stayed on screen with nothing to
    remove. Put it back explicitly. */
@@ -648,6 +687,7 @@ console.log("scray-bugreport.js loaded");
             <img id="scrayBugShotImg" alt="">
             <div id="scrayBugShotNone">No screenshot</div>
             <div id="scrayBugShotBtns">
+              <button type="button" id="scrayBugShotPaste" hidden>Paste</button>
               <label class="filebtn" for="scrayBugShotFile">Attach a photo</label>
               <input type="file" id="scrayBugShotFile" accept="image/*" hidden>
               <button type="button" id="scrayBugShotClear" hidden>Remove</button>
@@ -710,6 +750,52 @@ console.log("scray-bugreport.js loaded");
         : "";
     }
     paintShot("");
+
+    const shotPaste = document.getElementById("scrayBugShotPaste");
+
+    /** Take an image from wherever, report it the same way. */
+    async function adoptShot(promise, source) {
+      shotNote.textContent = "reading\u2026";
+      try {
+        const next = await promise;
+        if (!next) { shotNote.textContent = "no image on the clipboard"; return; }
+        shot = next;
+        paintShot(source);
+      } catch (err) {
+        // NotAllowedError is the Paste confirmation being dismissed, which is
+        // an answer rather than a fault - say so plainly and leave the button.
+        const name = err && err.name;
+        shotNote.textContent = (name === "NotAllowedError" || name === "SecurityError")
+          ? "paste not allowed \u2014 tap Paste again, or long-press and choose Paste"
+          : String(err && err.message ? err.message : err);
+      }
+    }
+
+    // Only offered where it can work. Everything else still has the paste
+    // handler below, which needs no API at all.
+    if (shotPaste && navigator.clipboard && typeof navigator.clipboard.read === "function") {
+      shotPaste.hidden = false;
+      shotPaste.addEventListener("click", () => {
+        // Started HERE, inside the click, and handed over as a promise - see
+        // shotFromClipboardRead for why it cannot be awaited first.
+        adoptShot(shotFromClipboardRead(navigator.clipboard.read()), "from your clipboard");
+      });
+    }
+
+    // The no-permission route, and the only one on a desktop keyboard: a real
+    // paste carries its own consent, so nothing is asked and nothing can be
+    // refused. Long-press \u2192 Paste on a phone, \u2318V or Ctrl+V anywhere else.
+    overlay.addEventListener("paste", (e) => {
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      for (const item of items) {
+        if (item.kind !== "file" || !/^image\//.test(item.type || "")) continue;
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        e.preventDefault();
+        adoptShot(shotFromFile(blob), "pasted");
+        return;
+      }
+    });
 
     shotFile.addEventListener("change", async () => {
       const file = shotFile.files && shotFile.files[0];

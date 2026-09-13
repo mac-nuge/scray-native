@@ -1998,7 +1998,28 @@ if (jumpSearchBtn) {
                 filterDisplayedByFilename();
             }
         } else {
-    // Normal mode: focus main search box
+    // Normal mode: the search pill IS the filter box now (randomiser.js,
+    // 13.84), so F wakes THAT rather than scrolling the page down to the box
+    // sitting behind it. One rule for waking the pill however you got there:
+    // its own focus handler opens it, grows the text and puts the caret at the
+    // END, exactly as a tap does. Clearing is still the pill's own x.
+    //
+    // focus() has to run synchronously inside this click - iOS raises the
+    // keyboard only for a focus that is still inside the user gesture - and
+    // there is nothing to scroll to, because the pills bar is fixed to the top
+    // of the screen.
+    //
+    // getClientRects() rather than offsetParent for the visibility test: the
+    // bar is position: fixed, and offsetParent is null for a fixed subtree in
+    // some browsers whether it is on screen or not. An empty list means the
+    // bar is display: none - fullscreen hides it - or there is no pill yet.
+    const pillInput = document.getElementById("scraySearchPillInput");
+    if (pillInput && pillInput.getClientRects().length) {
+        pillInput.focus();
+        return;
+    }
+
+    // No pill to wake: the main box, exactly as before.
     const searchBox = document.getElementById("filenameSearchBox");
     if (searchBox) {
         const isMobilePortrait = window.innerWidth <= 768 && window.matchMedia('(orientation: portrait)').matches;

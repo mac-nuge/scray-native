@@ -3457,8 +3457,12 @@ async function scrayPlayRandomBookmark() {
 
         entries = [];
         (videos || []).forEach(video => {
-            if (!Array.isArray(video.bookmarks)) return;
-            video.bookmarks.forEach(bm => {
+            // Blacklisted notes are not random-bookmark material either.
+            const bms = window.scrayVisibleBookmarks
+                ? window.scrayVisibleBookmarks(video)
+                : (Array.isArray(video.bookmarks) ? video.bookmarks : []);
+            if (!bms.length) return;
+            bms.forEach(bm => {
                 if (!bm || typeof bm.time !== 'number' || bm.time <= 0) return;
                 entries.push({ video, time: bm.time, note: (bm.note || '').trim() });
             });
@@ -4040,7 +4044,9 @@ function scrayNextBookmark() {
     // timestamp to look up again - a round trip that could fail, and did.
     // filter() returns a new array, so sorting here can't reorder
     // currentPlayingVideo.bookmarks underneath anyone else.
-    const sorted = (v && Array.isArray(v.bookmarks) ? v.bookmarks : [])
+    const sorted = (window.scrayVisibleBookmarks
+            ? window.scrayVisibleBookmarks(v)
+            : (v && Array.isArray(v.bookmarks) ? v.bookmarks : []))
         .filter(b => b && typeof b.time === 'number')
         .sort((a, b) => a.time - b.time);
 
@@ -6203,7 +6209,9 @@ const isTouchDevice = !canHover;
 
 const entries = [];
 
-video.bookmarks.forEach(bm => {
+// Blacklisted notes leave no marker on the progress bar either - a mark you
+// cannot open is worse than no mark.
+(window.scrayVisibleBookmarks ? window.scrayVisibleBookmarks(video) : video.bookmarks).forEach(bm => {
     if (typeof bm.time !== 'number') return;
 
     const percent = Math.max(0, Math.min(100, (bm.time / duration) * 100));

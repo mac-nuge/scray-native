@@ -517,6 +517,48 @@ window.scrayMapName = function (kind, raw) {
   return window.scrayNameMap.lookup(kind, raw);
 };
 
+/* ---- blacklisted notes (13.109 / stg-native 13.103) -----------------------
+   A note ticked Blacklist in manage-data is dead everywhere: the bookmarks
+   carrying it are not drawn, not marked on the progress bar, not counted, and
+   the note itself stops being offered as something to filter by.
+
+   It is an ATTRIBUTE rather than a deletion, so nothing is lost - unticking
+   the box in manage-data brings every one of those bookmarks back, on every
+   device, at the next dictionary refresh.
+
+   Asked by either spelling, like every other attribute lookup: a caller
+   holding the raw note from the database and one holding the mapped display
+   name both land on the same row. Blacklisting the mapped name therefore
+   covers every raw spelling that maps onto it, which is the point of having
+   tidied them together in the first place.
+--------------------------------------------------------------------------- */
+window.scrayNoteBlacklisted = function (raw) {
+  const note = String(raw == null ? "" : raw).trim();
+  if (!note || !window.scrayNameMap) return false;
+  const attrs = window.scrayNameMap.attrsFor("note", note);
+  if (attrs && attrs.blacklist) return true;
+  // The raw spelling may not itself be a row, while the name it maps TO is.
+  const mapped = window.scrayMapName ? window.scrayMapName("note", note) : note;
+  if (mapped && mapped !== note) {
+    const a2 = window.scrayNameMap.attrsFor("note", mapped);
+    if (a2 && a2.blacklist) return true;
+  }
+  return false;
+};
+
+/**
+ * A video's bookmarks, minus anything blacklisted.
+ *
+ * Every surface that DRAWS bookmarks reads them through this. The stored array
+ * is never touched: hiding is a display decision taken fresh on each read, so
+ * it follows the dictionary rather than needing a rewrite of the data.
+ */
+window.scrayVisibleBookmarks = function (video) {
+  const all = (video && Array.isArray(video.bookmarks)) ? video.bookmarks : [];
+  if (!all.length) return all;
+  return all.filter(b => !window.scrayNoteBlacklisted(b && b.note));
+};
+
 /**
  * Fold a counted list of bookmark notes down to the mapped vocabulary.
  *
@@ -539,6 +581,9 @@ window.scrayFoldNotes = function (rows) {
     const obj = r && typeof r === 'object';
     const raw = String((obj ? r.note : r) || '').trim();
     if (!raw) return;
+    // Blacklisted notes leave the vocabulary entirely - not offered as a pill,
+    // not a filter you could pick even by accident.
+    if (window.scrayNoteBlacklisted && window.scrayNoteBlacklisted(raw)) return;
     const name = window.scrayMapName ? window.scrayMapName('note', raw) : raw;
     if (!name) return;
     // The same fold key the dictionary is stored under, so two spellings that

@@ -62,7 +62,8 @@
     const out = [];
     (videos || []).forEach(video => {
       if (!video || !Array.isArray(video.bookmarks) || !video.bookmarks.length) return;
-      video.bookmarks
+      // Blacklisted notes never become a row here.
+      (window.scrayVisibleBookmarks ? window.scrayVisibleBookmarks(video) : video.bookmarks)
         .filter(bm => bm && typeof bm.time === 'number')
         .sort((a, b) => a.time - b.time)
         .forEach(bm => {
@@ -173,7 +174,9 @@
     const counts = new Map();
     const bump = (val, n) => { if (val) counts.set(val, (counts.get(val) || 0) + n); };
     videos.forEach(v => {
-      const bms = Array.isArray(v.bookmarks) ? v.bookmarks.filter(b => b && typeof b.time === 'number') : [];
+      const bms = (window.scrayVisibleBookmarks ? window.scrayVisibleBookmarks(v)
+                   : (Array.isArray(v.bookmarks) ? v.bookmarks : []))
+                   .filter(b => b && typeof b.time === 'number');
       if (!bms.length) return;
       if (kind === 'note') {
         bms.forEach(bm => bump(noteOf(bm) || NO_NOTE, 1));

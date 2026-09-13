@@ -464,8 +464,14 @@ window.showExcludeTagsModal = showExcludeTagsModal;
 window.scrayFacetFilters = window.scrayFacetFilters || {
    studio:    new Set(),
    performer: new Set(),
-   stashtag:  new Set()
+   stashtag:  new Set(),
+   note:      new Set()
 };
+// bookmarks-page.js creates its own note set when it loads first; either way
+// there is exactly one, because both sides only ever fill a gap.
+window.SCRAY_FACET_CLASSES.forEach(k => {
+   if (!window.scrayFacetFilters[k]) window.scrayFacetFilters[k] = new Set();
+});
 window.scrayTagIntersect = !!window.scrayTagIntersect;
 
 /* Excludes, one set per facet class.
@@ -542,8 +548,21 @@ window.SCRAY_FACET_META = {
    tag:       { label: 'Tags',       pill: 'floating-tag-include'   },
    studio:    { label: 'Studios',    pill: 'floating-tag-studio'    },
    performer: { label: 'Performers', pill: 'floating-tag-performer' },
-   stashtag:  { label: 'Stash tags', pill: 'floating-tag-stashtag'  }
+   stashtag:  { label: 'Stash tags', pill: 'floating-tag-stashtag'  },
+   // Bookmark notes (13.110). On the bookmarks page a picked note narrows to
+   // the BOOKMARKS carrying it; here it narrows to the VIDEOS that have one,
+   // which is the same question asked of a list of files.
+   note:      { label: 'Notes',      pill: 'floating-tag-note'      }
 };
+
+/* The facet classes, in the order they are drawn. 'tag' is deliberately not
+   one of them: catalogue tags have their own selects, their own exclude pill
+   and their own place in getFilteredVideos.
+
+   Declared once because it was written out six times, and adding a class meant
+   finding all six - miss one and the filter half-works in a way that takes a
+   while to notice. */
+window.SCRAY_FACET_CLASSES = ['studio', 'performer', 'stashtag', 'note'];
 
 /**
  * Re-run the filter and repaint the pills bar.
@@ -586,7 +605,7 @@ window.scrayRefreshFilters = scrayRefreshFilters;
  */
 window.scrayClearAllFilters = function (ev) {
    if (window.commonSelectedTags) window.commonSelectedTags.clear();
-   ['studio', 'performer', 'stashtag'].forEach(k => {
+   window.SCRAY_FACET_CLASSES.forEach(k => {
        const s = (window.scrayFacetFilters || {})[k];
        if (s) s.clear();
        const x = (window.scrayFacetExcludes || {})[k];
@@ -666,6 +685,7 @@ window.scrayFacetSet = scrayFacetSet;
  */
 function scrayFacetValues(video, kind) {
    if (kind === 'tag') return Array.isArray(video && video.tags) ? video.tags : [];
+   if (kind === 'note') return scrayVideoNotes(video);
    const p = window.scrayStashNames && window.scrayStashNames.parts(video);
    if (!p) return [];
    if (kind === 'studio')    return p.studio ? [p.studio] : [];
@@ -673,6 +693,33 @@ function scrayFacetValues(video, kind) {
    if (kind === 'stashtag')  return p.stashTagList || [];
    return [];
 }
+
+/**
+ * The bookmark notes one video carries, as the MAPPED display names.
+ *
+ * Handled outside scrayFacetValues' parts() block because notes are not stash
+ * data at all - they hang off the video's own bookmarks - but it answers the
+ * same question the other classes do, so the filter and the cloud counts both
+ * reach it through the same call.
+ *
+ * Mapped and de-duplicated: two raw spellings tidied onto one name are one
+ * value here, which is what makes picking that name find both. Blacklisted
+ * notes are already gone, because scrayVisibleBookmarks dropped them.
+ */
+function scrayVideoNotes(video) {
+   const bms = window.scrayVisibleBookmarks
+       ? window.scrayVisibleBookmarks(video)
+       : (video && Array.isArray(video.bookmarks) ? video.bookmarks : []);
+   const out = new Set();
+   bms.forEach(b => {
+       const raw = String((b && b.note) || '').trim();
+       if (!raw) return;
+       const name = window.scrayMapName ? window.scrayMapName('note', raw) : raw;
+       if (name) out.add(name);
+   });
+   return Array.from(out);
+}
+window.scrayVideoNotes = scrayVideoNotes;
 window.scrayFacetValues = scrayFacetValues;
 
 /**
@@ -773,9 +820,15 @@ const SCRAY_CLOUD_UNSET = '—';
  * no change here.
  */
 function scrayCloudAttrDefs(kind) {
-   if (kind !== 'studio') return [];
+   // Studios and notes both carry attributes from manage-data; the rest are
+   // derived live and have no row to hang one on.
+   if (kind !== 'studio' && kind !== 'note') return [];
    const nm = window.scrayNameMap;
-   return (nm && typeof nm.attrDefs === 'function') ? (nm.attrDefs('studio') || []) : [];
+   const defs = (nm && typeof nm.attrDefs === 'function') ? (nm.attrDefs(kind) || []) : [];
+   // A check is a flag, not a grouping. Blacklist as a level would offer two
+   // buckets, one of which is always empty - those rows are gone from the
+   // cloud before it is drawn.
+   return defs.filter(d => d && d.type !== 'check');
 }
 
 function scrayCloudAttrPickSet(kind, attrKey) {
@@ -1740,7 +1793,7 @@ Array.from(window.commonSelectedTags).forEach(tag => {
 // a bar carrying a dozen terms still reads as three groups instead of one
 // undifferentiated wall. Rendered in class order rather than selection order,
 // for the same reason.
-['studio', 'performer', 'stashtag'].forEach(kind => {
+window.SCRAY_FACET_CLASSES.forEach(kind => {
    const set  = (window.scrayFacetFilters || {})[kind];
    const meta = (window.SCRAY_FACET_META  || {})[kind];
    if (!set || !meta) return;
@@ -1761,7 +1814,7 @@ Array.from(window.commonSelectedTags).forEach(tag => {
 // seventh shade of red would be three more colours to learn for one idea.
 // Catalogue-tag excludes are NOT here: they keep their consolidated
 // Exclude (n) pill further down, which already has a modal behind it.
-['studio', 'performer', 'stashtag'].forEach(kind => {
+window.SCRAY_FACET_CLASSES.forEach(kind => {
    const exSet = (window.scrayFacetExcludes || {})[kind];
    if (!exSet || !exSet.size) return;
    Array.from(exSet).forEach(val => {
@@ -2442,7 +2495,7 @@ includeAll = Array.from(window.commonSelectedTags); // unified selection
 // term. Intersect keeps only videos carrying EVERY one. The switch spans all
 // four classes at once, because "show me the overlap" is one question and not
 // four.
-const facetPicks = ['studio', 'performer', 'stashtag']
+const facetPicks = window.SCRAY_FACET_CLASSES
    .map(kind => [kind, Array.from((window.scrayFacetFilters || {})[kind] || [])])
    .filter(pair => pair[1].length > 0);
 
@@ -2485,7 +2538,7 @@ if (Array.isArray(excludeTags) && excludeTags.length > 0) {
 // Applied AFTER the includes and always as ANY, whatever scrayTagIntersect
 // says: exclude wins, and "not these" has no ALL reading worth offering - a
 // video would have to carry every excluded studio at once to be dropped.
-const facetExcl = ['studio', 'performer', 'stashtag']
+const facetExcl = window.SCRAY_FACET_CLASSES
    .map(kind => [kind, Array.from((window.scrayFacetExcludes || {})[kind] || [])])
    .filter(pair => pair[1].length > 0);
 
@@ -2783,7 +2836,7 @@ if (window.commonSelectedTags) {
   window.commonSelectedTags.clear();
 }
 if (window.scrayFacetFilters) {
-  ['studio', 'performer', 'stashtag'].forEach(k => {
+  window.SCRAY_FACET_CLASSES.forEach(k => {
       if (window.scrayFacetFilters[k]) window.scrayFacetFilters[k].clear();
       if (window.scrayFacetExcludes && window.scrayFacetExcludes[k]) {
           window.scrayFacetExcludes[k].clear();

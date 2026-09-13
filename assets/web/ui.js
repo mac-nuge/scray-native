@@ -2186,7 +2186,11 @@ const dropdowns = [
 // AT no longer opens a select2 - it opens the tag cloud, along with the three
 // facet buttons beside it. Bound here rather than in the dropdowns loop below,
 // because that loop calls select2('open') and these have no select behind them.
-[['btnAT', 'tag'], ['btnSTU', 'studio'], ['btnPERF', 'performer'], ['btnSTAG', 'stashtag']]
+// NOTE joined them in 13.110. On this page a picked note keeps the VIDEOS that
+// have a bookmark carrying it - the bookmarks page keeps the bookmarks
+// themselves, which is the same modal asked of a different list.
+[['btnAT', 'tag'], ['btnSTU', 'studio'], ['btnPERF', 'performer'], ['btnSTAG', 'stashtag'],
+ ['btnNOTE', 'note']]
   .forEach(pair => {
       document.getElementById(pair[0])?.addEventListener('click', () => {
           if (typeof window.showTagCloudModal === 'function') window.showTagCloudModal(pair[1]);

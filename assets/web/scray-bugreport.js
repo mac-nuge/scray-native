@@ -519,6 +519,84 @@ console.log("scray-bugreport.js loaded");
     return await shrinkShot(await blobToDataUrl(file));
   }
 
+  /**
+   * Paste-a-screenshot, wired onto one dialog. BOTH surfaces that take a
+   * picture use this - the bug report panel and the "Include a screenshot?"
+   * question in front of a diagnostics report - so the behaviour is written
+   * once rather than drifting apart. 13.106 and 13.107 only ever reached the
+   * first of the two, which is why the button appeared to be missing.
+   *
+   * Two routes in, because one of them is not available everywhere:
+   *
+   *   the button   navigator.clipboard.read(), where WebKit exposes it. Picker
+   *                is on https and has it; Native loads its copy of this page
+   *                from a bundled file:// URL and does NOT, even though the
+   *                writeText() used elsewhere in the app works there.
+   *   a real paste needs no API, no permission and no secure context - your
+   *                paste IS the consent. The only route that works in Native,
+   *                and the only one a desktop keyboard uses.
+   *
+   * The catch with the second is that iOS only offers Paste over an EDITABLE
+   * element, and for an image it wants a rich one - a plain text field may
+   * offer no Paste at all while the pasteboard is holding a picture. So where
+   * read() is missing the button reveals `box`, an empty contenteditable, and
+   * asks for a long-press there.
+   */
+  function wirePasteInto({ root, button, box, note, onShot }) {
+    const say = (msg) => { if (note) note.textContent = msg; };
+    const hideBox = () => { if (box) { box.textContent = ""; box.hidden = true; } };
+
+    async function adopt(promise, source) {
+      say("reading\u2026");
+      try {
+        const next = await promise;
+        if (!next) { say("no image on the clipboard"); return; }
+        hideBox();
+        onShot(next, source);
+      } catch (err) {
+        // A dismissed Paste confirmation is an answer, not a fault.
+        const name = err && err.name;
+        say((name === "NotAllowedError" || name === "SecurityError")
+          ? "paste not allowed \u2014 tap Paste again, or use the box and long-press"
+          : String(err && err.message ? err.message : err));
+      }
+    }
+
+    if (button) {
+      button.hidden = false;
+      button.addEventListener("click", () => {
+        if (navigator.clipboard && typeof navigator.clipboard.read === "function") {
+          // Started HERE, inside the click, and handed over as a promise - see
+          // shotFromClipboardRead for why it cannot be awaited first.
+          adopt(shotFromClipboardRead(navigator.clipboard.read()), "from your clipboard");
+          return;
+        }
+        if (!box) return;
+        box.hidden = false;
+        box.textContent = "";
+        box.focus();
+        say("long-press in the box and choose Paste");
+      });
+    }
+
+    root.addEventListener("paste", (e) => {
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      for (const item of items) {
+        if (item.kind !== "file" || !/^image\//.test(item.type || "")) continue;
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        e.preventDefault();
+        adopt(shotFromFile(blob), "pasted");
+        return;
+      }
+      // Text, or something with no picture in it. Never leave it in the box.
+      if (box && !box.hidden) {
+        e.preventDefault();
+        say("that paste had no image in it");
+      }
+    });
+  }
+
   function injectStyles() {
     if (document.getElementById("scrayBugStyles")) return;
     const el = document.createElement("style");
@@ -581,6 +659,23 @@ console.log("scray-bugreport.js loaded");
    remove. Put it back explicitly. */
 #scrayBugShotClear[hidden] { display: none; }
 #scrayBugShotNote { font-size: 0.72rem; color: #888; }
+/* Somewhere a long-press can paste INTO. Only shown where clipboard.read() is
+   missing - see wirePasteInto. contenteditable rather than a text field
+   because iOS will not offer Paste for an image over a plain one. */
+.pastebox {
+  margin-top: 8px; min-height: 42px; padding: 10px;
+  border: 1px dashed #5a5a5a; border-radius: 6px;
+  background: #202020; color: #ddd; font-size: 0.8rem;
+  -webkit-user-select: text; user-select: text; outline: none;
+}
+.pastebox:empty::before {
+  content: "Long-press here and choose Paste";
+  color: #777;
+}
+.pastebox[hidden] { display: none; }
+/* Its own line inside the wrapping button row, rather than squeezed beside
+   the buttons. */
+#scrayBugShotBtns .pastebox { flex: 1 1 100%; }
 #scrayShotAskOverlay {
   position: fixed; inset: 0; z-index: ${Z_MODAL};
   background: rgba(0,0,0,0.72);
@@ -609,6 +704,9 @@ console.log("scray-bugreport.js loaded");
   -webkit-tap-highlight-color: transparent;
 }
 #scrayShotAskActions .filebtn:hover, #scrayShotAskActions button:hover { background: #3a3a3a; color: #fff; }
+/* Same trap as #scrayBugShotClear above: the rule sets display, which outranks
+   the UA sheet's [hidden]{display:none}. */
+#scrayShotAskActions button[hidden] { display: none; }
 #scrayShotAskActions button.primary { background: #2d6cdf; border-color: #2d6cdf; color: #fff; font-weight: 600; }
 #scrayBugPanel summary { cursor: pointer; font-size: 0.78rem; color: #888; }
 #scrayBugPanel pre {
@@ -692,6 +790,8 @@ console.log("scray-bugreport.js loaded");
               <input type="file" id="scrayBugShotFile" accept="image/*" hidden>
               <button type="button" id="scrayBugShotClear" hidden>Remove</button>
               <span id="scrayBugShotNote"></span>
+              <div id="scrayBugPasteBox" class="pastebox" contenteditable="true"
+                   role="textbox" aria-label="Long-press here and choose Paste" hidden></div>
             </div>
           </div>
         </div>
@@ -751,50 +851,12 @@ console.log("scray-bugreport.js loaded");
     }
     paintShot("");
 
-    const shotPaste = document.getElementById("scrayBugShotPaste");
-
-    /** Take an image from wherever, report it the same way. */
-    async function adoptShot(promise, source) {
-      shotNote.textContent = "reading\u2026";
-      try {
-        const next = await promise;
-        if (!next) { shotNote.textContent = "no image on the clipboard"; return; }
-        shot = next;
-        paintShot(source);
-      } catch (err) {
-        // NotAllowedError is the Paste confirmation being dismissed, which is
-        // an answer rather than a fault - say so plainly and leave the button.
-        const name = err && err.name;
-        shotNote.textContent = (name === "NotAllowedError" || name === "SecurityError")
-          ? "paste not allowed \u2014 tap Paste again, or long-press and choose Paste"
-          : String(err && err.message ? err.message : err);
-      }
-    }
-
-    // Only offered where it can work. Everything else still has the paste
-    // handler below, which needs no API at all.
-    if (shotPaste && navigator.clipboard && typeof navigator.clipboard.read === "function") {
-      shotPaste.hidden = false;
-      shotPaste.addEventListener("click", () => {
-        // Started HERE, inside the click, and handed over as a promise - see
-        // shotFromClipboardRead for why it cannot be awaited first.
-        adoptShot(shotFromClipboardRead(navigator.clipboard.read()), "from your clipboard");
-      });
-    }
-
-    // The no-permission route, and the only one on a desktop keyboard: a real
-    // paste carries its own consent, so nothing is asked and nothing can be
-    // refused. Long-press \u2192 Paste on a phone, \u2318V or Ctrl+V anywhere else.
-    overlay.addEventListener("paste", (e) => {
-      const items = (e.clipboardData && e.clipboardData.items) || [];
-      for (const item of items) {
-        if (item.kind !== "file" || !/^image\//.test(item.type || "")) continue;
-        const blob = item.getAsFile();
-        if (!blob) continue;
-        e.preventDefault();
-        adoptShot(shotFromFile(blob), "pasted");
-        return;
-      }
+    wirePasteInto({
+      root: overlay,
+      button: document.getElementById("scrayBugShotPaste"),
+      box: document.getElementById("scrayBugPasteBox"),
+      note: shotNote,
+      onShot: (next, source) => { shot = next; paintShot(source); }
     });
 
     shotFile.addEventListener("change", async () => {
@@ -947,12 +1009,17 @@ console.log("scray-bugreport.js loaded");
           <h2>Include a screenshot?</h2>
           <p id="scrayShotAskHint">
             The console, app state and diagnostics are sent either way.
-            A photo is optional - iOS will offer your photo library or the camera.
+            A photo is optional - Paste takes one straight off your clipboard,
+            so a screenshot never has to be saved; Add a photo opens your
+            library or the camera.
           </p>
           <img id="scrayShotAskImg" alt="">
+          <div id="scrayShotAskPasteBox" class="pastebox" contenteditable="true"
+               role="textbox" aria-label="Long-press here and choose Paste" hidden></div>
           <div id="scrayShotAskNote"></div>
           <div id="scrayShotAskActions">
             <button type="button" id="scrayShotAskCancel">Cancel</button>
+            <button type="button" id="scrayShotAskPaste" hidden>Paste</button>
             <label class="filebtn" for="scrayShotAskFile" id="scrayShotAskPick">Add a photo</label>
             <input type="file" id="scrayShotAskFile" accept="image/*" hidden>
             <button type="button" id="scrayShotAskSend" class="primary">Send without</button>
@@ -993,6 +1060,21 @@ console.log("scray-bugreport.js loaded");
           send.textContent = "Send with photo";
         } catch (err) {
           note.textContent = String(err && err.message ? err.message : err);
+        }
+      });
+
+      wirePasteInto({
+        root: overlay,
+        button: overlay.querySelector("#scrayShotAskPaste"),
+        box: overlay.querySelector("#scrayShotAskPasteBox"),
+        note: note,
+        onShot: (next) => {
+          shot = next;
+          img.src = shot;
+          img.classList.add("on");
+          note.textContent = `${Math.round(shot.length * 0.75 / 1024)} KB attached`;
+          pick.textContent = "Choose another";
+          send.textContent = "Send with photo";
         }
       });
 

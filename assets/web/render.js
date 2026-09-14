@@ -360,6 +360,11 @@ const SCRAY_LIST_ONE_OPEN = true;
 // pull, ticking it - re-renders the list, and the row you were working in
 // shouldn't snap shut under you.
 const scrayOpenListRows = { main: new Set(), random: new Set(), history: new Set(), basket: new Set() };
+// Exposed so the view switch can empty it (scray-views.js). A row key is the
+// video's id in Videos view and `id@time` in Bookmarks view, so a key carried
+// across the switch can never match a row again and would sit here for the rest
+// of the session, re-opening a row the moment you happened to switch back.
+window.scrayOpenListRows = scrayOpenListRows;
 
 /** The score this app displays, or null when there isn't one. */
 // Native 13.53: on this phone and in the catalogue, but with no OneDrive copy

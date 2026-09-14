@@ -242,6 +242,23 @@ function scrayListSortClear() {
 }
 window.scrayListSortClear = scrayListSortClear;
 
+/**
+ * Take named keys out of the sort, leaving the rest of the stack in order.
+ *
+ * For the view switch (scray-views.js): 'note' and 'bmtime' read fields only a
+ * bookmark entry has, so they have to come out when the index goes back to
+ * Videos - left in, they would sort every row by undefined and read as a broken
+ * sort rather than an inapplicable one. Only the buttons are re-synced; the
+ * caller redraws, so there is no second sort of a list about to be replaced.
+ */
+function scrayListSortDrop(keys) {
+  const drop = Array.isArray(keys) ? keys : [keys];
+  const before = scrayListSort.length;
+  scrayListSort = scrayListSort.filter(s => !drop.includes(s.key));
+  if (scrayListSort.length !== before) syncListSortButtons();
+}
+window.scrayListSortDrop = scrayListSortDrop;
+
 /** Re-sort what's on screen and redraw it, at the depth already showing. */
 function scrayApplyListSort() {
   syncListSortButtons();
@@ -812,7 +829,13 @@ window.scrayRemoveTagFilter = function (kind, name) {
 
 /** How many terms are selected across every class. */
 function scrayTotalFilterTerms() {
-   return ['tag', 'studio', 'performer', 'stashtag'].reduce((n, k) => {
+   // Driven off SCRAY_FACET_CLASSES rather than a written-out list, for the same
+   // reason the exclude sets are (13.114): the four names here were written
+   // before 'note' became a class, so a note-only filter counted as no terms at
+   // all - the intersect and Clear all pills stayed away, and the bookmarks page
+   // had to add notes back on top of this. 'tag' is not a facet class and keeps
+   // its own place at the front.
+   return ['tag'].concat(window.SCRAY_FACET_CLASSES || []).reduce((n, k) => {
        const s = scrayFacetSet(k);
        return n + (s ? s.size : 0);
    }, 0);

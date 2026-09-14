@@ -441,6 +441,40 @@
 #scrayDisguiseGlobe.is-close { background: #d32f2f; }
 #scrayDisguiseGlobe.is-close:hover { background: #e53935; }
 
+/* ⚙️ VID / BM - the index page's view switch (scray-views.js, 13.120). First in
+   the dock's DOM order, so it sits left of 🌐 and the COL panel; same box as the
+   globe so the three read as one row.
+
+   It is drawn HIDDEN and stays that way unless scray-views.js reveals it, which
+   only the index does - the dock is on every page, and a switch on a page with
+   no list to switch would do nothing.
+
+   Green in Videos view because it offers bookmarks; BM purple - the colour the
+   note cells and note pills already use - once bookmarks are what you are
+   looking at, so the view you are in is readable from the button alone. */
+#scrayDisguiseView {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 32px;
+  padding: 0;
+  /* Same margin note as the globe above: style.css's bare-element rule puts
+     10px under every button below 1024px, and the dock aligns MARGIN boxes. */
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background: #2e7d32;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+#scrayDisguiseView:hover { background: #388e3c; }
+#scrayDisguiseView.is-bookmarks { background: #6f42c1; }
+#scrayDisguiseView.is-bookmarks:hover { background: #7e52cc; }
+
 /* ⚙️ FULLSCREEN: transparent, and fades with the player controls (13.122).
    In FLS and MPFS these sit on top of the picture, so they drop to
    FS_ANCHOR_OPACITY and then go entirely when Plyr idles its controls away -
@@ -459,6 +493,7 @@
 #scrayDisguise.is-fs.is-controls-hidden #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) {
   opacity: 0;
 }
+#scrayDisguise.is-fs.is-controls-hidden #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) #scrayDisguiseView,
 #scrayDisguise.is-fs.is-controls-hidden #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) #scrayDisguiseGlobe,
 #scrayDisguise.is-fs.is-controls-hidden #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) #scrayDisguiseControl {
   pointer-events: none;
@@ -622,6 +657,11 @@
     width: 28px;
     height: 38px;
     font-size: 16px;
+  }
+  #scrayDisguiseView {
+    width: 34px;
+    height: 38px;
+    font-size: 12px;
   }
   .scray-disguise-row > span.scray-disguise-lbl { width: 26px; }
   .scray-disguise-row input[type="range"] { width: 88px; }
@@ -840,6 +880,26 @@
     // Picker is running inside Native's browser".
     const inAppBrowser = IN_APP_BROWSER;
     const wantsGlobe = IS_NATIVE || inAppBrowser;
+
+    // ---- VID / BM, the index page's view switch (13.120) -----------------
+    // Built here because the dock is the one thing already anchored correctly
+    // on every screen and in every fullscreen state - a switch pinned anywhere
+    // else would have to restate all of that.
+    //
+    // Deliberately dumb: it is drawn hidden with no label, and calls whatever
+    // window.scrayToggleView is AT CLICK TIME. scray-views.js reveals it, names
+    // it and colours it, so this file needs to know nothing about views, and a
+    // page without that script (a bookmarks page still in place, browse) simply
+    // never shows a button.
+    const viewBtn = document.createElement('button');
+    viewBtn.id = 'scrayDisguiseView';
+    viewBtn.type = 'button';
+    viewBtn.hidden = true;
+    viewBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof window.scrayToggleView === 'function') window.scrayToggleView();
+    });
 
     const globeBtn = document.createElement('button');
     globeBtn.id = 'scrayDisguiseGlobe';
@@ -1250,10 +1310,12 @@
 
     backRoot.appendChild(shot);
     root.appendChild(tint);
-    // The dock is the positioned element; these two are laid out inside it by
-    // flexbox, in DOM order, so 🌐 sits left of the COL panel. No measuring.
+    // The dock is the positioned element; these are laid out inside it by
+    // flexbox, in DOM order, so VID/BM sits left of 🌐 and 🌐 left of the COL
+    // panel. No measuring.
     const dock = document.createElement('div');
     dock.id = 'scrayDisguiseDock';
+    dock.appendChild(viewBtn);
     if (wantsGlobe) dock.appendChild(globeBtn);
     dock.appendChild(control);
     root.appendChild(dock);

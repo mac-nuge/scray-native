@@ -55,7 +55,11 @@
     "scray-rename.js",
     "player.js",
     "disguise.js",
-    "settings.js"
+    "settings.js",
+    // Last, and it has to be: it wraps randomiser.js's filter, stats and cloud
+    // functions and reveals disguise.js's view button, so both must already
+    // have run. document.write keeps this list strictly in order.
+    "scray-views.js"
   ];
   localScripts.forEach(src => {
     document.write(`<script src="${src}?v=${cacheBustVer}"><\/script>`);
@@ -609,6 +613,10 @@
 <button class="sort-btn" data-list-sort="watched" title="Sort by time watched">Watched</button>
 <button class="sort-btn" data-list-sort="played" title="Sort by last played">Played</button>
 <button class="sort-btn" data-list-sort="created" title="Sort by date created">Created</button>
+<!-- Bookmarks view only: bookmark time. In the DOM on both views but hidden in
+     Videos (scray-views.js), because the sort row is wired by data-list-sort
+     once at boot and a button that came and went would lose its handler. -->
+<button class="sort-btn" data-list-sort="bmtime" title="Sort by bookmark time" hidden>Time</button>
 </div>
 
  <div id="videoStats" style="margin-top:8px; font-size:0.85rem; color:#555;"></div>

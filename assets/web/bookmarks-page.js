@@ -203,12 +203,14 @@
 
   // Notes count towards "more than one term" (the intersect and Clear all
   // pills) and are cleared by Clear all.
-  const baseTotalFilterTerms = window.scrayTotalFilterTerms;
-  if (typeof baseTotalFilterTerms === 'function') {
-    window.scrayTotalFilterTerms = function () {
-      return baseTotalFilterTerms() + noteIncludes.size;
-    };
-  }
+  //
+  // 13.120: the override that used to be here is gone. scrayTotalFilterTerms now
+  // runs off SCRAY_FACET_CLASSES, which has included 'note' since 13.114, so
+  // adding noteIncludes.size on top counted every picked note twice and armed
+  // the intersect pill a term early. This page is due for deletion once the
+  // index's Videos/Bookmarks toggle is proven; the line is dropped rather than
+  // left wrong in the meantime, because this is the fallback being tested
+  // against.
 
   const baseClearAll = window.scrayClearAllFilters;
   if (typeof baseClearAll === 'function') {

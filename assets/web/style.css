@@ -50,6 +50,20 @@ Change this single value to control how visible the progress bar track is
 (0 = fully invisible, 1 = fully opaque). Currently 0.3 = 30% visible.
 ========================================= */
 :root {
+/* ⚙️ MPFS BOTTOM STACK (13.125). The three rows, and the only place their
+   offsets are written. disguise.js positions the dock with var(--mpfs-row-1),
+   player.js writes var(--mpfs-row-2) onto the controls inline, the circles rule
+   below uses var(--mpfs-row-3), and the orange row guides draw themselves at
+   rows 1 and 2 - so the drawn lines cannot disagree with the rows they mark.
+
+   Each row is row 1 plus the measured height of everything under it plus a 9px
+   gap: dock 30, controls 59. Row 1 is 6vh, which is where the player controls
+   sat before 13.124 - so the bottom row lands where the thumb already expects
+   one. Move row 1 and the rest follow. */
+--mpfs-row-1: 6vh;                 /* anchor dock       (disguise.js) */
+--mpfs-row-2: calc(6vh + 39px);    /* player controls   (player.js, inline) */
+--mpfs-row-3: calc(6vh + 107px);   /* circle pause row  (below) */
+
 --scray-progress-bar-opacity: 0.3;
 }
 
@@ -2259,7 +2273,20 @@ pointer-events: none !important;
    Higher specificity than the media-query rule (three classes vs one), so it
    wins regardless of source order; media queries add no specificity. */
 body.portrait-fullscreen:not(.manual-rotate-landscape) .plyr-frame-step-group {
-    bottom: 118px !important;
+    /* Row 3 of the MPFS stack - see the block comment on FULLSCREEN_CONTROLS_BOTTOM
+       in :root at the top of this file, which is where the three rows are
+       written down together. Was a flat 118px, which overlapped the anchor
+       dock at 149 by 13px. */
+    bottom: var(--mpfs-row-3) !important;
+}
+
+/* ⚙️ Row 2 as a PRE-JS fallback. applyFullscreenOffsets() writes the live value
+   inline, but it only runs once Plyr reports fullscreen - so without this the
+   first paint of MPFS puts the controls at the shared 7vh below, on top of the
+   anchor dock now sitting at row 1. Higher specificity than that rule, so it
+   wins; FLS never matches it. */
+body.portrait-fullscreen:not(.manual-rotate-landscape) .plyr__controls {
+    bottom: var(--mpfs-row-2) !important;
 }
 
 /* ⚙️ Forced landscape (manual rotate): raised and shifted left more, to
@@ -2660,15 +2687,88 @@ width: 9em;   /* ⚙️ widen if your filter terms run long */
 .fls-filter-pill.editing .fls-filter-pill-label { display: none; }
 .fls-filter-pill.editing .fls-filter-pill-input { display: inline-block; }
 
-.fls-filter-pill-bin {
-background: transparent;
-border: none;
-color: #fff;
-font-size: 0.7rem;
-line-height: 1;
-padding: 0 2px;
-cursor: pointer;
--webkit-tap-highlight-color: rgba(255,255,255,0.2);
+/* ⚙️ 13.132: 13.131's full-width editing box is gone with the pill it styled.
+   The filter in fullscreen is the pink search pill in the bar above, which is
+   the page's own and needs no second set of rules. */
+
+/* ⚙️ THE SEARCH PILL IS TAPPABLE IN THE TITLE (13.132).
+   .fls-video-title > #floatingTagPillsBar is pointer-events:none on purpose -
+   the bar carries the open-basket click handler, and a stray tap beside a pill
+   should not open the basket. The retired filter pill used to opt itself back
+   in; the search pill takes that over, and only the search pill, for exactly
+   the reason the old one was the only exception. */
+.fls-video-title > #floatingTagPillsBar .floating-tag-search-wrap,
+.fls-video-title > #floatingTagPillsBar .floating-tag-search,
+.fls-video-title > #floatingTagPillsBar .search-pill-input {
+pointer-events: auto !important;
+}
+
+/* ⚙️ AND IT MUST NOT JUMP WHEN YOU START TYPING (13.133).
+   .floating-tag-search-wrap.is-focused goes position:absolute with left/right
+   insets - which is right on the page, where its own comment explains that
+   #floatingTagPillsBar is position:fixed so `absolute` resolves against the
+   bar's padding box.
+
+   In the title it is not. The 13.62 rules put the bar at position:static when
+   it rides into .fls-video-title, so an absolutely positioned child of it
+   resolves against whatever IS positioned further up - somewhere inside the
+   player, and in FLS inside the rotated container. So the field left the title
+   the instant the is-focused class landed, which is the jump.
+
+   Here it simply grows in place. The reason it is taken out of flow on the page
+   - that growing would push the bar to a second row, and the bar's height is
+   what the list autoscroll measures - does not apply in the title, which
+   nothing measures and which is already one pill per row. */
+.fls-video-title > #floatingTagPillsBar .floating-tag-search-wrap.is-focused {
+position: static !important;
+top: auto !important;
+left: auto !important;
+right: auto !important;
+z-index: auto !important;
+/* ⚙️ Full width of the title, and that is what pins it. Focusing always changes
+   the field's size - the clear x appears, and the term is now editable - and the
+   bar centres its children, so ANY width change slides it sideways. Snapping to
+   the bar's full width on focus spends that movement once, at the moment you
+   tap, and then nothing you type can move it again: it is already as wide as it
+   can get. Sized to content instead, every keystroke re-centres the row, which
+   is the drift Mac was describing. */
+width: 100% !important;
+flex: 0 0 100% !important;
+}
+/* ⚙️ AND NOTHING GROWS. Un-positioning it was only half: the focused state also
+   takes the input to 2rem, the magnifier to 1.4rem, the x to 1.9rem and adds
+   padding, a 16px radius and a shadow - all sized for the page's full-width bar
+   at the top of the screen. Dropped into the title, which in FLS is a narrow
+   rotated strip, that much growth reflows the bar and carries the field 122px
+   down it. Same jump, different cause, which is why fixing only the position
+   made it worse rather than better.
+   So the focused pieces keep the title's own compact metrics - the ones beside
+   them on .floating-tag-pill - and focusing changes nothing but the caret. */
+.fls-video-title > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .floating-tag-search {
+width: auto !important;
+max-width: 100% !important;
+gap: 4px !important;
+padding: 2px 6px !important;
+border-radius: 10px !important;
+box-shadow: none !important;
+}
+.fls-video-title > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-input {
+/* flex-basis 0 with min-width 0: the input fills what the pill has left instead
+   of demanding its intrinsic 20-character width, which is the 89px that made
+   the row wrap in the first place. */
+font-size: 0.6rem !important;
+flex: 1 1 0 !important;
+min-width: 0 !important;
+width: auto !important;
+}
+.fls-video-title > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-glass {
+font-size: 0.7rem !important;
+}
+.fls-video-title > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-x {
+font-size: 0.8rem !important;
+margin: 0 !important;
+padding: 0 4px !important;
+border-radius: 8px !important;
 }
 
 /* Faded out with the controls means untappable too - otherwise it stays a
@@ -2728,6 +2828,31 @@ pointer-events: auto;
    rule must not hide #inlineVideoContainer - in MPFS that IS the fullscreen
    surface. */
 body.fls-filter-editing.keyboard-active.search-pill-active #inlineVideoContainer {
+display: block !important;
+}
+
+/* ⚙️ THE BLINK ON CLOSING THE KEYBOARD (13.131), and why the rule above was not
+   enough on its own.
+
+   Two classes come off at different times. `fls-filter-editing` is removed
+   synchronously by endFullscreenFilterEdit() the moment the input blurs;
+   `keyboard-active` is removed by the visualViewport resize handler, which does
+   not fire until the keyboard has finished animating down - several frames
+   later. In between, the guard above has gone but
+   `.keyboard-active.search-pill-active` still holds, so
+   `#inlineVideoContainer { display: none !important }` applies and the player
+   vanishes for those frames. That is the blink.
+
+   Keying the guard on the FULLSCREEN classes instead fixes it by construction:
+   they are set for the whole interaction and outlast both of the others, so
+   there is no window for the hide rule to land in. (`search-pill-active` is
+   effectively always true since 13.84 put the page's search pill permanently on
+   screen, which is why this never needed a search term to reproduce.)
+
+   In fullscreen the player IS the surface. There is no results list behind it to
+   make room for, so hiding it for a keyboard is never right there. */
+body.portrait-fullscreen.keyboard-active.search-pill-active #inlineVideoContainer,
+body.manual-rotate-landscape.keyboard-active.search-pill-active #inlineVideoContainer {
 display: block !important;
 }
 
@@ -2986,8 +3111,7 @@ background: rgba(255, 255, 255, 0.3) !important;
    remaining controls so the play button isn't pushed out */
 @media (max-width: 768px) and (orientation: portrait) {
 body:not(.manual-rotate-landscape) .plyr-random-video,
-body:not(.manual-rotate-landscape) .plyr-history-sequence,
-body:not(.manual-rotate-landscape) .plyr-play-next {
+body:not(.manual-rotate-landscape) .plyr-history-sequence {
     display: none !important;
 }
 
@@ -2996,6 +3120,22 @@ body:not(.manual-rotate-landscape) .plyr-play-next {
    next-bookmark control in the same slot. Hidden in MPB only, where the row
    is too tight for it. */
 body:not(.manual-rotate-landscape):not(.portrait-fullscreen) .plyr-basket-quick {
+    display: none !important;
+}
+
+/* ⚙️ > (play next) shows in MPFS too (13.137), in the slot immediately before
+   M>. Same treatment as M> above and for the same reason: it was in the
+   three-way portrait hide with X and H<, which is written for MPB - where the
+   control row genuinely is too tight - and MPFS was only caught by it because
+   MPFS is also portrait. Narrowing the selector rather than adding an un-hide
+   keeps one rule per button saying where it is hidden, instead of a hide and a
+   contradicting override.
+
+   The order needs no CSS: attachPlayNextButton() runs before
+   attachBasketQuickButton() at all three call sites and both insert before the
+   fullscreen control, so > lands ahead of M> in the DOM, and neither carries a
+   flex order to undo that. */
+body:not(.manual-rotate-landscape):not(.portrait-fullscreen) .plyr-play-next {
     display: none !important;
 }
 
@@ -7459,6 +7599,16 @@ background: rgba(0, 0, 0, 0.5) !important;
 body.portrait-inline:has(#bookmarkTooltipRail) #permanentProgressBar {
 z-index: 97 !important;
 }
+
+/* ⚙️ 13.130: 13.129's block here is GONE. It tried to un-hide
+   #floatingTagPillsBar in its page position for MPFS - but the bar is not in its
+   page position in fullscreen. syncNowPlayingStripPlacement MOVES it into
+   .fls-video-title (13.62), and the rules at TAG PILLS IN THE FLS / MPFS TITLE
+   already un-hide, place and fade it there. Two mechanisms for one bar, and the
+   new one only overrode `display` while the hide rule sets `visibility` too - so
+   it achieved nothing except fighting the one that works. The real miss was that
+   13.129 removed the F circle, which was the only caller of
+   startFullscreenFilterEdit(); 🔍 makes that call now (ui.js). */
 
 /* The double-tap grid shows only while you're tapping the picture
    (CONTROLS POLICY in player.js sets body.scray-guides-awake from the touch and

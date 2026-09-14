@@ -4185,6 +4185,11 @@ const adjustForKeyboard = () => {
    // offsetTop is the direct answer where a browser reports it; iOS Safari
    // usually leaves it at 0 and moves pageTop instead, which is measured
    // from the top of the DOCUMENT, so the page's own scroll comes off it.
+   //
+   // 13.138: the name is now historical. This is the viewport gap, and anything
+   // `position: fixed` needs it - applyManualRotationStyles() reads it too, to
+   // stop the whole FLS surface riding up while you type. Don't rename or drop
+   // it without checking player.js as well as the pills-bar rule in style.css.
    const vv = window.visualViewport;
    const seenTop = vv.offsetTop || Math.max(0, (vv.pageTop || 0) - (window.scrollY || 0));
    document.documentElement.style.setProperty('--pills-top-offset', `${seenTop}px`);

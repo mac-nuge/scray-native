@@ -39,7 +39,25 @@
   // 7vh PLUS their height - a flat pixel offset lands inside the row on some
   // screens and above it on others. The 62px is the control row's height plus
   // a little air; that's the number to nudge if it's still tight.
-  const MOBILE_BOTTOM_OFFSET_MPFS = 'calc(7vh + 62px)';
+  // ⚙️ MPFS BOTTOM STACK (13.124). Three rows, measured up from the screen edge,
+  // rotated on Mac's instruction so the anchor row is under the thumb:
+  //
+  //   row 3   circle pause row   calc(6vh + 107px)   style.css
+  //   row 2   player controls    calc(6vh + 39px)    player.js, written inline
+  //   row 1   anchor dock        6vh                 disguise.js
+  //   ----    progress rail      4vh                 player.js (unmoved)
+  //
+  // 6vh is where the player controls used to sit, so row 1 lands exactly where the
+  // thumb already expects a control row. The offsets above it are row 1 plus the
+  // measured heights (dock 30, controls 59) plus a 9px gap each, rather than the old
+  // hand-picked numbers - which had the circles at 118 and the dock at 149 and
+  // therefore OVERLAPPING BY 13px, live, before any of this. Change row 1 and the
+  // two above it follow.
+  // ⚙️ DORMANT since 13.134: the dock is not drawn in MPFS at all, so nothing
+  // reads this. Kept at row 1 of the MPFS stack - where it was through 13.131 -
+  // so that if the anchors are ever wanted back there they land on the documented
+  // row rather than at whichever offset the last experiment left behind.
+  const MOBILE_BOTTOM_OFFSET_MPFS = 'var(--mpfs-row-1, 6vh)';
   // ⚙️ Landscape phone. 10px, matching the `bottom: 10px !important` the app
   // pins #cornerButtons at in landscape, so the anchor buttons sit on the SAME
   // baseline as the burger buttons rather than floating above them. It was
@@ -368,11 +386,33 @@
   position: absolute;
   top: calc(env(safe-area-inset-top, 0px) + 10px);
   right: calc(env(safe-area-inset-right, 0px) + 10px);
+  /* ⚙️ SPANS THE WIDTH since the corner row moved in (13.121). The dock used to
+     be shrink-to-fit, because it held two buttons. It now also holds the
+     scrolling strip, which needs somewhere to scroll - so it is stretched to
+     the opposite edge and the strip takes whatever the frozen buttons leave.
+     Safe because the dock is pointer-events:none and only its children opt
+     back in: the empty part of the row is not a dead zone over the page. */
+  left: calc(env(safe-area-inset-left, 0px) + 10px);
   pointer-events: none;
   display: flex;
   flex-direction: row;
   align-items: flex-start;   /* desktop anchors by the TOP edge */
   gap: 6px;
+
+  /* ⚙️ ONE BOX FOR EVERY BUTTON IN THE ROW (13.122), and it is the corner
+     button's, because that is the one there are ten of: 32x27, padding 6px 8px,
+     identical at every breakpoint. The anchor buttons used to carry their own
+     sizes - 38px tall on a phone against the corner row's 27 - which was
+     invisible while they were separate rows and obvious the moment they shared
+     one. Change these two numbers, not the rules below.
+
+     ⚙️ 30px, not the 27 a corner button measures on its own: X^T's superscript
+     makes it 30, and a flex row stretches its siblings to match - so 30 is what
+     the corner row has always actually been. The height is pinned here rather
+     than left to whichever button happens to be tallest, so adding or removing
+     X^T later cannot silently resize the whole row. */
+  --scray-btn-h: 30px;
+  --scray-btn-min-w: 32px;
 }
 #scrayDisguiseControl {
   position: relative;
@@ -412,9 +452,11 @@
    coordinates at all, so there is nothing left to drift. */
 #scrayDisguiseGlobe {
   flex: 0 0 auto;
-  width: 26px;
-  height: 32px;
-  padding: 0;
+  /* The corner button's box, from the dock's tokens (13.122). */
+  width: auto;
+  min-width: var(--scray-btn-min-w);
+  height: var(--scray-btn-h);
+  padding: 0 8px;
   /* style.css sets  button, select, input  to width:100%, padding:12px and
      margin-bottom:10px for everything under 1024px. The ID beats a bare
      element selector so width and padding were already safe, but margin was
@@ -441,6 +483,63 @@
 #scrayDisguiseGlobe.is-close { background: #d32f2f; }
 #scrayDisguiseGlobe.is-close:hover { background: #e53935; }
 
+/* ⚙️ ANCHOR ROW GUIDE (13.128). One orange rule through the middle of the anchor
+   row, so the double-tap grid tells you where the buttons are as well as which
+   zone you are in.
+
+   It belongs to the DOUBLE-TAP GRID, not to the controls - up only while
+   body.scray-guides-awake is set, exactly as .fls-tap-guides is, with the same
+   asymmetric timing (instant up, 0.1s out). That class is on body and this
+   overlay is a sibling of body, so syncStateClasses mirrors it onto the root as
+   .is-guides-awake.
+
+   ⚙️ ONE LINE, AND ONLY FOR THE ANCHOR ROW. 13.126 and 13.127 also bracketed the
+   player controls, which meant tracking a row that FLS rotates 90deg into a
+   column - two vertical lines there, two horizontal ones in MPFS, decided by
+   measuring the rect. Mac dropped the controls guide, and with it all of that:
+   the anchor row lives in this overlay rather than in the player, so it is never
+   rotated and a horizontal rule is right in both modes. Nothing here needs to
+   know which mode is running.
+
+   It lives in the OVERLAY, not inside .fls-tap-guides with the rest of the grid.
+   The guide container is bounded in MPFS (top:33.333%, bottom:152px) - it IS the
+   gesture band - so a child of it cannot reach the anchor row below 152px. And
+   it lives inside .plyr__video-wrapper, which the zoom gesture AND the FLS
+   rotation both transform; a transformed ancestor becomes the containing block
+   for position:fixed, so a fixed child there would rotate along with it. */
+#scrayMpfsRowGuides {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+  z-index: 1;
+}
+/* Both fullscreen modes. is-fs is FLS or MPFS; MPB gets no grid, so no guide. */
+#scrayDisguise.is-fs #scrayMpfsRowGuides {
+  display: block;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+/* ⚙️ The tap grid's own visibility contract, copied rather than approximated:
+   see the .fls-tap-guides pair in style.css - change one, change the other. */
+#scrayDisguise.is-fs.is-guides-awake #scrayMpfsRowGuides {
+  opacity: 1;
+  transition: none;
+}
+
+.scray-row-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  /* Hidden until placeRowGuides() has a real row to centre on, so the line never
+     sits at an arbitrary place claiming the buttons are there. */
+  display: none;
+  /* ⚙️ Orange at 70% transparent, per Mac. 2px rather than the tap grid's 1px:
+     at alpha 0.3 over moving picture a hairline is not reliably visible. */
+  background: rgba(255, 140, 0, 0.3);
+}
+
 /* ⚙️ VID / BM - the index page's view switch (scray-views.js, 13.120). First in
    the dock's DOM order, so it sits left of 🌐 and the COL panel; same box as the
    globe so the three read as one row.
@@ -454,9 +553,11 @@
    looking at, so the view you are in is readable from the button alone. */
 #scrayDisguiseView {
   flex: 0 0 auto;
-  width: 30px;
-  height: 32px;
-  padding: 0;
+  /* The corner button's box, from the dock's tokens (13.122). */
+  width: auto;
+  min-width: var(--scray-btn-min-w);
+  height: var(--scray-btn-h);
+  padding: 0 8px;
   /* Same margin note as the globe above: style.css's bare-element rule puts
      10px under every button below 1024px, and the dock aligns MARGIN boxes. */
   margin: 0;
@@ -472,8 +573,113 @@
   -webkit-tap-highlight-color: transparent;
 }
 #scrayDisguiseView:hover { background: #388e3c; }
-#scrayDisguiseView.is-bookmarks { background: #6f42c1; }
-#scrayDisguiseView.is-bookmarks:hover { background: #7e52cc; }
+/* ⚙️ No view switch in fullscreen (13.129). Videos/Bookmarks changes what the
+   LIST underneath shows, which you cannot see while a video is over it - and the
+   frozen group is tighter in fullscreen. A CSS rule rather than the hidden
+   property, deliberately: scray-views.js owns that property and re-asserts it on
+   every toggle, so the two would fight. */
+#scrayDisguise.is-fs:not(.is-peek) #scrayDisguiseView { display: none; }
+
+/* ⚙️ 13.132: the consolidated X is gone. X^n, Xb and X^T are ordinary buttons
+   in the row again, after H - one tap each, no stack to open, and nothing
+   sitting above the row to keep track of. The stack's rules went with it.
+
+   ⚙️ AND THE ROW ITSELF IS GONE IN FULLSCREEN. FLS and MPFS show only the
+   frozen three - 🔍, 🌐 and COL. Everything the scrolling row carried is
+   reachable from the circles, which 13.132 put back, and a row of buttons over
+   the picture was the thing they duplicated. Hidden rather than emptied: the
+   strip keeps its scroll position and its buttons keep their handlers, so
+   leaving fullscreen brings the row back exactly as it was. */
+/* ⚙️ NO DOCK IN FULLSCREEN AT ALL (13.134). 13.132 cut the row down to the
+   frozen three and 13.133 moved those out of the way; Mac's answer is that they
+   are not wanted over the picture at all. Everything they did is reachable from
+   the circles, and the one thing that was not - the filter - is reachable by
+   peeking.
+
+   ⚙️ EXCEPT WHILE PEEKING. An up-swipe in FLS slides the rotated player aside
+   and body.fls-peek gives the page back - that is what the :not(.fls-peek) on
+   every page-element hide in style.css is for. In that state the page is
+   ordinary, so the dock is ordinary too: the whole row, in its normal place, at
+   full opacity, with the same buttons it shows when nothing is playing. It costs
+   one relayed class rather than a second layout.
+
+   Hiding the dock also retires the orange row guide on its own: placeRowGuides
+   drops a line whose target has no box, and a display:none dock has none. */
+#scrayDisguise.is-fs:not(.is-peek) #scrayDisguiseDock { display: none; }
+#scrayDisguise.is-fs:not(.is-peek) #scrayDisguiseStrip { display: none; }
+
+/* ⚙️ THE FUSED ROW (13.121). #cornerButtons' inner .corner-btn-row is MOVED
+   into the dock at build time and renamed #scrayDisguiseStrip; the shell it
+   came from is hidden. So the two rows that used to sit beside each other,
+   with a hand-maintained 92px reserve between them, are now one flex row:
+
+     [ ---- strip, scrolls ---- ][ 🔍 ][ VID/BM ][ 🌐 ][ COL ]
+                                 \_________ frozen __________/
+
+   The freeze needs no code. The four on the right are ordinary flex items at
+   their natural width; the strip is the only one that flexes, so it takes what
+   is left and scrolls its overflow. Buttons that do not fit pass under the
+   frozen group's shadow, which is what the shadow is for.
+
+   min-width: 0 is load-bearing - a flex item will not shrink below its content
+   width without it, so the strip would push the frozen four off the screen
+   instead of scrolling.
+
+   The old row's rules stop applying the moment it leaves #cornerButtons (they
+   are all descendant selectors), so the scroll behaviour and the button metrics
+   are restated here rather than inherited. That is the point: the fused row's
+   appearance is now described in one place instead of eight. */
+#scrayDisguiseStrip {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* ⚙️ One button and one gap of clear space before the row starts, so the
+     first button sits where the second one used to (13.122). Padding rather
+     than margin, deliberately: it belongs to the scrolling content, so the
+     buttons pass through it as you scroll instead of stopping at a hard edge,
+     and the strip keeps its full width for measuring. */
+  padding-left: calc(var(--scray-btn-min-w) + 6px);
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 6px;
+  /* center, not the default stretch: with every button pinned to the token
+     height nothing should be stretched to match a taller sibling. */
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  pointer-events: auto;
+}
+#scrayDisguiseStrip::-webkit-scrollbar { display: none; }
+
+/* Both the scrolling buttons and the frozen 🔍. One id + one class, so this
+   beats style.css's bare button rule (width:100%, padding:12px, margin) the
+   same way #cornerButtons .burger-btn used to. */
+#scrayDisguiseStrip .burger-btn,
+#scrayDisguiseDock > .burger-btn {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: auto;
+  min-width: var(--scray-btn-min-w);
+  height: var(--scray-btn-h);
+  margin: 0;
+  padding: 0 8px;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+/* ⚙️ The freeze line. A shadow cast leftward by the first frozen button, so the
+   strip reads as passing UNDERNEATH the group rather than stopping dead at an
+   arbitrary edge - which is the only thing that tells you there is more row to
+   scroll to. */
+#scrayDisguiseDock > #jumpSearchBtn {
+  box-shadow: -7px 0 7px -4px rgba(0, 0, 0, 0.4);
+}
 
 /* ⚙️ FULLSCREEN: transparent, and fades with the player controls (13.122).
    In FLS and MPFS these sit on top of the picture, so they drop to
@@ -486,16 +692,36 @@
    pointer-events goes on the children, not the dock - the dock is already
    pointer-events:none and its children opt back in, so clearing it here would
    do nothing. */
-#scrayDisguise.is-fs #scrayDisguiseDock {
+#scrayDisguise.is-fs:not(.is-peek) #scrayDisguiseDock {
   opacity: ${FS_ANCHOR_OPACITY};
   transition: opacity 0.3s ease;
 }
-#scrayDisguise.is-fs.is-controls-hidden #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) {
+/* ⚙️ THE BLIND STATE (13.123). Invisible, and it must behave invisible: an
+   button you cannot see must not be pressable, and tapping where it lives has
+   to bring it back rather than doing nothing. Same contract .fls-video-title
+   already has.
+
+   The dock itself becomes the catcher - pointer-events goes to auto, the one
+   place in this file where it does - and EVERY descendant goes dead. The
+   descendant rule has to be there: #scrayDisguiseStrip .burger-btn and
+   #scrayDisguiseDock > .burger-btn both set pointer-events:auto, and turning it
+   off on the strip alone left every corner button inside it perfectly tappable
+   while invisible (13.121's regression, and exactly what Mac hit). It out-
+   specifies both, so no !important is needed.
+
+   The dock's pointerdown handler reads this same state and raises the controls
+   instead of letting the tap land, so one tap wakes the row and a second tap
+   presses the button - never the blind press. */
+/* ⚙️ :not(.is-peek) here too (13.136). The video keeps playing behind a peek, so
+   Plyr still idles its controls away and is-controls-hidden still goes true -
+   which faded the dock to nothing while the page was supposed to be back. 13.134
+   put the exclusion on the FS_ANCHOR_OPACITY rule and missed this pair, which is
+   the one that actually hides it. */
+#scrayDisguise.is-fs.is-controls-hidden:not(.is-peek) #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) {
   opacity: 0;
+  pointer-events: auto;
 }
-#scrayDisguise.is-fs.is-controls-hidden #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) #scrayDisguiseView,
-#scrayDisguise.is-fs.is-controls-hidden #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) #scrayDisguiseGlobe,
-#scrayDisguise.is-fs.is-controls-hidden #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) #scrayDisguiseControl {
+#scrayDisguise.is-fs.is-controls-hidden:not(.is-peek) #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) * {
   pointer-events: none;
 }
 #scrayDisguiseNav {
@@ -606,16 +832,72 @@
 #scrayDisguiseControl.is-collapsed #scrayDisguiseBugBtn {
   display: none;
 }
+/* ⚙️ Collapsed, COL is not a panel - it is a button among buttons, so it is
+   drawn as one (13.123): .burger-btn's box AND its skin, which is dark grey,
+   4px corners, white type and no border or shadow. It used to be a white 10px
+   pill with a grey hairline - the card look of the menu it becomes - which read
+   as a stray UI element sitting in the row rather than the last button in it.
+
+   Strictly .is-collapsed. EXPANDED it is a menu again and keeps the white card,
+   which is what makes it readable over a video. */
+/* ⚙️ OPEN, THE PANEL LEAVES THE ROW (13.135). The dock is a flex row, and since
+   13.121 the scrolling strip is in it at flex:1 1 auto - so an expanded COL was
+   a flex item competing with the strip for width and lost most of it. Measured
+   at 402px: it asked for its 62vw (249px) and got 107.
+
+   Taking it out of flow when open gives it its own size back and puts it where
+   Mac wants it - above the buttons rather than inside them. Anchored to the
+   dock's own bottom-right, so the handle stays exactly where the COL button was
+   and the panel simply grows upward out of it; nothing in the row moves.
+
+   The dock is position:absolute and has no overflow, so it is both the
+   containing block and not a clip. Desktop anchors by the top instead, in the
+   media query below, because the dock is up there and a panel growing upward
+   would leave the screen. */
+#scrayDisguiseControl:not(.is-collapsed) {
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 4;
+}
+/* ⚙️ And the row keeps the space it left behind - see renderOpen(), which
+   measures the collapsed button and writes the reservation as the dock's
+   padding-right. Out of flow, COL stops being a flex item, so without it the
+   strip grows into the slot and 🔍, VID and 🌐 all slide right, then slide back
+   when the panel closes: a jiggle on every open.
+   Measured rather than expressed in tokens because the collapsed width is not
+   the token - min-width is a floor, and the mode tag's text decides the rest, so
+   it differs by breakpoint. A calc of --scray-btn-min-w was 4px out on desktop. */
+
 #scrayDisguiseControl.is-collapsed {
-  padding: 4px 6px;
   gap: 0;
+  /* Pinned with border-box so the border cannot push COL a pixel taller than
+     the buttons beside it, which is exactly what it did at first. */
+  box-sizing: border-box;
+  height: var(--scray-btn-h);
+  min-width: var(--scray-btn-min-w);
+  padding: 0 8px;
+  border-radius: 4px;
+  background: #333;
+  border: none;
+  box-shadow: none;
+  color: #ffffff;
+}
+/* The mode tag is the button's label now, so it takes the button's colour.
+   Restated for both the plain and the has-mode-tag handle: the tag rule carries
+   its own grey and would otherwise keep winning. */
+#scrayDisguiseControl.is-collapsed #scrayDisguiseHandle,
+#scrayDisguiseControl.is-collapsed #scrayDisguiseHandle.has-mode-tag {
+  color: #ffffff;
 }
 /* Collapsed, the handle IS the panel, so it needs a real target and room for
    the three-character mode tag. The mobile block below restates both at thumb
    size; same specificity, later in the sheet, so it still wins on phones. */
 #scrayDisguiseControl.is-collapsed #scrayDisguiseHandle {
-  min-width: 30px;
-  min-height: 20px;
+  /* The control carries the min-width now, so the handle just fills it. */
+  min-width: 0;
+  width: 100%;
+  min-height: var(--scray-btn-h);
 }
 #scrayDisguiseHandle.has-mode-tag {
   font-size: 9px;
@@ -630,7 +912,15 @@
     top: auto;
     bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET});
     right: calc(env(safe-area-inset-right, 0px) + 6px);
+    /* Matches the right offset, so the strip's gutters are even. */
+    left: calc(env(safe-area-inset-left, 0px) + 6px);
     align-items: flex-end;   /* phones anchor by the BOTTOM edge */
+  }
+  /* Phones anchor the dock by its BOTTOM, so the open panel grows upward from
+     where the button was rather than downward off the screen. */
+  #scrayDisguiseControl:not(.is-collapsed) {
+    top: auto;
+    bottom: 0;
   }
   #scrayDisguiseControl {
     padding: 6px 8px;
@@ -653,16 +943,10 @@
   #scrayDisguiseHandle { order: 2; }
   /* Phone: bigger tap target. Which EDGE it lines up with is the dock's
      align-items, so the button follows the panel without knowing which. */
-  #scrayDisguiseGlobe {
-    width: 28px;
-    height: 38px;
-    font-size: 16px;
-  }
-  #scrayDisguiseView {
-    width: 34px;
-    height: 38px;
-    font-size: 12px;
-  }
+  /* Only the type gets bigger on a phone now: the box is the corner button's
+     at every breakpoint, and the corner button never changed size either. */
+  #scrayDisguiseGlobe { font-size: 16px; }
+  #scrayDisguiseView  { font-size: 12px; }
   .scray-disguise-row > span.scray-disguise-lbl { width: 26px; }
   .scray-disguise-row input[type="range"] { width: 88px; }
   .scray-disguise-val { min-width: 28px; }
@@ -684,8 +968,8 @@
     font-size: 13px;
   }
   #scrayDisguiseControl.is-collapsed #scrayDisguiseHandle {
-    min-width: 30px;
-    min-height: 26px;
+    min-width: 0;
+    min-height: var(--scray-btn-h);
   }
   #scrayDisguiseHandle.has-mode-tag {
     font-size: 9px;
@@ -706,11 +990,17 @@
      syncStateClasses() mirrors the body class onto the root, so the selector
      has something to bite on. Both variants are needed: the .is-native rule
      above carries the same weight, so the plain one would lose to it. */
-  #scrayDisguise.is-mpfs #scrayDisguiseDock {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET_MPFS});
-  }
+  /* ⚙️ Row 1, and deliberately WITHOUT the safe-area term the other states
+     carry: this row has to land exactly where the player controls used to,
+     and those are anchored at a plain 6vh with no inset of their own. Adding
+     one here would float the dock above the row it is replacing.
+     Native takes no extra lift for the same reason - the controls did not -
+     so the .is-native rule restates the same value purely to out-weigh the
+     .is-native portrait rule above, which carries two IDs and would otherwise
+     keep winning inside this block. Same trick, and same reason, as landscape. */
+  #scrayDisguise.is-mpfs #scrayDisguiseDock,
   #scrayDisguise.is-mpfs.is-native #scrayDisguiseDock {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET_MPFS} + ${NATIVE_EXTRA_LIFT});
+    bottom: ${MOBILE_BOTTOM_OFFSET_MPFS};
   }
 }
 
@@ -1097,6 +1387,16 @@
       renderOpen();   // the collapsed launch button carries the mode tag
     }
     function renderOpen() {
+      // ⚙️ Reserve the collapsed button's slot BEFORE it leaves the flow, while
+      // it is still the size we need to stand in for.
+      if (state.open && !control.style.getPropertyValue('--scray-col-reserve')) {
+        const w = Math.round(control.getBoundingClientRect().width);
+        if (w > 0) dock.style.paddingRight = (w + 6) + 'px';
+        control.style.setProperty('--scray-col-reserve', '1');
+      } else if (!state.open) {
+        dock.style.paddingRight = '';
+        control.style.removeProperty('--scray-col-reserve');
+      }
       control.classList.toggle('is-collapsed', !state.open);
       // Mobile anchors to the bottom and grows upward, so the caret has to
       // point the other way to still mean "this is where it will go".
@@ -1310,15 +1610,204 @@
 
     backRoot.appendChild(shot);
     root.appendChild(tint);
-    // The dock is the positioned element; these are laid out inside it by
-    // flexbox, in DOM order, so VID/BM sits left of 🌐 and 🌐 left of the COL
-    // panel. No measuring.
+
+    // ---- Anchor row guide (13.128) ---------------------------------------
+    // One line, appended before the dock so it paints under the buttons rather
+    // than across them.
+    const rowGuides = document.createElement('div');
+    rowGuides.id = 'scrayMpfsRowGuides';
+    const anchorLine = document.createElement('div');
+    anchorLine.className = 'scray-row-line is-anchors';
+    rowGuides.appendChild(anchorLine);
+    root.appendChild(rowGuides);
+
+    /**
+     * Centre the line on the anchor row.
+     *
+     * ⚙️ Both rects come from the SAME batch and the offset is expressed against
+     * the guide container's own rect - the element the line sits inside. That is
+     * what keeps this out of 13.119's trap: the bug there was writing a
+     * coordinate measured in the VISUAL viewport onto an element laid out
+     * against the LAYOUT viewport, two systems that diverge the moment Safari's
+     * toolbar collapses. Container-relative arithmetic has no second system in
+     * it, so there is nothing to diverge.
+     *
+     * Runs on the discrete moment the guide wakes, and on resize - never in a
+     * loop and never mid-animation, which is the other half of what drifted.
+     * Only opacity animates on the row; its position is CSS-anchored.
+     */
+    function placeRowGuides() {
+      const r = dock && dock.getBoundingClientRect();
+      if (!r || !r.height) { anchorLine.style.display = 'none'; return; }
+      const box = rowGuides.getBoundingClientRect();
+      anchorLine.style.display = 'block';
+      // Less half the line's own 2px, so the line is centred rather than
+      // starting at the centre.
+      anchorLine.style.top = Math.round(r.top + r.height / 2 - box.top - 1) + 'px';
+    }
+    window.addEventListener('resize', placeRowGuides);
+    window.addEventListener('orientationchange', placeRowGuides);
+
+    // ---- Edge swipes open the panels (13.132) ----------------------------
+    // Swipe in from the left edge for history, from the right edge for the
+    // basket - the same two panels H() and B() open, without reaching for the
+    // row. NOTHING PLAYING ONLY: in FLS and MPFS the horizontal edges are the
+    // player's own seek and zoom territory, and this must not sit on top of it.
+    //
+    // ⚙️ The gesture is deliberately narrow. It has to start within EDGE px of
+    // the screen edge, travel inward at least SWIPE px, stay more horizontal
+    // than vertical, and be a single finger - so a diagonal thumb on a
+    // vertically scrolling list never trips it. Read-only: it never calls
+    // preventDefault, so a swipe it decides against still does whatever the
+    // page was going to do with it.
+    const EDGE = 24;      // ⚙️ how close to the edge a swipe has to start
+    const SWIPE = 55;     // ⚙️ how far in it has to travel to count
+    let sx = 0, sy = 0, fromEdge = null;
+
+    document.addEventListener('touchstart', (ev) => {
+      fromEdge = null;
+      if (!ev.touches || ev.touches.length !== 1) return;
+      // Fullscreen is the player's; a panel open over the page is not either.
+      if (root.classList.contains('is-fs')) return;
+      if (document.querySelector('#historyPanel.history-open, #basketPanel.basket-open')) return;
+      const t0 = ev.touches[0];
+      sx = t0.clientX; sy = t0.clientY;
+      const box = root.getBoundingClientRect();
+      if (sx - box.left <= EDGE) fromEdge = 'left';
+      else if (box.right - sx <= EDGE) fromEdge = 'right';
+    }, { passive: true, capture: true });
+
+    document.addEventListener('touchend', (ev) => {
+      const edge = fromEdge;
+      fromEdge = null;
+      if (!edge) return;
+      const t0 = ev.changedTouches && ev.changedTouches[0];
+      if (!t0) return;
+      const dx = t0.clientX - sx;
+      const dy = t0.clientY - sy;
+      if (Math.abs(dx) < SWIPE || Math.abs(dy) > Math.abs(dx)) return;
+      // Inward only: left edge must travel right, right edge must travel left.
+      if (edge === 'left' && dx > 0) {
+        if (typeof window.toggleHistory === 'function') window.toggleHistory(true);
+      } else if (edge === 'right' && dx < 0) {
+        if (typeof window.toggleBasket === 'function') window.toggleBasket(true);
+      }
+    }, { passive: true, capture: true });
+    // The dock is the positioned element; everything below is laid out inside
+    // it by flexbox, in DOM order. No measuring.
     const dock = document.createElement('div');
     dock.id = 'scrayDisguiseDock';
+
+    // ---- Fuse the corner row into the dock (13.121) ----------------------
+    // The corner row and the anchor buttons were two separately positioned
+    // rows sharing one baseline, kept apart by a 92px reserve written by hand
+    // into six !important blocks in style.css (13.122, 13.123). Every time a
+    // button was added to either side that number was wrong again.
+    //
+    // They are now ONE flex row. `.corner-btn-row` is MOVED - not copied - into
+    // the dock, so every handler bound by id is still bound to the same node,
+    // and its ids are untouched. 🔍 comes out of it and joins the frozen
+    // group, per Mac: the four on the right are always reachable and the rest
+    // scroll under them.
+    //
+    // Moving it out of <body> has two effects worth knowing, both wanted:
+    //   - `body.fullscreen-active:not(.fls-peek) #cornerButtons` no longer
+    //     reaches it, so the row survives fullscreen instead of being hidden
+    //     outright - and being a dock child it now fades with the player
+    //     controls like the anchor buttons do.
+    //   - every other #cornerButtons rule (the centring, the history-panel
+    //     shifts, the three right-anchor blocks, the reserve) stops applying
+    //     too. They are dead rather than fighting; see the CSS note above.
+    // The shell stays in the DOM, hidden: it still holds the retired parked
+    // buttons, whose handlers are wired by id and would be dead listeners if
+    // the elements went away.
+    const cornerRoot = document.getElementById('cornerButtons');
+    const strip = cornerRoot && cornerRoot.querySelector('.corner-btn-row');
+    if (strip) {
+      // ⚙️ Captured BEFORE the strip moves, and off the strip rather than off
+      // the document. The dock is not in the document until root.appendChild()
+      // at the end of this function, so the moment the strip goes into it the
+      // whole row becomes a DETACHED subtree - and document.getElementById
+      // cannot see into one. Querying the document here returned null, the
+      // search button silently stayed in the scroller, and the frozen group was
+      // three buttons instead of four.
+      const searchBtn = strip.querySelector('#jumpSearchBtn');
+      strip.id = 'scrayDisguiseStrip';
+      dock.appendChild(strip);
+      if (searchBtn) dock.appendChild(searchBtn);
+      cornerRoot.style.display = 'none';
+    }
+
+    // ---- X^n, Xb and X^T rejoin the row (13.132) -------------------------
+    // 13.129 folded them into a stack above X; they are ordinary buttons again,
+    // sitting after H. MOVED, not rebuilt, so their id-bound handlers in
+    // randomiser.js keep working - and X^n comes out of the parked section it
+    // has been in since 13.114, which is a different container from the row, so
+    // each is asked of its own home (13.130's lesson).
+    //
+    // Xb is the exception: it has never been a corner button, only a control
+    // inside the player, so it is built here against the same window function
+    // that one calls. It is created whether or not the row exists, so the row
+    // state below always has something to place.
+    const findX = (id) => (strip && strip.querySelector('#' + id))
+                       || (cornerRoot && cornerRoot.querySelector('#' + id));
+    const xbBtn = document.createElement('button');
+    xbBtn.id = 'scrayXbBtn';
+    xbBtn.type = 'button';
+    xbBtn.className = 'burger-btn burger-btn-pink';
+    xbBtn.textContent = 'Xb';
+    xbBtn.title = 'Play a random bookmark';
+    xbBtn.addEventListener('click', () => {
+      if (typeof window.scrayPlayRandomBookmark === 'function') {
+        window.scrayPlayRandomBookmark().catch(err => console.warn('[Xb] failed:', err));
+      }
+    });
+    if (strip) {
+      // In DOM order after H: X^n, Xb, X^T. The visible order is set by flex
+      // `order` in applyRowState, but the DOM is the record of tap order, so it
+      // is put right here too. The anchor walks forward with each insert -
+      // inserting all three after a FIXED anchor would reverse them.
+      let anchorEl = strip.querySelector('#playHistorySequenceBtn');
+      [findX('playRandomWeightedBtn'), xbBtn, findX('playRandomTimeBtn')].forEach(b => {
+        if (!b) return;
+        b.style.display = '';
+        if (anchorEl) { anchorEl.insertAdjacentElement('afterend', b); anchorEl = b; }
+        else strip.appendChild(b);
+      });
+    }
+
     dock.appendChild(viewBtn);
     if (wantsGlobe) dock.appendChild(globeBtn);
     dock.appendChild(control);
     root.appendChild(dock);
+
+    // ---- Which buttons the row shows, by app state (13.132) ---------------
+    // Nothing playing: the things that start something, in Mac's order -
+    //   X  R  H  X^n  Xb  X^T  B()  H()
+    // Fullscreen: nothing at all. The row is hidden there and the circles carry
+    // its jobs, so a second set of them over the picture is just clutter.
+    //
+    // hidden, not removed: every one of these is wired by id elsewhere, and the
+    // parked-button rule applies just as much to a button that comes back.
+    const ROW_IDLE = ['playRandomFilteredBtn', 'quickRandomBtn', 'playHistorySequenceBtn',
+                      'playRandomWeightedBtn', 'scrayXbBtn', 'playRandomTimeBtn',
+                      'basketToggleBtn', 'historyToggleBtn'];
+    // ⚙️ Empty in fullscreen (13.132). The row is hidden outright by CSS there -
+    // this is belt and braces, and it is what the state function reads, so the
+    // two cannot disagree about what fullscreen shows.
+    const ROW_FULLSCREEN = [];
+    function applyRowState(isFullscreen) {
+      if (!strip) return;
+      const want = isFullscreen ? ROW_FULLSCREEN : ROW_IDLE;
+      strip.querySelectorAll('.burger-btn').forEach(btn => {
+        const at = want.indexOf(btn.id);
+        btn.hidden = at === -1;
+        // flex order, so the row reads in the requested sequence without the
+        // DOM being reshuffled - which would break nothing, but would make the
+        // markup stop describing the tap order it is the record of.
+        btn.style.order = at === -1 ? '' : String(at);
+      });
+    }
 
     // ---- Mirror the player's state onto the overlay root ------------------
     // The overlay lives on documentElement, a SIBLING of body, so no
@@ -1360,6 +1849,30 @@
       root.classList.toggle('is-mpfs', mpfs);
       root.classList.toggle('is-fs', fs);
       root.classList.toggle('is-controls-hidden', hidden);
+
+      // ⚙️ The double-tap grid's own awake flag, relayed for the row guides.
+      // body carries it (CONTROLS POLICY in player.js sets it from the touch
+      // and clears it ~300ms after the taps stop); this overlay is a sibling of
+      // body and cannot see it, exactly as with is-mpfs.
+      // ⚙️ Peek relayed (13.134). An up-swipe in FLS slides the player aside and
+      // hands the page back; FLS itself stays on, so body keeps both
+      // fullscreen-active and manual-rotate-landscape and is-fs stays true. This
+      // is the class that says "but the page is usable", and every dock rule
+      // that means "over the picture" excludes it.
+      root.classList.toggle('is-peek', b.classList.contains('fls-peek'));
+
+      const awake = b.classList.contains('scray-guides-awake');
+      const wasAwake = root.classList.contains('is-guides-awake');
+      root.classList.toggle('is-guides-awake', awake);
+      // Measure on the rising edge only: the rows are where they are, and the
+      // moment they are about to be shown is the one moment worth asking.
+      if (awake && !wasAwake) placeRowGuides();
+
+      // The row's contents follow the app's state (13.129).
+      // Peeking counts as not-playing: the player has slid aside and the page
+      // is back, so the row that belongs to the page is the one to show (13.134).
+      applyRowState(fs && !b.classList.contains('fls-peek'));
+
     }
     new MutationObserver(syncStateClasses).observe(document.body, {
       attributes: true, attributeFilter: ['class'],
@@ -1447,15 +1960,53 @@
       e.stopPropagation();
     }, true);
 
+    // ---- Tapping the blind row wakes it instead of pressing it (13.123) --
+    // In FLS and MPFS the row fades out with the player controls. While it is
+    // faded the CSS above makes the dock itself the only live target, so this
+    // sees the tap and nothing inside it can fire. Raising the controls brings
+    // the row back - the same gesture, and the same result, as tapping the
+    // video: one tap to wake, a second to press.
+    //
+    // Capture phase, and it stops the event: a tap meant to reveal the row is
+    // not also a tap on the app behind it.
+    function dockIsBlind() {
+      // Peeking is never blind (13.136): the dock is fully visible and its
+      // buttons do their own jobs. Without this, a tap on one of them while the
+      // controls happened to be idle would raise the player's controls instead
+      // of pressing the button - the same miss as the fade rules above.
+      return root.classList.contains('is-fs')
+          && !root.classList.contains('is-peek')
+          && root.classList.contains('is-controls-hidden')
+          && control.classList.contains('is-collapsed');
+    }
+    dock.addEventListener('pointerdown', (ev) => {
+      if (!dockIsBlind()) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      // scrayRaiseControlsForTouch also re-arms Plyr's hide timer, so the row
+      // stays up for the usual dwell rather than vanishing again immediately.
+      // scrayShowControlsNow is the fallback: it reveals but does not re-arm.
+      if (typeof window.scrayRaiseControlsForTouch === 'function') {
+        window.scrayRaiseControlsForTouch();
+      } else if (typeof window.scrayShowControlsNow === 'function') {
+        window.scrayShowControlsNow();
+      }
+    }, true);
+
     // ---- Tap off the panel to collapse it (mobile) ----
     // Capture phase and read-only: never preventDefault, so the tap still
     // does whatever it was going to do in the app underneath.
     if (CLOSE_ON_OUTSIDE_TAP) {
       document.addEventListener('pointerdown', (e) => {
         if (!state.open) return;
-        // The dock, not just the control: the 🌐 button lives in the dock
-        // beside the panel, and a tap on it is not a tap "off the panel".
-        if (e.target && dock.contains(e.target)) return;
+        // The panel's own furniture, not the whole dock (13.121). 🌐 and
+        // VID/BM sit beside the panel and a tap on one is not a tap "off the
+        // panel" - but since the corner row moved INTO the dock, a dock-wide
+        // test would mean tapping R or X left an open panel sitting over the
+        // app. Those buttons are the app underneath, so they close it, and so
+        // does 🔍, which scrolls the page out from under the panel anyway.
+        const furniture = [control, globeBtn, viewBtn];
+        if (e.target && furniture.some(el => el && el.contains(e.target))) return;
         state.open = false;
         capturing = false;
         renderOpen();

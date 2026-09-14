@@ -300,7 +300,24 @@ function applyFullscreenFilterTerm(term) {
     syncFullscreenFilterPill();
 }
 
+// ⚙️ RETIRED (13.132). The filter pill under the title is gone: the pink search
+// pill rides into .fls-video-title with #floatingTagPillsBar and shows the term
+// at rest, so this was a second box saying the same thing one line below it.
+// 🔍 focuses that pill now (ui.js), and style.css opts it back in from the bar's
+// pointer-events:none so it can be tapped where it sits.
+//
+// The builder is kept and short-circuited rather than deleted, because
+// syncFullscreenFilterPill, startFullscreenFilterEdit and the strip placement
+// all query for the pill and are already written to cope with it being absent -
+// returning null exercises exactly those paths. Flip SHOW_FLS_FILTER_PILL to
+// bring it back.
+const SHOW_FLS_FILTER_PILL = false;
+
 function ensureFullscreenFilterPill() {
+    if (!SHOW_FLS_FILTER_PILL) {
+        document.querySelector('.fls-filter-pill')?.remove();
+        return null;
+    }
     const bar = ensureVideoTitleBar();
     if (!bar) return null;
 
@@ -436,6 +453,15 @@ window.syncVideoTitleBar = syncVideoTitleBar;
 // ---------------------------------------------------------------
 function scrayStripBelongsInTitle() {
     const b = document.body.classList;
+    // ⚙️ Not while peeking (13.135). An up-swipe in FLS slides the player aside
+    // and hands the page back, but both fullscreen classes stay set - so the
+    // now-playing strip and #floatingTagPillsBar were still being held in
+    // .fls-video-title, where the 13.62 rules draw the pills compact, centred
+    // and pointer-events:none. That is why the filter did not look or behave
+    // like the page's full-width pink bar during peek: it was not on the page.
+    // Returning false here sends both back, which scrayReturnNowPlayingStrip and
+    // scrayReturnTagPills below already know how to do.
+    if (b.contains('fls-peek')) return false;
     return b.contains('manual-rotate-landscape') || b.contains('portrait-fullscreen');
 }
 
@@ -539,7 +565,24 @@ function scrayReturnTagPills() {
 }
 window.scrayReturnTagPills = scrayReturnTagPills;
 
+/**
+ * The first circle is X^n in MPFS and X^T in FLS (13.133).
+ *
+ * Driven from syncNowPlayingStripPlacement, which already runs on every body
+ * class change - so the swap happens on the same signal the rest of the
+ * fullscreen furniture moves on, rather than needing an observer of its own.
+ */
+function scrayRandomCircleMode() {
+    const btn = document.querySelector('.plyr-frame-filter');
+    if (!btn) return;
+    const fls = document.body.classList.contains('manual-rotate-landscape');
+    btn.textContent = fls ? 'Xt' : 'Xn';
+    btn.title = fls ? 'Play random from a random point' : 'Weighted random';
+}
+window.scrayRandomCircleMode = scrayRandomCircleMode;
+
 function syncNowPlayingStripPlacement() {
+    scrayRandomCircleMode();
     const strip = document.getElementById('currentVideoInfo');
     if (!strip) return;
     if (!scrayStripBelongsInTitle()) {
@@ -1395,8 +1438,38 @@ function applyManualRotationStyles() {
         'max-height': screenW + 'px',
         margin: '0',
         padding: '0',
+        // ⚙️ THE SURFACE RIDING UP WHILE YOU TYPE (13.138).
+        //
+        // This box is `position: fixed`, so it is laid out against the LAYOUT
+        // viewport. When iOS opens the keyboard it does not resize that viewport -
+        // it SCROLLS the page to lift the focused input clear of the keyboard, and
+        // the visual viewport slides down the document while the layout one stays
+        // put. Everything fixed therefore appears to travel UP by the gap, all
+        // together: video, title, pill, controls, circles. Nothing has moved
+        // relative to anything else, which is why it reads as "the whole thing
+        // jumped" rather than as one element misplacing itself.
+        //
+        // --pills-top-offset is exactly that gap, published by adjustForKeyboard()
+        // in randomiser.js on every viewport resize and scroll, and absent (so 0)
+        // whenever the keyboard is down. 13.82 already used it to rescue the pills
+        // bar from the same fate; the fullscreen surface was simply never given
+        // it. Adding it back as a translate cancels the scroll.
+        //
+        // It goes FIRST because transform functions compose outermost-first: ahead
+        // of the rotate it is a plain screen-space nudge, in the same space the gap
+        // was measured in. Behind the rotate it would be 120px sideways. (13.119's
+        // rule in its safe form: what is written here is the DIFFERENCE between the
+        // two viewports, not a coordinate taken from one and applied in the other.)
+        //
+        // Keeping it as a var() rather than a scraped number means the value can
+        // change on every visualViewport event without re-running this function -
+        // custom properties resolve at computed-value time, so the inline transform
+        // re-evaluates on its own. No re-measure, no layout pass, nothing to get
+        // out of step.
+        //
         // Peek slides the rotated box off to the right (see setFlsPeek).
-        transform: (flsPeekActive ? `translateX(${flsPeekShiftPx()}px) ` : '') +
+        transform: 'translateY(var(--pills-top-offset, 0px)) ' +
+            (flsPeekActive ? `translateX(${flsPeekShiftPx()}px) ` : '') +
             'translate(-50%, -50%) rotate(90deg)',
         'transform-origin': 'center center',
         // Just under a history/basket panel opened over FLS.
@@ -1864,7 +1937,27 @@ window.toggleScrollLock = toggleScrollLock;
 //   HIGHER number = sits FURTHER UP the screen
 // Keep PROGRESS larger than CONTROLS (progress bar sits above the buttons).
 // =========================================
-const FULLSCREEN_CONTROLS_BOTTOM_VH = 6;   // was 7
+// ⚙️ MPFS BOTTOM STACK (13.124). Three rows, measured up from the screen edge,
+// rotated on Mac's instruction so the anchor row is under the thumb:
+//
+//   row 3   circle pause row   calc(6vh + 107px)   style.css
+//   row 2   player controls    calc(6vh + 39px)    player.js, written inline
+//   row 1   anchor dock        6vh                 disguise.js
+//   ----    progress rail      4vh                 player.js (unmoved)
+//
+// 6vh is where the player controls used to sit, so row 1 lands exactly where the
+// thumb already expects a control row. The offsets above it are row 1 plus the
+// measured heights (dock 30, controls 59) plus a 9px gap each, rather than the old
+// hand-picked numbers - which had the circles at 118 and the dock at 149 and
+// therefore OVERLAPPING BY 13px, live, before any of this. Change row 1 and the
+// two above it follow.
+//
+// This one is MPFS-only by construction: applyFullscreenOffsets() returns early
+// while manualRotationActive, so FLS never reaches it and keeps its own layout.
+// The fallback is only for a stylesheet that failed to load; :root in style.css
+// is the real value, so the orange row guides drawn at --mpfs-row-2 and the
+// controls they mark can never drift apart.
+const FULLSCREEN_CONTROLS_BOTTOM = 'var(--mpfs-row-2, calc(6vh + 39px))';
 const FULLSCREEN_PROGRESS_BOTTOM_VH = 4;  // was 13 (keeps the same ~6vh gap)
 
 /**
@@ -1882,7 +1975,7 @@ function applyFullscreenControlOffsets() {
 
     const controls = document.querySelector('.plyr__controls');
     if (controls) {
-        controls.style.setProperty('bottom', FULLSCREEN_CONTROLS_BOTTOM_VH + 'vh', 'important');
+        controls.style.setProperty('bottom', FULLSCREEN_CONTROLS_BOTTOM, 'important');
     }
 
     const progressBar = document.getElementById('permanentProgressBar');
@@ -1891,7 +1984,7 @@ function applyFullscreenControlOffsets() {
         progressBar.style.setProperty('bottom', FULLSCREEN_PROGRESS_BOTTOM_VH + 'vh', 'important');
     }
 
-    console.log(`Fullscreen offsets applied - controls ${FULLSCREEN_CONTROLS_BOTTOM_VH}vh, progress ${FULLSCREEN_PROGRESS_BOTTOM_VH}vh`);
+    console.log(`Fullscreen offsets applied - controls ${FULLSCREEN_CONTROLS_BOTTOM}, progress ${FULLSCREEN_PROGRESS_BOTTOM_VH}vh`);
 }
 
 /** Strip the fullscreen-only inline offsets so the docked/inline CSS takes over again */
@@ -4238,12 +4331,24 @@ function attachFrameStepButtons() {
         return b;
     };
 
-    // 1 - FLS filter. Opens the same inline edit the title-bar pill does, so
-    // there is one filter implementation rather than two.
-    const filterBtn = makeCircle('plyr-frame-filter', 'Filter', 'F');
+    // 1 - X^n, weighted random (13.132). This slot was F, the fullscreen
+    // filter - which the pink search pill in the title bar now does at rest, so
+    // the circle was a second way into a thing you can already see. It clicks
+    // the real X^n rather than reaching for the play function, so whatever that
+    // button does stays the one implementation.
+    // ⚙️ Mode-dependent (13.133): X^n in MPFS, X^T in FLS. One slot, because
+    // there is one circle group and both modes share it - scrayRandomCircleMode()
+    // below relabels it on every body-class change. It clicks the real corner
+    // button rather than reaching for the play function, so whatever that button
+    // does stays the one implementation; a display:none button still fires its
+    // handler on .click(), which is what makes that work while the row is hidden
+    // in fullscreen.
+    const filterBtn = makeCircle('plyr-frame-filter', 'Weighted random', 'Xn');
     setupTapButton(filterBtn, () => {
-        if (typeof window.startFullscreenFilterEdit === 'function') window.startFullscreenFilterEdit();
+        const fls = document.body.classList.contains('manual-rotate-landscape');
+        document.getElementById(fls ? 'playRandomTimeBtn' : 'playRandomWeightedBtn')?.click();
     });
+    scrayRandomCircleMode();
 
     // 2 - history panel, opened over the fullscreen player
     const historyBtn = makeCircle('plyr-frame-history', 'History', 'H');
@@ -4282,6 +4387,12 @@ function attachFrameStepButtons() {
     const rightBtn = makeCircle('plyr-frame-step-right', 'Next frame', '+');
     attachFrameStepHoldHandlers(rightBtn, 1);
 
+    // ⚙️ All eight again (13.132). 13.129 dropped F, H and B because the fused
+    // anchor row carried them in fullscreen - and 13.132 takes that row OUT of
+    // fullscreen entirely, so the circles are the only way to reach them again.
+    // The first slot is X^n now rather than F; see makeCircle above.
+    // (Leaving them built-but-detached in 13.129 is what made this an
+    // appendChild rather than an archaeology exercise.)
     group.appendChild(filterBtn);
     group.appendChild(historyBtn);
     group.appendChild(basketBtn);
@@ -5260,6 +5371,12 @@ function scrayRaiseControlsForTouch() {
         player.toggleControls(false);
     }, SCRAY_CONTROLS_HIDE_MS);
 }
+
+// Exposed for the anchor dock (13.123): while the fused row is faded out with
+// the controls, a tap on it raises them through here rather than pressing a
+// button nobody can see. Wanted over scrayShowControlsNow because this also
+// re-arms the hide timer, so the row stays up for the usual dwell.
+window.scrayRaiseControlsForTouch = scrayRaiseControlsForTouch;
 
 // Capture phase on the document, so this sees every touch before anything on
 // the player can stop it - a marker stops its own touchstart dead.

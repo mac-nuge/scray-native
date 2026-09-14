@@ -1966,6 +1966,41 @@ document.addEventListener("DOMContentLoaded", () => {
 const jumpSearchBtn = document.getElementById("jumpSearchBtn");
 if (jumpSearchBtn) {
     jumpSearchBtn.addEventListener("click", () => {
+        // ⚙️ FULLSCREEN FIRST (13.130). In FLS and MPFS the page is behind the
+        // picture, so there is nothing to scroll to and the page's own search
+        // pill is not where you can reach it - the pills bar has been moved into
+        // .fls-video-title, where it is deliberately pointer-events:none.
+        // startFullscreenFilterEdit() is the filter for those modes; it used to
+        // be reached only from the F circle, which 13.129 removed, which is what
+        // left fullscreen with no way in at all.
+        //
+        // Called synchronously inside this click for the same reason the pill
+        // focus below is: iOS raises the keyboard only for a focus still inside
+        // the user gesture.
+        const b = document.body.classList;
+        // ⚙️ Peeking is not "over the picture" (13.134): the player has slid
+        // aside and the page is back, so the filter behaves exactly as it does
+        // when nothing is playing - fall through to the page paths below.
+        if (!b.contains('fls-peek')
+            && (b.contains('manual-rotate-landscape') || b.contains('portrait-fullscreen'))) {
+            // 13.132: the pink search pill rides into .fls-video-title with the
+            // pills bar, so it is on screen in fullscreen already - focus THAT,
+            // exactly as the page path below does, rather than the retired
+            // filter pill. Synchronous inside the click: iOS raises the keyboard
+            // only for a focus still inside the user gesture.
+            const fsPill = document.getElementById("scraySearchPillInput");
+            if (fsPill && fsPill.getClientRects().length) {
+                fsPill.focus();
+                return;
+            }
+            // No pill on screen (bar empty, or an older layout): fall back to
+            // the inline edit if it is still around.
+            if (typeof window.startFullscreenFilterEdit === 'function') {
+                window.startFullscreenFilterEdit();
+                return;
+            }
+        }
+
         // ✅ Check if in landscape mobile mode
         const isLandscape = window.matchMedia('(orientation: landscape)').matches;
         const isMobile = window.innerWidth <= 1024;

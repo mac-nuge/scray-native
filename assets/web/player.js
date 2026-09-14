@@ -5145,12 +5145,14 @@ const SCRAY_CONTROL_AREA_SLOP_PX = 6;
 // ⚙️ How long after a touch the mouse events a phone synthesises are still
 // treated as that touch.
 const SCRAY_TOUCH_MOUSE_WINDOW_MS = 1000;
-// ⚙️ How long the control bar stays up before it hides itself. Halved from
-// 3000 in 13.90. This is the one number for it: scrayRaiseControlsForTouch
-// arms it for a bar raised from a control area, and scrayArmControlsHide arms
-// it for every other way the bar comes up - which is what stops Plyr's own
-// hardcoded 2000ms being the one that actually decides.
-const SCRAY_CONTROLS_HIDE_MS = 1500;
+// ⚙️ How long the control bar stays up before it hides itself. 3000 -> 1500 in
+// 13.90, then +50% to 2250 in 13.123: 1500 turned out a tad quick to live with.
+// This is the one number for it: scrayRaiseControlsForTouch arms it for a bar
+// raised from a control area, and scrayArmControlsHide arms it for every other
+// way the bar comes up. Note this is now ABOVE Plyr's own hardcoded 2000ms,
+// which is fine - scrayTakeOverPlyrControlsTimer replaces Plyr's timer rather
+// than racing it, so ours is still the number that decides.
+const SCRAY_CONTROLS_HIDE_MS = 2250;
 
 let scrayGestureInControls = false;
 // The current touch started on the picture rather than the control bar or the

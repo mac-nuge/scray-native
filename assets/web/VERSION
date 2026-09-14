@@ -1,1 +1,1 @@
-stg-native - 13.107 test: fix the undeclared probeMode that broke the delta pull
+stg-native - 13.119 stable: in-app browser no longer mistaken for the Native app - red close button and level anchor buttons

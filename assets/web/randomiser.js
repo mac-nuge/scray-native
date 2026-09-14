@@ -489,11 +489,64 @@ window.scrayTagIntersect = !!window.scrayTagIntersect;
    read. A second parallel store for the same thing is how the two end up
    disagreeing, so 'tag' goes through the select and only the three facet
    classes live here. */
+/**
+ * Scroll the results into view after a filter changes.
+ *
+ * Target is #videoStats - the "Items: N | Total size: X" line - so the count is
+ * the first thing under the field and the rows start immediately below it.
+ *
+ * Not the search row (#filenameSearchBox), which style.css has hidden under
+ * 1024px since 13.84 when the pill took it over, and not the sort buttons
+ * either: those only respond with the term at rest, so a row of controls that
+ * does nothing mid-type is a row of viewport spent on nothing.
+ *
+ * scrollIntoView is not used because #floatingTagPillsBar is position:fixed
+ * across the top, so its "start" parks the target UNDERNEATH it. What is
+ * covering the top is measured rather than assumed - the bar wraps to a second
+ * row once enough pills are on, and the focused search field is taller again.
+ */
+window.scrayScrollToResults = function (behavior) {
+   const target = document.getElementById('videoStats')
+               || document.querySelector('.sort-buttons-container')
+               || document.getElementById('filenameSearchBox');
+   if (!target) return;
+
+   let clear = 0;
+   const bar = document.getElementById('floatingTagPillsBar');
+   if (bar) {
+       const r = bar.getBoundingClientRect();
+       // Only when it is actually painted across the top - in landscape it
+       // moves, and an off-screen bar should not push the list down.
+       if (r.height && r.top < 80) clear = r.bottom + 6;
+   }
+   // Focused, the search field leaves the bar's flex flow (13.118) and is
+   // taller than it, so the bar's own rect no longer describes what is over the
+   // top of the screen. Whichever reaches further down wins.
+   const live = document.querySelector('.floating-tag-search-wrap.is-focused');
+   if (live) {
+       const lr = live.getBoundingClientRect();
+       if (lr.height && lr.top < 140) clear = Math.max(clear, lr.bottom + 6);
+   }
+
+   const top = window.scrollY + target.getBoundingClientRect().top - clear;
+   window.scrollTo({ top: Math.max(0, top), behavior: behavior || 'smooth' });
+};
+
 window.scrayFacetExcludes = window.scrayFacetExcludes || {
    studio:    new Set(),
    performer: new Set(),
    stashtag:  new Set()
 };
+// Same gap-fill as the includes above, and for the same reason (13.108): a
+// class with no exclude set here makes scraySetExcluded a no-op, so its cloud
+// chips cycle off -> include -> off and the exclude leg silently vanishes.
+// That is exactly what 'note' did on the index page, while the bookmarks page
+// - which creates its own note exclude set - cycled all three states. Driving
+// it off SCRAY_FACET_CLASSES means the next class added gets both halves
+// without anyone having to remember this file.
+window.SCRAY_FACET_CLASSES.forEach(k => {
+   if (!window.scrayFacetExcludes[k]) window.scrayFacetExcludes[k] = new Set();
+});
 
 function scrayFacetExcludeSet(kind) {
    return (window.scrayFacetExcludes || {})[kind] || null;
@@ -2563,9 +2616,16 @@ if (facetExcl.length > 0) {
    videos = videos.filter(rec => {
        // parts() once per record, same reason as the include pass above.
        const p = window.scrayStashNames ? window.scrayStashNames.parts(rec) : null;
-       if (!p) return true;   // no StashDB row - nothing to exclude on
        return !facetExcl.some(pair => {
            const kind = pair[0], list = pair[1];
+           // Notes come off the video's OWN bookmarks, not from parts() - so
+           // they are tested BEFORE the no-StashDB-row guard below, which
+           // otherwise waved every unmatched video past its note excludes.
+           if (kind === 'note') {
+               const notes = scrayVideoNotes(rec);
+               return list.some(val => notes.includes(val));
+           }
+           if (!p) return false;   // no StashDB row - nothing to exclude on
            const have = kind === 'studio'    ? (p.studio ? [p.studio] : [])
                       : kind === 'performer' ? (p.performerListAll || p.performerList || [])
                       : (p.stashTagList || []);
@@ -2819,11 +2879,15 @@ if (addFilteredBtn) {
    }
 }
 
-if (!window.skipSearchScroll) {
-const searchBar = document.getElementById("filenameSearchBox");
-if (searchBar) {
-searchBar.scrollIntoView({ behavior: "smooth", block: "start" });
-}
+// One-shot, not a mode. Forty-odd places set skipSearchScroll = true meaning
+// "don't scroll on THIS refresh", and exactly one ever set it back to false -
+// inside a setTimeout on the clear-filters path. So the first player open,
+// history panel or sync of the session latched it on and this scroll never
+// ran again. Consuming it here is what every one of those callers assumes.
+const skipScroll = !!window.skipSearchScroll;
+window.skipSearchScroll = false;
+if (!skipScroll) {
+window.scrayScrollToResults();
 }
 
 // ✅ Refresh floating pills to show/hide search pill
@@ -3307,10 +3371,7 @@ const isLandscape = window.matchMedia('(orientation: landscape)').matches;
 const isMobile = window.innerWidth <= 1024;
 
 if (!(isLandscape && isMobile)) {
- const searchBar = document.getElementById("filenameSearchBox");
- if (searchBar) {
-   searchBar.scrollIntoView({ behavior: "smooth", block: "start" });
- }
+ window.scrayScrollToResults();
 }
 }
 
@@ -3526,19 +3587,31 @@ searchBox.addEventListener("keydown", (e) => {
 
    clearFiltersBtn?.addEventListener("click", clearAllFilters);
 
-   // On mobile portrait, when the filter bar is focused/typed in (e.g. via
-   // the F button), scroll the page so the "+B" add-filtered-to-basket
-   // button and sort buttons row sit at the top of the visible screen
-   // (above the keyboard), with an adjustable buffer above them.
+   // Typing in the filter (pill, main box or the 🔍 button) parks the stats
+   // line at the top, so the count and the first results sit directly under
+   // what you are typing into and narrow as you type.
+   //
+   // THIS is the function that runs while you type, not the scroll at the end
+   // of filterDisplayedByFilename - the input handler above deliberately sets
+   // skipSearchScroll before each keystroke to suppress that one. So a change
+   // to how typing scrolls belongs here.
+   //
+   // It anchored on #searchFilterRow, which style.css has hidden with
+   // `display: none !important` under 1024px since 13.84, when the search pill
+   // took that row over. A display:none element measures as all zeros, so the
+   // target came out as pageYOffset - 80 and every keystroke nudged the page
+   // UP by 80px instead of moving to the results. Dead since 13.84, and only
+   // on the phones this function is for, which is why it went unnoticed.
+   //
+   // Instant, not smooth, and repeated: the list re-renders under us as the
+   // filter narrows and can pull the scroll back down.
    function scrollListIntoViewForFilter() {
-       const isMobilePortrait = window.innerWidth <= 768 && window.matchMedia('(orientation: portrait)').matches;
-       if (!isMobilePortrait) return;
-       const scrollToRow = () => {
-           const anchorEl = document.getElementById("searchFilterRow");
-           if (!anchorEl) return;
-           const targetY = anchorEl.getBoundingClientRect().top + window.pageYOffset - MOBILE_FILTER_SCROLL_BUFFER_PX;
-           window.scrollTo({ top: Math.max(0, targetY), behavior: "auto" });
-       };
+       // Landscape on a phone puts the list in the side panel, where scrolling
+       // the page behind it achieves nothing. Everywhere else scrolls.
+       const isLandscape = window.matchMedia('(orientation: landscape)').matches;
+       const isMobile    = window.innerWidth <= 1024;
+       if (isLandscape && isMobile) return;
+       const scrollToRow = () => window.scrayScrollToResults('auto');
        requestAnimationFrame(scrollToRow);
        setTimeout(scrollToRow, 50);
        setTimeout(scrollToRow, 150);

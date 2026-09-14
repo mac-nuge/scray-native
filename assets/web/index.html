@@ -1,3 +1,11 @@
+<!-- ===== INDEX =====
+     NAMING: this page is "the index" - the main list + player screen. It is
+     the name to use for it in conversation, in comments and in bug reports,
+     as opposed to "bookmarks" (bookmarks.html) and whatever pages come
+     later. "Native" names the APP, not this page; either app's main screen
+     is its index. The Floating Menu's nav labels it the same way, and
+     scray-bugreport already reports `page: index.html`.
+     ================== -->
 <html><head>
   <meta charset="UTF-8">
   <title>Universal Native</title>
@@ -399,21 +407,30 @@
 </script>
 
 <div id="cornerButtons">
+<!-- ⚙️ CORNER ROW ORDER (13.108) - this is the tap order, left to right, and
+     the only thing that sets it. The two trailing pinks (X^T, B^x) were not in
+     the requested sequence but were not asked for either way, so they keep
+     their place at the end rather than disappearing.
+     Retired buttons are parked below with display:none rather than deleted:
+     their handlers are wired by id elsewhere and a missing element is a silent
+     dead listener. -->
 <div class="corner-btn-row">
-<button id="pickerCornerBtn" class="burger-btn burger-btn-blue" title="Open Picker in the in-app browser">P</button>
-<button id="jumpSearchBtn" class="burger-btn" title="Jump to Search">F</button>
+<button id="jumpSearchBtn" class="burger-btn" title="Jump to Search">&#128269;</button>
 <button id="playRandomFilteredBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video">X</button>
 <button id="quickRandomBtn" class="burger-btn">R</button>
-<button id="playRandomTimeBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video from a Random Point (5%-95%)">X<sup>T</sup></button>
-<button id="playPreviousBtn" class="burger-btn burger-btn-pink" title="Play Previous in Current List">&lt;</button>
 <button id="playNextBtn" class="burger-btn burger-btn-pink" title="Play Next in Current List">&gt;</button>
 <button id="playHistorySequenceBtn" class="burger-btn burger-btn-pink" title="Play Through History">H</button>
-<button id="playRandomBasketBtn" class="burger-btn burger-btn-pink" title="Play Random from Basket">B</button>
 <button id="basketToggleBtn" class="burger-btn">B (<span id="basketCount">0</span>)</button>
+<button id="playPreviousBtn" class="burger-btn burger-btn-pink" title="Play Previous in Current List">&lt;</button>
 <button id="historyToggleBtn" class="burger-btn">H (<span id="historyCount">0</span>)</button>
-<button id="clearBtnCorner" class="burger-btn" title="Stop Playback">C</button>
+<button id="playRandomTimeBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video from a Random Point (5%-95%)">X<sup>T</sup></button>
+<button id="playRandomBasketBtn" class="burger-btn burger-btn-pink" title="Play Random from Basket">B</button>
 </div>
 
+<!-- Retired 13.108: the browser now has its own always-on-top 🌐 button beside
+     the COL panel, and C went with the reorder. -->
+<button id="pickerCornerBtn" class="burger-btn burger-btn-blue" title="Open Picker in the in-app browser" style="display:none">P</button>
+<button id="clearBtnCorner" class="burger-btn" title="Stop Playback" style="display:none">C</button>
 <button id="listBtnCorner" class="burger-btn" style="display:none">L</button>
 <button id="playRandomWeightedBtn" class="burger-btn burger-btn-pink" title="Play Random Filtered Video (favours less-watched)" style="display:none">X<sup>n</sup></button>
 <button id="jumpRandomBtn" class="burger-btn" title="Jump to Random" style="display:none">R^</button>

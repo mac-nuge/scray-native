@@ -40,11 +40,14 @@
   // screens and above it on others. The 62px is the control row's height plus
   // a little air; that's the number to nudge if it's still tight.
   const MOBILE_BOTTOM_OFFSET_MPFS = 'calc(7vh + 62px)';
-  // ⚙️ Air left between the top of the control row and the bottom of this
-  // panel once the row can actually be measured. With the measurement in
-  // place this is the only number worth nudging.
-  const MPFS_CONTROLS_CLEARANCE_PX = 12;
-  const MOBILE_BOTTOM_OFFSET_LANDSCAPE = '58px';
+  // ⚙️ Landscape phone. 10px, matching the `bottom: 10px !important` the app
+  // pins #cornerButtons at in landscape, so the anchor buttons sit on the SAME
+  // baseline as the burger buttons rather than floating above them. It was
+  // 58px, which lifted them clear of that row - necessary when the row ran the
+  // full width, pointless now the row reserves horizontal space for them
+  // (13.123). Mac spotted it in a narrow landscape window: level on the phone,
+  // 48px high in picker on the desktop.
+  const MOBILE_BOTTOM_OFFSET_LANDSCAPE = '10px';
 
   // Native's WKWebView runs edge-to-edge with no browser chrome below it, so
   // the same offset lands lower on the glass and closer to the home-swipe
@@ -53,6 +56,11 @@
 
   // Mobile only: tapping anywhere off the panel collapses it.
   const CLOSE_ON_OUTSIDE_TAP = true;
+
+  // In FLS and MPFS the anchor buttons sit over the video. They go this
+  // transparent there, and fade out completely with the player's own controls.
+  // ⚙️ 1 = fully opaque, 0 = invisible.
+  const FS_ANCHOR_OPACITY = 0.45;
 
   // Screenshots, per layout — one is picked at random per load.
   // An entry is a path, or { src, fit, position } to override the defaults
@@ -191,54 +199,46 @@
     return (MODE_FILTER[mode] || '').indexOf('invert') !== -1;
   }
 
-  /**
-   * MPFS puts a full-width player control row across the bottom of the
-   * screen, and a fixed bottom offset kept landing on the volume button.
-   * The row's height AND its distance from the bottom are both set in vh by
-   * the app's stylesheet - and two competing !important rules put it at
-   * either 7vh or 20vh depending on which fullscreen class Plyr applied - so
-   * no fixed pixel value clears it on every device. Measure the row instead
-   * and sit above whatever it actually is. Every other mode clears the inline
-   * value so the stylesheet keeps control there.
-   */
-  function positionAbovePlayerControls() {
-    const el = document.getElementById('scrayDisguiseControl');
-    if (!el) return;
-    const body = document.body;
-    const inMpfs = body.classList.contains('portrait-fullscreen')
-      && !body.classList.contains('manual-rotate-landscape');
-    if (!inMpfs || !isMobile()) { el.style.removeProperty('bottom'); return; }
-
-    const controls = document.querySelector('.plyr__controls');
-    const rect = controls && controls.getBoundingClientRect();
-    if (!rect || !rect.height) { el.style.removeProperty('bottom'); return; }
-
-    // rect.top is the top of the row; measuring from the viewport bottom
-    // clears the whole row plus whatever gap it sits on.
-    const clearRow = window.innerHeight - rect.top;
-    el.style.setProperty('bottom', (clearRow + MPFS_CONTROLS_CLEARANCE_PX) + 'px', 'important');
-  }
-
-  function watchPlayerControls() {
-    const run = () => positionAbovePlayerControls();
-    window.addEventListener('resize', run);
-    window.addEventListener('orientationchange', run);
-    // Entering and leaving MPFS is a body class change, and Plyr rebuilds the
-    // control row on every source change, so watch both.
-    new MutationObserver(run).observe(document.body, {
-      attributes: true, attributeFilter: ['class'],
-    });
-    run();
-  }
+  // ---- MPFS: why there is no measuring here (13.121) --------------------
+  // There used to be a positionAbovePlayerControls() that measured
+  // .plyr__controls and wrote an inline `bottom` on the dock, so the panel
+  // would auto-fit whatever height the control row happened to be.
+  //
+  // It is gone, because it is what made the anchor buttons walk up the screen
+  // in MPFS. It re-ran on a MutationObserver watching BODY CLASS changes -
+  // scray-paused, scray-scrubbing, scray-guides-awake, keyboard-active - all
+  // of which fire while you swipe, and each run wrote a fresh number measured
+  // against whatever the row was doing at that instant. 13.120 tried to make
+  // the measurement honest by subtracting the row's animated translate; it did
+  // not hold. Picker has never had this function and has never drifted, which
+  // is the whole argument: the CSS offset below is a constant, a constant
+  // cannot drift, and matching Picker is worth more than an auto-fit.
+  //
+  // If the panel sits too close to the control row on some device, nudge
+  // MOBILE_BOTTOM_OFFSET_MPFS at the top of this file. That is the knob now.
 
   const mq = window.matchMedia(MOBILE_MEDIA);
   function isMobile() { return mq.matches; }
 
-  // True only inside Scray Native's WKWebView. Checks for the app's own
-  // message handler rather than window.webkit, which iOS Safari also has.
-  const IS_NATIVE = !!(
+  // Picker running inside Native's own in-app browser. ScrayBrowser.swift
+  // injects this at documentStart and nothing else does, so it is exact.
+  const IN_APP_BROWSER = !!window.SCRAY_IN_APP_BROWSER;
+
+  // True only in Scray Native's MAIN web view - the app itself.
+  //
+  // The scrayBridge message handler is NOT enough on its own (13.125).
+  // ScrayBrowser.swift registers a handler under that very same name for the
+  // pages it hosts, so Picker running inside Native's browser passed this test
+  // too and was treated as the app: it kept the blue "open the browser" button
+  // while already being in the browser, and it took NATIVE_EXTRA_LIFT, which
+  // put the anchor buttons 30px above the corner row. Both of Mac's complaints,
+  // one cause. The in-app browser is excluded explicitly rather than by
+  // reaching for a different signal, because the handler genuinely is there -
+  // it is the surface that differs, not the bridge.
+  const IS_NATIVE = !IN_APP_BROWSER && !!(
     (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scrayBridge)
     || window.ScrayBridge
+    || window.SCRAY_NATIVE
   );
 
   function normaliseShot(entry) {
@@ -356,10 +356,26 @@
   background-repeat: no-repeat;
   opacity: 0;
 }
-#scrayDisguiseControl {
+/* ⚙️ THE DOCK - the one positioned element (13.119).
+   Everything that decides WHERE the anchor buttons sit lives on this rule and
+   its overrides: desktop top-right, phone bottom-right, the Native lift, the
+   landscape lift, and the MPFS lift that Native writes here as an inline
+   style. The COL panel and the 🌐 button are laid out INSIDE it by flexbox, so
+   their relationship to each other is never computed and can never drift.
+   pointer-events stays none so the empty gap between them isn't a dead zone
+   over the page; both children opt back in. */
+#scrayDisguiseDock {
   position: absolute;
   top: calc(env(safe-area-inset-top, 0px) + 10px);
   right: calc(env(safe-area-inset-right, 0px) + 10px);
+  pointer-events: none;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;   /* desktop anchors by the TOP edge */
+  gap: 6px;
+}
+#scrayDisguiseControl {
+  position: relative;
   pointer-events: auto;
   display: flex; flex-direction: column; gap: 6px;
   padding: 8px 10px;
@@ -375,6 +391,77 @@
 }
 #scrayDisguiseBody {
   display: flex; flex-direction: column; gap: 6px;
+}
+
+/* 🌐 Browser button - a plain flex item in the dock, sitting left of the COL
+   panel because it comes first in the DOM. Blue to match .burger-btn-blue;
+   skinnier than it is tall because it sits in the corner-button row's lane.
+
+   It is NOT inside #scrayDisguiseControl: on phones the control carries
+   overflow-y:auto (so a tall expanded panel can scroll in landscape), and an
+   overflow ancestor clips absolutely positioned descendants that sit outside
+   its box - which is where this button would have to live. It was in the DOM
+   and invisible on screen (13.114).
+
+   It is not positioned by measuring the control's rect either (13.115). On iOS
+   that drifts: getBoundingClientRect() reports VISUAL-viewport coordinates,
+   while an absolutely positioned child of a fixed root is laid out against the
+   LAYOUT viewport. The two diverge the moment Safari's toolbar collapses under
+   a swipe, so each re-sync wrote a coordinate from one system into the other
+   and the button crawled up the screen. Flexbox in the dock needs no
+   coordinates at all, so there is nothing left to drift. */
+#scrayDisguiseGlobe {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 32px;
+  padding: 0;
+  /* style.css sets  button, select, input  to width:100%, padding:12px and
+     margin-bottom:10px for everything under 1024px. The ID beats a bare
+     element selector so width and padding were already safe, but margin was
+     not: 10px of margin under a 38px button made its MARGIN box 48px, and
+     align-items:flex-end aligns MARGIN boxes - so the button rendered 10px
+     ABOVE the COL panel it is supposed to sit level with. The dock measured
+     78x48 instead of 78x38, which is what gave it away (13.120). */
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background: #1565c0;
+  color: #ffffff;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+#scrayDisguiseGlobe:hover { background: #1976d2; }
+/* ⚙️ Picker inside Native's in-app browser: the same button, opposite job -
+   close the browser rather than open one. Red because it dismisses something
+   (the same red the Exclude pill and the modals' Clear buttons use), and 📱
+   because what matters is where you land, not that a thing is being closed. */
+#scrayDisguiseGlobe.is-close { background: #d32f2f; }
+#scrayDisguiseGlobe.is-close:hover { background: #e53935; }
+
+/* ⚙️ FULLSCREEN: transparent, and fades with the player controls (13.122).
+   In FLS and MPFS these sit on top of the picture, so they drop to
+   FS_ANCHOR_OPACITY and then go entirely when Plyr idles its controls away -
+   the same .plyr--hide-controls signal .fls-video-title already keys off,
+   relayed onto this root by syncStateClasses because the overlay lives
+   outside <body> and cannot see that class itself.
+   The :has() guard keeps an OPEN panel on screen: the controls idle out after
+   three seconds, and a menu vanishing mid-tap is not a fade, it is a bug.
+   pointer-events goes on the children, not the dock - the dock is already
+   pointer-events:none and its children opt back in, so clearing it here would
+   do nothing. */
+#scrayDisguise.is-fs #scrayDisguiseDock {
+  opacity: ${FS_ANCHOR_OPACITY};
+  transition: opacity 0.3s ease;
+}
+#scrayDisguise.is-fs.is-controls-hidden #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) {
+  opacity: 0;
+}
+#scrayDisguise.is-fs.is-controls-hidden #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) #scrayDisguiseGlobe,
+#scrayDisguise.is-fs.is-controls-hidden #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) #scrayDisguiseControl {
+  pointer-events: none;
 }
 #scrayDisguiseNav {
   display: flex; flex-wrap: wrap; gap: 4px;
@@ -504,10 +591,13 @@
 
 /* ---- Compact layout for phones ---- */
 @media ${MOBILE_MEDIA} {
-  #scrayDisguiseControl {
+  #scrayDisguiseDock {
     top: auto;
     bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET});
     right: calc(env(safe-area-inset-right, 0px) + 6px);
+    align-items: flex-end;   /* phones anchor by the BOTTOM edge */
+  }
+  #scrayDisguiseControl {
     padding: 6px 8px;
     font-size: 11px;
     /* Widened from 46vw: the menu now carries an extra full-width button and
@@ -526,6 +616,13 @@
   /* Bottom-anchored, so the handle belongs at the bottom edge and the panel
      grows upward from it. */
   #scrayDisguiseHandle { order: 2; }
+  /* Phone: bigger tap target. Which EDGE it lines up with is the dock's
+     align-items, so the button follows the panel without knowing which. */
+  #scrayDisguiseGlobe {
+    width: 28px;
+    height: 38px;
+    font-size: 16px;
+  }
   .scray-disguise-row > span.scray-disguise-lbl { width: 26px; }
   .scray-disguise-row input[type="range"] { width: 88px; }
   .scray-disguise-val { min-width: 28px; }
@@ -556,15 +653,23 @@
     letter-spacing: 0.03em;
     color: #6b6b6b;
   }
-  #scrayDisguise.is-native #scrayDisguiseControl {
+  #scrayDisguise.is-native #scrayDisguiseDock {
     bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET} + ${NATIVE_EXTRA_LIFT});
   }
-  /* MPFS. Both variants are needed: the .is-native selector above carries two
-     IDs, so a single body-scoped rule would lose to it on specificity. */
-  body.portrait-fullscreen:not(.manual-rotate-landscape) #scrayDisguiseControl {
+  /* MPFS (13.121). Keyed off .is-mpfs on the OVERLAY ROOT, not off body.
+     These used to read  body.portrait-fullscreen:not(.manual-rotate-landscape)
+     #scrayDisguiseDock  - a DESCENDANT-OF-BODY selector - and this
+     overlay is appended to documentElement, a SIBLING of body. So it matched
+     nothing, in either app, for as long as it has existed. Native did not
+     notice because positionAbovePlayerControls was writing an inline bottom
+     over the top of it; deleting that function is what exposed it.
+     syncStateClasses() mirrors the body class onto the root, so the selector
+     has something to bite on. Both variants are needed: the .is-native rule
+     above carries the same weight, so the plain one would lose to it. */
+  #scrayDisguise.is-mpfs #scrayDisguiseDock {
     bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET_MPFS});
   }
-  body.portrait-fullscreen:not(.manual-rotate-landscape) #scrayDisguise.is-native #scrayDisguiseControl {
+  #scrayDisguise.is-mpfs.is-native #scrayDisguiseDock {
     bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET_MPFS} + ${NATIVE_EXTRA_LIFT});
   }
 }
@@ -572,11 +677,15 @@
 /* Landscape phone: the app right-anchors #cornerButtons at bottom: 10px, so
    clear that row rather than covering the burger buttons. */
 @media (max-width: 1024px) and (orientation: landscape) {
-  #scrayDisguiseControl {
+  #scrayDisguiseDock {
     bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET_LANDSCAPE});
   }
-  #scrayDisguise.is-native #scrayDisguiseControl {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET_LANDSCAPE} + ${NATIVE_EXTRA_LIFT});
+  /* Native takes NO extra lift in landscape. The rule is here purely to beat
+     the .is-native portrait rule above, which carries two IDs and would
+     otherwise keep winning inside this media query and put Native's buttons
+     36px up while Picker's sat at 10px. Same value on purpose. */
+  #scrayDisguise.is-native #scrayDisguiseDock {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + ${MOBILE_BOTTOM_OFFSET_LANDSCAPE});
   }
 }`;
     const styleEl = document.createElement('style');
@@ -705,6 +814,69 @@
     const handle = document.createElement('button');
     handle.id = 'scrayDisguiseHandle';
     handle.type = 'button';
+
+    // ---- 🌐 Browser button ------------------------------------------------
+    // Always on top, pinned immediately LEFT of the COL panel, and deliberately
+    // NOT inside #scrayDisguiseBody - it has to survive the panel collapsing,
+    // which is the state it spends most of its life in. Absolute against the
+    // control, so it tracks every one of the control's anchoring rules (top on
+    // desktop, bottom on phones, the MPFS lift) without restating any of them.
+    //
+    // In Native this is the corner "P" that used to sit in #cornerButtons: the
+    // bridge resumes the in-app browser wherever it was left. On the web there
+    // is no bridge, so it opens the browse console in a new tab.
+    // ---- The browser button, which is two different buttons (13.124) ------
+    // Native's job is to SUMMON the browser: blue 🌐, resumes the in-app
+    // browser wherever it was left.
+    // Picker's job is the opposite. Picker only ever runs inside that browser
+    // or in a desktop/Safari tab - so "open the browser" is either redundant
+    // (you are in it) or meaningless (there isn't one). Inside the in-app
+    // browser it becomes a red 📱: dismiss the browser, back to Native.
+    // Anywhere else in Picker there is nothing for it to do, so it is not
+    // drawn at all and COL sits on its own.
+    //
+    // window.SCRAY_IN_APP_BROWSER is injected at documentStart by
+    // ScrayBrowser.swift, and ONLY there, so it is an exact test for "this
+    // Picker is running inside Native's browser".
+    const inAppBrowser = IN_APP_BROWSER;
+    const wantsGlobe = IS_NATIVE || inAppBrowser;
+
+    const globeBtn = document.createElement('button');
+    globeBtn.id = 'scrayDisguiseGlobe';
+    globeBtn.type = 'button';
+    if (IS_NATIVE) {
+      globeBtn.textContent = '\uD83C\uDF10';          // 🌐
+      globeBtn.title = 'Open the browser';
+    } else {
+      globeBtn.classList.add('is-close');
+      globeBtn.textContent = '\uD83D\uDCF1';          // 📱
+      globeBtn.title = 'Close the browser - back to Scray Native';
+    }
+    globeBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+
+      // Picker inside the in-app browser: hop to scraynative://close.
+      // ScrayBrowser.swift cancels any scraynative:// navigation, and every
+      // host except "newtab" falls through to `dismiss(animated: true)`,
+      // playing a video afterwards only when a ?key= came with it. No key, no
+      // playback - just the dismissal. That path already ships in the
+      // installed IPA, so this needs no Swift change and no rebuild.
+      if (!IS_NATIVE) {
+        if (inAppBrowser) window.location.href = 'scraynative://close';
+        return;
+      }
+
+      if (typeof window.scrayOpenBrowser === 'function') { window.scrayOpenBrowser(); return; }
+      if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
+        window.ScrayBridge.openBrowser()
+          .catch(err => console.error('[browser] openBrowser failed:', err));
+        return;
+      }
+      const url = (window.SCRAY_SYNC && window.SCRAY_SYNC.BROWSE_URL) || 'browse.html';
+      window.open(url, '_blank');
+    });
+
 
     const bodyWrap = document.createElement('div');
     bodyWrap.id = 'scrayDisguiseBody';
@@ -901,20 +1073,48 @@
     // ⚙️ NAV — the colour panel doubles as this app's navigation. Add a line
     // to add a destination. The page you are already on renders as a plain
     // label rather than a link.
+    //
+    // NAMING: "index" is the main page - the list + player screen - as opposed
+    // to Bookmarks and whatever pages come later. It was labelled "Native",
+    // which named the APP rather than the page and left the app's own main
+    // screen with no name of its own.
+    //
+    // An entry with `open` instead of `href` runs that function rather than
+    // navigating: Picker lives on the web, and pointing the WKWebView at it
+    // would replace the app with it. Sending it to the in-app browser leaves
+    // the app running underneath, which is what the corner "P" always did.
     const NAV_LINKS = [
-      { href: 'index.html',     label: 'Native' },
+      { href: 'index.html',     label: 'Index' },
+      { label: 'Picker', open: () => {
+          const url = (typeof window.scrayPickerUrl === 'function')
+            ? window.scrayPickerUrl() : null;
+          if (!url) return;
+          if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
+            window.ScrayBridge.openBrowser(url)
+              .catch(err => console.error('[nav] openBrowser failed:', err));
+          } else {
+            window.open(url, '_blank');
+          }
+        } },
       { href: 'bookmarks.html', label: 'Bookmarks' }
     ];
 
     const navWrap = document.createElement('div');
     navWrap.id = 'scrayDisguiseNav';
     const here = (location.pathname.split('/').pop() || 'index.html').toLowerCase();
-    NAV_LINKS.forEach(({ href, label }) => {
-      const isHere = href.toLowerCase() === here;
+    NAV_LINKS.forEach(({ href, label, open }) => {
+      const isHere = !!href && href.toLowerCase() === here;
       const el = document.createElement(isHere ? 'span' : 'a');
       el.className = 'scray-disguise-nav-link' + (isHere ? ' is-here' : '');
       el.textContent = label;
-      if (!isHere) el.href = href;
+      if (isHere) {
+        // nothing to wire - you are already on it
+      } else if (open) {
+        el.href = '#';
+        el.addEventListener('click', (ev) => { ev.preventDefault(); open(); });
+      } else {
+        el.href = href;
+      }
       navWrap.appendChild(el);
     });
     bodyWrap.appendChild(navWrap);
@@ -1050,7 +1250,59 @@
 
     backRoot.appendChild(shot);
     root.appendChild(tint);
-    root.appendChild(control);
+    // The dock is the positioned element; these two are laid out inside it by
+    // flexbox, in DOM order, so 🌐 sits left of the COL panel. No measuring.
+    const dock = document.createElement('div');
+    dock.id = 'scrayDisguiseDock';
+    if (wantsGlobe) dock.appendChild(globeBtn);
+    dock.appendChild(control);
+    root.appendChild(dock);
+
+    // ---- Mirror the player's state onto the overlay root ------------------
+    // The overlay lives on documentElement, a SIBLING of body, so no
+    // `body.something .scrayDisguise*` selector can ever reach it. Copying the
+    // one class the layout cares about onto the root is what lets the MPFS
+    // offset above apply at all. A class toggle, deliberately - the thing it
+    // replaces was a live measurement, and that is what drifted (13.121).
+    //
+    // Plyr's controls-hidden flag lives on the .plyr element, which is inside
+    // body and gets rebuilt on every source change - so the observer is bound
+    // to #inlineVideoContainer (the stable wrapper) rather than to .plyr, and
+    // rebound if that wrapper is ever replaced. Scoped to that subtree rather
+    // than to body's, deliberately: a class-change observer over the whole
+    // list would fire on every row highlight.
+    let controlsHost = null;
+    let controlsObserver = null;
+    function bindControlsWatcher() {
+      const host = document.getElementById('inlineVideoContainer');
+      if (!host || host === controlsHost) return;
+      if (controlsObserver) controlsObserver.disconnect();
+      controlsHost = host;
+      controlsObserver = new MutationObserver(syncStateClasses);
+      controlsObserver.observe(host, {
+        subtree: true, attributes: true, attributeFilter: ['class'],
+      });
+    }
+
+    function syncStateClasses() {
+      const b = document.body;
+      const mpfs = b.classList.contains('portrait-fullscreen')
+        && !b.classList.contains('manual-rotate-landscape');
+      // FLS counts too: both put the player over the whole screen, and the
+      // fade wants either. Only the POSITION offset is MPFS-only.
+      const fs = FULLSCREEN_BODY_CLASSES.some(c => b.classList.contains(c));
+      bindControlsWatcher();
+      const plyr = document.querySelector('.plyr');
+      const hidden = !!plyr && plyr.classList.contains('plyr--hide-controls');
+
+      root.classList.toggle('is-mpfs', mpfs);
+      root.classList.toggle('is-fs', fs);
+      root.classList.toggle('is-controls-hidden', hidden);
+    }
+    new MutationObserver(syncStateClasses).observe(document.body, {
+      attributes: true, attributeFilter: ['class'],
+    });
+    syncStateClasses();
     document.documentElement.appendChild(backRoot);
     document.documentElement.appendChild(root);
 
@@ -1139,7 +1391,9 @@
     if (CLOSE_ON_OUTSIDE_TAP) {
       document.addEventListener('pointerdown', (e) => {
         if (!state.open) return;
-        if (e.target && control.contains(e.target)) return;
+        // The dock, not just the control: the 🌐 button lives in the dock
+        // beside the panel, and a tap on it is not a tap "off the panel".
+        if (e.target && dock.contains(e.target)) return;
         state.open = false;
         capturing = false;
         renderOpen();
@@ -1168,11 +1422,6 @@
         attributeFilter: ['style', 'class']
       });
     }
-
-    // Must come after the panel is in the DOM: the positioner looks the panel
-    // up by id, so starting it any earlier makes its first run a no-op and
-    // leaves a session that BOOTS in MPFS on the CSS fallback for ever.
-    watchPlayerControls();
 
     console.log(`✓ Disguise layer mounted (${currentShot ? currentShot.src : 'no screenshot'}, `
       + `${state.mode}, ${isMobile() ? 'mobile' : 'desktop'})`);

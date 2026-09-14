@@ -344,6 +344,50 @@ min-width: 0;
 }
 .floating-tag-search-wrap.is-focused .search-pill-input { font-size: 1.1rem; }
 
+/* ---- FOCUSED: the field takes the whole top row (13.118) ----------------
+   While you are actually typing, the term is the only thing worth reading, so
+   the pill leaves the bar's flex flow and covers it - tag, score and exclude
+   pills included. They are untouched underneath and come straight back on blur.
+   Taken OUT OF FLOW rather than grown in place on purpose: grown in place it
+   would push the bar to a second row mid-keystroke, and the bar is what the
+   autoscroll measures to decide where the list starts - so the list would step
+   down the screen as you typed.
+   #floatingTagPillsBar is position:fixed, so `absolute` here resolves against
+   its padding box. The 8px insets match the bar's own side gutters; the
+   containing block is the padding box, so `0` would sit flush to the screen. */
+.floating-tag-search-wrap.is-focused {
+position: absolute;
+top: 0;
+left: 8px;
+right: 8px;
+width: auto;
+margin-left: 0;
+z-index: 3;
+}
+.floating-tag-search-wrap.is-focused .floating-tag-search {
+width: 100%;
+gap: 8px;
+padding: 6px 14px;
+border-radius: 16px;
+box-shadow: 0 2px 12px rgba(0, 0, 0, 0.28);
+}
+/* ⚙️ The typing size. */
+.floating-tag-search-wrap.is-focused .search-pill-input {
+font-size: 2rem;
+flex: 1 1 auto;
+/* Beats the inline px width sizeSearchPill writes. At full width the term no
+   longer decides the box - the bar does - so the measured width is wrong by
+   definition here, and it is an inline style, so it needs !important. */
+width: auto !important;
+}
+.floating-tag-search-wrap.is-focused .search-pill-glass { font-size: 1.4rem; }
+.floating-tag-search-wrap.is-focused .search-pill-x {
+font-size: 1.9rem;
+margin: -8px -4px -8px 8px;
+padding: 6px 10px;
+border-radius: 14px;
+}
+
 /* Idle AND empty: no term to show, so the pill is the magnifier plus a couple
    of characters of room - enough to be an easy target rather than a sliver.
    ⚙️ The stub's spare width. Kept as width rather than display:none, because
@@ -665,7 +709,20 @@ max-width: calc(100vw - 40px);
 @media (max-width: 768px) and (orientation: portrait) {
 #cornerButtons {
   bottom: calc(env(safe-area-inset-bottom,0px) + 36px) !important;
-  max-width: calc(100vw - 40px - 44px) !important;
+  /* ⚙️ Anchored LEFT, not centred (13.122). The base rule centres the row with
+     left:50% + translateX(-50%), so on a 402px screen a 285px row ran 59->344
+     and its last button sat under the anchor buttons at 318. Centring also
+     means the row's start moves every time a button is added or removed.
+     Left-anchored it starts in the same place always, and the reserve below
+     decides where it stops.
+     ⚙️ ANCHOR_RESERVE = 92px: the dock's own right offset (6) + its width
+     (28 globe + 6 gap + 44 COL = 78) + 8px of air. Both anchor buttons are
+     always on top, so a corner button underneath them is unreachable rather
+     than merely hidden - hence a reserve rather than a z-index. */
+  left: calc(env(safe-area-inset-left,0px) + 8px) !important;
+  transform: none !important;
+  max-width: calc(100vw - env(safe-area-inset-left,0px)
+                        - env(safe-area-inset-right,0px) - 8px - 92px) !important;
 }
 }
 
@@ -4682,11 +4739,15 @@ padding-top: 20px !important; /* Match the white strip height */
 position: fixed !important;
 bottom: 10px !important;
 left: auto !important; /* ✅ stop anchoring to left */
-right: calc(env(safe-area-inset-right, 0px) + 10px) !important; /* ✅ anchor to right */
+/* ⚙️ Right-anchored PAST the anchor buttons (13.123). The row and the 🌐/COL
+   pair now share a baseline in landscape, so the row has to stop before them
+   exactly as it does in portrait. 92px = the dock's own right offset (6) + its
+   width (78) + 8px of air - the same reserve as the portrait rule. */
+right: calc(env(safe-area-inset-right, 0px) + 10px + 92px) !important;
 top: auto !important;
 transform: none !important; /* ✅ cancel the centering transform used in portrait */
 z-index: 1600 !important;
-max-width: calc(100vw - 40px) !important; /* a bit more room for right safe-area */
+max-width: calc(100vw - 40px - 92px) !important; /* less the anchor-button reserve */
 opacity: 1 !important;
 pointer-events: auto !important;
 }
@@ -4698,7 +4759,7 @@ pointer-events: auto !important;
 
   /* ✅ reinforce right anchoring even if other rules set left */
   left: auto !important;
-  right: calc(env(safe-area-inset-right, 0px) + 10px) !important;
+  right: calc(env(safe-area-inset-right, 0px) + 10px + 92px) !important; /* + anchor-button reserve (13.123) */
   transform: none !important;
 }
 }
@@ -4717,7 +4778,7 @@ body:has(#randomPlaylistPanel.random-panel-open) * {
 @media (max-width: 1024px) and (orientation: landscape) {
  body:has(#randomPlaylistPanel.random-panel-open) #cornerButtons {
    left: auto !important;
-   right: calc(env(safe-area-inset-right, 0px) + 10px) !important;
+   right: calc(env(safe-area-inset-right, 0px) + 10px + 92px) !important; /* + anchor-button reserve (13.123) */
    justify-content: flex-end !important;
  }
 }

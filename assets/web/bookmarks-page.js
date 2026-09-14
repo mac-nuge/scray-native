@@ -84,6 +84,10 @@
   if (window.SCRAY_FACET_META) {
     window.SCRAY_FACET_META.note = { label: 'Notes', pill: 'floating-tag-note' };
   }
+  // This page draws its own note pills, with its own include/exclude handling
+  // behind them. Tell randomiser.js so its generic pill loop leaves the class
+  // alone rather than drawing a second set beside them.
+  window.scrayFacetPillsOwn = Object.assign(window.scrayFacetPillsOwn || {}, { note: true });
   const noteIncludes = window.scrayFacetFilters.note;
   const noteExcludes = window.scrayFacetExcludes.note;
 
@@ -280,7 +284,12 @@
   // ---------------------------------------------------------------- controls
 
   function wireNoteButton() {
-    document.getElementById('btnNOTE')?.addEventListener('click', () => {
+    const btn = document.getElementById('btnNOTE');
+    // ui.js binds this for every page now; whichever runs first wins and the
+    // other stands down. Two handlers meant two stacked modals.
+    if (!btn || btn.dataset.scrayCloudBound) return;
+    btn.dataset.scrayCloudBound = '1';
+    btn.addEventListener('click', () => {
       if (typeof window.showTagCloudModal === 'function') window.showTagCloudModal('note');
     });
   }

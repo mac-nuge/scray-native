@@ -2192,7 +2192,14 @@ const dropdowns = [
 [['btnAT', 'tag'], ['btnSTU', 'studio'], ['btnPERF', 'performer'], ['btnSTAG', 'stashtag'],
  ['btnNOTE', 'note']]
   .forEach(pair => {
-      document.getElementById(pair[0])?.addEventListener('click', () => {
+      const btn = document.getElementById(pair[0]);
+      // Bound once, whoever gets there first. The bookmarks page wires NOTE
+      // for itself and this file wires it for every page, so the button had
+      // two handlers and opened two stacked modals - which is why Close
+      // needed pressing twice (13.112).
+      if (!btn || btn.dataset.scrayCloudBound) return;
+      btn.dataset.scrayCloudBound = '1';
+      btn.addEventListener('click', () => {
           if (typeof window.showTagCloudModal === 'function') window.showTagCloudModal(pair[1]);
       });
   });

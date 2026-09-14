@@ -461,6 +461,15 @@ window.showExcludeTagsModal = showExcludeTagsModal;
    three facet classes together - from ANY to ALL. One switch rather than one
    per class: "show me the overlap" is a single question.
    ========================================= */
+/* The facet classes, in the order they are drawn. 'tag' is deliberately not
+   one of them: catalogue tags have their own selects, their own exclude pill
+   and their own place in getFilteredVideos.
+
+   Declared once because it was written out six times, and adding a class meant
+   finding all six - miss one and the filter half-works in a way that takes a
+   while to notice. */
+window.SCRAY_FACET_CLASSES = ['studio', 'performer', 'stashtag', 'note'];
+
 window.scrayFacetFilters = window.scrayFacetFilters || {
    studio:    new Set(),
    performer: new Set(),
@@ -554,15 +563,6 @@ window.SCRAY_FACET_META = {
    // which is the same question asked of a list of files.
    note:      { label: 'Notes',      pill: 'floating-tag-note'      }
 };
-
-/* The facet classes, in the order they are drawn. 'tag' is deliberately not
-   one of them: catalogue tags have their own selects, their own exclude pill
-   and their own place in getFilteredVideos.
-
-   Declared once because it was written out six times, and adding a class meant
-   finding all six - miss one and the filter half-works in a way that takes a
-   while to notice. */
-window.SCRAY_FACET_CLASSES = ['studio', 'performer', 'stashtag', 'note'];
 
 /**
  * Re-run the filter and repaint the pills bar.
@@ -1794,6 +1794,11 @@ Array.from(window.commonSelectedTags).forEach(tag => {
 // undifferentiated wall. Rendered in class order rather than selection order,
 // for the same reason.
 window.SCRAY_FACET_CLASSES.forEach(kind => {
+   // A page that renders a class's pills itself says so, and this leaves them
+   // alone. The bookmarks page does exactly that for notes - it has its own
+   // include/exclude handling behind them - and without this the bar carried
+   // each note twice (13.112).
+   if ((window.scrayFacetPillsOwn || {})[kind]) return;
    const set  = (window.scrayFacetFilters || {})[kind];
    const meta = (window.SCRAY_FACET_META  || {})[kind];
    if (!set || !meta) return;
@@ -1815,6 +1820,7 @@ window.SCRAY_FACET_CLASSES.forEach(kind => {
 // Catalogue-tag excludes are NOT here: they keep their consolidated
 // Exclude (n) pill further down, which already has a modal behind it.
 window.SCRAY_FACET_CLASSES.forEach(kind => {
+   if ((window.scrayFacetPillsOwn || {})[kind]) return;
    const exSet = (window.scrayFacetExcludes || {})[kind];
    if (!exSet || !exSet.size) return;
    Array.from(exSet).forEach(val => {
@@ -2514,6 +2520,17 @@ if (includeAll.length > 0 || facetPicks.length > 0) {
            facetPicks.forEach(pair => {
                const kind = pair[0], list = pair[1];
                facetTotal += list.length;
+               // Notes come off the video's OWN bookmarks, not from parts().
+               // Answered before the stash guard above would have mattered,
+               // and before the chain below - which, without this, fell
+               // through to stashTagList and compared notes against stash
+               // tags. That matched nothing, so picking a note emptied the
+               // list on both this page and the bookmarks one (13.112).
+               if (kind === 'note') {
+                   const notes = scrayVideoNotes(rec);
+                   list.forEach(val => { if (notes.includes(val)) facetHits++; });
+                   return;
+               }
                if (!p) return;
                const have = kind === 'studio'    ? (p.studio ? [p.studio] : [])
                           : kind === 'performer' ? (p.performerListAll || p.performerList || [])

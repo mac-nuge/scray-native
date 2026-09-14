@@ -340,14 +340,25 @@ async function pullDeltas(applyRow) {
   // Keyed by mode, so switching live↔test doesn't read as a rebuild and
   // trigger a full re-pull in each direction. Each database keeps its own
   // epoch, so the client has to remember one per database too.
-  const epochKey = `epoch:${probeMode || "live"}`;
+  //
+  // probeMode was read here and declared nowhere - a ReferenceError that threw
+  // before the first request, so the whole delta pull never ran. It surfaced
+  // as "[bookmarks] sync before load failed, showing the local copy" on the
+  // one page whose loader calls this directly (13.113). What it wanted is the
+  // mode this client is actually talking to.
+  const dbMode = (window.scrayDbMode && typeof window.scrayDbMode.lastKnown === "function")
+    ? window.scrayDbMode.lastKnown() : null;
+  const epochKey = `epoch:${dbMode || "live"}`;
   const seenEpoch = await scrayGetSyncState(epochKey);
   const probe = await apiCall("pull", { params: { since: 0, limit: 1 } });
   if (probe.epoch != null && seenEpoch?.epoch != null && seenEpoch.epoch !== probe.epoch) {
     console.log(`[sync] database edition changed (${seenEpoch.epoch} → ${probe.epoch}) — re-pulling everything`);
     await scrayClearSyncCursor();
   }
-  if (probe.epoch != null) await scraySetSyncState("epoch", { epoch: probe.epoch });
+  // The SAME key it was read from. It was read as `epoch:<mode>` and written
+  // as plain "epoch", so the stored edition could never be found again and the
+  // rebuild check above could never fire - even once probeMode was defined.
+  if (probe.epoch != null) await scraySetSyncState(epochKey, { epoch: probe.epoch });
 
   const cursor = await scrayGetSyncState("cursor");
   let since = cursor?.seq ?? 0;

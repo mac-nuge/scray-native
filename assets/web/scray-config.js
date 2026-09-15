@@ -396,6 +396,11 @@ window.scrayFingerprint = function (v) {
    Lives here rather than in a new file so Native needs no change to
    index.html's script list and no bundle rebuild to pick it up.
    ========================================= */
+// note -> did a blacklist pattern hit it. Declared ahead of scrayNameMap
+// because that adopts its cached copy the moment it is built, and adopt()
+// is what empties this.
+window.scrayNoteBlacklistCache = window.scrayNoteBlacklistCache || new Map();
+
 window.scrayNameMap = (function () {
   // v2: the cached payload gained attributes, and a v1 blob would leave the
   // studio cloud with no rows until the TTL expired.
@@ -414,6 +419,11 @@ window.scrayNameMap = (function () {
   // holding - the lists print the mapped one, the database carries the raw
   // one - and neither has to know whether a studio was ever renamed.
   let index    = { studio: {}, note: {}, censor: {} };
+  // Note blacklist patterns (browse 13.60): the source strings as saved in
+  // manage-data, and the same list compiled once per adopt(). A pattern that
+  // will not compile is dropped here rather than thrown on every bookmark.
+  let notePatterns = [];
+  let noteRegexes  = [];
   let loadedAt = 0;
   let inFlight = null;
 
@@ -446,6 +456,15 @@ window.scrayNameMap = (function () {
               censor: (p.attrs     && p.attrs.censor)     || {} };
     defs  = { studio: (p.attr_defs && p.attr_defs.studio) || [], note: (p.attr_defs && p.attr_defs.note) || [],
               censor: (p.attr_defs && p.attr_defs.censor) || [] };
+    notePatterns = Array.isArray(p.note_patterns) ? p.note_patterns.filter(s => typeof s === "string") : [];
+    noteRegexes  = [];
+    notePatterns.forEach(src => {
+      try { noteRegexes.push(new RegExp(src, "i")); }
+      catch (err) { console.warn("[name-map] skipping bad note pattern:", src, err.message); }
+    });
+    // Answers are cached per note (see matchesNotePattern) and belong to the
+    // pattern list they were worked out against.
+    if (window.scrayNoteBlacklistCache) window.scrayNoteBlacklistCache.clear();
     reindex();
   }
 
@@ -494,7 +513,8 @@ window.scrayNameMap = (function () {
         loadedAt = Date.now();
         try {
           localStorage.setItem(CACHE_KEY, JSON.stringify(
-            { at: loadedAt, rev: json.rev, maps: dict, attrs: attrs, attr_defs: defs }));
+            { at: loadedAt, rev: json.rev, maps: dict, attrs: attrs, attr_defs: defs,
+              note_patterns: notePatterns }));
         } catch {}
       } catch (err) {
         // Keep whatever is cached. A missing dictionary means raw names, which
@@ -508,7 +528,15 @@ window.scrayNameMap = (function () {
     return inFlight;
   }
 
-  return { lookup, refresh, key, attrsFor, attrDefs,
+  /** True when any blacklist pattern matches this text. Case-insensitive. */
+  function matchesNotePattern(text) {
+    const s = String(text == null ? "" : text);
+    if (!s || !noteRegexes.length) return false;
+    return noteRegexes.some(re => re.test(s));
+  }
+
+  return { lookup, refresh, key, attrsFor, attrDefs, matchesNotePattern,
+           notePatterns: () => notePatterns.slice(),
            dump: () => dict, dumpAttrs: () => attrs };
 })();
 
@@ -543,7 +571,19 @@ window.scrayNoteBlacklisted = function (raw) {
     const a2 = window.scrayNameMap.attrsFor("note", mapped);
     if (a2 && a2.blacklist) return true;
   }
-  return false;
+  // Patterns (browse 13.60) - "anything containing x" rather than one row at
+  // a time. Tested against both spellings, like the tick above, so a pattern
+  // written for the tidied name still catches the raw ones mapped onto it.
+  // Cached per note: this runs for every bookmark on every draw, and a list of
+  // regexes is the one part of it that is not a hash lookup. adopt() clears
+  // the cache whenever the pattern list can have changed.
+  const cache = window.scrayNoteBlacklistCache;
+  if (cache.has(note)) return cache.get(note);
+  const hit = !!(window.scrayNameMap.matchesNotePattern &&
+    (window.scrayNameMap.matchesNotePattern(note) ||
+     (mapped && mapped !== note && window.scrayNameMap.matchesNotePattern(mapped))));
+  cache.set(note, hit);
+  return hit;
 };
 
 /**

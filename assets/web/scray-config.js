@@ -424,6 +424,13 @@ window.scrayNameMap = (function () {
   // will not compile is dropped here rather than thrown on every bookmark.
   let notePatterns = [];
   let noteRegexes  = [];
+  // Automatic parent notes (browse 13.62). The stopword list comes from
+  // api.php with the dictionary; this default only covers a cached copy from
+  // before 13.62, and must match scrayNoteParentStopwords() there.
+  const DEFAULT_PARENT_STOPWORDS = ["a", "an", "and", "the", "of", "on", "in", "into", "onto", "with",
+    "to", "for", "at", "by", "from", "or", "as", "is", "it", "up", "then", "while", "her", "his", "their"];
+  let parentStopwords = new Set(DEFAULT_PARENT_STOPWORDS);
+  let parentNone = "(none)";
   let loadedAt = 0;
   let inFlight = null;
 
@@ -465,6 +472,12 @@ window.scrayNameMap = (function () {
     // Answers are cached per note (see matchesNotePattern) and belong to the
     // pattern list they were worked out against.
     if (window.scrayNoteBlacklistCache) window.scrayNoteBlacklistCache.clear();
+    parentStopwords = new Set(Array.isArray(p.note_parent_stopwords)
+      ? p.note_parent_stopwords.map(w => String(w).toLowerCase()) : DEFAULT_PARENT_STOPWORDS);
+    if (typeof p.note_parent_none === "string" && p.note_parent_none) parentNone = p.note_parent_none;
+    // Parents are worked out from the mappings and the overrides, both of
+    // which may just have changed.
+    if (window.scrayNoteParentsCache) window.scrayNoteParentsCache.clear();
     reindex();
   }
 
@@ -521,7 +534,8 @@ window.scrayNameMap = (function () {
         try {
           localStorage.setItem(CACHE_KEY, JSON.stringify(
             { at: loadedAt, rev: json.rev, maps: dict, attrs: attrs, attr_defs: defs,
-              note_patterns: notePatterns }));
+              note_patterns: notePatterns,
+              note_parent_stopwords: [...parentStopwords], note_parent_none: parentNone }));
         } catch {}
       } catch (err) {
         // Keep whatever is cached. A missing dictionary means raw names, which
@@ -544,6 +558,8 @@ window.scrayNameMap = (function () {
 
   return { lookup, refresh, key, attrsFor, attrDefs, matchesNotePattern,
            notePatterns: () => notePatterns.slice(),
+           parentStopwords: () => parentStopwords,
+           parentNone: () => parentNone,
            dump: () => dict, dumpAttrs: () => attrs };
 })();
 
@@ -591,6 +607,59 @@ window.scrayNoteBlacklisted = function (raw) {
      (mapped && mapped !== note && window.scrayNameMap.matchesNotePattern(mapped))));
   cache.set(note, hit);
   return hit;
+};
+
+/* ---- parent notes (browse 13.62 / picker 13.147 / stg-native 13.145) -----
+   Notes work like tags now: "neck kiss" files under both "neck" and "kiss".
+
+   By default a note's parents are the words of its display name (mapped, or
+   raw where unmapped): lowercase, a hyphenated or apostrophised word kept as
+   one, one-letter words and api.php's stopwords dropped. A parent list filed
+   by hand in manage-data REPLACES that, and "(none)" there means no parents.
+
+   The tokeniser must match scrayNoteAutoParents() in api.php and
+   autoParents() in manage-data.html.
+--------------------------------------------------------------------------- */
+window.scrayNoteParentsCache = window.scrayNoteParentsCache || new Map();
+
+/** "Neck-kiss and POV" -> ["neck-kiss", "pov"]. */
+window.scrayNoteAutoParents = function (name) {
+  const nm = window.scrayNameMap;
+  const stop = nm && nm.parentStopwords ? nm.parentStopwords() : new Set();
+  const words = String(name == null ? "" : name).normalize("NFC").toLowerCase()
+    .match(/[\p{L}\p{N}]+(?:['\u2019-][\p{L}\p{N}]+)*/gu) || [];
+  const out = [];
+  words.forEach(w => { if (w.length > 1 && !stop.has(w) && !out.includes(w)) out.push(w); });
+  return out;
+};
+
+/**
+ * A note's parent notes, by either spelling: the hand-filed list where there
+ * is one, otherwise the automatic words. Always an array (possibly empty).
+ * Cached per note; adopt() clears it with every dictionary change.
+ */
+window.scrayNoteParents = function (raw) {
+  const note = String(raw == null ? "" : raw).trim();
+  if (!note) return [];
+  const cache = window.scrayNoteParentsCache;
+  if (cache.has(note)) return cache.get(note);
+  const nm = window.scrayNameMap;
+  const mapped = window.scrayMapName ? window.scrayMapName("note", note) : note.toLowerCase();
+  let set = nm ? (nm.attrsFor("note", note).parent || "") : "";
+  if (!set && nm && mapped && mapped !== note) set = nm.attrsFor("note", mapped).parent || "";
+  let out;
+  if (String(set).trim()) {
+    const none = (nm && nm.parentNone ? nm.parentNone() : "(none)").toLowerCase();
+    out = [];
+    String(set).split("|").forEach(p => {
+      const t = p.trim().toLowerCase();
+      if (t && t !== none && !out.includes(t)) out.push(t);
+    });
+  } else {
+    out = window.scrayNoteAutoParents(mapped);
+  }
+  cache.set(note, out);
+  return out;
 };
 
 /**

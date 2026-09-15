@@ -4,6 +4,57 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 13.62 / picker 13.147 / native 13.145 — test: automatic parent notes from note words
+<!-- 2026-09-15T19:32Z -->
+
+**browse** — `staging-browse - 13.62`: `api.php`, `manage-data.html`, `VERSION.txt`
+**picker** — `staging - 13.147`: `scray-config.js`, `randomiser.js`, `VERSION`
+**native** — `stg-native - 13.145`: `assets/web/scray-config.js`, `assets/web/randomiser.js`, `assets/web/VERSION`
+
+Stage 1 of 4 in making bookmark notes work like tags. Mac is finding that a lot of bookmarks belong under several labels, so parent notes become the main way to label and filter them. The later stages are the NOTES filter led by parents, the bookmark modal as a parent-note search with multi-select, and a two-panel swipeable modal. This stage only changes how parents are worked out. Sits on top of picker 13.146 / native 13.144 (compact Jira modal), still awaiting its test.
+
+**The rule.** By default a note's parent notes are the words of its display name: the mapped name, or the raw note where it isn't mapped.
+- **Words:** lowercase. A hyphen or apostrophe inside a word keeps it one word ("neck-kiss", "doggy's"). One-letter words and a ⚙️ stopword list (a, and, the, of, on, with, from and so on) are dropped, and repeats count once.
+- **Nothing stored:** an automatic parent is worked out wherever it's needed, so notes with no name_maps row get parents too.
+- **Overrides (Mac's choices):** a parent list set by hand in manage-data **replaces** the automatic words. `(none)` means no parents at all, since an empty value already means automatic.
+- **One rule, three copies:** `scrayNoteAutoParents()` in api.php, `autoParents()` in manage-data.html and `scrayNoteAutoParents()` in both apps' scray-config.js. The tokeniser is one regex copied between them. The stopword list lives only in api.php (`scrayNoteParentStopwords()`) and reaches both clients in `name_map_list` / `name_map_get`, and the dictionary rev includes it.
+
+**api.php.**
+- **Existing parents (Mac: keep as overrides).** `scrayMigrateNoteParentsAuto()` runs once, flagged `note_parents_auto_v1` in app_state, on the first `name_map_list` or `name_map_get`. A hand-set list that says exactly what the automatic rule now says (same words, any order or case) isn't really an override, so it's cleared. Everything else is kept. A row left with no mapping and no attributes is deleted, as `name_map_save` would. The flag stores how many were cleared.
+- **Save:** `name_map_save` does the same for incoming rows, so a CSV import that restates the words saves as automatic and keeps following the name if the mapping changes.
+- **`(none)`** listed beside real parents is dropped by `scrayCleanNameAttrs`, and the real parents win.
+
+**manage-data.html (Parent note column).**
+- **Automatic:** dashed, faded chips, one per word, which follow the mapped name live as you type it.
+- **Set by hand:** a ✎, solid chips and an **auto** button that goes back to automatic. Its tooltip lists the words you'd get.
+- **Editing an automatic cell** turns it into an override: removing a chip keeps the other words, and adding one (Enter, a pick, leaving the cell) keeps the words plus the new one. If your edit ends up matching the automatic words, the cell goes back to automatic by itself.
+- **Removing the last parent** gives a red **none** chip; its × goes back to automatic. Backspace and Ctrl+D work the same way, since the cell's stored value is still what's on `data-multi`.
+- **Counts:** tiles, chip counts, sort, search and suggestions all use a note's actual parents (automatic or set). There's a new **SET BY HAND** tile, and a **✎ set by hand** chip at the front of the Parent note row that narrows to the overrides.
+- **Import hint:** an empty parent cell means automatic, and `(none)` means no parents.
+
+**Apps (scray-config.js, randomiser.js; same code in both).**
+- **`window.scrayNoteParents(note)`** returns a note's parents by either spelling: the hand-set list (lowercased, `(none)` giving an empty list), otherwise the automatic words of its mapped name. It's cached per note, and every dictionary adopt clears the cache. A cached dictionary from before this bump falls back to a built-in copy of the stopword list.
+- **NOTE cloud:** `scrayCloudAttrValues` uses it for a note's Parent row, so that row now fills in for every note. What parent picks *do* in the cloud is unchanged here (they narrow the chip grid); stage 2 makes them choose the videos.
+
+**Tested.**
+- **Parsing:** `php -l` clean. PHP functions extracted and run: hyphen, apostrophe, unicode, numbers, stopwords, one-letter words and repeats; `(none)` beside a real parent dropped, on its own kept.
+- **Migration** against SQLite: a matching override on an unmapped note deletes the row; one on a mapped note clears the parent and keeps the mapping; a different one is kept; a blacklist tick survives; studio rows are untouched; it runs once.
+- **Real api.php** under PHP's built-in server (test paths, stub auth, minimal tables): `name_map_list` returns the stopwords and the sentinel. A save restating the auto words stores automatic, `(none)` is kept, and `(none) | Cowgirl` on a note mapped to "cowgirl" saves as automatic. `name_map_get` carries both new fields.
+- **manage-data** in headless Chromium against that server, 18 checks:
+  - Dashed auto chips, and the none and set-by-hand cells.
+  - SET BY HAND tile and chip; chip counts use actual parents.
+  - × on an auto chip gives an override; adding a word gives an override; removing it again goes back to auto.
+  - Typing a mapped name updates the auto chips live.
+  - The auto button; Backspace down to none; none's × back to auto; the set-by-hand narrowing.
+  - Save, then the server state and the reloaded sheet match.
+  - No page errors.
+- **Both apps' scray-config.js** loaded with a cached dictionary: automatic words, a mapped note's words, an override by raw and by mapped spelling, `(none)`, and stopwords from the payload. `node --check` on all four JS files.
+
+**Worth knowing.**
+- **Stopwords:** edit `scrayNoteParentStopwords()` in api.php. The apps pick a change up at their next dictionary refresh, because it moves the rev.
+- **The Parent row in the NOTE cloud** will be much longer now. Stage 2 is where it becomes the main filter.
+- **Deploy browse first.** An old api.php sends no stopwords, so the apps fall back to their built-in copy, which is identical.
+
 ### picker 13.146 / native 13.144 — test: compact Jira modal
 <!-- 2026-09-15T18:18Z -->
 

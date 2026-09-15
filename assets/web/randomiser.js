@@ -935,6 +935,13 @@ function scrayCloudAttrValue(kind, name, attrKey) {
  * is a list of one, which is what it always was.
  */
 function scrayCloudAttrValues(kind, name, def) {
+   // A note's parents are no longer only what was filed (browse 13.62): by
+   // default they are the words of the note itself, and scray-config.js owns
+   // that rule, including a hand-filed list replacing it.
+   if (kind === 'note' && def.key === 'parent' && typeof window.scrayNoteParents === 'function') {
+       const list = window.scrayNoteParents(name);
+       return list.length ? list : [SCRAY_CLOUD_UNSET];
+   }
    const v = scrayCloudAttrValue(kind, name, def.key);
    if (!def.multi || v === SCRAY_CLOUD_UNSET) return [v];
    const seen = new Map();

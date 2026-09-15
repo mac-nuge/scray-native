@@ -927,6 +927,25 @@ function scrayCloudAttrValue(kind, name, attrKey) {
 }
 
 /**
+ * Every bucket one cloud value files under for an attribute.
+ *
+ * A multi attribute (a note's parents, browse 13.59) is stored as one string
+ * joined with " | ", and a note with two parents belongs in BOTH chips - so it
+ * is counted under each, and picking either parent keeps it. A plain attribute
+ * is a list of one, which is what it always was.
+ */
+function scrayCloudAttrValues(kind, name, def) {
+   const v = scrayCloudAttrValue(kind, name, def.key);
+   if (!def.multi || v === SCRAY_CLOUD_UNSET) return [v];
+   const seen = new Map();
+   v.split('|').forEach(p => {
+       const t = p.trim();
+       if (t && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
+   });
+   return seen.size ? [...seen.values()] : [SCRAY_CLOUD_UNSET];
+}
+
+/**
  * The big picker that replaced the AT dropdown.
  *
  * One button per value with its count. Tapping toggles it and the modal STAYS
@@ -1051,8 +1070,8 @@ async function showTagCloudModal(kind) {
        attrDefs.forEach(def => {
            const tally = new Map();
            counts.forEach((n, name) => {
-               const v = scrayCloudAttrValue(kind, name, def.key);
-               tally.set(v, (tally.get(v) || 0) + n);
+               scrayCloudAttrValues(kind, name, def).forEach(v =>
+                   tally.set(v, (tally.get(v) || 0) + n));
            });
            // Nothing filled in for this attribute yet, so no row - rather than
            // a row with a single "everything is unset" chip in it.
@@ -1122,7 +1141,7 @@ async function showTagCloudModal(kind) {
            if (!picked.size) return;
            names = names.filter(n =>
                set.has(n) || scrayIsExcluded(kind, n) ||
-               picked.has(scrayCloudAttrValue(kind, n, def.key)));
+               scrayCloudAttrValues(kind, n, def).some(v => picked.has(v)));
        });
 
        // A selected value stays visible even once it stops matching the search

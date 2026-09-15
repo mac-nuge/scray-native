@@ -986,6 +986,11 @@ async function showTagCloudModal(kind) {
    search.className = 'scray-cloud-search';
    search.placeholder = 'Narrow this list\u2026';
    controls.appendChild(search);
+   // NOTE cloud (picker 13.148 / stg-native 13.146): parent notes are the way
+   // in now, so the box narrows the Parent note chips, and the notes below
+   // follow - a note shows when one of its parents matches the term.
+   const searchesParents = kind === 'note';
+   if (searchesParents) search.placeholder = 'Search parent notes\u2026';
 
    const btnRow = document.createElement('div');
    btnRow.className = 'scray-cloud-btnrow';
@@ -1085,6 +1090,13 @@ async function showTagCloudModal(kind) {
            if (tally.size <= 1 && tally.has(SCRAY_CLOUD_UNSET)) return;
 
            const picked = scrayCloudAttrPickSet(kind, def.key);
+           // The search box narrows the parent chips. A picked one stays, so
+           // the way to undo it is never hidden behind clearing the box.
+           if (searchesParents && def.key === 'parent' && term) {
+               [...tally.keys()].forEach(v => {
+                   if (v === SCRAY_CLOUD_UNSET || (!v.toLowerCase().includes(term) && !picked.has(v))) tally.delete(v);
+               });
+           }
            const row = document.createElement('div');
            row.className = 'scray-cloud-attrrow';
 
@@ -1156,8 +1168,13 @@ async function showTagCloudModal(kind) {
        // box first. An EXCLUDED one has to stay for the same reason and more
        // so: the only way back to neutral is the third tap on that same chip,
        // and a chip that vanished on tap two would strand it.
+       const parentDef = searchesParents ? attrDefs.find(d => d.key === 'parent') : null;
        if (term) names = names.filter(n =>
-           n.toLowerCase().includes(term) || set.has(n) || scrayIsExcluded(kind, n));
+           (parentDef
+               ? scrayCloudAttrValues(kind, n, parentDef).some(v =>
+                     v !== SCRAY_CLOUD_UNSET && v.toLowerCase().includes(term))
+               : n.toLowerCase().includes(term))
+           || set.has(n) || scrayIsExcluded(kind, n));
 
        names.sort(scrayCloudSort === 'alpha'
            ? (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })
@@ -1239,6 +1256,7 @@ async function showTagCloudModal(kind) {
 
    search.addEventListener('input', () => {
        term = search.value.trim().toLowerCase();
+       if (searchesParents) renderAttrRows();
        renderGrid();
    });
 

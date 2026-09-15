@@ -4,6 +4,27 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.148 / native 13.146 — test: NOTE cloud search narrows parent notes
+<!-- 2026-09-15T19:41Z -->
+
+**picker** — `staging - 13.148`: `randomiser.js`, `VERSION`
+**native** — `stg-native - 13.146`: `assets/web/randomiser.js`, `assets/web/VERSION`
+
+Mac: parent notes are the way into the NOTE filter now, so its search box should narrow them. Typing "bj" narrowed only the notes grid and left every parent chip showing. This sits between stage 1 (13.147 / 13.145) and stage 2.
+
+**The change** (`showTagCloudModal`, NOTE cloud only; the other clouds are unchanged):
+- **Placeholder:** the box now reads "Search parent notes…".
+- **Parent chips:** `renderAttrRows` keeps only the chips whose name contains the term, and drops the unset chip while you're searching. A chip you've already picked stays visible, so undoing a pick never means clearing the box first. The search input redraws this row as you type.
+- **Notes grid:** a note shows when one of its parents contains the term, not its own name. The notes below therefore always match the parent chips above. Picked and excluded notes still stay visible, as before.
+- **Picking a parent** still narrows the notes grid to the notes under it. Stage 2 makes it choose the videos.
+
+**Tested** in headless Chromium with each app's real `randomiser.js` and `scray-config.js`, a cached dictionary and stubbed counts, 6 checks each:
+- The placeholder.
+- "po" leaves only the pov chip and shows "oral pov" and "bj", which is mapped to "oral pov".
+- A picked "kiss" chip stays visible while "ora" is typed.
+- Clearing the box with kiss picked leaves only "neck kiss".
+- `node --check` on both files.
+
 ### browse 13.62 / picker 13.147 / native 13.145 — test: automatic parent notes from note words
 <!-- 2026-09-15T19:32Z -->
 

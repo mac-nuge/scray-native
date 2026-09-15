@@ -7790,3 +7790,10 @@ body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor >
 @media (max-width: 1024px) {
 #searchFilterRow { display: none !important; }
 }
+
+/* Bookmark notes print in lowercase everywhere (picker 13.142 / stg-native
+   13.141). Most surfaces get it from scrayNameMap.lookup; the bookmark modal's
+   note pills show the stored text on purpose - it is an editing surface - so
+   they are lowercased here, as display only. Editing the note (.bm-note-edit)
+   still shows and saves exactly what is stored. */
+.bm-note-btn { text-transform: lowercase; }

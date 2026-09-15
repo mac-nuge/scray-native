@@ -478,9 +478,16 @@ window.scrayNameMap = (function () {
   function lookup(kind, raw) {
     const original = String(raw == null ? "" : raw);
     const table = dict[kind];
-    if (!table || !original) return original;
-    const hit = table[key(original)];
-    return (typeof hit === "string" && hit !== "") ? hit : original;
+    // Notes always print in lowercase (picker 13.142 / stg-native 13.141),
+    // mapped or not. Here rather than at each call site because every surface
+    // that PRINTS a note already comes through here - the tooltip chips, the
+    // markers, the NOTE cloud and pills, the Note column, the loading line,
+    // the quick notes and their autocomplete. The stored note is untouched;
+    // a quick note tapped from the rail does save its lowercase text, which
+    // was asked for. Studios keep their case.
+    const out = (!table || !original) ? original
+      : ((h) => (typeof h === "string" && h !== "") ? h : original)(table[key(original)]);
+    return kind === "note" ? out.toLowerCase() : out;
   }
 
   /**

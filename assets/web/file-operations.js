@@ -4246,7 +4246,7 @@ async function showStashModal(video) {
                    '<span style="font-variant-numeric:tabular-nums;flex:0 0 auto;' +
                    'white-space:nowrap;opacity:.8;">' + clock(m.time_ms) + '</span>' +
                    '<span style="flex:1 1 auto;min-width:0;overflow-wrap:anywhere;' +
-                   'word-break:break-word;">' + esc(m.note || m.tag || '(untitled)') + '</span>' +
+                   'word-break:break-word;">' + esc((m.note || m.tag || '(untitled)').toLowerCase()) + '</span>' +
                    (d ? '<span style="flex:0 0 auto;font-size:.8em;white-space:nowrap;' +
                         'opacity:.8;">saved</span>' : '') +
                    '</label>';

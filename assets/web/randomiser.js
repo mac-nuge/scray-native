@@ -1073,6 +1073,13 @@ async function showTagCloudModal(kind) {
    // in now, so the box narrows the Parent note chips, and the notes below
    // follow - a note shows when one of its parents matches the term.
    const searchesParents = kind === 'note';
+   // Loose on purpose (picker 13.150 / stg-native 13.148): every word typed is
+   // its own term and a parent matching ANY of them shows, so "mish ts" brings
+   // up both "mish" and "ts" rather than nothing.
+   const termHit = (v) => {
+       const s = String(v).toLowerCase();
+       return term.split(/\s+/).some(w => w && s.includes(w));
+   };
    if (searchesParents) search.placeholder = 'Search parent notes\u2026';
 
    const btnRow = document.createElement('div');
@@ -1209,7 +1216,7 @@ async function showTagCloudModal(kind) {
            // the way to undo it is never hidden behind clearing the box.
            if (searchesParents && def.key === 'parent' && term) {
                [...tally.keys()].forEach(v => {
-                   if (v === SCRAY_CLOUD_UNSET || (!v.toLowerCase().includes(term) && !picked.has(v))) tally.delete(v);
+                   if (v === SCRAY_CLOUD_UNSET || (!termHit(v) && !picked.has(v))) tally.delete(v);
                });
            }
            const row = document.createElement('div');
@@ -1307,7 +1314,7 @@ async function showTagCloudModal(kind) {
        if (term && !(parentDef && parentPicks().size)) names = names.filter(n =>
            (parentDef
                ? scrayCloudAttrValues(kind, n, parentDef).some(v =>
-                     v !== SCRAY_CLOUD_UNSET && v.toLowerCase().includes(term))
+                     v !== SCRAY_CLOUD_UNSET && termHit(v))
                : n.toLowerCase().includes(term))
            || set.has(n) || scrayIsExcluded(kind, n));
 

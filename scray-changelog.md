@@ -4,6 +4,21 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.150 / native 13.148 — test: NOTE search matches any typed word
+<!-- 2026-09-15T20:07Z -->
+
+**picker** — `staging - 13.150`: `randomiser.js`, `VERSION`
+**native** — `stg-native - 13.148`: `assets/web/randomiser.js`, `assets/web/VERSION`
+
+Mac confirmed stage 2 (13.149 / 13.147) works well, and asked for a looser search box in the NOTES filter. "mish ts" matched nothing, because the whole string had to appear inside one parent note. It should bring up both "mish" and "ts".
+
+**Change.** A new `termHit()` in `showTagCloudModal` splits what's typed on whitespace, and a value matches when it contains **any** of the words. Both places that search use it: the parent chips, and the mapped notes (a note shows when any of its parents matches). Picked parents still stay visible, and once a parent is picked the box still leaves the mapped notes alone. The other filter modals (tags, studios, performers) keep their whole-string search.
+
+**Tested** in headless Chromium on native's real index.html with the stage 2 fixture:
+- "lick  cow" (double space) shows the cowgirl and lick chips, plus the notes "cowgirl pov" and "neck lick".
+- A single partial word ("nec") still works, and an unmatched word leaves only All.
+- No page errors. `node --check` passes on both files.
+
 ### picker 13.149 / native 13.147 — test: parent notes filter videos and bookmarks
 <!-- 2026-09-15T19:59Z -->
 

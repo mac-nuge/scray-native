@@ -110,6 +110,10 @@
     const inc = noteIncludes();
     if (ex.size && ex.has(key)) return false;
     if (inc.size && !inc.has(key)) return false;
+    // Parent notes (picker 13.149 / stg-native 13.147) are tested on each
+    // bookmark here; the base pass only kept videos with at least one match.
+    if (typeof window.scrayNoteParentsPass === 'function' &&
+        !window.scrayNoteParentsPass(entry.__bmNote || '')) return false;
     return true;
   }
 

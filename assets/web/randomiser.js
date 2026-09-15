@@ -565,6 +565,87 @@ window.SCRAY_FACET_CLASSES.forEach(k => {
    if (!window.scrayFacetExcludes[k]) window.scrayFacetExcludes[k] = new Set();
 });
 
+/* ---- parent note filter (picker 13.149 / stg-native 13.147) -------------
+   Notes work like tags now (browse 13.62): a bookmark files under every one
+   of its parent notes - by default the words of the note. Parent notes are
+   the primary way to filter bookmarks, so a picked parent decides the videos
+   (and, in Bookmarks view, the bookmarks) shown. The mapped notes still sit
+   under the parents in the cloud and narrow further.
+
+   Tested PER BOOKMARK, not per video: "kiss" + "neck" with intersect on means
+   a bookmark that is both, not a video that has a kiss bookmark somewhere and
+   a neck bookmark somewhere else - which is the whole reason a bookmark can
+   have several parents.
+
+   Additive (any picked parent) by default; intersect (all of them) is its own
+   switch rather than scrayTagIntersect, because it is a question about one
+   bookmark rather than about how the filter classes combine.
+--------------------------------------------------------------------------- */
+window.scrayNoteParentFilter = window.scrayNoteParentFilter || new Set();
+window.scrayNoteParentIntersect = !!window.scrayNoteParentIntersect;
+
+/** Does a note (raw or mapped) satisfy the picked parents? True when none are picked. */
+function scrayNoteParentsPass(note) {
+   const picks = window.scrayNoteParentFilter;
+   if (!picks || !picks.size) return true;
+   const parents = typeof window.scrayNoteParents === 'function' ? window.scrayNoteParents(note) : [];
+   if (!parents.length) return false;
+   return window.scrayNoteParentIntersect
+       ? [...picks].every(p => parents.includes(p))
+       : parents.some(p => picks.has(p));
+}
+window.scrayNoteParentsPass = scrayNoteParentsPass;
+
+/**
+ * A video passes the parent filter when ONE of its bookmarks does - and, if
+ * mapped notes are picked too, that same bookmark's note is one of them.
+ */
+function scrayVideoPassesNoteParents(video) {
+   const bms = window.scrayVisibleBookmarks
+       ? window.scrayVisibleBookmarks(video)
+       : (video && Array.isArray(video.bookmarks) ? video.bookmarks : []);
+   const inc = (window.scrayFacetFilters || {}).note;
+   return bms.some(b => {
+       const raw = String((b && b.note) || '').trim();
+       if (!raw || !scrayNoteParentsPass(raw)) return false;
+       if (inc && inc.size) {
+           const name = window.scrayMapName ? window.scrayMapName('note', raw) : raw;
+           if (!inc.has(name)) return false;
+       }
+       return true;
+   });
+}
+window.scrayVideoPassesNoteParents = scrayVideoPassesNoteParents;
+
+/**
+ * parent -> how many videos carry it (Videos view) or how many bookmarks do
+ * (Bookmarks view), over the whole catalogue - the same scope the other cloud
+ * counts use. Counted here rather than by adding up the notes' counts, which
+ * would count a video once per note it has under a parent.
+ */
+async function scrayNoteParentCounts() {
+   const videos = await getAllVideos();
+   const perBookmark = typeof window.scrayViewMode === 'function' && window.scrayViewMode() === 'bookmarks';
+   const counts = new Map();
+   videos.forEach(v => {
+       const bms = window.scrayVisibleBookmarks
+           ? window.scrayVisibleBookmarks(v)
+           : (Array.isArray(v && v.bookmarks) ? v.bookmarks : []);
+       const seen = new Set();
+       bms.forEach(b => {
+           const raw = String((b && b.note) || '').trim();
+           if (!raw || typeof window.scrayNoteParents !== 'function') return;
+           window.scrayNoteParents(raw).forEach(pn => {
+               if (perBookmark) counts.set(pn, (counts.get(pn) || 0) + 1);
+               else seen.add(pn);
+           });
+       });
+       seen.forEach(pn => counts.set(pn, (counts.get(pn) || 0) + 1));
+   });
+   return counts;
+}
+window.scrayNoteParentCounts = scrayNoteParentCounts;
+
 function scrayFacetExcludeSet(kind) {
    return (window.scrayFacetExcludes || {})[kind] || null;
 }
@@ -682,6 +763,8 @@ window.scrayClearAllFilters = function (ev) {
        if (x) x.clear();
    });
    window.scrayTagIntersect = false;
+   if (window.scrayNoteParentFilter) window.scrayNoteParentFilter.clear();
+   window.scrayNoteParentIntersect = false;
 
    // Cleared through jQuery so each select's own change handler runs and the
    // cascade re-widens the option lists. Every one of these fires a filter
@@ -838,7 +921,7 @@ function scrayTotalFilterTerms() {
    return ['tag'].concat(window.SCRAY_FACET_CLASSES || []).reduce((n, k) => {
        const s = scrayFacetSet(k);
        return n + (s ? s.size : 0);
-   }, 0);
+   }, 0) + ((window.scrayNoteParentFilter && window.scrayNoteParentFilter.size) || 0);
 }
 window.scrayTotalFilterTerms = scrayTotalFilterTerms;
 
@@ -1003,14 +1086,28 @@ async function showTagCloudModal(kind) {
    const attrWrap = document.createElement('div');
    attrWrap.className = 'scray-cloud-attrs';
    controls.appendChild(attrWrap);
+   // NOTE cloud: the parent chips scroll in a box of their own. In the flow
+   // they were hundreds of chips, and the notes grid below - the part that
+   // takes the rest of the height - was squeezed to nothing.
+   if (kind === 'note') {
+       attrWrap.classList.add('scray-cloud-note-parents');
+       const notesLabel = document.createElement('div');
+       notesLabel.className = 'scray-cloud-sectionlabel';
+       notesLabel.textContent = 'Mapped notes';
+       content.appendChild(notesLabel);
+   }
 
    const grid = document.createElement('div');
-   grid.className = 'tag-selection-grid scray-cloud-grid';
+   grid.className = 'tag-selection-grid scray-cloud-grid' + (kind === 'note' ? ' scray-cloud-note-grid' : '');
    content.appendChild(grid);
 
    let counts = new Map();
+   let parentCounts = new Map();
    let shown  = [];
    let term   = '';
+   // The picked parents live in the real filter, not the cloud's own narrowing.
+   const parentPicks = () => window.scrayNoteParentFilter;
+   const isParentDef = (def) => kind === 'note' && def.key === 'parent';
 
    const close = () => {
        document.removeEventListener('keydown', escHandler);
@@ -1046,8 +1143,20 @@ async function showTagCloudModal(kind) {
        mkToggle(scrayCloudSort === 'count' ? 'Sort: count' : 'Sort: A\u2013Z', false, () => {
            scrayCloudSort = scrayCloudSort === 'count' ? 'alpha' : 'count';
            renderControls();
+           if (kind === 'note') renderAttrRows();
            renderGrid();
        });
+
+       // Parent notes: a bookmark with ANY picked parent, or with ALL of them.
+       if (kind === 'note') {
+           mkToggle(window.scrayNoteParentIntersect ? 'Parents: all \u2229' : 'Parents: any \u222A',
+               window.scrayNoteParentIntersect, () => {
+                   window.scrayNoteParentIntersect = !window.scrayNoteParentIntersect;
+                   scrayRefreshFilters();
+                   renderControls();
+                   renderGrid();
+               });
+       }
 
        // The intersect switch. Global rather than per-class, and offered in
        // every cloud so it is reachable from whichever one happens to be open.
@@ -1081,15 +1190,21 @@ async function showTagCloudModal(kind) {
 
        attrDefs.forEach(def => {
            const tally = new Map();
-           counts.forEach((n, name) => {
-               scrayCloudAttrValues(kind, name, def).forEach(v =>
-                   tally.set(v, (tally.get(v) || 0) + n));
-           });
+           if (isParentDef(def)) {
+               parentCounts.forEach((n, v) => tally.set(v, n));
+               // A picked parent nothing carries any more still needs its chip.
+               parentPicks().forEach(v => { if (!tally.has(v)) tally.set(v, 0); });
+           } else {
+               counts.forEach((n, name) => {
+                   scrayCloudAttrValues(kind, name, def).forEach(v =>
+                       tally.set(v, (tally.get(v) || 0) + n));
+               });
+           }
            // Nothing filled in for this attribute yet, so no row - rather than
            // a row with a single "everything is unset" chip in it.
            if (tally.size <= 1 && tally.has(SCRAY_CLOUD_UNSET)) return;
 
-           const picked = scrayCloudAttrPickSet(kind, def.key);
+           const picked = isParentDef(def) ? parentPicks() : scrayCloudAttrPickSet(kind, def.key);
            // The search box narrows the parent chips. A picked one stays, so
            // the way to undo it is never hidden behind clearing the box.
            if (searchesParents && def.key === 'parent' && term) {
@@ -1120,20 +1235,28 @@ async function showTagCloudModal(kind) {
                row.appendChild(b);
            };
 
-           chip('All', !picked.size, () => {
-               picked.clear();
+           // Picking a parent changes the real filter (videos, pills), so it
+           // re-runs it; the other rows only narrow what the cloud shows.
+           const afterPick = () => {
+               if (isParentDef(def)) scrayRefreshFilters();
                renderAttrRows();
                renderGrid();
+           };
+
+           chip('All', !picked.size, () => {
+               picked.clear();
+               afterPick();
            });
 
+           const byCount = isParentDef(def) && scrayCloudSort === 'count';
            [...tally.keys()].sort((a, b) =>
                a === SCRAY_CLOUD_UNSET ? 1
              : b === SCRAY_CLOUD_UNSET ? -1
+             : (byCount && tally.get(b) !== tally.get(a)) ? tally.get(b) - tally.get(a)
              : a.localeCompare(b, undefined, { sensitivity: 'base' })
            ).forEach(v => chip(v, picked.has(v), () => {
                if (picked.has(v)) picked.delete(v); else picked.add(v);
-               renderAttrRows();
-               renderGrid();
+               afterPick();
            }, tally.get(v)));
 
            attrWrap.appendChild(row);
@@ -1142,7 +1265,10 @@ async function showTagCloudModal(kind) {
 
    function syncTitle(shown) {
        const ex = scrayExcludeCount(kind);
-       title.textContent = meta.label + ' \u2014 ' + set.size + ' selected'
+       const np = kind === 'note' ? parentPicks().size : 0;
+       title.textContent = meta.label + ' \u2014 '
+           + (kind === 'note' ? np + (np === 1 ? ' parent, ' : ' parents, ') : '')
+           + set.size + ' selected'
            + (ex ? ', ' + ex + ' excluded' : '')
            + ', ' + shown + ' shown';
    }
@@ -1156,6 +1282,13 @@ async function showTagCloudModal(kind) {
        // normally read. A value already selected stays visible either way, on
        // the same principle as the search box below.
        attrDefs.forEach(def => {
+           if (isParentDef(def)) {
+               // Same test the filter itself uses, intersect included.
+               if (!parentPicks().size) return;
+               names = names.filter(n =>
+                   set.has(n) || scrayIsExcluded(kind, n) || scrayNoteParentsPass(n));
+               return;
+           }
            const picked = scrayCloudAttrPickSet(kind, def.key);
            if (!picked.size) return;
            names = names.filter(n =>
@@ -1169,7 +1302,9 @@ async function showTagCloudModal(kind) {
        // so: the only way back to neutral is the third tap on that same chip,
        // and a chip that vanished on tap two would strand it.
        const parentDef = searchesParents ? attrDefs.find(d => d.key === 'parent') : null;
-       if (term) names = names.filter(n =>
+       // Once parents are picked, the notes shown are the ones under them; the
+       // box is then only for finding more parents, so it leaves the grid be.
+       if (term && !(parentDef && parentPicks().size)) names = names.filter(n =>
            (parentDef
                ? scrayCloudAttrValues(kind, n, parentDef).some(v =>
                      v !== SCRAY_CLOUD_UNSET && v.toLowerCase().includes(term))
@@ -1249,6 +1384,7 @@ async function showTagCloudModal(kind) {
 
    async function rebuild() {
        counts = await scrayFacetCounts(kind, scrayCloudGender);
+       if (kind === 'note') parentCounts = await scrayNoteParentCounts();
        renderControls();
        renderAttrRows();
        renderGrid();
@@ -1279,7 +1415,9 @@ async function showTagCloudModal(kind) {
            const ex = scrayFacetExcludeSet(kind);
            if (ex) ex.clear();
        }
+       if (kind === 'note') parentPicks().clear();
        scrayRefreshFilters();
+       renderAttrRows();
        renderGrid();
    });
    footer.appendChild(clearBtn);
@@ -1922,6 +2060,32 @@ window.SCRAY_FACET_CLASSES.forEach(kind => {
    const set  = (window.scrayFacetFilters || {})[kind];
    const meta = (window.SCRAY_FACET_META  || {})[kind];
    if (!set || !meta) return;
+   // Parent notes go in front of the mapped notes they lead to, in their own
+   // darker purple, with their any/all switch once there are two to combine.
+   if (kind === 'note' && window.scrayNoteParentFilter && window.scrayNoteParentFilter.size) {
+       Array.from(window.scrayNoteParentFilter).forEach(val => {
+           const pp = document.createElement("span");
+           pp.className = "floating-tag-pill floating-tag-noteparent";
+           pp.textContent = val;
+           pp.title = "Parent note - click to remove";
+           pp.addEventListener("click", () => {
+               window.scrayNoteParentFilter.delete(val);
+               scrayRefreshFilters();
+           });
+           container.appendChild(pp);
+       });
+       if (window.scrayNoteParentFilter.size > 1) {
+           const px = document.createElement("span");
+           px.className = "floating-tag-pill floating-tag-noteparent-mode";
+           px.textContent = window.scrayNoteParentIntersect ? "\u2229 all parents" : "\u222A any parent";
+           px.title = "Tap to switch between bookmarks with ANY picked parent note and ALL of them";
+           px.addEventListener("click", () => {
+               window.scrayNoteParentIntersect = !window.scrayNoteParentIntersect;
+               scrayRefreshFilters();
+           });
+           container.appendChild(px);
+       }
+   }
    Array.from(set).forEach(val => {
        const fPill = document.createElement("span");
        fPill.className = "floating-tag-pill " + meta.pill;
@@ -2621,9 +2785,13 @@ includeAll = Array.from(window.commonSelectedTags); // unified selection
 // term. Intersect keeps only videos carrying EVERY one. The switch spans all
 // four classes at once, because "show me the overlap" is one question and not
 // four.
+// With parent notes picked, the mapped-note picks stop being a class of their
+// own and narrow the parent test instead, on the same bookmark - see
+// scrayVideoPassesNoteParents, applied just below the include pass.
+const parentsOn = !!(window.scrayNoteParentFilter && window.scrayNoteParentFilter.size);
 const facetPicks = window.SCRAY_FACET_CLASSES
    .map(kind => [kind, Array.from((window.scrayFacetFilters || {})[kind] || [])])
-   .filter(pair => pair[1].length > 0);
+   .filter(pair => pair[1].length > 0 && !(parentsOn && pair[0] === 'note'));
 
 if (includeAll.length > 0 || facetPicks.length > 0) {
    const intersect = !!window.scrayTagIntersect;
@@ -2664,6 +2832,10 @@ if (includeAll.length > 0 || facetPicks.length > 0) {
            : (tagHits > 0 || facetHits > 0);
    });
 }
+
+// Parent notes, always AND with the rest: they are the way into bookmarks,
+// not one more term to be OR-ed with a studio.
+if (parentsOn) videos = videos.filter(scrayVideoPassesNoteParents);
 
 // Filter by exclude tags, if passed
 if (Array.isArray(excludeTags) && excludeTags.length > 0) {
@@ -2992,6 +3164,8 @@ if (window.scrayFacetFilters) {
   });
 }
 window.scrayTagIntersect = false;
+if (window.scrayNoteParentFilter) window.scrayNoteParentFilter.clear();
+window.scrayNoteParentIntersect = false;
 
 // Reset all filters – clear level-based include dropdowns
 $('#tagFilterLevel1Select').val(null).trigger('change');

@@ -4,6 +4,48 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.149 / native 13.147 — test: parent notes filter videos and bookmarks
+<!-- 2026-09-15T19:59Z -->
+
+**picker** — `staging - 13.149`: `randomiser.js`, `scray-views.js`, `style.css`, `VERSION`
+**native** — `stg-native - 13.147`: `assets/web/randomiser.js`, `assets/web/scray-views.js`, `assets/web/style.css`, `assets/web/VERSION`
+
+Stage 2 of the notes-as-tags work. Mac tested 13.148 / 13.146 on the phone: tapping a parent note in the NOTES filter didn't count as selected, added no pill and didn't filter any videos, and the mapped notes had disappeared. Most of that was by design so far: parent chips only narrowed the note chips inside the modal, and stage 2 was always going to make them a real filter. The missing notes were a real layout bug. Hundreds of automatic parent chips sat in the modal's non-scrolling controls area and squeezed the notes grid to zero height.
+
+**The filter.**
+- **State:** `window.scrayNoteParentFilter` (a Set of parent notes) and `window.scrayNoteParentIntersect`.
+- **Per bookmark, not per video.** `scrayNoteParentsPass(note)` checks one note: additive means any picked parent, intersect means all of them. With intersect on, "neck" and "kiss" find a bookmark that is both, not a video with a neck bookmark here and a kiss bookmark there. That's the reason a bookmark has several parents in the first place.
+- **Its own switch.** Any/all has its own toggle rather than reusing `scrayTagIntersect`, because it asks about one bookmark, not about how the filter classes combine.
+- **Videos (`getFilteredVideos`):** a video stays when one of its bookmarks passes the parent test. If mapped notes are picked too, it has to be that same bookmark (`scrayVideoPassesNoteParents`). The parent test is always ANDed with everything else, since parent notes are the way in, not one more term to OR with a studio. While parents are picked, mapped-note picks leave the facet include pass and only narrow the parent test. With no parents picked, mapped notes work exactly as before.
+- **Bookmarks view (`scray-views.js`):** `passesNoteFilter` applies the parent test to each bookmark as well, so only the bookmarks that match are listed. Xb picks from them, because `scrayTotalFilterTerms` now counts parents.
+- **Pills:** picked parents go in front of the mapped-note pills, in a deeper purple (`floating-tag-noteparent`). From two parents on, an outlined `∪ any parent` / `∩ all parents` pill flips the mode. Tapping a parent pill removes it.
+- **Clearing:** the Clear-all pill, the big Clear and the cloud's "Clear notes" all empty parents and set any/all back to any.
+
+**NOTES filter modal.**
+- **Parent notes box:** the chips now scroll in a box of their own (⚙️ `max-height: 26vh`), with a **Mapped notes** label and grid underneath (⚙️ at least 18vh). The notes modal is also allowed to be taller (⚙️ 80vh against the other filters' 62vh).
+- **Picking a parent** updates the filter, the pills and the list straight away. The title reads "Notes — 1 parent, 0 selected, 2 shown".
+- **Mapped notes** show the notes under the picked parents, using the same test as the filter, intersect included. You can then tap them to narrow further.
+- **Counts:** a parent's count is how many videos carry it, or how many bookmarks do in Bookmarks view (`scrayNoteParentCounts`). Before, it added up the notes' counts, so a video was counted once for each note it had under that parent.
+- **Sort: count** applies to the parent chips too.
+- **Parents: any ∪ / Parents: all ∩** toggle next to Tag intersect.
+- **Search:** the box still narrows the parent chips. Once a parent is picked it stops narrowing the mapped notes, so those stay the notes under your picks.
+
+**Tested** in headless Chromium at 390×844 on native's real index.html, with all its scripts and style.css, a cached dictionary and a stubbed five-video catalogue. 19 checks:
+- **Counts:** each parent counted once per video; the (none) note gives no parent.
+- **Layout:** the mapped notes grid is visible and taller than 100px.
+- **Picking neck:** the chip turns on, the title and the pill appear, the mapped notes show "neck kiss" and "neck lick", and the videos narrow to the two with neck bookmarks.
+- **neck + kiss:** in any mode, both videos, and the mode pill appears. In all mode, only the video whose one bookmark is "neck kiss", and the notes grid follows.
+- **Mapped note on top:** picking "neck lick" narrows to its video.
+- **Bookmarks view:** returns exactly that bookmark, then all three matching bookmarks once the note pick is cleared.
+- **Search:** keeps picked chips and leaves the mapped notes as they were.
+- **Clearing:** the All chip clears the filter, and so does Clear all.
+- No page errors. `node --check` on all four JS files. picker's changes are the same code.
+
+**Worth knowing.**
+- **Bookmarks with no note** never match a parent pick.
+- **Parent counts** are over the whole catalogue, like every other filter chip, so they don't shrink as other filters are added.
+- **Next:** stage 3, the bookmark modal as a parent-note search with multi-select and Save.
+
 ### picker 13.148 / native 13.146 — test: NOTE cloud search narrows parent notes
 <!-- 2026-09-15T19:41Z -->
 

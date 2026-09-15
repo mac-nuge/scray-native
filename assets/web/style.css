@@ -4439,6 +4439,28 @@ color: #333;
 .scray-cloud-stashtag.is-on  { background: #b8860b; color: #fff; }
 .scray-cloud-item.is-on .scray-cloud-count { opacity: 0.85; }
 
+/* NOTE cloud (picker 13.149 / stg-native 13.147). Parent notes are the main
+   filter and there are hundreds of them, so they scroll in a box of their own
+   and the mapped notes keep a guaranteed share of the height underneath.
+   ⚙️ The parent box height, the notes' minimum, and the taller modal. */
+.scray-cloud-content:has(.scray-cloud-note-grid) { max-height: 80vh; }
+.scray-cloud-note-parents {
+max-height: 26vh;
+overflow-y: auto;
+-webkit-overflow-scrolling: touch;
+flex: 0 0 auto;
+padding-bottom: 6px;
+border-bottom: 1px solid #e3e3e3;
+}
+.scray-cloud-sectionlabel {
+font-size: 0.68rem;
+letter-spacing: 0.08em;
+text-transform: uppercase;
+color: #888;
+margin: 0 0 6px;
+}
+.scray-cloud-note-grid { min-height: 18vh; }
+
 /* Second tap. Red rather than a fifth class colour, and struck through so the
    state reads at a glance in a grid of two hundred chips. Wins over .is-on in
    source order, which is belt and braces - the two are never set together. */
@@ -7674,6 +7696,9 @@ bookmark and adds a Note column (render.js, scrayListNoteCell). html gets
 
 /* Note pills and cloud chips: the BM purple. */
 .floating-tag-note { background-color: #6f42c1; color: white; }
+/* Parent notes lead to the mapped notes, so the same family a shade deeper. */
+.floating-tag-noteparent { background-color: #3d1f7a; color: white; }
+.floating-tag-noteparent-mode { background-color: #fff; color: #3d1f7a; border: 1px solid #3d1f7a; }
 .floating-tag-fexclude.fx-note { border-left-color: #6f42c1; }
 .scray-cloud-note.is-on { background: #6f42c1; color: #fff; }
 

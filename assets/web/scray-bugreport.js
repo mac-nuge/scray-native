@@ -613,43 +613,59 @@ console.log("scray-bugreport.js loaded");
   -webkit-tap-highlight-color: transparent;
 }
 #scrayBugBtn:hover, #scrayBugBtn:focus { opacity: 1; background: rgba(60,60,60,0.9); color: #fff; }
+/* Pinned to the top, not centred, and sized to the VISUAL viewport by
+   fitToViewport() in openModal - so when the on-screen keyboard opens the
+   panel shrinks to the space above it (and scrolls inside) instead of
+   sliding underneath. Every control below sets width/margin/padding itself:
+   style.css's mobile query sets "button, select, input { width:100%;
+   padding:12px; margin-bottom:10px }" and "label { font-size:1.1rem }",
+   which is what made this panel so tall. */
 #scrayBugOverlay {
   position: fixed; inset: 0; z-index: ${Z_MODAL};
   background: rgba(0,0,0,0.72);
-  display: flex; align-items: center; justify-content: center; padding: 16px;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: max(10px, env(safe-area-inset-top)) 10px 10px; box-sizing: border-box;
   font-family: Arial, Helvetica, sans-serif;
 }
 #scrayBugPanel {
   background: #1e1e1e; color: #eee; border: 1px solid #3a3a3a; border-radius: 10px;
-  width: min(560px, 100%); max-height: 88vh; overflow-y: auto;
-  padding: 18px 18px 14px; box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+  width: min(520px, 100%); max-height: 100%; overflow-y: auto; box-sizing: border-box;
+  padding: 11px 12px 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.6);
   -webkit-overflow-scrolling: touch;
 }
-#scrayBugPanel h2 { margin: 0 0 12px; font-size: 1.05rem; font-weight: 600; }
-#scrayBugPanel label { display: block; font-size: 0.82rem; font-weight: 600; margin: 0 0 4px; }
-#scrayBugPanel .row { margin-bottom: 13px; }
+#scrayBugHead { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+#scrayBugPanel h2 { margin: 0; flex: 1 1 auto; font-size: 1rem; font-weight: 600; }
+#scrayBugPanel label { display: block; font-size: 0.74rem; font-weight: 600; margin: 0 0 3px; color: #bbb; }
+#scrayBugPanel .row { margin-bottom: 8px; }
+/* ⚙️ ADJUSTABLE: field height. Summary and What happened share it; What
+   happened grows as you type (see autoGrow, capped at 160px). */
 #scrayBugPanel input[type=text], #scrayBugPanel textarea, #scrayBugPanel select {
   width: 100%; box-sizing: border-box; background: #2a2a2a; color: #eee;
-  border: 1px solid #454545; border-radius: 6px; padding: 8px 9px;
+  border: 1px solid #454545; border-radius: 6px; padding: 7px 9px; margin: 0;
+  height: 38px; line-height: 22px;
   font-size: 16px; font-family: inherit;   /* 16px stops iOS zooming on focus */
 }
-#scrayBugPanel textarea { min-height: 92px; resize: vertical; }
-#scrayBugPanel .check { display: flex; align-items: flex-start; gap: 8px; font-size: 0.82rem; color: #bbb; }
-#scrayBugPanel .check input { margin-top: 2px; }
-#scrayBugPanel details { margin-top: 8px; }
-#scrayBugShotBox { display: flex; flex-direction: column; gap: 8px; }
+#scrayBugPanel textarea { min-height: 38px; resize: vertical; display: block; overflow-y: hidden; }
+#scrayBugPanel .check { display: flex; align-items: flex-start; gap: 7px; font-size: 0.76rem; color: #bbb; }
+#scrayBugPanel .check input {
+  width: auto; height: auto; flex: 0 0 auto; margin: 1px 0 0; padding: 0;
+}
+#scrayBugPanel .check label { flex: 1 1 auto; font-size: 0.76rem; color: #bbb; }
+#scrayBugPanel details { margin-top: 4px; }
 #scrayBugShotImg {
-  display: none; max-width: 100%; max-height: 190px; width: auto;
+  display: none; max-width: 100%; max-height: 120px; width: auto; margin-top: 6px;
   border: 1px solid #454545; border-radius: 6px; background: #000;
-  object-fit: contain; align-self: flex-start;
+  object-fit: contain;
 }
 #scrayBugShotImg.on { display: block; }
-#scrayBugShotNone { font-size: 0.78rem; color: #888; }
-#scrayBugShotBtns { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#scrayBugShotBtns .lbl { font-size: 0.74rem; font-weight: 600; color: #bbb; }
+#scrayBugShotNone { font-size: 0.74rem; color: #888; }
+#scrayBugShotBtns .grow { flex: 1 1 auto; }
+#scrayBugShotBtns { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 #scrayBugShotBtns .filebtn, #scrayBugShotClear, #scrayBugShotPaste {
   background: #2a2a2a; color: #ddd; border: 1px solid #4a4a4a; border-radius: 6px;
   padding: 5px 10px; font-size: 0.78rem; cursor: pointer; display: inline-block; margin: 0;
-  font-weight: normal;
+  width: auto; line-height: 1.2; font-weight: normal; font-family: inherit;
 }
 #scrayBugShotBtns .filebtn:hover, #scrayBugShotClear:hover,
 #scrayBugShotPaste:hover { background: #3a3a3a; color: #fff; }
@@ -658,7 +674,8 @@ console.log("scray-bugreport.js loaded");
    [hidden]{display:none} - so Remove stayed on screen with nothing to
    remove. Put it back explicitly. */
 #scrayBugShotClear[hidden] { display: none; }
-#scrayBugShotNote { font-size: 0.72rem; color: #888; }
+#scrayBugShotNote { font-size: 0.72rem; color: #888; flex: 1 1 100%; }
+#scrayBugShotNote:empty { display: none; }
 /* Somewhere a long-press can paste INTO. Only shown where clipboard.read() is
    missing - see wirePasteInto. contenteditable rather than a text field
    because iOS will not offer Paste for an image over a plain one. */
@@ -714,21 +731,23 @@ console.log("scray-bugreport.js loaded");
   padding: 8px; margin: 8px 0 0; max-height: 220px; overflow: auto;
   font-size: 0.68rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word; color: #9c9;
 }
-#scrayBugActions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+#scrayBugActions { display: flex; gap: 8px; margin: 0 0 8px; }
 #scrayBugActions button {
-  padding: 9px 16px; border-radius: 6px; border: 1px solid #4a4a4a;
-  background: #2f2f2f; color: #ddd; font-size: 0.88rem; cursor: pointer;
+  flex: 1 1 0; width: auto; margin: 0;
+  padding: 8px 12px; border-radius: 6px; border: 1px solid #4a4a4a;
+  background: #2f2f2f; color: #ddd; font-size: 0.88rem; font-family: inherit; cursor: pointer;
 }
 #scrayBugActions button.primary { background: #2d6cdf; border-color: #2d6cdf; color: #fff; font-weight: 600; }
 #scrayBugActions button[disabled] { opacity: 0.5; cursor: default; }
-#scrayBugStatus { font-size: 0.8rem; min-height: 1.2em; margin-top: 10px; }
+#scrayBugStatus { font-size: 0.8rem; margin: -2px 0 8px; }
+#scrayBugStatus:empty { display: none; }
 #scrayBugStatus.bad { color: #ff7a6b; }
 #scrayBugStatus.good { color: #7ddb8a; }
-#scrayBugTypeToggle { display: flex; gap: 8px; }
+#scrayBugTypeToggle { display: flex; gap: 4px; flex: 0 0 auto; }
 #scrayBugTypeToggle button {
-  flex: 1 1 0; padding: 11px 8px; border-radius: 6px;
+  flex: 0 0 auto; width: auto; margin: 0; padding: 4px 9px; border-radius: 5px;
   border: 1px solid #454545; background: #2a2a2a; color: #9a9a9a;
-  font-size: 0.92rem; font-family: inherit; cursor: pointer;
+  font-size: 0.76rem; line-height: 1.2; font-family: inherit; cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
@@ -738,10 +757,12 @@ console.log("scray-bugreport.js loaded");
   }
 
   let open = false;
+  let unfit = null;   // removes the visualViewport listeners openModal adds
 
   function close() {
     const o = document.getElementById("scrayBugOverlay");
     if (o) o.remove();
+    if (unfit) { unfit(); unfit = null; }
     open = false;
   }
 
@@ -762,14 +783,13 @@ console.log("scray-bugreport.js loaded");
     overlay.id = "scrayBugOverlay";
     overlay.innerHTML = `
       <div id="scrayBugPanel" role="dialog" aria-modal="true">
-        <h2>Report an issue</h2>
-        <div class="row">
-          <label>Type</label>
+        <div id="scrayBugHead">
+          <h2>Report an issue</h2>
           <div id="scrayBugTypeToggle" role="group" aria-label="Issue type">
-            <button type="button" class="on" data-type="Bug" aria-pressed="true">🐞 Bug</button>
-            <button type="button" data-type="Task" aria-pressed="false">✓ Task</button>
+            <button type="button" data-type="Bug" aria-pressed="false">🐞 Bug</button>
+            <button type="button" class="on" data-type="Task" aria-pressed="true">✓ Task</button>
           </div>
-          <input type="hidden" id="scrayBugType" value="Bug">
+          <input type="hidden" id="scrayBugType" value="Task">
         </div>
         <div class="row">
           <label for="scrayBugSummary">Summary</label>
@@ -777,27 +797,31 @@ console.log("scray-bugreport.js loaded");
         </div>
         <div class="row">
           <label for="scrayBugDetails">What happened?</label>
-          <textarea id="scrayBugDetails" placeholder="What you did, what you expected, what you got."></textarea>
+          <textarea id="scrayBugDetails" rows="1" placeholder="What you did, expected, and got"></textarea>
         </div>
+        <div id="scrayBugActions">
+          <button type="button" id="scrayBugCancel">Cancel</button>
+          <button type="button" id="scrayBugSend" class="primary">Send to Jira</button>
+        </div>
+        <div id="scrayBugStatus"></div>
         <div class="row" id="scrayBugShotRow">
-          <label>Screenshot</label>
-          <div id="scrayBugShotBox">
-            <img id="scrayBugShotImg" alt="">
-            <div id="scrayBugShotNone">No screenshot</div>
-            <div id="scrayBugShotBtns">
-              <button type="button" id="scrayBugShotPaste" hidden>Paste</button>
-              <label class="filebtn" for="scrayBugShotFile">Attach a photo</label>
-              <input type="file" id="scrayBugShotFile" accept="image/*" hidden>
-              <button type="button" id="scrayBugShotClear" hidden>Remove</button>
-              <span id="scrayBugShotNote"></span>
-              <div id="scrayBugPasteBox" class="pastebox" contenteditable="true"
-                   role="textbox" aria-label="Long-press here and choose Paste" hidden></div>
-            </div>
+          <div id="scrayBugShotBtns">
+            <span class="lbl">Screenshot</span>
+            <span id="scrayBugShotNone">none</span>
+            <span class="grow"></span>
+            <button type="button" id="scrayBugShotPaste" hidden>Paste</button>
+            <label class="filebtn" for="scrayBugShotFile">Attach a photo</label>
+            <input type="file" id="scrayBugShotFile" accept="image/*" hidden>
+            <button type="button" id="scrayBugShotClear" hidden>Remove</button>
+            <span id="scrayBugShotNote"></span>
+            <div id="scrayBugPasteBox" class="pastebox" contenteditable="true"
+                 role="textbox" aria-label="Long-press here and choose Paste" hidden></div>
           </div>
+          <img id="scrayBugShotImg" alt="">
         </div>
-        <div class="row">
+        <div class="row" style="margin-bottom:0">
           <div class="check">
-            <input type="checkbox" id="scrayBugIncl" checked>
+            <input type="checkbox" id="scrayBugIncl">
             <label for="scrayBugIncl" style="font-weight:normal;margin:0;">
               Attach app state, a ${Math.round(dom.length / 1024)} KB DOM snapshot
               and the last ${lines.length} console line${lines.length === 1 ? "" : "s"}
@@ -808,17 +832,48 @@ console.log("scray-bugreport.js loaded");
             <pre id="scrayBugPreview"></pre>
           </details>
         </div>
-        <div id="scrayBugStatus"></div>
-        <div id="scrayBugActions">
-          <button type="button" id="scrayBugCancel">Cancel</button>
-          <button type="button" id="scrayBugSend" class="primary">Send to Jira</button>
-        </div>
       </div>`;
     // <html>, not <body>: the Floating Menu is also a child of <html> at the
     // same z-index, and at equal z-index the later sibling paints on top. The
     // menu is built at DOMContentLoaded, this overlay on click, so appending
     // here puts the modal above it. In <body> it would be buried.
     document.documentElement.appendChild(overlay);
+
+    // Keep the whole panel above the on-screen keyboard. position:fixed is
+    // laid out against the LAYOUT viewport, which the keyboard doesn't
+    // shrink, so on iOS (Safari and Native's WKWebView) the lower part of the
+    // overlay ended up under the keys. Size the overlay to the VISUAL
+    // viewport instead; the panel's max-height:100% then fits the space left
+    // and scrolls inside it. No-op where visualViewport is missing.
+    const vv = window.visualViewport;
+    if (vv) {
+      const panelEl = overlay.firstElementChild;
+      const fitToViewport = () => {
+        overlay.style.top = vv.offsetTop + "px";
+        overlay.style.height = vv.height + "px";
+        overlay.style.bottom = "auto";
+        const a = document.activeElement;
+        if (a && panelEl.contains(a) && a.scrollIntoView) a.scrollIntoView({ block: "nearest" });
+      };
+      fitToViewport();
+      vv.addEventListener("resize", fitToViewport);
+      vv.addEventListener("scroll", fitToViewport);
+      unfit = () => {
+        vv.removeEventListener("resize", fitToViewport);
+        vv.removeEventListener("scroll", fitToViewport);
+      };
+    }
+
+    // What happened starts the same height as Summary and grows with what
+    // you type, up to a cap, then scrolls.
+    const detailsEl = document.getElementById("scrayBugDetails");
+    const autoGrow = () => {
+      detailsEl.style.height = "38px";
+      const want = detailsEl.scrollHeight + 2;   // + borders
+      detailsEl.style.height = Math.min(Math.max(want, 38), 160) + "px";
+      detailsEl.style.overflowY = want > 160 ? "auto" : "hidden";
+    };
+    detailsEl.addEventListener("input", autoGrow);
 
     // textContent, not innerHTML: console output is arbitrary text and will
     // contain angle brackets sooner or later.

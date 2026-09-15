@@ -4,6 +4,28 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.146 / native 13.144 — test: compact Jira modal
+<!-- 2026-09-15T18:18Z -->
+
+**picker** — `staging - 13.146`: `scray-bugreport.js`, `VERSION`
+**native** — `stg-native - 13.144`: `assets/web/scray-bugreport.js`, `assets/web/VERSION`
+
+Mac's ask: the Report an issue modal was far taller than it needed to be (about 930px on a phone) and the on-screen keyboard covered the lower half. Make it compact without losing anything.
+
+**What changed.**
+- **Type toggle:** Task is now the default. Bug / Task are small pills on the title line; the separate "Type" row is gone (the group keeps its aria-label).
+- **Summary and What happened** are the same 38px height. What happened grows as you type, up to 160px, then scrolls, so long write-ups still fit. Placeholder shortened to one line.
+- **Cancel / Send to Jira** now sit straight under What happened, full width side by side, so they're visible while typing. The status line sits under them and takes no space when empty.
+- **Screenshot** is one line: label, "none", then Paste and Attach a photo side by side. The attached image preview is capped at 120px. Paste-box fallback for Native is unchanged.
+- **Attach app state** is unticked by default.
+- **Keyboard:** the overlay is pinned to the top and sized to `visualViewport` (resize and scroll), so the panel shrinks to the space above the keyboard and scrolls inside. The listeners are removed on close.
+
+**Why it was so tall.** style.css's mobile query sets `button, select, input { width:100%; padding:12px; margin-bottom:10px }` and `label { font-size:1.1rem }`. That's why Paste was a full-width bar on its own row and the checkbox sat mid-row. Every control in the panel now sets its own width, margin and padding.
+
+**Tested.** `node --check` on both copies. Headless Chromium at 390px against picker's style.css: panel 305px tall (was about 930), fields 38px each, Task selected, box unticked, no page errors. With the viewport cut to 470px and four lines typed, everything, buttons included, still fits.
+
+**Worth knowing.** The markup and CSS are byte-identical between picker and native. If a future tweak makes the panel taller again, check the style.css mobile query first.
+
 ### browse 13.61 / picker 13.145 / native 13.143 — test: one changelog per repo, merged on changelog.html
 <!-- 2026-09-15T17:59Z -->
 

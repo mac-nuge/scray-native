@@ -565,49 +565,51 @@ window.SCRAY_FACET_CLASSES.forEach(k => {
    if (!window.scrayFacetExcludes[k]) window.scrayFacetExcludes[k] = new Set();
 });
 
-/* ---- parent note filter (picker 13.149 / stg-native 13.147) -------------
+/* ---- keyword filter (picker 13.149 / stg-native 13.147) -------------
    Notes work like tags now (browse 13.62): a bookmark files under every one
-   of its parent notes - by default the words of the note. Parent notes are
-   the primary way to filter bookmarks, so a picked parent decides the videos
+   of its keywords - by default the words of the note. Keywords are
+   the primary way to filter bookmarks, so a picked keyword decides the videos
    (and, in Bookmarks view, the bookmarks) shown. The mapped notes still sit
-   under the parents in the cloud and narrow further.
+   under the keywords in the cloud and narrow further.
 
    Tested PER BOOKMARK, not per video: "kiss" + "neck" with intersect on means
    a bookmark that is both, not a video that has a kiss bookmark somewhere and
    a neck bookmark somewhere else - which is the whole reason a bookmark can
-   have several parents.
+   have several keywords.
 
-   Additive (any picked parent) by default; intersect (all of them) is its own
+   Additive (any picked keyword) by default; intersect (all of them) is its own
    switch rather than scrayTagIntersect, because it is a question about one
    bookmark rather than about how the filter classes combine.
 --------------------------------------------------------------------------- */
-window.scrayNoteParentFilter = window.scrayNoteParentFilter || new Set();
-window.scrayNoteParentIntersect = !!window.scrayNoteParentIntersect;
+window.scrayNoteKeywordFilter = window.scrayNoteKeywordFilter || new Set();
+window.scrayNoteKeywordIntersect = !!window.scrayNoteKeywordIntersect;
 
-/** Does a note (raw or mapped) satisfy the picked parents? True when none are picked. */
-function scrayNoteParentsPass(note) {
-   const picks = window.scrayNoteParentFilter;
+/** Does a note (raw or mapped) satisfy the picked keywords? True when none are picked. */
+function scrayNoteKeywordsPass(note) {
+   const picks = window.scrayNoteKeywordFilter;
    if (!picks || !picks.size) return true;
-   const parents = typeof window.scrayNoteParents === 'function' ? window.scrayNoteParents(note) : [];
-   if (!parents.length) return false;
-   return window.scrayNoteParentIntersect
-       ? [...picks].every(p => parents.includes(p))
-       : parents.some(p => picks.has(p));
+   // Expanded: a child keyword counts as its parent note (browse 13.64).
+   const keywords = typeof window.scrayNoteKeywordsExpanded === 'function' ? window.scrayNoteKeywordsExpanded(note)
+       : typeof window.scrayNoteKeywords === 'function' ? window.scrayNoteKeywords(note) : [];
+   if (!keywords.length) return false;
+   return window.scrayNoteKeywordIntersect
+       ? [...picks].every(p => keywords.includes(p))
+       : keywords.some(p => picks.has(p));
 }
-window.scrayNoteParentsPass = scrayNoteParentsPass;
+window.scrayNoteKeywordsPass = scrayNoteKeywordsPass;
 
 /**
- * A video passes the parent filter when ONE of its bookmarks does - and, if
+ * A video passes the keyword filter when ONE of its bookmarks does - and, if
  * mapped notes are picked too, that same bookmark's note is one of them.
  */
-function scrayVideoPassesNoteParents(video) {
+function scrayVideoPassesNoteKeywords(video) {
    const bms = window.scrayVisibleBookmarks
        ? window.scrayVisibleBookmarks(video)
        : (video && Array.isArray(video.bookmarks) ? video.bookmarks : []);
    const inc = (window.scrayFacetFilters || {}).note;
    return bms.some(b => {
        const raw = String((b && b.note) || '').trim();
-       if (!raw || !scrayNoteParentsPass(raw)) return false;
+       if (!raw || !scrayNoteKeywordsPass(raw)) return false;
        if (inc && inc.size) {
            const name = window.scrayMapName ? window.scrayMapName('note', raw) : raw;
            if (!inc.has(name)) return false;
@@ -615,17 +617,17 @@ function scrayVideoPassesNoteParents(video) {
        return true;
    });
 }
-window.scrayVideoPassesNoteParents = scrayVideoPassesNoteParents;
+window.scrayVideoPassesNoteKeywords = scrayVideoPassesNoteKeywords;
 
 /**
- * parent -> how many videos carry it (Videos view) or how many bookmarks do
+ * keyword -> how many videos carry it (Videos view) or how many bookmarks do
  * (Bookmarks view), over the whole catalogue - the same scope the other cloud
  * counts use. Counted here rather than by adding up the notes' counts, which
- * would count a video once per note it has under a parent.
+ * would count a video once per note it has under a keyword.
  */
-async function scrayNoteParentCounts(perBookmarkArg) {
+async function scrayNoteKeywordCounts(perBookmarkArg) {
    const videos = await getAllVideos();
-   // true = always count bookmarks - the bookmark modal ranks parents by how
+   // true = always count bookmarks - the bookmark modal ranks keywords by how
    // many bookmarks use them, whichever view is showing (13.151 / 13.149).
    const perBookmark = perBookmarkArg === true
        || (typeof window.scrayViewMode === 'function' && window.scrayViewMode() === 'bookmarks');
@@ -637,8 +639,9 @@ async function scrayNoteParentCounts(perBookmarkArg) {
        const seen = new Set();
        bms.forEach(b => {
            const raw = String((b && b.note) || '').trim();
-           if (!raw || typeof window.scrayNoteParents !== 'function') return;
-           window.scrayNoteParents(raw).forEach(pn => {
+           if (!raw || typeof window.scrayNoteKeywords !== 'function') return;
+           // Expanded, so a parent note's count includes its children's bookmarks.
+           (window.scrayNoteKeywordsExpanded || window.scrayNoteKeywords)(raw).forEach(pn => {
                if (perBookmark) counts.set(pn, (counts.get(pn) || 0) + 1);
                else seen.add(pn);
            });
@@ -647,7 +650,7 @@ async function scrayNoteParentCounts(perBookmarkArg) {
    });
    return counts;
 }
-window.scrayNoteParentCounts = scrayNoteParentCounts;
+window.scrayNoteKeywordCounts = scrayNoteKeywordCounts;
 
 function scrayFacetExcludeSet(kind) {
    return (window.scrayFacetExcludes || {})[kind] || null;
@@ -766,8 +769,8 @@ window.scrayClearAllFilters = function (ev) {
        if (x) x.clear();
    });
    window.scrayTagIntersect = false;
-   if (window.scrayNoteParentFilter) window.scrayNoteParentFilter.clear();
-   window.scrayNoteParentIntersect = false;
+   if (window.scrayNoteKeywordFilter) window.scrayNoteKeywordFilter.clear();
+   window.scrayNoteKeywordIntersect = false;
 
    // Cleared through jQuery so each select's own change handler runs and the
    // cascade re-widens the option lists. Every one of these fires a filter
@@ -924,7 +927,7 @@ function scrayTotalFilterTerms() {
    return ['tag'].concat(window.SCRAY_FACET_CLASSES || []).reduce((n, k) => {
        const s = scrayFacetSet(k);
        return n + (s ? s.size : 0);
-   }, 0) + ((window.scrayNoteParentFilter && window.scrayNoteParentFilter.size) || 0);
+   }, 0) + ((window.scrayNoteKeywordFilter && window.scrayNoteKeywordFilter.size) || 0);
 }
 window.scrayTotalFilterTerms = scrayTotalFilterTerms;
 
@@ -1015,17 +1018,19 @@ function scrayCloudAttrValue(kind, name, attrKey) {
 /**
  * Every bucket one cloud value files under for an attribute.
  *
- * A multi attribute (a note's parents, browse 13.59) is stored as one string
- * joined with " | ", and a note with two parents belongs in BOTH chips - so it
- * is counted under each, and picking either parent keeps it. A plain attribute
+ * A multi attribute (a note's keywords, browse 13.59) is stored as one string
+ * joined with " | ", and a note with two keywords belongs in BOTH chips - so it
+ * is counted under each, and picking either keyword keeps it. A plain attribute
  * is a list of one, which is what it always was.
  */
 function scrayCloudAttrValues(kind, name, def) {
-   // A note's parents are no longer only what was filed (browse 13.62): by
+   // A note's keywords are no longer only what was filed (browse 13.62): by
    // default they are the words of the note itself, and scray-config.js owns
    // that rule, including a hand-filed list replacing it.
-   if (kind === 'note' && def.key === 'parent' && typeof window.scrayNoteParents === 'function') {
-       const list = window.scrayNoteParents(name);
+   if (kind === 'note' && def.key === 'keywords' && typeof window.scrayNoteKeywords === 'function') {
+       // With the parent notes they count as, so a search for a parent finds
+       // the notes filed under its children too (browse 13.64).
+       const list = (window.scrayNoteKeywordsExpanded || window.scrayNoteKeywords)(name);
        return list.length ? list : [SCRAY_CLOUD_UNSET];
    }
    const v = scrayCloudAttrValue(kind, name, def.key);
@@ -1072,18 +1077,18 @@ async function showTagCloudModal(kind) {
    search.className = 'scray-cloud-search';
    search.placeholder = 'Narrow this list\u2026';
    controls.appendChild(search);
-   // NOTE cloud (picker 13.148 / stg-native 13.146): parent notes are the way
-   // in now, so the box narrows the Parent note chips, and the notes below
-   // follow - a note shows when one of its parents matches the term.
-   const searchesParents = kind === 'note';
+   // NOTE cloud (picker 13.148 / stg-native 13.146): keywords are the way
+   // in now, so the box narrows the Keyword chips, and the notes below
+   // follow - a note shows when one of its keywords matches the term.
+   const searchesKeywords = kind === 'note';
    // Loose on purpose (picker 13.150 / stg-native 13.148): every word typed is
-   // its own term and a parent matching ANY of them shows, so "mish ts" brings
+   // its own term and a keyword matching ANY of them shows, so "mish ts" brings
    // up both "mish" and "ts" rather than nothing.
    const termHit = (v) => {
        const s = String(v).toLowerCase();
        return term.split(/\s+/).some(w => w && s.includes(w));
    };
-   if (searchesParents) search.placeholder = 'Search parent notes\u2026';
+   if (searchesKeywords) search.placeholder = 'Search keywords\u2026';
 
    const btnRow = document.createElement('div');
    btnRow.className = 'scray-cloud-btnrow';
@@ -1096,11 +1101,11 @@ async function showTagCloudModal(kind) {
    const attrWrap = document.createElement('div');
    attrWrap.className = 'scray-cloud-attrs';
    controls.appendChild(attrWrap);
-   // NOTE cloud: the parent chips scroll in a box of their own. In the flow
+   // NOTE cloud: the keyword chips scroll in a box of their own. In the flow
    // they were hundreds of chips, and the notes grid below - the part that
    // takes the rest of the height - was squeezed to nothing.
    if (kind === 'note') {
-       attrWrap.classList.add('scray-cloud-note-parents');
+       attrWrap.classList.add('scray-cloud-note-keywords');
        const notesLabel = document.createElement('div');
        notesLabel.className = 'scray-cloud-sectionlabel';
        notesLabel.textContent = 'Mapped notes';
@@ -1112,12 +1117,12 @@ async function showTagCloudModal(kind) {
    content.appendChild(grid);
 
    let counts = new Map();
-   let parentCounts = new Map();
+   let keywordCounts = new Map();
    let shown  = [];
    let term   = '';
-   // The picked parents live in the real filter, not the cloud's own narrowing.
-   const parentPicks = () => window.scrayNoteParentFilter;
-   const isParentDef = (def) => kind === 'note' && def.key === 'parent';
+   // The picked keywords live in the real filter, not the cloud's own narrowing.
+   const keywordPicks = () => window.scrayNoteKeywordFilter;
+   const isKeywordsDef = (def) => kind === 'note' && def.key === 'keywords';
 
    const close = () => {
        document.removeEventListener('keydown', escHandler);
@@ -1157,11 +1162,11 @@ async function showTagCloudModal(kind) {
            renderGrid();
        });
 
-       // Parent notes: a bookmark with ANY picked parent, or with ALL of them.
+       // Keywords: a bookmark with ANY picked keyword, or with ALL of them.
        if (kind === 'note') {
-           mkToggle(window.scrayNoteParentIntersect ? 'Parents: all \u2229' : 'Parents: any \u222A',
-               window.scrayNoteParentIntersect, () => {
-                   window.scrayNoteParentIntersect = !window.scrayNoteParentIntersect;
+           mkToggle(window.scrayNoteKeywordIntersect ? 'Keywords: all \u2229' : 'Keywords: any \u222A',
+               window.scrayNoteKeywordIntersect, () => {
+                   window.scrayNoteKeywordIntersect = !window.scrayNoteKeywordIntersect;
                    scrayRefreshFilters();
                    renderControls();
                    renderGrid();
@@ -1200,10 +1205,10 @@ async function showTagCloudModal(kind) {
 
        attrDefs.forEach(def => {
            const tally = new Map();
-           if (isParentDef(def)) {
-               parentCounts.forEach((n, v) => tally.set(v, n));
-               // A picked parent nothing carries any more still needs its chip.
-               parentPicks().forEach(v => { if (!tally.has(v)) tally.set(v, 0); });
+           if (isKeywordsDef(def)) {
+               keywordCounts.forEach((n, v) => tally.set(v, n));
+               // A picked keyword nothing carries any more still needs its chip.
+               keywordPicks().forEach(v => { if (!tally.has(v)) tally.set(v, 0); });
            } else {
                counts.forEach((n, name) => {
                    scrayCloudAttrValues(kind, name, def).forEach(v =>
@@ -1214,12 +1219,15 @@ async function showTagCloudModal(kind) {
            // a row with a single "everything is unset" chip in it.
            if (tally.size <= 1 && tally.has(SCRAY_CLOUD_UNSET)) return;
 
-           const picked = isParentDef(def) ? parentPicks() : scrayCloudAttrPickSet(kind, def.key);
-           // The search box narrows the parent chips. A picked one stays, so
+           const picked = isKeywordsDef(def) ? keywordPicks() : scrayCloudAttrPickSet(kind, def.key);
+           // The search box narrows the keyword chips. A picked one stays, so
            // the way to undo it is never hidden behind clearing the box.
-           if (searchesParents && def.key === 'parent' && term) {
+           if (searchesKeywords && def.key === 'keywords' && term) {
                [...tally.keys()].forEach(v => {
-                   if (v === SCRAY_CLOUD_UNSET || (!termHit(v) && !picked.has(v))) tally.delete(v);
+                   if (v === SCRAY_CLOUD_UNSET) { tally.delete(v); return; }
+                   // A parent note brings its children with it (browse 13.64).
+                   const par = window.scrayKeywordParentOf ? window.scrayKeywordParentOf(v) : null;
+                   if (!termHit(v) && !picked.has(v) && !(par && (picked.has(par) || termHit(par)))) tally.delete(v);
                });
            }
            const row = document.createElement('div');
@@ -1230,10 +1238,10 @@ async function showTagCloudModal(kind) {
            label.textContent = def.label;
            row.appendChild(label);
 
-           const chip = (text, on, fn, n) => {
+           const chip = (text, on, fn, n, cls) => {
                const b = document.createElement('button');
                b.type = 'button';
-               b.className = 'scray-cloud-attrchip' + (on ? ' is-on' : '');
+               b.className = 'scray-cloud-attrchip' + (on ? ' is-on' : '') + (cls ? ' ' + cls : '');
                b.textContent = text;
                if (n != null) {
                    const c = document.createElement('span');
@@ -1245,10 +1253,10 @@ async function showTagCloudModal(kind) {
                row.appendChild(b);
            };
 
-           // Picking a parent changes the real filter (videos, pills), so it
+           // Picking a keyword changes the real filter (videos, pills), so it
            // re-runs it; the other rows only narrow what the cloud shows.
            const afterPick = () => {
-               if (isParentDef(def)) scrayRefreshFilters();
+               if (isKeywordsDef(def)) scrayRefreshFilters();
                renderAttrRows();
                renderGrid();
            };
@@ -1258,16 +1266,35 @@ async function showTagCloudModal(kind) {
                afterPick();
            });
 
-           const byCount = isParentDef(def) && scrayCloudSort === 'count';
-           [...tally.keys()].sort((a, b) =>
+           const byCount = isKeywordsDef(def) && scrayCloudSort === 'count';
+           let ordered = [...tally.keys()].sort((a, b) =>
                a === SCRAY_CLOUD_UNSET ? 1
              : b === SCRAY_CLOUD_UNSET ? -1
              : (byCount && tally.get(b) !== tally.get(a)) ? tally.get(b) - tally.get(a)
              : a.localeCompare(b, undefined, { sensitivity: 'base' })
-           ).forEach(v => chip(v, picked.has(v), () => {
+           );
+           // Parent notes (browse 13.64): bold, with their children straight
+           // after them rather than scattered through the sort.
+           const kwTree = isKeywordsDef(def) && typeof window.scrayKeywordTree === 'function' ? window.scrayKeywordTree() : null;
+           if (kwTree && kwTree.parentOf.size) {
+               const inList = new Set(ordered);
+               const placed = new Set();
+               const out = [];
+               ordered.forEach(v => {
+                   if (placed.has(v)) return;
+                   const par = kwTree.parentOf.get(v);
+                   if (par && inList.has(par)) return;          // goes under its parent
+                   out.push(v); placed.add(v);
+                   (kwTree.children.get(v) || []).forEach(c => {
+                       if (inList.has(c) && !placed.has(c)) { out.push(c); placed.add(c); }
+                   });
+               });
+               ordered = out;
+           }
+           ordered.forEach(v => chip(v, picked.has(v), () => {
                if (picked.has(v)) picked.delete(v); else picked.add(v);
                afterPick();
-           }, tally.get(v)));
+           }, tally.get(v), kwTree && kwTree.parents.has(v) ? 'is-parent' : ''));
 
            attrWrap.appendChild(row);
        });
@@ -1275,9 +1302,9 @@ async function showTagCloudModal(kind) {
 
    function syncTitle(shown) {
        const ex = scrayExcludeCount(kind);
-       const np = kind === 'note' ? parentPicks().size : 0;
+       const np = kind === 'note' ? keywordPicks().size : 0;
        title.textContent = meta.label + ' \u2014 '
-           + (kind === 'note' ? np + (np === 1 ? ' parent, ' : ' parents, ') : '')
+           + (kind === 'note' ? np + (np === 1 ? ' keyword, ' : ' keywords, ') : '')
            + set.size + ' selected'
            + (ex ? ', ' + ex + ' excluded' : '')
            + ', ' + shown + ' shown';
@@ -1292,11 +1319,11 @@ async function showTagCloudModal(kind) {
        // normally read. A value already selected stays visible either way, on
        // the same principle as the search box below.
        attrDefs.forEach(def => {
-           if (isParentDef(def)) {
+           if (isKeywordsDef(def)) {
                // Same test the filter itself uses, intersect included.
-               if (!parentPicks().size) return;
+               if (!keywordPicks().size) return;
                names = names.filter(n =>
-                   set.has(n) || scrayIsExcluded(kind, n) || scrayNoteParentsPass(n));
+                   set.has(n) || scrayIsExcluded(kind, n) || scrayNoteKeywordsPass(n));
                return;
            }
            const picked = scrayCloudAttrPickSet(kind, def.key);
@@ -1311,12 +1338,12 @@ async function showTagCloudModal(kind) {
        // box first. An EXCLUDED one has to stay for the same reason and more
        // so: the only way back to neutral is the third tap on that same chip,
        // and a chip that vanished on tap two would strand it.
-       const parentDef = searchesParents ? attrDefs.find(d => d.key === 'parent') : null;
-       // Once parents are picked, the notes shown are the ones under them; the
-       // box is then only for finding more parents, so it leaves the grid be.
-       if (term && !(parentDef && parentPicks().size)) names = names.filter(n =>
-           (parentDef
-               ? scrayCloudAttrValues(kind, n, parentDef).some(v =>
+       const keywordsDef = searchesKeywords ? attrDefs.find(d => d.key === 'keywords') : null;
+       // Once keywords are picked, the notes shown are the ones under them; the
+       // box is then only for finding more keywords, so it leaves the grid be.
+       if (term && !(keywordsDef && keywordPicks().size)) names = names.filter(n =>
+           (keywordsDef
+               ? scrayCloudAttrValues(kind, n, keywordsDef).some(v =>
                      v !== SCRAY_CLOUD_UNSET && termHit(v))
                : n.toLowerCase().includes(term))
            || set.has(n) || scrayIsExcluded(kind, n));
@@ -1394,7 +1421,7 @@ async function showTagCloudModal(kind) {
 
    async function rebuild() {
        counts = await scrayFacetCounts(kind, scrayCloudGender);
-       if (kind === 'note') parentCounts = await scrayNoteParentCounts();
+       if (kind === 'note') keywordCounts = await scrayNoteKeywordCounts();
        renderControls();
        renderAttrRows();
        renderGrid();
@@ -1402,7 +1429,7 @@ async function showTagCloudModal(kind) {
 
    search.addEventListener('input', () => {
        term = search.value.trim().toLowerCase();
-       if (searchesParents) renderAttrRows();
+       if (searchesKeywords) renderAttrRows();
        renderGrid();
    });
 
@@ -1425,7 +1452,7 @@ async function showTagCloudModal(kind) {
            const ex = scrayFacetExcludeSet(kind);
            if (ex) ex.clear();
        }
-       if (kind === 'note') parentPicks().clear();
+       if (kind === 'note') keywordPicks().clear();
        scrayRefreshFilters();
        renderAttrRows();
        renderGrid();
@@ -2070,27 +2097,28 @@ window.SCRAY_FACET_CLASSES.forEach(kind => {
    const set  = (window.scrayFacetFilters || {})[kind];
    const meta = (window.SCRAY_FACET_META  || {})[kind];
    if (!set || !meta) return;
-   // Parent notes go in front of the mapped notes they lead to, in their own
+   // Keywords go in front of the mapped notes they lead to, in their own
    // darker purple, with their any/all switch once there are two to combine.
-   if (kind === 'note' && window.scrayNoteParentFilter && window.scrayNoteParentFilter.size) {
-       Array.from(window.scrayNoteParentFilter).forEach(val => {
+   if (kind === 'note' && window.scrayNoteKeywordFilter && window.scrayNoteKeywordFilter.size) {
+       Array.from(window.scrayNoteKeywordFilter).forEach(val => {
            const pp = document.createElement("span");
-           pp.className = "floating-tag-pill floating-tag-noteparent";
+           pp.className = "floating-tag-pill floating-tag-notekeyword"
+               + (window.scrayKeywordIsParent && window.scrayKeywordIsParent(val) ? " is-parent" : "");
            pp.textContent = val;
-           pp.title = "Parent note - click to remove";
+           pp.title = "Keyword - click to remove";
            pp.addEventListener("click", () => {
-               window.scrayNoteParentFilter.delete(val);
+               window.scrayNoteKeywordFilter.delete(val);
                scrayRefreshFilters();
            });
            container.appendChild(pp);
        });
-       if (window.scrayNoteParentFilter.size > 1) {
+       if (window.scrayNoteKeywordFilter.size > 1) {
            const px = document.createElement("span");
-           px.className = "floating-tag-pill floating-tag-noteparent-mode";
-           px.textContent = window.scrayNoteParentIntersect ? "\u2229 all parents" : "\u222A any parent";
-           px.title = "Tap to switch between bookmarks with ANY picked parent note and ALL of them";
+           px.className = "floating-tag-pill floating-tag-notekeyword-mode";
+           px.textContent = window.scrayNoteKeywordIntersect ? "\u2229 all keywords" : "\u222A any keyword";
+           px.title = "Tap to switch between bookmarks with ANY picked keyword and ALL of them";
            px.addEventListener("click", () => {
-               window.scrayNoteParentIntersect = !window.scrayNoteParentIntersect;
+               window.scrayNoteKeywordIntersect = !window.scrayNoteKeywordIntersect;
                scrayRefreshFilters();
            });
            container.appendChild(px);
@@ -2795,13 +2823,13 @@ includeAll = Array.from(window.commonSelectedTags); // unified selection
 // term. Intersect keeps only videos carrying EVERY one. The switch spans all
 // four classes at once, because "show me the overlap" is one question and not
 // four.
-// With parent notes picked, the mapped-note picks stop being a class of their
-// own and narrow the parent test instead, on the same bookmark - see
-// scrayVideoPassesNoteParents, applied just below the include pass.
-const parentsOn = !!(window.scrayNoteParentFilter && window.scrayNoteParentFilter.size);
+// With keywords picked, the mapped-note picks stop being a class of their
+// own and narrow the keyword test instead, on the same bookmark - see
+// scrayVideoPassesNoteKeywords, applied just below the include pass.
+const keywordsOn = !!(window.scrayNoteKeywordFilter && window.scrayNoteKeywordFilter.size);
 const facetPicks = window.SCRAY_FACET_CLASSES
    .map(kind => [kind, Array.from((window.scrayFacetFilters || {})[kind] || [])])
-   .filter(pair => pair[1].length > 0 && !(parentsOn && pair[0] === 'note'));
+   .filter(pair => pair[1].length > 0 && !(keywordsOn && pair[0] === 'note'));
 
 if (includeAll.length > 0 || facetPicks.length > 0) {
    const intersect = !!window.scrayTagIntersect;
@@ -2843,9 +2871,9 @@ if (includeAll.length > 0 || facetPicks.length > 0) {
    });
 }
 
-// Parent notes, always AND with the rest: they are the way into bookmarks,
+// Keywords, always AND with the rest: they are the way into bookmarks,
 // not one more term to be OR-ed with a studio.
-if (parentsOn) videos = videos.filter(scrayVideoPassesNoteParents);
+if (keywordsOn) videos = videos.filter(scrayVideoPassesNoteKeywords);
 
 // Filter by exclude tags, if passed
 if (Array.isArray(excludeTags) && excludeTags.length > 0) {
@@ -3174,8 +3202,8 @@ if (window.scrayFacetFilters) {
   });
 }
 window.scrayTagIntersect = false;
-if (window.scrayNoteParentFilter) window.scrayNoteParentFilter.clear();
-window.scrayNoteParentIntersect = false;
+if (window.scrayNoteKeywordFilter) window.scrayNoteKeywordFilter.clear();
+window.scrayNoteKeywordIntersect = false;
 
 // Reset all filters – clear level-based include dropdowns
 $('#tagFilterLevel1Select').val(null).trigger('change');

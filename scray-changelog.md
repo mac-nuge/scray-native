@@ -4,6 +4,82 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 13.64 / picker 13.153 / native 13.151 — test: keywords, and parent notes
+<!-- 2026-09-15T21:58Z -->
+
+**browse** — `staging-browse - 13.64`: `api.php`, `manage-data.html`, `VERSION.txt`
+**picker** — `staging - 13.153`: `scray-config.js`, `randomiser.js`, `scray-views.js`, `file-operations.js`, `style.css`, `VERSION`
+**native** — `stg-native - 13.151`: `assets/web/scray-config.js`, `assets/web/randomiser.js`, `assets/web/scray-views.js`, `assets/web/file-operations.js`, `assets/web/style.css`, `assets/web/VERSION`
+
+Mac asked for three things:
+1. What 13.62–13.152 called "parent notes" (a note's words) are now **keywords**, everywhere.
+2. In the NOTES filter, mapped notes are styled like the keyword chips.
+3. A new manage-data section, **Parent notes**. A keyword ticked Parent becomes a parent note, and any other keyword can have one parent note. Parent notes are bold in the apps and behave like any other keyword, except that picking one also brings in its child keywords.
+
+His aim: keywords he always wants linked to another keyword shouldn't need that other keyword added by hand every time.
+
+Mac's choices:
+- **Children count as the parent.** Picking "sex" matches bookmarks with sex or any of its children, under one pill.
+- **Links aren't written into notes.** Picking "cowgirl" saves "cowgirl", so changing the link later updates old bookmarks too.
+- **Full rename.** The stored key moves as well, so "parent" only ever means the new parent notes.
+
+**1. Keywords (the rename).**
+- **Storage:** a note's list is now stored under `keywords` (label "Keywords"). `ensureNameMaps` moves any note's `parent` value there, notes only; a studio's Parent is untouched. It's the same LIKE-filtered move as 13.34's class→parent.
+- **api.php:** functions and fields are renamed: `scrayNoteAutoKeywords`, `scrayNoteKeywordStopwords`, `scrayNoteKeywordsNone`, `scrayNoteKeywordsSame`, `scrayMigrateNoteKeywordsAuto` (still flagged `note_parents_auto_v1`, so it doesn't run again), and `note_keyword_stopwords` / `note_keywords_none` in the dictionary.
+- **manage-data:** the notes sheet column, tiles, placeholder and hint are renamed. A CSV from before this bump with a `parent` column on notes still imports, as keywords.
+- **Apps:** `scrayNoteKeywords`, `scrayNoteAutoKeywords`, `scrayNoteKeywordFilter` / `scrayNoteKeywordIntersect`, `scrayNoteKeywordsPass`, `scrayVideoPassesNoteKeywords`, `scrayNoteKeywordCounts`, CSS `floating-tag-notekeyword` / `scray-cloud-note-keywords`, and all the text ("Search keywords…", "Keywords: any ∪", "1 keyword, 0 selected", "∪ any keyword"). Comments too. They also read the old field names and an old cached `parent` value, so a cached dictionary still works until it refreshes.
+
+**2. Mapped notes in the NOTES filter** use the keyword chips' size, border, radius and colours: violet when picked, red when excluded.
+
+**3. Parent notes.**
+
+*Storage (api.php).* A new name_maps kind, `keyword`, with one row per keyword and attributes `is_parent` (a check) and `parent` (one keyword).
+- **`name_map_list?kind=keyword`** lists every keyword with how many bookmarks carry it (`scrayKeywordUses`). Notes come from both bookmark tables and are read the way the apps read them: by either spelling, with a hand-set keyword list replacing the words, `(none)` giving nothing, and blacklisted notes left out. A parent-note row whose keyword no longer appears on any note shows as orphaned.
+- **Save rules** are applied to the whole set after each save, so the order rows arrive in doesn't matter: a parent note can't have a parent, and a keyword's parent must still be ticked Parent. Untick one and its children lose it; a row left with nothing is deleted. Keyword rows are lowercase and never mapped.
+- **`name_map_get`** carries the `keyword` kind.
+
+*manage-data: PARENT NOTES tab*, straight after BOOKMARK NOTES.
+- **Columns:** Parent (tick), Keyword (bold when a parent, with "2 children"), Parent note (a dropdown of the current parent notes; disabled on a parent note), Bookmarks.
+- **Keeping it consistent while you edit:** ticking a keyword clears its own parent; unticking one clears its children's links. The sheet redraws with focus back on the tick or dropdown.
+- **Tiles:** KEYWORDS / PARENT NOTES / CHILDREN / ON THEIR OWN / ORPHANED / UNSAVED. The view buttons read CHILDREN / PARENTS on this sheet. No chip rows.
+
+*Apps.*
+- **The tree:** `scrayKeywordTree()` builds parent notes, child→parent and parent→children from the dictionary's keyword rows. It's read defensively: a parent's own parent, or a link to a keyword that isn't a parent, is ignored. It exposes `scrayKeywordIsParent`, `scrayKeywordParentOf` and `scrayKeywordChildren`.
+- **Expanded keywords:** `scrayNoteKeywordsExpanded(note)` is a note's own keywords plus the parent notes they count as. Filtering and counting use it: the keyword test for videos and for Bookmarks view (so "sex" finds cowgirl bookmarks, and all-mode "sex + pov" finds "cowgirl pov"), the parent's count (which includes its children), and the NOTES search. The rail and the saved note still use the note's own keywords.
+- **NOTES filter:**
+  - Parent notes are bold, with their children straight after them.
+  - Searching keeps a child visible when its parent is picked or matches the search.
+  - A picked parent's pill is bold.
+- **Bookmark modal:**
+  - Parent notes are bold.
+  - A picked parent note's children come straight after the picks.
+  - A search that finds a parent note also lists its children after it.
+  - Picking a child saves just the child.
+
+**Tested.**
+- **api.php:** `php -l` is clean. Under PHP's built-in server with a SQLite fixture:
+  - The note `parent`→`keywords` move leaves studios untouched.
+  - The keyword list and counts, with a blacklisted note excluded and a hand-set list used.
+  - A save drops a parent note's own parent and a link to a non-parent. Unticking the parent clears and deletes its children's rows.
+  - `name_map_get` carries the keyword kind.
+- **manage-data** in headless Chromium, 21 checks:
+  - **Notes sheet:** migrated lists show as automatic or set; there's a KEYWORDS column and tiles; the tab order is right; a save stores `keywords`.
+  - **Parent notes sheet:** headers; the keyword list; ticking; the dropdown is disabled for parents and lists only parents; children and child counts; promoting a child clears its link; unticking removes it from options and clears children; PARENTS and CHILDREN views.
+  - **Save and reload:** a save round-trips, the page reloads clean with no chip rows, and switching back to notes works.
+- **Native's real index.html** in headless Chromium, with a cached dictionary holding parent notes, 17 checks:
+  - The tree, including a link to a non-parent being ignored, and expanded keywords.
+  - Parent bold, its count including its children, children following it, and the "Keywords" row label.
+  - Mapped notes computed with the same radius, size and colour as the keyword chips.
+  - Picking the parent: videos include its children, the notes under it show, the pill is bold, all-mode works, and Bookmarks view lists per bookmark.
+  - A search for the parent brings its children.
+  - Bookmark modal: parent first and bold, children after a pick and after a search hit, and a child saved on its own.
+- **Regression:** the stage 2, 3 and 4 suites and the loose-search suite still pass with the renamed names (19 + 17 + 20 + 4). `node --check` passes on every JS file, and picker's changed functions match native's apart from comments.
+
+**Worth knowing.**
+- **Deploy browse first.** Until it's live, the apps find no keyword rows, so there are no parent notes, and hand-set note keywords only come through the old-name fallback.
+- **One level only,** by design.
+- **Keyword rows:** a keyword that's neither a parent nor a child has no row. It appears on the sheet only because a note uses it.
+
 ### picker 13.152 / native 13.150 — test: bookmark modal split into swipeable Add and Bookmarks pages
 <!-- 2026-09-15T20:40Z -->
 

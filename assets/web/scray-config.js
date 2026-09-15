@@ -424,13 +424,13 @@ window.scrayNameMap = (function () {
   // will not compile is dropped here rather than thrown on every bookmark.
   let notePatterns = [];
   let noteRegexes  = [];
-  // Automatic parent notes (browse 13.62). The stopword list comes from
+  // Automatic keywords (browse 13.62). The stopword list comes from
   // api.php with the dictionary; this default only covers a cached copy from
-  // before 13.62, and must match scrayNoteParentStopwords() there.
-  const DEFAULT_PARENT_STOPWORDS = ["a", "an", "and", "the", "of", "on", "in", "into", "onto", "with",
+  // before 13.62, and must match scrayNoteKeywordStopwords() there.
+  const DEFAULT_KEYWORD_STOPWORDS = ["a", "an", "and", "the", "of", "on", "in", "into", "onto", "with",
     "to", "for", "at", "by", "from", "or", "as", "is", "it", "up", "then", "while", "her", "his", "their"];
-  let parentStopwords = new Set(DEFAULT_PARENT_STOPWORDS);
-  let parentNone = "(none)";
+  let keywordStopwords = new Set(DEFAULT_KEYWORD_STOPWORDS);
+  let keywordsNone = "(none)";
   let loadedAt = 0;
   let inFlight = null;
 
@@ -460,7 +460,9 @@ window.scrayNameMap = (function () {
     dict  = { studio: (p.maps      && p.maps.studio)      || {}, note: (p.maps      && p.maps.note)      || {},
               censor: (p.maps      && p.maps.censor)      || {} };
     attrs = { studio: (p.attrs     && p.attrs.studio)     || {}, note: (p.attrs     && p.attrs.note)     || {},
-              censor: (p.attrs     && p.attrs.censor)     || {} };
+              censor: (p.attrs     && p.attrs.censor)     || {},
+              // Parent notes (browse 13.64): one row per keyword, see scrayKeywordTree.
+              keyword: (p.attrs    && p.attrs.keyword)    || {} };
     defs  = { studio: (p.attr_defs && p.attr_defs.studio) || [], note: (p.attr_defs && p.attr_defs.note) || [],
               censor: (p.attr_defs && p.attr_defs.censor) || [] };
     notePatterns = Array.isArray(p.note_patterns) ? p.note_patterns.filter(s => typeof s === "string") : [];
@@ -472,12 +474,18 @@ window.scrayNameMap = (function () {
     // Answers are cached per note (see matchesNotePattern) and belong to the
     // pattern list they were worked out against.
     if (window.scrayNoteBlacklistCache) window.scrayNoteBlacklistCache.clear();
-    parentStopwords = new Set(Array.isArray(p.note_parent_stopwords)
-      ? p.note_parent_stopwords.map(w => String(w).toLowerCase()) : DEFAULT_PARENT_STOPWORDS);
-    if (typeof p.note_parent_none === "string" && p.note_parent_none) parentNone = p.note_parent_none;
-    // Parents are worked out from the mappings and the overrides, both of
+    // Before browse 13.64 these were note_parent_stopwords / note_parent_none.
+    const stopSrc = p.note_keyword_stopwords || p.note_parent_stopwords;
+    keywordStopwords = new Set(Array.isArray(stopSrc)
+      ? stopSrc.map(w => String(w).toLowerCase()) : DEFAULT_KEYWORD_STOPWORDS);
+    const noneSrc = p.note_keywords_none || p.note_parent_none;
+    if (typeof noneSrc === "string" && noneSrc) keywordsNone = noneSrc;
+    // Parent notes are read from the 'keyword' rows, which may just have changed.
+    window.scrayKeywordTreeCache = null;
+    if (window.scrayNoteKeywordsExpandedCache) window.scrayNoteKeywordsExpandedCache.clear();
+    // Keywords are worked out from the mappings and the overrides, both of
     // which may just have changed.
-    if (window.scrayNoteParentsCache) window.scrayNoteParentsCache.clear();
+    if (window.scrayNoteKeywordsCache) window.scrayNoteKeywordsCache.clear();
     reindex();
   }
 
@@ -535,7 +543,7 @@ window.scrayNameMap = (function () {
           localStorage.setItem(CACHE_KEY, JSON.stringify(
             { at: loadedAt, rev: json.rev, maps: dict, attrs: attrs, attr_defs: defs,
               note_patterns: notePatterns,
-              note_parent_stopwords: [...parentStopwords], note_parent_none: parentNone }));
+              note_keyword_stopwords: [...keywordStopwords], note_keywords_none: keywordsNone }));
         } catch {}
       } catch (err) {
         // Keep whatever is cached. A missing dictionary means raw names, which
@@ -558,8 +566,8 @@ window.scrayNameMap = (function () {
 
   return { lookup, refresh, key, attrsFor, attrDefs, matchesNotePattern,
            notePatterns: () => notePatterns.slice(),
-           parentStopwords: () => parentStopwords,
-           parentNone: () => parentNone,
+           keywordStopwords: () => keywordStopwords,
+           keywordsNone: () => keywordsNone,
            dump: () => dict, dumpAttrs: () => attrs };
 })();
 
@@ -609,23 +617,23 @@ window.scrayNoteBlacklisted = function (raw) {
   return hit;
 };
 
-/* ---- parent notes (browse 13.62 / picker 13.147 / stg-native 13.145) -----
+/* ---- keywords (browse 13.62 / picker 13.147 / stg-native 13.145) -----
    Notes work like tags now: "neck kiss" files under both "neck" and "kiss".
 
-   By default a note's parents are the words of its display name (mapped, or
+   By default a note's keywords are the words of its display name (mapped, or
    raw where unmapped): lowercase, a hyphenated or apostrophised word kept as
-   one, one-letter words and api.php's stopwords dropped. A parent list filed
-   by hand in manage-data REPLACES that, and "(none)" there means no parents.
+   one, one-letter words and api.php's stopwords dropped. A keyword list filed
+   by hand in manage-data REPLACES that, and "(none)" there means no keywords.
 
-   The tokeniser must match scrayNoteAutoParents() in api.php and
-   autoParents() in manage-data.html.
+   The tokeniser must match scrayNoteAutoKeywords() in api.php and
+   autoKeywords() in manage-data.html.
 --------------------------------------------------------------------------- */
-window.scrayNoteParentsCache = window.scrayNoteParentsCache || new Map();
+window.scrayNoteKeywordsCache = window.scrayNoteKeywordsCache || new Map();
 
 /** "Neck-kiss and POV" -> ["neck-kiss", "pov"]. */
-window.scrayNoteAutoParents = function (name) {
+window.scrayNoteAutoKeywords = function (name) {
   const nm = window.scrayNameMap;
-  const stop = nm && nm.parentStopwords ? nm.parentStopwords() : new Set();
+  const stop = nm && nm.keywordStopwords ? nm.keywordStopwords() : new Set();
   const words = String(name == null ? "" : name).normalize("NFC").toLowerCase()
     .match(/[\p{L}\p{N}]+(?:['\u2019-][\p{L}\p{N}]+)*/gu) || [];
   const out = [];
@@ -634,30 +642,93 @@ window.scrayNoteAutoParents = function (name) {
 };
 
 /**
- * A note's parent notes, by either spelling: the hand-filed list where there
+ * A note's keywords, by either spelling: the hand-filed list where there
  * is one, otherwise the automatic words. Always an array (possibly empty).
  * Cached per note; adopt() clears it with every dictionary change.
  */
-window.scrayNoteParents = function (raw) {
+window.scrayNoteKeywords = function (raw) {
   const note = String(raw == null ? "" : raw).trim();
   if (!note) return [];
-  const cache = window.scrayNoteParentsCache;
+  const cache = window.scrayNoteKeywordsCache;
   if (cache.has(note)) return cache.get(note);
   const nm = window.scrayNameMap;
   const mapped = window.scrayMapName ? window.scrayMapName("note", note) : note.toLowerCase();
-  let set = nm ? (nm.attrsFor("note", note).parent || "") : "";
-  if (!set && nm && mapped && mapped !== note) set = nm.attrsFor("note", mapped).parent || "";
+  // .parent is where a dictionary cached before browse 13.64 still has them.
+  const listOf = (a) => (a && (a.keywords || a.parent)) || "";
+  let set = nm ? listOf(nm.attrsFor("note", note)) : "";
+  if (!set && nm && mapped && mapped !== note) set = listOf(nm.attrsFor("note", mapped));
   let out;
   if (String(set).trim()) {
-    const none = (nm && nm.parentNone ? nm.parentNone() : "(none)").toLowerCase();
+    const none = (nm && nm.keywordsNone ? nm.keywordsNone() : "(none)").toLowerCase();
     out = [];
     String(set).split("|").forEach(p => {
       const t = p.trim().toLowerCase();
       if (t && t !== none && !out.includes(t)) out.push(t);
     });
   } else {
-    out = window.scrayNoteAutoParents(mapped);
+    out = window.scrayNoteAutoKeywords(mapped);
   }
+  cache.set(note, out);
+  return out;
+};
+
+/* ---- parent notes (browse 13.64 / picker 13.153 / stg-native 13.151) ----
+   A keyword ticked Parent in manage-data's PARENT NOTES sheet is a parent
+   note. Any other keyword there may name ONE parent note, and then counts as
+   that parent wherever the apps filter or count: "cowgirl" under "sex" is found
+   by picking "sex", without "sex" ever being typed into a note. The link is
+   never written into a note, so changing it moves every old bookmark with it.
+
+   One level only. api.php and manage-data enforce that; this reads it
+   defensively anyway (a parent's own parent, or a link to a keyword that is
+   not a parent, is ignored).
+--------------------------------------------------------------------------- */
+window.scrayKeywordTreeCache = null;
+function scrayKeywordTree() {
+  if (window.scrayKeywordTreeCache) return window.scrayKeywordTreeCache;
+  const nm = window.scrayNameMap;
+  const table = (nm && typeof nm.dumpAttrs === "function" && nm.dumpAttrs().keyword) || {};
+  const parents = new Set();
+  const parentOf = new Map();
+  const children = new Map();
+  Object.keys(table).forEach(k => { if (table[k] && table[k].is_parent) parents.add(k.toLowerCase()); });
+  Object.keys(table).forEach(k => {
+    const kw = k.toLowerCase();
+    const par = String((table[k] && table[k].parent) || "").trim().toLowerCase();
+    if (!par || par === kw || parents.has(kw) || !parents.has(par)) return;
+    parentOf.set(kw, par);
+    if (!children.has(par)) children.set(par, []);
+    children.get(par).push(kw);
+  });
+  children.forEach(list => list.sort());
+  return (window.scrayKeywordTreeCache = { parents, parentOf, children });
+}
+window.scrayKeywordTree = scrayKeywordTree;
+const scrayKwKey = (k) => String(k == null ? "" : k).trim().toLowerCase();
+/** Is this keyword a parent note? */
+window.scrayKeywordIsParent = (k) => scrayKeywordTree().parents.has(scrayKwKey(k));
+/** The parent note a keyword counts as, or null. */
+window.scrayKeywordParentOf = (k) => scrayKeywordTree().parentOf.get(scrayKwKey(k)) || null;
+/** A parent note's child keywords, A-Z (empty for anything else). */
+window.scrayKeywordChildren = (k) => (scrayKeywordTree().children.get(scrayKwKey(k)) || []).slice();
+
+window.scrayNoteKeywordsExpandedCache = window.scrayNoteKeywordsExpandedCache || new Map();
+/**
+ * A note's keywords PLUS the parent notes they count as - what filtering and
+ * counting use. scrayNoteKeywords stays the note's own words, which is what
+ * the rail offers and what a saved note is built from.
+ */
+window.scrayNoteKeywordsExpanded = function (raw) {
+  const note = String(raw == null ? "" : raw).trim();
+  if (!note) return [];
+  const cache = window.scrayNoteKeywordsExpandedCache;
+  if (cache.has(note)) return cache.get(note);
+  const own = window.scrayNoteKeywords(note);
+  const out = own.slice();
+  own.forEach(k => {
+    const par = window.scrayKeywordParentOf(k);
+    if (par && !out.includes(par)) out.push(par);
+  });
   cache.set(note, out);
   return out;
 };

@@ -2997,7 +2997,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     }
 
     // Notes as tags (picker 13.151 / stg-native 13.149). The quick-add rail is
-    // now a search over PARENT notes: you pick the parents a bookmark belongs
+    // now a search over KEYWORDS: you pick the keywords a bookmark belongs
     // under, and its note is built from them. allNotes is still the full note
     // vocabulary, for the existing-bookmark row editor's autocomplete.
     let allNotes = [];
@@ -3008,28 +3008,28 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             console.warn('Could not load top bookmark notes:', err);
         }
     }
-    // parent -> how many bookmarks carry it. Counted over the local catalogue
-    // (randomiser.js), then topped up with the parents of every note the server
-    // knows, so a parent that only lives in notes not held locally is still
+    // keyword -> how many bookmarks carry it. Counted over the local catalogue
+    // (randomiser.js), then topped up with the keywords of every note the server
+    // knows, so a keyword that only lives in notes not held locally is still
     // offered - at the bottom, with a count of 0.
-    const parentPop = new Map();
+    const kwPop = new Map();
     try {
-        if (typeof window.scrayNoteParentCounts === 'function') {
-            (await window.scrayNoteParentCounts(true)).forEach((n, pn) => parentPop.set(pn, n));
+        if (typeof window.scrayNoteKeywordCounts === 'function') {
+            (await window.scrayNoteKeywordCounts(true)).forEach((n, pn) => kwPop.set(pn, n));
         }
     } catch (err) {
-        console.warn('Could not count parent notes:', err);
+        console.warn('Could not count keywords:', err);
     }
-    if (typeof window.scrayNoteParents === 'function') {
-        allNotes.forEach(n => window.scrayNoteParents(n).forEach(pn => {
-            if (!parentPop.has(pn)) parentPop.set(pn, 0);
+    if (typeof window.scrayNoteKeywords === 'function') {
+        allNotes.forEach(n => window.scrayNoteKeywords(n).forEach(pn => {
+            if (!kwPop.has(pn)) kwPop.set(pn, 0);
         }));
     }
-    const popOf = (pn) => parentPop.get(pn) || 0;
-    const parentsByPop = [...parentPop.keys()]
+    const popOf = (pn) => kwPop.get(pn) || 0;
+    const keywordsByPop = [...kwPop.keys()]
         .sort((a, b) => (popOf(b) - popOf(a)) || a.localeCompare(b));
-    // ⚙️ How many parent notes the rail offers before anything is typed.
-    const TOP_PARENTS = 100;
+    // ⚙️ How many keywords the rail offers before anything is typed.
+    const TOP_KEYWORDS = 100;
 
     if (!modal.isConnected) return;
 
@@ -3054,7 +3054,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     let page = 0;
     let renderSeq = 0;          // which renderContent a deferred callback belongs to
     let pageSeq = 0;            // which page change a deferred callback belongs to
-    let picked = [];            // parent notes chosen for the new bookmark, in tap order
+    let picked = [];            // keywords chosen for the new bookmark, in tap order
     let newNote = '';           // survives re-renders
     let committed = false;      // guards against a double-fire closing twice
 
@@ -3338,7 +3338,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         const previewEl = modal.querySelector('#bmNotePreview');
         const clearEl = modal.querySelector('#newBmClear');
 
-        /** The note the picked parents make: most popular first, ties in tap order. */
+        /** The note the picked keywords make: most popular first, ties in tap order. */
         const builtNote = () => picked
             .map((pn, i) => [pn, i])
             .sort((a, b) => (popOf(b[0]) - popOf(a[0])) || (a[1] - b[1]))
@@ -3349,12 +3349,21 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         let resultItems = [];
 
         /**
-         * The rail. Nothing typed: the picked parents, then the top parents by
+         * The rail. Nothing typed: the picked keywords, then the top keywords by
          * popularity. Typing: a "+ word" pill for each typed word that is not a
-         * parent yet, the picked parents, then EVERY parent containing any typed
+         * keyword yet, the picked keywords, then EVERY keyword containing any typed
          * word - loose, like the NOTES filter - exact and prefix matches first,
          * popularity within that.
          */
+        /** Child keywords of any parent notes in a list, in order, without repeats. */
+        const childrenOf = (list) => {
+            if (typeof window.scrayKeywordChildren !== 'function') return [];
+            const out = [];
+            list.forEach(k => window.scrayKeywordChildren(k).forEach(c => { if (!out.includes(c)) out.push(c); }));
+            return out;
+        };
+        const isParentNote = (k) => typeof window.scrayKeywordIsParent === 'function' && window.scrayKeywordIsParent(k);
+
         const renderResults = () => {
             if (!railEl) return;
             const q = (newNoteEl ? newNoteEl.value : newNote).trim().toLowerCase();
@@ -3364,24 +3373,36 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             if (terms.length) {
                 const fresh = [];
                 terms.forEach(t => {
-                    // Tokenised the way a note's words become parents, so what is
+                    // Tokenised the way a note's words become keywords, so what is
                     // offered is exactly what the saved note will file under.
-                    const words = typeof window.scrayNoteAutoParents === 'function'
-                        ? window.scrayNoteAutoParents(t) : [t];
+                    const words = typeof window.scrayNoteAutoKeywords === 'function'
+                        ? window.scrayNoteAutoKeywords(t) : [t];
                     words.forEach(w => {
-                        if (!parentPop.has(w) && !pickedSet.has(w) && !fresh.includes(w)) fresh.push(w);
+                        if (!kwPop.has(w) && !pickedSet.has(w) && !fresh.includes(w)) fresh.push(w);
                     });
                 });
                 fresh.forEach(w => items.push({ word: w, fresh: true }));
                 picked.forEach(pn => items.push({ word: pn, on: true }));
                 const rank = (pn) => terms.includes(pn) ? 0 : terms.some(t => pn.startsWith(t)) ? 1 : 2;
-                parentsByPop
-                    .filter(pn => !pickedSet.has(pn) && terms.some(t => pn.includes(t)))
+                // A picked parent note's children come next (browse 13.64)...
+                childrenOf(picked).forEach(pn => { if (!pickedSet.has(pn)) items.push({ word: pn }); });
+                const shown = new Set(items.map(it => it.word));
+                keywordsByPop
+                    .filter(pn => !pickedSet.has(pn) && !shown.has(pn) && terms.some(t => pn.includes(t)))
                     .sort((a, b) => rank(a) - rank(b))
-                    .forEach(pn => items.push({ word: pn }));
+                    .forEach(pn => {
+                        if (shown.has(pn)) return;
+                        items.push({ word: pn }); shown.add(pn);
+                        // ...and so do the children of a parent note the search found.
+                        childrenOf([pn]).forEach(c => {
+                            if (!pickedSet.has(c) && !shown.has(c)) { items.push({ word: c }); shown.add(c); }
+                        });
+                    });
             } else {
                 picked.forEach(pn => items.push({ word: pn, on: true }));
-                parentsByPop.filter(pn => !pickedSet.has(pn)).slice(0, TOP_PARENTS)
+                const shown = new Set(items.map(it => it.word));
+                childrenOf(picked).forEach(pn => { if (!shown.has(pn)) { items.push({ word: pn }); shown.add(pn); } });
+                keywordsByPop.filter(pn => !shown.has(pn)).slice(0, TOP_KEYWORDS)
                     .forEach(pn => items.push({ word: pn }));
             }
             resultItems = items;
@@ -3392,8 +3413,11 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                     const look = it.on ? 'background: #007bff; color: #fff; border: 1px solid #007bff;'
                         : it.fresh ? 'background: #fff; color: #1e7e34; border: 1px dashed #28a745;'
                         : '';
-                    const title = it.on ? 'Picked - tap to remove' : it.fresh ? 'New parent note - tap to add it' : 'Tap to add';
-                    return `<button type="button" class="quick-note-btn modal-btn${it.on || it.fresh ? '' : ' modal-btn-secondary'}" data-ri="${i}" title="${title}" style="${PILL}${look}">${it.fresh ? '+ ' : ''}${esc(it.word)}</button>`;
+                    const parentNote = !it.fresh && isParentNote(it.word);
+                    const title = it.on ? 'Picked - tap to remove' : it.fresh ? 'New keyword - tap to add it'
+                        : parentNote ? 'Parent note - tap to add' : 'Tap to add';
+                    // Parent notes in bold (browse 13.64).
+                    return `<button type="button" class="quick-note-btn modal-btn${it.on || it.fresh ? '' : ' modal-btn-secondary'}" data-ri="${i}" title="${title}" style="${PILL}${look}${parentNote ? ' font-weight: 700;' : ''}">${it.fresh ? '+ ' : ''}${esc(it.word)}</button>`;
                 }).join('')
                 : '<span style="font-size: 0.72rem; color: #999;">No notes yet - type one to add it.</span>';
 
@@ -3770,11 +3794,11 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                 const typing = pressedWhileTyping || typingNewNote();
                 pressedWhileTyping = false;
                 if (typing && newNoteEl) {
-                    // Its parent notes join the picks, the way its note used to
+                    // Its keywords join the picks, the way its note used to
                     // join the typed text.
                     const text = working[idx] && !working[idx].deleted ? (working[idx].note || '').trim() : '';
-                    if (text && typeof window.scrayNoteParents === 'function') {
-                        window.scrayNoteParents(text).forEach(pn => { if (!picked.includes(pn)) picked.push(pn); });
+                    if (text && typeof window.scrayNoteKeywords === 'function') {
+                        window.scrayNoteKeywords(text).forEach(pn => { if (!picked.includes(pn)) picked.push(pn); });
                         renderResults();
                     }
                     focusNoteField();

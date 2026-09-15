@@ -5660,31 +5660,52 @@ BOOKMARK NOTE LABELS UNDER MARKERS
    in FLS, the bar's 90deg rotation for free. */
 .bookmark-marker-label {
 position: absolute;
-top: calc(100% + 3px);
-left: 50%;
+/* ⚙️ Gap from the bar's bottom edge. The anchor's top IS that edge, so 4px
+   puts the text where it sat as a child of the marker (1px past the dot). */
+top: 4px;
+left: 50%;             /* overwritten per label with the marker's own left% */
 transform: translateX(-50%);
 max-width: 72px;
 overflow: hidden;
 text-overflow: ellipsis;
 white-space: nowrap;
 text-align: center;
-font-size: calc(0.7rem - 3px);
+/* ⚙️ One step down from 0.7rem - 3px (13.143 / 13.142). */
+font-size: calc(0.7rem - 4px);
 line-height: 1;
 color: #fff;
 text-shadow: 1px 1px 2px rgba(0,0,0,0.9);
 pointer-events: none;
-z-index: 59;   /* under the marker dot at 60, above the endcaps at 55 */
+opacity: 1;
 }
 
-/* The marker's :hover rule scales the whole box, label included. 1/1.4
-   cancels it so the text stays put while the dot grows. */
-.progress-bookmark-marker:hover .bookmark-marker-label {
-transform: translateX(-50%) scale(0.714);
+/* The strip the labels hang from (13.143 / 13.142): a full-width, zero-height
+   flex item directly below .permanent-progress-bar, the mirror image of
+   .permanent-progress-ts-anchor above it. Its top is the bar's bottom edge
+   and its width is the bar's width, so a label at the marker's left% sits
+   under the dot in every player, FLS's rotation included. Outside the bar on
+   purpose: the bar runs at --scray-progress-bar-opacity (30%), and the labels
+   were dimmed with it when they were the markers' children. */
+.permanent-progress-label-anchor {
+position: relative;
+align-self: stretch;
+width: 100%;
+height: 0;
+margin-top: -4px;      /* cancels #permanentProgressBar's gap: no layout change */
+pointer-events: none;
+z-index: 59;           /* above the bar (50), so a label that touches its dot reads on top */
+}
+@media (max-width: 768px) {
+.permanent-progress-label-anchor { margin-top: -3px; }
 }
 
-/* No gap to print into in the mini players. */
-/* No room to print into in the mini players, and too cramped to read in the
-   docked MPB player. */
+/* ⚙️ FLS: lifted 4px (13.143 / 13.142). The bar sits a few px off the edge of
+   the rotated player there, and the labels were running off it. Right up
+   against the bar now - a label may just touch the bottom of its dot. */
+body.manual-rotate-landscape .bookmark-marker-label {
+top: 0;
+}
+
 body.landscape-mini .bookmark-marker-label,
 body.portrait-mini .bookmark-marker-label,
 body.portrait-inline .bookmark-marker-label {

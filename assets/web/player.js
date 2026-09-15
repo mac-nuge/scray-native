@@ -5779,7 +5779,10 @@ permanentProgress.innerHTML = `
 <div class="permanent-progress-bar">
 <div class="permanent-progress-filled"></div>
 </div>
+<div class="permanent-progress-label-anchor"></div>
 `;
+// The bookmark note labels get the same treatment, BELOW the bar (13.143 /
+// 13.142): as children of their markers they were dimmed to the bar's 30%.
 
 // Insert after video wrapper, before controls
 const videoWrapper = plyrContainer.querySelector('.plyr__video-wrapper');
@@ -6312,6 +6315,9 @@ if (!progressBar) return;
 // are no longer on this bar.
 hideBookmarkRail();
 progressBar.querySelectorAll('.progress-bookmark-marker').forEach(m => m.remove());
+// Their note labels live in the anchor under the bar now, not in the markers,
+// so they have to be cleared separately or they would outlive the video.
+document.querySelectorAll('.permanent-progress-label-anchor .bookmark-marker-label').forEach(l => l.remove());
 
 const video = window.currentPlayingVideo;
 if (!video || !Array.isArray(video.bookmarks) || video.bookmarks.length === 0) {
@@ -6386,8 +6392,12 @@ groups.forEach(g => g.forEach(e => { e.cluster = g; }));
 // ⚙️ Note name printed under each marker, in the gap below the bar.
 // Every marker gets one, clustered included: overlapping labels are still
 // more use than missing ones, and the rail is there to read a dense cluster
-// properly. A child of the marker, so it inherits the marker's left% and, in
-// FLS, the bar's rotation - no extra maths.
+// properly. Placed in .permanent-progress-label-anchor, the zero-height strip
+// laid out directly under the bar, at the marker's own left% - the strip is
+// exactly as wide as the bar, so the same percentage lands under the dot, and
+// it still turns with the bar in FLS. It used to be a child of the marker,
+// which put it inside the bar and so drew it at the bar's 30% opacity.
+const labelAnchor = document.querySelector('.permanent-progress-label-anchor');
 entries.forEach(entry => {
     const note = (entry.bm.note || '').trim();
     if (!note) return;
@@ -6396,7 +6406,12 @@ entries.forEach(entry => {
     // Display only: the marker prints the mapped name, the bookmark row keeps
     // the raw one.
     label.textContent = window.scrayMapName ? window.scrayMapName('note', note) : note;
-    entry.marker.appendChild(label);
+    if (labelAnchor) {
+        label.style.left = entry.marker.style.left;
+        labelAnchor.appendChild(label);
+    } else {
+        entry.marker.appendChild(label);   // a bar built before this markup
+    }
 });
 
 const jumpTo = (entry) => {

@@ -4,6 +4,110 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.152 / native 13.150 — test: bookmark modal split into swipeable Add and Bookmarks pages
+<!-- 2026-09-15T20:40Z -->
+
+**picker** — `staging - 13.152`: `file-operations.js`, `VERSION`
+**native** — `stg-native - 13.150`: `assets/web/file-operations.js`, `assets/web/VERSION`
+
+Stage 4, the last of the notes-as-tags work, plus one tweak to stage 3 (13.151 / 13.149).
+
+**Top 100.** With nothing typed, the parent-note rail now shows the 100 most-used parent notes instead of 30 (⚙️ `TOP_PARENTS`).
+
+**Two pages** (Mac's spec):
+- new and existing bookmarks go in separate panels of the same modal, switched by swiping left and right with the feel of iPhone home-screen pages;
+- the Add bookmark panel is the modal as it was, minus the existing bookmarks;
+- the existing-bookmarks panel is the modal as it was, minus the quick notes;
+- Delete shows the existing bookmarks ready to delete, and the swap button next to the note field shows them ready to swap.
+
+**Layout.** Only when there's a playhead, i.e. a new bookmark to add. Opened from a list menu there's nothing to add, so the modal is the single bookmark list as before.
+- **Stays put:** the header, a two-tab strip ("Add bookmark" / "Bookmarks (n)", n = not marked for deleting) with a sliding underline, and the button row.
+- **Page 0:** the time, search field, preview and parent-note rail.
+- **Page 1:** a one-line hint, then the bookmark pills. The hint is grey by default ("Tap a time to jump to it, a note to edit it"), blue while swap is armed ("Tap a bookmark to move its note to 0:42") and red while delete is armed.
+- **Height:** each page has one scroller, so the old 60/40 split (`sizeQuickNotes`) is gone. The panel is now a fixed height rather than a maximum, because the pages are laid out against it. Otherwise it would change height as you swipe between a long list and a short one. `applyKeyboardInset` still sets it, so the keyboard still shrinks it.
+
+**The swipe.**
+- **Mechanism:** pointer events on `#bmPager`. The pager and both scrollers are `touch-action: pan-y`, so a vertical drag still scrolls the page's list and only a horizontal one reaches the pager. The first 8px of travel decides the axis for the whole gesture.
+- **Following the finger:** with no transition, it drags straight under your finger. Past either end it rubber-bands with iOS's resistance curve.
+- **On release:** it turns the page past ⚙️ a third of the width or on ⚙️ a flick over 0.35 px/ms, otherwise it springs back. A pause at the end doesn't count as a flick.
+- **Settle:** ⚙️ 320ms on an ease-out curve, shorter for a fast flick (down to 160ms), and the tab underline follows the drag. Tapping a tab turns the page too.
+- **Taps and selection:** the click that ends a swipe is swallowed, so a swipe that starts on a pill neither jumps nor opens the editor.
+- **Keyboard:** a swipe blurs the note field so the keyboard goes.
+- **Desktop mouse fix, found in testing:** a mouse drag over the rail started a text selection, and dragging a selection is a native drag-and-drop, which fires `pointercancel` and snapped the page back after about 25px. The pager now turns off text selection while a horizontal drag is under way, and cancels `dragstart`.
+
+**Buttons.**
+- **Delete:** arms delete and slides to Bookmarks. Tapping pills marks them, and a second Delete disarms.
+- **⇄:** arms swap and slides to Bookmarks. A tap on a bookmark moves its note to the playhead and saves, as before.
+- **Add note:** slides back to Add bookmark and focuses the field.
+- **Returning to Add bookmark:** swap and delete stand down, since they only mean something over the list. Pending deletions stay marked, and Save still applies them. After a swipe, the redraw that clears the mode waits until the list is off screen, so nothing jumps. From Add note it redraws first, because iOS only raises the keyboard for a focus made inside the tap.
+- **Page survives redraws:** marking, editing a note, or picking a parent all redraw on the page you're on.
+
+**Also fixed.** The rail's hand-drawn scroll thumb was measured before the panel had its height, so it could stay drawn with nothing to scroll. It showed as a grey sliver at the right edge of Add bookmark. It's re-measured once the panel is sized.
+
+**Tested** in headless Chromium at 390×844 on native's real index.html, with a stubbed playhead and save.
+- **Mouse, 20 checks:**
+  - Both pages lay out with scrollers taller than 100px, and the tabs and counts are right. A tab slides the page.
+  - A short slow drag springs back; a long drag turns the page; mid-drag past the end it resists and then springs back; a quick flick turns it.
+  - Delete slides to the list with the red hint. Marking a pill keeps you on the list, updates Save (1) and Bookmarks (2), and swiping back disarms delete but keeps the mark.
+  - Add note slides back and focuses the field, including while delete is armed.
+  - Swap slides to the list with the blue hint and saves the moved note (with the pending delete applied). Picking and saving on Add bookmark still works.
+  - A swipe that starts on a pill doesn't open its editor.
+- **Real touch events (CDP):** a horizontal touch swipe turns the page, and a vertical touch drag scrolls an 80-bookmark list without moving the page.
+- **No playhead:** the single list, with Delete working.
+- **Regression:** stage 3's 17 checks still pass. No page errors. `node --check` on both files. Picker's modal code is the same as native's apart from comments.
+
+**Worth checking on the phone.**
+- **Feel:** the flick threshold, the snap time and the rubber band are all ⚙️ constants at the top of the pager block.
+- **Existing note editor:** a tapped note still opens the old text field with the old dropdown of whole notes. Stage 4 didn't change it; say if it should become a parent-note picker too.
+
+### picker 13.151 / native 13.149 — test: bookmark modal searches and picks parent notes
+<!-- 2026-09-15T20:18Z -->
+
+**picker** — `staging - 13.151`: `file-operations.js`, `randomiser.js`, `VERSION`
+**native** — `stg-native - 13.149`: `assets/web/file-operations.js`, `assets/web/randomiser.js`, `assets/web/VERSION`
+
+Stage 3 of the notes-as-tags work. The bookmark modal now works from parent notes. Mac's spec:
+- the Add note field works as a search field;
+- the quick-note rail becomes the results, replacing the autocomplete, and shows every parent note that matches at least one typed word, even partly;
+- a typed word that isn't a parent yet is offered as a "+ word" pill at the start of the results;
+- the note is built from the picked words, most popular first;
+- saving means tapping the notes you want and then pressing Save, not saving on the first tap;
+- with nothing typed, the rail still shows the top 30;
+- the ▲▼ arrows go.
+
+Stage 4 (Add bookmark / Existing bookmarks as two swipeable panels, with Delete and swap showing the existing ones) is still to come, so the existing bookmark list stays in this panel for now.
+
+**Vocabulary** (`showBookmarksModal`).
+- **`parentPop`** counts how many bookmarks carry each parent note, from the local catalogue via `scrayNoteParentCounts(true)`. That function gained an argument to count bookmarks regardless of which view is showing.
+- **Top-up:** it's then topped up with the parents of every note `getTopBookmarkNotes(500)` returns, at a count of 0. A parent that only exists on notes this device doesn't hold is still offered, at the bottom.
+- **`allNotes`** stays too, but only for the existing-bookmark row editor's autocomplete. That editor is untouched until stage 4.
+
+**The new-bookmark row.** [time] [Search or add notes… ×] [⇄], then a preview line, then the results rail.
+- **Nothing typed:** the rail shows the picked parents, then ⚙️ `TOP_PARENTS` = 30 most popular (ties A–Z).
+- **Typing** (loose, like the NOTES filter): what's typed is split into words. Each word that isn't a parent yet gets a green dashed **+ word** pill first, tokenised with `scrayNoteAutoParents` so the offer matches what the saved note will file under. Then the picked parents, then **every** parent containing any typed word: exact matches, then prefix matches, then popularity.
+- **Picking:** a tap toggles a pick (blue = picked), and picked pills stay in the rail whatever is typed. A tap made while typing hands focus back to the field, so the keyboard stays up. Return picks the first unpicked pill instead of saving; with nothing left to pick it still saves.
+- **The note:** `builtNote()` joins the picks by popularity, most popular first, ties in tap order. A brand-new word has no count, so it goes last. The preview reads "Note: ts mish" as you go.
+- **Saving:** Save stores the new bookmark with that note, and tapping the time saves straight away with whatever is picked (possibly nothing). If words are typed but nothing is picked, Save doesn't close; the preview turns red and says "Tap a note to pick it, then Save". With nothing typed and nothing picked, Save just applies deletions and edits, as before.
+- **Clearing:** × clears the search and keeps the picks.
+- **Existing bookmark tapped while typing:** its parent notes join the picks (previously its note text was appended to the field).
+- **Removed:** the ▲▼ arrows (`AC_ARROW`, `#bmAcArrows`, `placeAcArrows`), the autocomplete on the new-note field, Add note's pick-the-highlighted-suggestion press, the append-to-typed-text path, and saving on a quick-note tap. Add note now just focuses the field. `scrayAttachNoteAutocomplete` is kept for the row editor and the bookmarks page.
+
+**Tested** in headless Chromium at 390×844 on native's real index.html, with a stubbed catalogue, playhead and save. 17 checks:
+- **At rest:** the rail shows parents by popularity; no arrows; the hint shows and × is hidden.
+- **Search:** "mi ts" shows + mi, ts and mish.
+- **Picking:** picks stay on and build "ts mish"; unpicking works; clearing leaves picks first, then the top parents.
+- **Return:** picks the "+ cuddle" pill, which goes after ts, and doesn't save.
+- **Save:** stores {42, "ts cuddle"}. Typed but unpicked shows the red hint and saves nothing.
+- **Existing bookmark while typing:** "neck kiss" picks kiss and neck.
+- **Time button:** saves the picks.
+- **Plain Save:** adds nothing.
+- No page errors. `node --check` passes on all four files. Picker's modal code is the same as native's apart from comments.
+
+**Worth watching on the phone.**
+- **Keyboard:** whether tapping a pill while typing flickers it (focus goes back inside the tap, so iOS should allow it).
+- **"+ word" pills:** typing half a word always offers it as a new note, e.g. "+ ki" while typing "kiss". It only becomes a note if tapped.
+- **Multi-word parents:** a parent set by hand with a space in it would split into separate words once saved into a note.
+
 ### picker 13.150 / native 13.148 — test: NOTE search matches any typed word
 <!-- 2026-09-15T20:07Z -->
 

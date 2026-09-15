@@ -2948,7 +2948,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     // overscroll-behavior: contain stops a flick that reaches the end of one
     // scroller from chaining out to the overlay and the page behind it, which
     // is what was dragging the whole panel around.
-    const SCROLL_STYLE = 'flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;';
+    const SCROLL_STYLE = 'flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y;';
     // iOS/WKWebView ignores ::-webkit-scrollbar and scrollbar-width entirely,
     // so there's no way to make the native overlay bar more visible. #bmScroll
     // gets its own wrapper + a hand-drawn thumb (#bmScrollThumb) instead.
@@ -2996,21 +2996,40 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         }
     }
 
-    let topNotes = [];
-    let allNotes = [];   // the full note vocabulary, for the autocomplete
+    // Notes as tags (picker 13.151 / stg-native 13.149). The quick-add rail is
+    // now a search over PARENT notes: you pick the parents a bookmark belongs
+    // under, and its note is built from them. allNotes is still the full note
+    // vocabulary, for the existing-bookmark row editor's autocomplete.
+    let allNotes = [];
     if (typeof window.getTopBookmarkNotes === 'function') {
         try {
-            // Both lists are the MAPPED vocabulary - getTopBookmarkNotes folds
-            // raw spellings into their display name - so a pill tap stores the
-            // standard text and the note field suggests the same words.
-            // ⚙️ 50 pills on the quick-add rail; the autocomplete still wants
-            // the long tail, and both come from the one cached fetch.
             allNotes = await window.getTopBookmarkNotes(500);
-            topNotes = allNotes.slice(0, 50);
         } catch (err) {
             console.warn('Could not load top bookmark notes:', err);
         }
     }
+    // parent -> how many bookmarks carry it. Counted over the local catalogue
+    // (randomiser.js), then topped up with the parents of every note the server
+    // knows, so a parent that only lives in notes not held locally is still
+    // offered - at the bottom, with a count of 0.
+    const parentPop = new Map();
+    try {
+        if (typeof window.scrayNoteParentCounts === 'function') {
+            (await window.scrayNoteParentCounts(true)).forEach((n, pn) => parentPop.set(pn, n));
+        }
+    } catch (err) {
+        console.warn('Could not count parent notes:', err);
+    }
+    if (typeof window.scrayNoteParents === 'function') {
+        allNotes.forEach(n => window.scrayNoteParents(n).forEach(pn => {
+            if (!parentPop.has(pn)) parentPop.set(pn, 0);
+        }));
+    }
+    const popOf = (pn) => parentPop.get(pn) || 0;
+    const parentsByPop = [...parentPop.keys()]
+        .sort((a, b) => (popOf(b) - popOf(a)) || a.localeCompare(b));
+    // ⚙️ How many parent notes the rail offers before anything is typed.
+    const TOP_PARENTS = 100;
 
     if (!modal.isConnected) return;
 
@@ -3030,6 +3049,12 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
 
     let mode = 'normal';        // 'normal' | 'swap' | 'delete'
     let editingIndex = null;    // which row is currently an open note input
+    // Two pages when there is a playhead (picker 13.152 / stg-native 13.150):
+    // 0 = Add bookmark, 1 = the existing bookmarks. Survives re-renders.
+    let page = 0;
+    let renderSeq = 0;          // which renderContent a deferred callback belongs to
+    let pageSeq = 0;            // which page change a deferred callback belongs to
+    let picked = [];            // parent notes chosen for the new bookmark, in tap order
     let newNote = '';           // survives re-renders
     let committed = false;      // guards against a double-fire closing twice
 
@@ -3154,10 +3179,17 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             // ⚙️ Floor is lower with the keyboard up: forcing 180px there
             // would push the button row back under the keys.
             panel.style.maxHeight = Math.max(keyboardUp ? 120 : 180, usable) + 'px';
+            // Paged, the panel is a fixed height rather than a cap: the pages
+            // are laid out against it, and a panel that changed height as you
+            // swiped between a long list and a short one would jump about.
+            panel.style.height = modal.querySelector('#bmPager') ? panel.style.maxHeight : '';
+            modal.__repaintPage?.();
+            // The rail's thumb was measured before the panel had its height, when
+            // everything overflowed; measure it again now.
+            modal.querySelector('#qnScroll')?.dispatchEvent(new Event('scroll'));
             // The panel just changed height, so the 60/40 split and the
             // arrows under Add note need remeasuring.
             modal.__sizeQuickNotes?.();
-            modal.__placeAcArrows?.();
         }
         // Keep a row note being edited in view - by hand, inside #bmScroll
         // only. scrollIntoView walks up to the page when #bmScroll has nothing
@@ -3197,19 +3229,8 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         vvWatch.observe(document.body, { childList: true });
     }
 
-    // ▼ ▲ under Add note (13.50, moved under it in 13.51, split in 13.52): ▼
-    // spans Add note's width, ▲ sits just right of it under Delete. Not .modal-btn,
-    // whose mobile padding would undo the sizing; every size is !important
-    // for the same global `button` rule as PILL_BTN. They sit in the panel's
-    // own bottom padding - the white under the button row - so the panel is
-    // no taller for them: positioned against the panel (not inside the form,
-    // whose overflow: hidden would clip them) by placeAcArrows() below.
-    const AC_ARROW = (id, glyph, title) => `<button type="button" id="${id}" title="${title}" aria-label="${title}" `
-        + 'style="flex: 0 0 auto !important; width: 30px !important; height: 100% !important; min-width: 0 !important; '
-        + 'margin: 0 !important; padding: 0 !important; border: none; border-radius: 5px; background: #d3e4fb; '
-        + `color: #004a99; font-size: 0.65rem !important; line-height: 1; cursor: pointer;">${glyph}</button>`;
-
     const renderContent = () => {
+        const myRender = ++renderSeq;
         // Row colours are the mode indicator: blue = swap is armed, red =
         // delete is armed. Pending deletions stay struck through in every
         // mode so you can disarm and still see what Save will remove.
@@ -3225,68 +3246,78 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                 <p style="flex: 0 0 auto; font-size: 0.85rem; color: #666; margin-bottom: 12px;">${esc(video.filename)}</p>
         `;
 
-        if (hasPlayhead) {
-            html += `
-                <div class="bookmark-item" style="flex: 0 0 auto; display: flex; gap: 6px; align-items: center; margin-bottom: 8px; background: #f9f9f9; padding: 8px; border-radius: 4px; width: 100%; box-sizing: border-box;">
-                    <button type="button" id="newBmTimeBtn" class="modal-btn modal-btn-secondary" title="Save this bookmark now (tap without a note to save it with none)" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 8px !important; font-family: monospace; font-size: 0.75rem; white-space: nowrap; margin-bottom: 0 !important;">${formatDuration(newTime * 1000)}</button>
-                    <input type="text" id="newBmNote" value="${esc(newNote)}" placeholder="Add a note..." style="flex: 1 1 auto !important; width: auto !important; min-width: 0; padding: 6px !important; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; margin-bottom: 0 !important;">
-                    <button type="button" id="swapBmBtn" class="modal-btn" title="Swap: move an existing bookmark's note to this timestamp" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 10px !important; min-width: 0; margin-bottom: 0 !important; background: ${mode === 'swap' ? '#0056b3' : '#007bff'}; color: #fff; font-size: 1rem; line-height: 1;">&#8644;</button>
-                </div>
-            `;
-        }
-
-        // Wrapping rail of content-sized pills, same shape as the quick-note
-        // row below it - two or three bookmarks per line rather than one
-        // full-width row each.
-        // Everything between the new-bookmark row and the buttons scrolls as
-        // one region; the list no longer caps itself, or it would be a
-        // scroller inside a scroller.
-        // Two independent scrollers rather than one. The quick-note rail is
-        // capped and scrolls on its own; the bookmark list takes whatever
-        // height is left and scrolls on its own. Sharing one scroller meant a
-        // long tag list simply pushed the bookmarks out of sight.
-        // The label sits OUTSIDE the scroller - it shouldn't scroll away from
-        // the rail it describes.
-        if (topNotes.length > 0 && hasPlayhead) {
-            html += `
-                <div id="qnWrap" title="Quick notes: tap one to save a bookmark with it - or, while typing a note, to add it to the note" style="${SCROLL_WRAP_STYLE} flex: 0 1 auto; margin: 0 0 10px;">
-                    <div id="qnScroll" style="${SCROLL_STYLE}">
-                        <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px;">
-                            ${topNotes.map((n, i) => `<button type="button" class="quick-note-btn modal-btn modal-btn-secondary" data-note-index="${i}" style="flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.69rem; margin: 0;">${esc(n)}</button>`).join('')}
-                        </div>
-                    </div>
-                    <div id="qnScrollThumb" style="${THUMB_STYLE}"></div>
-                </div>
-            `;
-        }
-
-        html += `<div id="bmWrap" style="${SCROLL_WRAP_STYLE}"><div id="bmScroll" style="${SCROLL_STYLE}">`;
-        html += `<div id="bookmarksList" style="display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; margin-bottom: 12px;">`;
-
+        // The existing bookmarks, as pills. Built first because they go on
+        // page 1 when paged, or straight into the panel when there is no
+        // playhead and so nothing to add.
+        let listHtml = `<div id="bmWrap" style="${SCROLL_WRAP_STYLE}"><div id="bmScroll" style="${SCROLL_STYLE}">`;
+        listHtml += `<div id="bookmarksList" style="display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; margin-bottom: 12px;">`;
         if (!working.length) {
-            html += `<p style="color: #999; font-style: italic; text-align: center;">No bookmarks yet.</p>`;
+            listHtml += `<p style="color: #999; font-style: italic; text-align: center; width: 100%;">No bookmarks yet.</p>`;
         } else {
             working.forEach((bm, idx) => {
                 const struck = bm.deleted ? 'opacity: 0.5; text-decoration: line-through;' : '';
                 // Imported marks are somebody else's reading of this video.
-                // Worth being able to tell at a glance which are yours.
                 const pillBorder = bm.source === 'stash' ? '#6c5ce7' : '#ccc';
-                html += `
+                listHtml += `
                 <div class="bm-pill" style="display: inline-flex; flex: 0 0 auto; width: auto; max-width: 100%; align-items: stretch; border: 2px solid ${pillBorder}; border-radius: 4px; overflow: hidden; box-sizing: border-box; ${struck}">
                     <button type="button" class="bm-jump" data-index="${idx}" style="${PILL_BTN}border-right: 1px solid #ccc; background: ${timeBg}; color: ${fg}; font-family: monospace; font-size: 0.66rem; white-space: nowrap;">${formatDuration(bm.time * 1000)}</button>
                 `;
                 if (editingIndex === idx && mode === 'normal') {
-                    html += `<input type="text" class="bm-note-edit" data-index="${idx}" value="${esc(bm.note)}" placeholder="Add a note..." style="flex: 0 1 auto; width: auto; min-width: 110px; margin: 0; padding: 5px 8px; border: none; font-size: 0.72rem; line-height: 1.25; background: #fff; color: #333;">`;
+                    listHtml += `<input type="text" class="bm-note-edit" data-index="${idx}" value="${esc(bm.note)}" placeholder="Add a note..." style="flex: 0 1 auto; width: auto; min-width: 110px; margin: 0; padding: 5px 8px; border: none; font-size: 0.72rem; line-height: 1.25; background: #fff; color: #333;">`;
                 } else {
-                    html += `<button type="button" class="bm-note-btn" data-index="${idx}" title="${esc(bm.note || '')}" style="${PILL_BTN}flex-shrink: 1; min-width: 0; max-width: ${NOTE_MAX_PX}px; text-align: left; background: ${noteBg}; color: ${bm.note ? fg : '#999'}; font-size: 0.72rem; font-style: ${bm.note ? 'normal' : 'italic'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${bm.note ? esc(bm.note) : 'no note'}</button>`;
+                    listHtml += `<button type="button" class="bm-note-btn" data-index="${idx}" title="${esc(bm.note || '')}" style="${PILL_BTN}flex-shrink: 1; min-width: 0; max-width: ${NOTE_MAX_PX}px; text-align: left; background: ${noteBg}; color: ${bm.note ? fg : '#999'}; font-size: 0.72rem; font-style: ${bm.note ? 'normal' : 'italic'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${bm.note ? esc(bm.note) : 'no note'}</button>`;
                 }
-                html += `</div>`;
+                listHtml += `</div>`;
             });
         }
+        listHtml += `</div></div><div id="bmScrollThumb" style="${THUMB_STYLE}"></div></div>`;   // list + #bmScroll + wrap
 
-        html += `</div>`;
-
-        html += `</div><div id="bmScrollThumb" style="${THUMB_STYLE}"></div></div>`;   // #bmScroll + wrap
+        if (hasPlayhead) {
+            // Two pages side by side, swiped between like an iPhone home screen
+            // (13.152 / 13.150): Add bookmark, then the existing bookmarks. The
+            // header, the tabs and the button row stay put; only the pages move.
+            const liveCount = working.filter(b => !b.deleted).length;
+            const tabStyle = (n) => 'flex: 1 1 0 !important; width: auto !important; margin: 0 !important; '
+                + 'padding: 6px 4px 8px !important; border: none; background: transparent; font-size: 0.8rem; '
+                + `font-weight: 600; cursor: pointer; color: ${page === n ? '#007bff' : '#888'};`;
+            const hint = mode === 'swap'
+                ? `<div style="flex: 0 0 auto; font-size: 0.72rem; color: #fff; background: #007bff; border-radius: 4px; padding: 5px 8px; margin: 0 0 8px;">Tap a bookmark to move its note to ${formatDuration(newTime * 1000)}</div>`
+                : mode === 'delete'
+                ? `<div style="flex: 0 0 auto; font-size: 0.72rem; color: #fff; background: #dc3545; border-radius: 4px; padding: 5px 8px; margin: 0 0 8px;">Tap bookmarks to mark them for deleting, then Save</div>`
+                : `<div style="flex: 0 0 auto; font-size: 0.7rem; color: #999; margin: 0 0 8px;">Tap a time to jump to it, a note to edit it</div>`;
+            html += `
+                <div id="bmTabs" role="tablist" style="flex: 0 0 auto; position: relative; display: flex; margin: 0 0 8px; border-bottom: 1px solid #e5e5e5;">
+                    <button type="button" class="bm-tab" data-page="0" role="tab" style="${tabStyle(0)}">Add bookmark</button>
+                    <button type="button" class="bm-tab" data-page="1" role="tab" style="${tabStyle(1)}">Bookmarks (${liveCount})</button>
+                    <div id="bmTabBar" style="position: absolute; left: 0; bottom: -1px; width: 50%; height: 2px; background: #007bff; transform: translateX(${page * 100}%);"></div>
+                </div>
+                <div id="bmPager" style="position: relative; flex: 1 1 0; min-height: 0; overflow: hidden; touch-action: pan-y;">
+                    <div id="bmTrack" style="position: absolute; top: 0; bottom: 0; left: 0; width: 200%; display: flex; transform: translate3d(${-page * 50}%, 0, 0); will-change: transform;">
+                        <div class="bm-page" data-page="0" style="flex: 0 0 50%; width: 50%; min-width: 0; display: flex; flex-direction: column; min-height: 0; box-sizing: border-box; padding-right: 8px;">
+                            <div class="bookmark-item" style="flex: 0 0 auto; display: flex; gap: 6px; align-items: center; margin-bottom: 4px; background: #f9f9f9; padding: 8px; border-radius: 4px; width: 100%; box-sizing: border-box;">
+                                <button type="button" id="newBmTimeBtn" class="modal-btn modal-btn-secondary" title="Save this bookmark now, with the notes picked so far (or none)" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 8px !important; font-family: monospace; font-size: 0.75rem; white-space: nowrap; margin-bottom: 0 !important;">${formatDuration(newTime * 1000)}</button>
+                                <input type="text" id="newBmNote" value="${esc(newNote)}" placeholder="Search or add notes..." autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" style="flex: 1 1 auto !important; width: auto !important; min-width: 0; padding: 6px !important; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; margin-bottom: 0 !important;">
+                                <button type="button" id="newBmClear" title="Clear the search" aria-label="Clear the search" style="flex: 0 0 auto !important; width: auto !important; min-width: 0 !important; margin: 0 !important; padding: 2px 4px !important; border: none; background: transparent; color: #999; font-size: 1.1rem; line-height: 1; display: ${newNote ? 'block' : 'none'};">&times;</button>
+                                <button type="button" id="swapBmBtn" class="modal-btn" title="Swap: move an existing bookmark's note to this timestamp" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 10px !important; min-width: 0; margin-bottom: 0 !important; background: ${mode === 'swap' ? '#0056b3' : '#007bff'}; color: #fff; font-size: 1rem; line-height: 1;">&#8644;</button>
+                            </div>
+                            <div id="bmNotePreview" style="flex: 0 0 auto; font-size: 0.72rem; color: #666; margin: 0 0 8px; padding: 0 2px; min-height: 1.25em; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></div>
+                            <div id="qnWrap" style="${SCROLL_WRAP_STYLE} margin: 0 0 10px;">
+                                <div id="qnScroll" style="${SCROLL_STYLE}">
+                                    <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px;"></div>
+                                </div>
+                                <div id="qnScrollThumb" style="${THUMB_STYLE}"></div>
+                            </div>
+                        </div>
+                        <div class="bm-page" data-page="1" style="flex: 0 0 50%; width: 50%; min-width: 0; display: flex; flex-direction: column; min-height: 0; box-sizing: border-box; padding-left: 8px;">
+                            ${hint}
+                            ${listHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else {
+            html += listHtml;
+        }
 
         const pending = working.filter(b => b.deleted).length;
         html += `
@@ -3297,13 +3328,238 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                     <button type="button" id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1;">Close</button>
                 </div>
                 </form>
-                ${hasPlayhead ? `<div id="bmAcArrows" style="position: absolute; display: flex; gap: 3px; height: 22px;">${AC_ARROW('bmAcDown', '&#9660;', 'Next suggestion')}${AC_ARROW('bmAcUp', '&#9650;', 'Previous suggestion')}</div>` : ''}
             </div>
         `;
 
         modal.innerHTML = html;
 
         const newNoteEl = modal.querySelector('#newBmNote');
+        const railEl = modal.querySelector('#quickNotesRow');
+        const previewEl = modal.querySelector('#bmNotePreview');
+        const clearEl = modal.querySelector('#newBmClear');
+
+        /** The note the picked parents make: most popular first, ties in tap order. */
+        const builtNote = () => picked
+            .map((pn, i) => [pn, i])
+            .sort((a, b) => (popOf(b[0]) - popOf(a[0])) || (a[1] - b[1]))
+            .map(x => x[0])
+            .join(' ');
+
+        // What the rail is showing, by position - the pills carry an index.
+        let resultItems = [];
+
+        /**
+         * The rail. Nothing typed: the picked parents, then the top parents by
+         * popularity. Typing: a "+ word" pill for each typed word that is not a
+         * parent yet, the picked parents, then EVERY parent containing any typed
+         * word - loose, like the NOTES filter - exact and prefix matches first,
+         * popularity within that.
+         */
+        const renderResults = () => {
+            if (!railEl) return;
+            const q = (newNoteEl ? newNoteEl.value : newNote).trim().toLowerCase();
+            const terms = q ? q.split(/\s+/).filter(Boolean) : [];
+            const pickedSet = new Set(picked);
+            const items = [];
+            if (terms.length) {
+                const fresh = [];
+                terms.forEach(t => {
+                    // Tokenised the way a note's words become parents, so what is
+                    // offered is exactly what the saved note will file under.
+                    const words = typeof window.scrayNoteAutoParents === 'function'
+                        ? window.scrayNoteAutoParents(t) : [t];
+                    words.forEach(w => {
+                        if (!parentPop.has(w) && !pickedSet.has(w) && !fresh.includes(w)) fresh.push(w);
+                    });
+                });
+                fresh.forEach(w => items.push({ word: w, fresh: true }));
+                picked.forEach(pn => items.push({ word: pn, on: true }));
+                const rank = (pn) => terms.includes(pn) ? 0 : terms.some(t => pn.startsWith(t)) ? 1 : 2;
+                parentsByPop
+                    .filter(pn => !pickedSet.has(pn) && terms.some(t => pn.includes(t)))
+                    .sort((a, b) => rank(a) - rank(b))
+                    .forEach(pn => items.push({ word: pn }));
+            } else {
+                picked.forEach(pn => items.push({ word: pn, on: true }));
+                parentsByPop.filter(pn => !pickedSet.has(pn)).slice(0, TOP_PARENTS)
+                    .forEach(pn => items.push({ word: pn }));
+            }
+            resultItems = items;
+
+            const PILL = 'flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.69rem; margin: 0; ';
+            railEl.innerHTML = items.length
+                ? items.map((it, i) => {
+                    const look = it.on ? 'background: #007bff; color: #fff; border: 1px solid #007bff;'
+                        : it.fresh ? 'background: #fff; color: #1e7e34; border: 1px dashed #28a745;'
+                        : '';
+                    const title = it.on ? 'Picked - tap to remove' : it.fresh ? 'New parent note - tap to add it' : 'Tap to add';
+                    return `<button type="button" class="quick-note-btn modal-btn${it.on || it.fresh ? '' : ' modal-btn-secondary'}" data-ri="${i}" title="${title}" style="${PILL}${look}">${it.fresh ? '+ ' : ''}${esc(it.word)}</button>`;
+                }).join('')
+                : '<span style="font-size: 0.72rem; color: #999;">No notes yet - type one to add it.</span>';
+
+            if (previewEl) {
+                const note = builtNote();
+                previewEl.style.color = '#666';
+                previewEl.innerHTML = note
+                    ? `Note: <b style="color: #333;">${esc(note)}</b>`
+                    : (terms.length ? 'Tap the notes this bookmark belongs under' : 'Search notes, or tap to pick them');
+            }
+            if (clearEl) clearEl.style.display = q ? 'block' : 'none';
+            modal.__sizeQuickNotes?.();
+            modal.querySelector('#qnScroll')?.dispatchEvent(new Event('scroll'));
+        };
+        renderResults();
+
+        // ---- the pager (13.152 / 13.150) -------------------------------
+        // Follows the finger, rubber-bands past either end, and settles on
+        // release: past a third of the width or a flick, it turns the page,
+        // otherwise it springs back - the iPhone home screen's rules. Pointer
+        // events with touch-action: pan-y, so a vertical drag is still the
+        // scroller's and only a horizontal one ever reaches here.
+        const pager = modal.querySelector('#bmPager');
+        const track = modal.querySelector('#bmTrack');
+        const tabBar = modal.querySelector('#bmTabBar');
+        const PAGES = 2;
+        // ⚙️ Settle time, its curve, how far a slow drag must go to turn the
+        // page (share of the width), and how fast a flick must be (px/ms).
+        const SNAP_MS = 320;
+        const SNAP_EASE = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
+        const TURN_SHARE = 0.33;
+        const FLICK_PX_MS = 0.35;
+
+        const paintPage = (px, animate, ms) => {
+            if (!track) return;
+            const W = (pager && pager.clientWidth) || 1;
+            const tr = animate ? `transform ${ms || SNAP_MS}ms ${SNAP_EASE}` : 'none';
+            if (animate) void track.offsetWidth;      // start from where it is now
+            track.style.transition = tr;
+            track.style.transform = `translate3d(${px}px, 0, 0)`;
+            if (tabBar) {
+                tabBar.style.transition = tr;
+                tabBar.style.transform = `translateX(${Math.max(0, Math.min(1, -px / W)) * 100}%)`;
+            }
+        };
+        modal.__repaintPage = pager ? () => paintPage(-page * pager.clientWidth, false) : null;
+
+        const goToPage = (n, opts = {}) => {
+            if (!pager || !track) return;
+            n = Math.max(0, Math.min(PAGES - 1, n));
+            // Back on Add bookmark, swap and delete stand down - they are only
+            // meaningful over the list. When the caller needs the new page's
+            // controls straight away (Add note focuses the field, and iOS only
+            // raises the keyboard inside the tap), redraw first and slide after.
+            if (n === 0 && mode !== 'normal' && opts.now) {
+                flushOpenEdit(false);
+                mode = 'normal';
+                renderContent();
+                modal.__goToPage?.(0, { ms: opts.ms });
+                return;
+            }
+            if (n === 1 && newNoteEl && document.activeElement === newNoteEl) newNoteEl.blur();
+            page = n;
+            paintPage(-n * pager.clientWidth, opts.animate !== false, opts.ms);
+            modal.querySelectorAll('.bm-tab').forEach(b => {
+                b.style.color = parseInt(b.dataset.page, 10) === n ? '#007bff' : '#888';
+            });
+            if (n === 0 && mode !== 'normal') {
+                // Otherwise redraw once the list is off screen, so nothing jumps.
+                const stamp = ++pageSeq;
+                setTimeout(() => {
+                    if (!modal.isConnected || myRender !== renderSeq || stamp !== pageSeq
+                        || page !== 0 || mode === 'normal') return;
+                    flushOpenEdit(false);
+                    mode = 'normal';
+                    renderContent();
+                }, (opts.ms || SNAP_MS) + 40);
+            }
+        };
+        modal.__goToPage = pager ? goToPage : null;
+
+        if (pager && track) {
+            let drag = null;
+            let suppressClickUntil = 0;
+            // iOS's own rubber band: resistance grows the further past the end.
+            const rubber = (d, W) => (1 - 1 / ((d * 0.55 / W) + 1)) * W;
+
+            pager.addEventListener('pointerdown', (e) => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, lastX: e.clientX,
+                         lastT: e.timeStamp, vx: 0, axis: null, W: pager.clientWidth || 1, off: -page * (pager.clientWidth || 1) };
+            });
+            const move = (e) => {
+                if (!drag || e.pointerId !== drag.id) return;
+                const dx = e.clientX - drag.x0;
+                const dy = e.clientY - drag.y0;
+                if (!drag.axis) {
+                    // ⚙️ 8px of travel decides the axis, and it holds for the gesture.
+                    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+                    drag.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+                    if (drag.axis === 'x') {
+                        try { pager.setPointerCapture(e.pointerId); } catch (_) {}
+                        // A mouse drag over text starts a selection, and dragging a
+                        // selection is a native drag-and-drop - which cancels the
+                        // pointer. So no selecting while the pages are moving.
+                        pager.style.userSelect = pager.style.webkitUserSelect = 'none';
+                        try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+                        // A field being typed in would otherwise keep the keyboard up mid-swipe.
+                        if (document.activeElement && pager.contains(document.activeElement)) document.activeElement.blur();
+                    }
+                }
+                if (drag.axis !== 'x') return;
+                e.preventDefault();
+                const dt = e.timeStamp - drag.lastT;
+                if (dt > 0) drag.vx = 0.7 * ((e.clientX - drag.lastX) / dt) + 0.3 * drag.vx;
+                drag.lastX = e.clientX;
+                drag.lastT = e.timeStamp;
+                const min = -(PAGES - 1) * drag.W;
+                let off = -page * drag.W + dx;
+                if (off > 0) off = rubber(off, drag.W);
+                else if (off < min) off = min - rubber(min - off, drag.W);
+                drag.off = off;
+                paintPage(off, false);
+            };
+            const end = (e, cancelled) => {
+                if (!drag || e.pointerId !== drag.id) return;
+                const d = drag;
+                drag = null;
+                if (d.axis !== 'x') return;
+                pager.style.userSelect = pager.style.webkitUserSelect = '';
+                suppressClickUntil = Date.now() + 400;
+                const dx = d.lastX - d.x0;
+                // A pause at the end of a drag is not a flick.
+                const vx = (e.timeStamp - d.lastT) > 80 ? 0 : d.vx;
+                let target = page;
+                if (!cancelled) {
+                    if (dx < -d.W * TURN_SHARE || vx < -FLICK_PX_MS) target = page + 1;
+                    else if (dx > d.W * TURN_SHARE || vx > FLICK_PX_MS) target = page - 1;
+                }
+                target = Math.max(0, Math.min(PAGES - 1, target));
+                // A fast flick settles faster, the way a thrown page does.
+                const remaining = Math.abs(-target * d.W - d.off);
+                const ms = Math.abs(vx) > 0.3
+                    ? Math.max(160, Math.min(SNAP_MS, (remaining / Math.abs(vx)) * 1.2))
+                    : SNAP_MS;
+                goToPage(target, { ms });
+            };
+            pager.addEventListener('pointermove', move, { passive: false });
+            pager.addEventListener('dragstart', (e) => e.preventDefault());
+            pager.addEventListener('pointerup', (e) => end(e, false));
+            pager.addEventListener('pointercancel', (e) => end(e, true));
+            // WKWebView belt and braces: once a drag is horizontal, the page
+            // must not scroll under it.
+            pager.addEventListener('touchmove', (e) => {
+                if (drag && drag.axis === 'x' && e.cancelable) e.preventDefault();
+            }, { passive: false });
+            // The tap that ends a swipe is not a tap on whatever is under it.
+            pager.addEventListener('click', (e) => {
+                if (Date.now() < suppressClickUntil) { e.preventDefault(); e.stopPropagation(); }
+            }, true);
+
+            modal.querySelectorAll('.bm-tab').forEach(b => b.addEventListener('click', (e) => {
+                e.stopPropagation();
+                goToPage(parseInt(b.dataset.page, 10), { now: true });
+            }));
+        }
 
         // Hand-drawn scroll thumbs - see SCROLL_WRAP_STYLE. There are two
         // independent scrollers now, so this is a factory rather than a
@@ -3330,44 +3586,8 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         // between them IS the space available to divide - no need to guess at
         // the height of the header, the new-bookmark row or the button strip.
         // Runs before the thumbs are wired so they measure the settled sizes.
-        const sizeQuickNotes = () => {
-            const qnWrap = modal.querySelector('#qnWrap');
-            const bmWrap = modal.querySelector('#bmWrap');
-            const qnScroll = modal.querySelector('#qnScroll');
-            if (!qnWrap || !bmWrap) return;
-
-            // Neutralise the previous pass before measuring, or each run
-            // measures the last run's result and the rail ratchets away.
-            qnWrap.style.flex = '0 1 auto';
-            qnWrap.style.maxHeight = 'none';
-
-            // The two wraps are the only flexible children of the form, so
-            // whatever they occupy between them IS the space to divide. No
-            // guessing at the header, new-bookmark row or button strip.
-            const shared = qnWrap.clientHeight + bmWrap.clientHeight;
-            if (shared <= 0) return;
-
-            // scrollHeight is the rail's natural height, independent of how
-            // flex happens to have squeezed it this frame.
-            const natural = qnScroll ? qnScroll.scrollHeight : 0;
-            const target = Math.round(Math.min(natural, shared * QUICK_NOTES_SHARE));
-
-            // A fixed basis with no grow and no shrink: an allocation, not a
-            // ceiling. max-height was the previous attempt and did nothing -
-            // both wraps shrink in proportion to their content, so a long
-            // bookmark list had already pushed the rail below the cap before
-            // the cap was ever consulted. Taking it out of the flex
-            // negotiation entirely is the only way to hold the share.
-            qnWrap.style.flex = `0 0 ${target}px`;
-        };
-        // Exposed on the element so applyKeyboardInset - which lives outside
-        // this closure and resizes the panel - can re-run it.
-        modal.__sizeQuickNotes = sizeQuickNotes;
-        sizeQuickNotes();
-        // The first pass can read short: the panel's own max-height may not
-        // have been applied yet when the markup lands. One more on the next
-        // frame, once layout has settled.
-        requestAnimationFrame(() => { if (modal.isConnected) sizeQuickNotes(); });
+        // One scroller per page now, so there is no longer a split to size.
+        modal.__sizeQuickNotes = null;
 
         wireScrollThumb('bmScroll', 'bmScrollThumb');
         wireScrollThumb('qnScroll', 'qnScrollThumb');
@@ -3399,18 +3619,22 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             modal.querySelector('#saveBookmarksBtn')?.click();
         });
 
-        newNoteEl?.addEventListener('input', () => { newNote = newNoteEl.value; });
+        newNoteEl?.addEventListener('input', () => {
+            newNote = newNoteEl.value;
+            renderResults();
+        });
 
-        // Whether the new-note field is being typed in: it was tapped, typed
-        // in, or opened with Add note - see the quick notes below. The
-        // auto-focus on opening deliberately doesn't count: wherever that
-        // focus sticks (desktop), quick notes would otherwise never save.
+        // Whether the note field is being typed in: tapped, typed in, or opened
+        // with Add note. Read at the PRESS of a pill, because on a phone the tap
+        // takes focus off the field before the click lands - and a pill tapped
+        // while typing gives focus straight back, so the keyboard stays up.
+        // The auto-focus on opening deliberately doesn't count.
         let noteFieldActive = false;
         const focusNoteField = () => {
             if (!newNoteEl) return;
             noteFieldActive = true;
-            // preventScroll for the same reason as the row edit below: WebKit
-            // scrolls the page, not the panel, and inflates offsetTop.
+            // preventScroll: WebKit scrolls the page, not the panel, and
+            // inflates visualViewport.offsetTop.
             newNoteEl.focus({ preventScroll: true });
             const end = newNoteEl.value.length;
             try { newNoteEl.setSelectionRange(end, end); } catch (_) {}
@@ -3420,137 +3644,85 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                 newNoteEl.addEventListener(type, () => { noteFieldActive = true; }, { passive: true });
             });
             newNoteEl.addEventListener('blur', () => { noteFieldActive = false; });
+            // Return picks the first pill that is not picked yet - usually the
+            // "+ word" or the exact match - rather than saving. With nothing
+            // left to pick it falls through to Save, as before.
+            newNoteEl.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter') return;
+                const next = newNoteEl.value.trim() && resultItems.find(it => !it.on);
+                if (!next) return;
+                e.preventDefault();
+                picked.push(next.word);
+                renderResults();
+            });
         }
-        if (newNoteEl) {
-            window.scrayAttachNoteAutocomplete?.(newNoteEl, () => allNotes, {
-                onPick: (v) => { newNote = v; }
+
+        modal.__focusNoteField = focusNoteField;
+
+        clearEl?.addEventListener('mousedown', (e) => e.preventDefault());
+        clearEl?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (newNoteEl) newNoteEl.value = '';
+            newNote = '';
+            renderResults();
+            focusNoteField();
+        });
+
+        // Picking and unpicking. Delegated: renderResults replaces the pills.
+        if (railEl) {
+            let pressedWhileTyping = false;
+            const railPress = (e) => {
+                if (!e.target.closest('.quick-note-btn')) return;
+                pressedWhileTyping = noteFieldActive && document.activeElement === newNoteEl;
+                if (pressedWhileTyping && e.type === 'mousedown') e.preventDefault();
+            };
+            railEl.addEventListener('touchstart', railPress, { passive: true });
+            railEl.addEventListener('mousedown', railPress);
+            railEl.addEventListener('click', (e) => {
+                const btn = e.target.closest('.quick-note-btn');
+                if (!btn) return;
+                e.stopPropagation();
+                const it = resultItems[parseInt(btn.dataset.ri, 10)];
+                if (!it) return;
+                const typing = pressedWhileTyping || (noteFieldActive && document.activeElement === newNoteEl);
+                pressedWhileTyping = false;
+                const at = picked.indexOf(it.word);
+                if (at === -1) picked.push(it.word); else picked.splice(at, 1);
+                renderResults();
+                if (typing) focusNoteField();
             });
         }
 
         // The timestamp on the new-bookmark row is the "commit this one now"
-        // button - the only way to store a bookmark with no note at all.
+        // button: the notes picked so far, or none at all.
         modal.querySelector('#newBmTimeBtn')?.addEventListener('click', (e) => {
             e.stopPropagation();
             flushOpenEdit(false);
-            commitAndClose({ time: newTime, note: (newNoteEl?.value || '').trim() });
+            commitAndClose({ time: newTime, note: builtNote() });
         });
 
         modal.querySelector('#swapBmBtn')?.addEventListener('click', (e) => {
             e.stopPropagation();
             setMode('swap');
+            // The bookmarks to swap with are on the other page.
+            if (mode === 'swap') modal.__goToPage?.(1);
         });
 
-        // Add note: the field sits at the top of the panel, out of thumb reach.
-        // Focusing from inside the tap is also what lets iOS raise the keyboard
-        // at all - the auto-focus on opening runs after an await, outside any
-        // gesture, so the keyboard never came up for it.
-        // While ▲ ▼ have a suggestion highlighted in the new note, Add note adds
-        // it with a space after, ready for the next word (13.51). Done on the
-        // press and the press cancelled, like the arrows, so the field keeps
-        // focus and the keyboard stays up; otherwise Add note is unchanged.
-        const addNoteBtn = modal.querySelector('#addNoteBtn');
-        let addPressedAt = 0;
-        const addPress = (e) => {
-            const ac = newNoteEl && newNoteEl.__scrayAc;
-            if (!ac || document.activeElement !== newNoteEl || !ac.hasActive()) { addPressedAt = 0; return; }
-            e.preventDefault();
+        // Add note: the field sits at the top of the panel, out of thumb reach,
+        // and focusing inside the tap is what lets iOS raise the keyboard.
+        modal.querySelector('#addNoteBtn')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            addPressedAt = Date.now();
-            ac.pickActive();
-            newNoteEl.value = newNote = newNoteEl.value.replace(/\s+$/, '') + ' ';
-            ac.close();
-            noteFieldActive = true;
-            const end = newNoteEl.value.length;
-            try { newNoteEl.setSelectionRange(end, end); } catch (_) {}
-        };
-        addNoteBtn?.addEventListener('touchstart', addPress, { passive: false });
-        addNoteBtn?.addEventListener('mousedown', addPress);
-        addNoteBtn?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (Date.now() - addPressedAt < 700) return;      // already added on the press
             flushOpenEdit(false);
-            focusNoteField();
-        });
-
-        // In the panel's bottom padding: ▼ under Add note and as wide as it, ▲
-        // just to its right, lined up with Delete's left edge (13.52).
-        // Re-placed whenever the panel changes size (the keyboard).
-        const placeAcArrows = () => {
-            const arrows = modal.querySelector('#bmAcArrows');
-            const panel = modal.querySelector('.basket-json-modal-content');
-            const down = modal.querySelector('#bmAcDown');
-            const up = modal.querySelector('#bmAcUp');
-            if (!arrows || !addNoteBtn || !panel || !down || !up) return;
-            const p = panel.getBoundingClientRect();
-            const b = addNoteBtn.getBoundingClientRect();
-            const del = modal.querySelector('#deleteBookmarksBtn')?.getBoundingClientRect();
-            // ⚙️ Gap under the button, the height the arrows may take, and ▲'s
-            // width - the size each arrow was when they shared Add note's width.
-            const GAP_PX = 2, MAX_H = 24, MIN_H = 16;
-            const upW = Math.round((b.width - 3) / 2);
-            const between = del ? Math.max(2, del.left - b.right) : 3;
-            down.style.setProperty('width', `${b.width}px`, 'important');
-            up.style.setProperty('width', `${upW}px`, 'important');
-            arrows.style.gap = `${between}px`;
-            arrows.style.left = `${b.left - p.left}px`;
-            arrows.style.width = `${b.width + between + upW}px`;
-            arrows.style.top = `${b.bottom - p.top + GAP_PX}px`;
-            arrows.style.height = `${Math.max(MIN_H, Math.min(MAX_H, p.bottom - b.bottom - GAP_PX * 2))}px`;
-        };
-        modal.__placeAcArrows = placeAcArrows;
-        placeAcArrows();
-        requestAnimationFrame(() => { if (modal.isConnected) placeAcArrows(); });
-        if (typeof ResizeObserver === 'function') {
-            const panelEl = modal.querySelector('.basket-json-modal-content');
-            if (panelEl) new ResizeObserver(() => { if (modal.isConnected) placeAcArrows(); }).observe(panelEl);
-        }
-
-        /** A quick note or an existing bookmark's note, added to the end of what's typed. */
-        const appendToNewNote = (text) => {
-            const typed = newNoteEl.value.replace(/\s+$/, '');
-            newNoteEl.value = newNote = typed ? `${typed} ${text}` : text;
-            newNoteEl.__scrayAc?.close();
-            focusNoteField();
-        };
-
-        // ▲ ▼ (13.50): step through the note suggestions, for a keyboard with
-        // no arrow keys; Return then adds the highlighted one. They work on
-        // the row note being edited if there is one, otherwise the new note.
-        // While that field has focus they act on the PRESS and cancel it, so
-        // focus - and the on-screen keyboard - never leaves the field. From
-        // cold they wait for the click, because iOS only raises the keyboard
-        // for a focus() made inside one.
-        const acField = () => modal.querySelector('.bm-note-edit') || newNoteEl;
-        ['bmAcUp', 'bmAcDown'].forEach(id => {
-            const btn = modal.querySelector('#' + id);
-            if (!btn) return;
-            const step = id === 'bmAcDown' ? 1 : -1;
-            let pressedAt = 0;
-            const press = (e) => {
-                const field = acField();
-                if (!field || document.activeElement !== field) { pressedAt = 0; return; }
-                e.preventDefault();
-                e.stopPropagation();
-                pressedAt = Date.now();
-                field.__scrayAc?.move(step);
-            };
-            btn.addEventListener('touchstart', press, { passive: false });
-            btn.addEventListener('mousedown', press);
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (Date.now() - pressedAt < 700) return;      // already stepped on the press
-                const field = acField();
-                if (!field) return;
-                if (field === newNoteEl) focusNoteField();
-                else field.focus({ preventScroll: true });
-                field.__scrayAc?.move(step);
-            });
+            // From the bookmarks page, slide back to Add bookmark first. That may
+            // redraw the modal, so the field is found again afterwards.
+            if (page !== 0) modal.__goToPage?.(0, { now: true });
+            (modal.__focusNoteField || focusNoteField)();
         });
 
         modal.querySelector('#deleteBookmarksBtn')?.addEventListener('click', (e) => {
             e.stopPropagation();
             setMode('delete');
+            if (mode === 'delete') modal.__goToPage?.(1);
         });
 
         // One handler for both halves of a row: which half was tapped only
@@ -3598,8 +3770,14 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                 const typing = pressedWhileTyping || typingNewNote();
                 pressedWhileTyping = false;
                 if (typing && newNoteEl) {
+                    // Its parent notes join the picks, the way its note used to
+                    // join the typed text.
                     const text = working[idx] && !working[idx].deleted ? (working[idx].note || '').trim() : '';
-                    if (text) appendToNewNote(text); else focusNoteField();
+                    if (text && typeof window.scrayNoteParents === 'function') {
+                        window.scrayNoteParents(text).forEach(pn => { if (!picked.includes(pn)) picked.push(pn); });
+                        renderResults();
+                    }
+                    focusNoteField();
                     return;
                 }
                 rowAction(idx, btn.classList.contains('bm-jump') ? 'time' : 'note');
@@ -3633,35 +3811,19 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         // "Typing" is read at the PRESS, not at the click: on a phone the tap
         // takes focus off the field before the click lands. On desktop the
         // press is also stopped from taking focus, so the caret never leaves.
-        modal.querySelectorAll('.quick-note-btn').forEach(btn => {
-            let pressedWhileTyping = false;
-            const notePress = (e) => {
-                pressedWhileTyping = noteFieldActive && document.activeElement === newNoteEl;
-                if (pressedWhileTyping && e.type === 'mousedown') e.preventDefault();
-            };
-            btn.addEventListener('touchstart', notePress, { passive: true });
-            btn.addEventListener('mousedown', notePress);
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                flushOpenEdit(false);
-                const text = topNotes[parseInt(btn.dataset.noteIndex, 10)];
-                const typing = pressedWhileTyping
-                    || (noteFieldActive && document.activeElement === newNoteEl);
-                pressedWhileTyping = false;
-                if (mode === 'normal' && typing && newNoteEl) {
-                    appendToNewNote(text);
-                } else if (mode === 'normal') {
-                    commitAndClose({ time: newTime, note: text });
-                } else if (newNoteEl) {
-                    newNoteEl.value = newNote = text;
-                }
-            });
-        });
-
         modal.querySelector('#saveBookmarksBtn').addEventListener('click', (e) => {
             e.stopPropagation();
             flushOpenEdit(false);
-            const note = (newNoteEl?.value || '').trim();
+            const note = hasPlayhead ? builtNote() : '';
+            // Typed but nothing picked: the words are a search, not a note, so
+            // say so rather than silently saving without them.
+            if (!note && (newNoteEl?.value || '').trim()) {
+                if (previewEl) {
+                    previewEl.style.color = '#dc3545';
+                    previewEl.textContent = 'Tap a note to pick it, then Save';
+                }
+                return;
+            }
             commitAndClose(note ? { time: newTime, note } : null);
         });
 

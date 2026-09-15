@@ -623,9 +623,12 @@ window.scrayVideoPassesNoteParents = scrayVideoPassesNoteParents;
  * counts use. Counted here rather than by adding up the notes' counts, which
  * would count a video once per note it has under a parent.
  */
-async function scrayNoteParentCounts() {
+async function scrayNoteParentCounts(perBookmarkArg) {
    const videos = await getAllVideos();
-   const perBookmark = typeof window.scrayViewMode === 'function' && window.scrayViewMode() === 'bookmarks';
+   // true = always count bookmarks - the bookmark modal ranks parents by how
+   // many bookmarks use them, whichever view is showing (13.151 / 13.149).
+   const perBookmark = perBookmarkArg === true
+       || (typeof window.scrayViewMode === 'function' && window.scrayViewMode() === 'bookmarks');
    const counts = new Map();
    videos.forEach(v => {
        const bms = window.scrayVisibleBookmarks

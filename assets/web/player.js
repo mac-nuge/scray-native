@@ -4444,6 +4444,12 @@ function attachFrameStepButtons() {
             guides.appendChild(seg);
         });
 
+        // FLS: the left third's halves - next bookmark above, MPFS below
+        // (picker 13.161 / native 13.159).
+        const flsSplit = document.createElement('div');
+        flsSplit.className = 'fls-tap-split';
+        guides.appendChild(flsSplit);
+
         // FLS: play/pause third, then the minus and plus sixths.
         addSegments('fls-tap-guide', [
             ['33.333%', '33.333%'],
@@ -8038,7 +8044,13 @@ function setupDoubleTapHandler() {
          // third is one zone, and a triple tap anywhere in it jumps to the
          // next bookmark. tY/tH are left computed above deliberately: they
          // cost nothing and re-splitting this zone later needs them back.
-         const flsZone = inFlsLeftThird ? 'nextbookmark' : null;
+         // ⚙️ Retired (picker 13.161 / native 13.159): next bookmark is a
+         // DOUBLE tap in the top half of the left third now, and the bottom
+         // half switches to MPFS - see the landscape branch of handleDoubleTap.
+         // A triple here would have to wait out the double, so there is no
+         // zone left to track. inFlsLeftThird stays computed for re-use.
+         void inFlsLeftThird;
+         const flsZone = null;
 
          const firedZone = window.scrayTrackTripleTap?.(flsZone);
          if (firedZone) {
@@ -8087,10 +8099,17 @@ if (isLandscape && isMobile) {
     const inMiddleThird = effTapX >= thirdW && effTapX < thirdW * 2;
 
     if (inLeftThird) {
-        // Nothing on double tap. This third is the triple-tap zone, handled
-        // separately - see the triple-tap tracker. Because there's no
-        // double-tap action here, the triple can fire on the third tap with
-        // no waiting period, which a shared zone would have forced.
+        // ⚙️ Two halves, as seen in landscape (picker 13.161 / native 13.159).
+        // Was the triple-tap zone for next bookmark.
+        //   TOP    -> next bookmark (what the triple tap did)
+        //   BOTTOM -> MPFS: leaves FLS for plain portrait fullscreen, the
+        //             same as the rotate button while fullscreen is on
+        // The split is drawn by .fls-tap-split in the guides.
+        if (effTapY < effRect.height / 2) {
+            window.scrayNextBookmark?.();
+        } else if (typeof window.toggleManualRotation === 'function' && manualRotationActive) {
+            window.toggleManualRotation();
+        }
         return;
     }
 

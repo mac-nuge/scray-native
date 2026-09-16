@@ -2456,6 +2456,22 @@ background: rgba(255, 255, 255, 0.22);
 }
 
 .fls-tap-tier { left: 66.667%; }
+
+/* ⚙️ FLS left third, halved (picker 13.161 / native 13.159): double tap above
+   for next bookmark, below for MPFS. The line runs across that third only, at
+   the picture's half height - handleDoubleTap divides the same height. */
+.fls-tap-split { display: none; }
+body.manual-rotate-landscape .fls-tap-split {
+display: block;
+position: absolute;
+left: 0;
+width: 33.333%;
+top: 50%;
+height: 1px;
+margin-top: -0.5px;
+background: rgba(255, 255, 255, 0.22);
+pointer-events: none !important;
+}
 .mpfs-tap-tier { left: 50%; }
 
 /* The shared segment rule insets from the top (to clear the FLS clock) and

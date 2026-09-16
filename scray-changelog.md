@@ -4,6 +4,46 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.161 / native 13.159 — test: smaller READY at the top, FLS left-third double taps, OneDrive free space
+<!-- 2026-09-16T13:30Z -->
+
+**picker** — `staging - 13.161`: `scray-config.js`, `player.js`, `style.css`, `randomiser.js`, `VERSION`
+**native** — `stg-native - 13.159`: `assets/web/scray-config.js`, `assets/web/player.js`, `assets/web/style.css`, `assets/web/VERSION`
+
+(browse 13.67 / picker 13.160 / native 13.158 were confirmed and committed as stable before this.)
+
+Mac asked for three things:
+1. The READY signal moved to the top of the page and made smaller.
+2. In FLS, a double tap in the bottom half of the zone left of the leftmost guideline switches to MPFS.
+3. In Picker, the total OneDrive free space across the connected accounts, from the same API data browse.html's storage panel uses, shown where Native shows the phone's free space: after "Total size" on the stats line above the list.
+
+For (2), Mac chose that next bookmark moves from a triple tap anywhere in the left third to a **double tap in its top half**.
+
+**1. READY** (`scray-config.js`, both apps). The toast is now a small pill at the top centre (`safe-area-inset-top + 8px`) instead of a large card mid-screen.
+- **Size:** 0.85rem, 5px × 12px padding, fully rounded, with a lighter shadow.
+- **Text:** one line, "✅ READY · start-up finished in 3.0s".
+- **Motion:** it drops in 6px and fades, instead of scaling.
+- **Unchanged:** the colour, the dwell time and the timing logic.
+
+**2. FLS left third** (`player.js`, both apps). This covers the landscape branch of `handleDoubleTap`, the zone left of the first guideline.
+- **Top half** (as seen in landscape; the tap is already remapped for FLS): `scrayNextBookmark()`, the same call the triple tap made.
+- **Bottom half:** `toggleManualRotation()`. While fullscreen is on, that resets the rotation and leaves plain portrait fullscreen, the same as the rotate button. It is guarded on `manualRotationActive`, so real device landscape does nothing there.
+- **Triple tap retired:** the triple-tap tracker's FLS zone is now `null`. A triple would have had to wait out the double, and single taps in the left third toggle the controls again like everywhere else. One-finger zoom (tap, then drag) is unaffected, since a double tap never moves.
+- **Guide:** a new `.fls-tap-split` draws a horizontal line across the left third at half height (FLS only), matching the other guides.
+
+**3. OneDrive free space** (`randomiser.js`, picker). `updateVideoStats` now reads "Items: N | Total size: X | OneDrive 1.86 TB free".
+- **The figure:** `graph_quota` (browse's call), with `remaining` summed over the accounts that answered, using browse's fallback of total minus used.
+- **A failed account** isn't counted, and marks the figure with `*`. The line's tooltip lists each account's free space and says how many couldn't be read.
+- **Doesn't slow the line:** it renders at once with the cached figure, and fills in when the call lands, but only if a newer render hasn't replaced the line.
+- **Cached for 5 minutes, one request at a time:** `graph_quota` makes a Graph call per account.
+- **Waits out READY:** the first fetch holds while `scrayBoot` is watching start-up or a folder refresh, polling every second for up to 2 minutes. READY is timed off network quiet, and a Graph round per account would otherwise push it back.
+
+**Tested** in headless Chromium:
+- **READY:** a pill at the top (y 8, 28px tall, 222px wide at 390px) reading "✅ READY · start-up finished in 3.0s".
+- **Stats line:** renders first without the OneDrive part, then fills in "OneDrive 1.40 TB free*" with the per-account tooltip (two accounts read, one failed). A second render reuses the cache with no second request.
+- **Not headless-tested:** the FLS double taps. The branch was checked by reading it, and both copies match.
+- **Syntax:** `node --check` passes on all changed JS.
+
 ### browse 13.67 / picker 13.160 / native 13.158 — test: S circle, delete everywhere, rename without parent, Jira quick send
 <!-- 2026-09-16T12:40Z -->
 

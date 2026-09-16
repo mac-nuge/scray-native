@@ -108,27 +108,27 @@ window.scrayBoot = (function () {
 
   // ⚙️ ADJUSTABLE: the READY confirmation's look and dwell time.
   const READY_COLOUR   = '#ff9800';  // matches the score badges / progress end caps
-  const READY_FONT     = '1.7rem';   // the word READY itself
+  const READY_FONT     = '0.85rem';  // the word READY itself (was 1.7rem, mid-screen)
   const READY_DWELL_MS = 2200;       // how long it sits before fading
 
   function toast(secs, label) {
     const el = document.createElement('div');
     el.innerHTML =
-      `✅ READY<br><span style="font-size:0.42em;opacity:0.9;font-weight:normal;">${label || 'start-up'} finished in ${secs}s</span>`;
+      `✅ READY <span style="font-size:0.8em;opacity:0.9;font-weight:normal;letter-spacing:0;">· ${label || 'start-up'} finished in ${secs}s</span>`;
     // Fully inline rather than borrowing .score-confirmation-tooltip: that
     // class positions itself near the bottom of the screen, and a class rule
     // fighting inline centring is exactly the kind of thing that silently
     // breaks later. Nothing here depends on style.css.
     el.style.cssText = `
       position: fixed;
-      top: 50%;
+      top: calc(env(safe-area-inset-top, 0px) + 8px);
       left: 50%;
-      transform: translate(-50%, -50%) scale(0.92);
+      transform: translate(-50%, -6px);
       background: ${READY_COLOUR};
       color: #fff;
-      padding: 20px 34px;
-      border-radius: 12px;
-      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+      padding: 5px 12px;
+      border-radius: 999px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
       font-family: Arial, sans-serif;
       font-size: ${READY_FONT};
       font-weight: bold;
@@ -147,11 +147,11 @@ window.scrayBoot = (function () {
     // setting both states in one go would skip the transition entirely.
     requestAnimationFrame(() => {
       el.style.opacity = '0.96';
-      el.style.transform = 'translate(-50%, -50%) scale(1)';
+      el.style.transform = 'translate(-50%, 0)';
     });
     setTimeout(() => {
       el.style.opacity = '0';
-      el.style.transform = 'translate(-50%, -50%) scale(0.96)';
+      el.style.transform = 'translate(-50%, -6px)';
       setTimeout(() => el.remove(), 350);
     }, READY_DWELL_MS);
   }

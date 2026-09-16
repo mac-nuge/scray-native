@@ -35,6 +35,11 @@ async function fetchDefaultExcludeTags() {
  */
 async function loadDefaultExcludeTags() {
     const tags = await fetchDefaultExcludeTags();
+    // Kept for the pills bar (picker 13.170 / native 13.166): the default
+    // excludes are always on, so they aren't "a filter in place" - Clear all
+    // ignores them when deciding whether to show, and puts them back when it
+    // clears.
+    window.scrayDefaultExcludeTags = new Set(tags);
     if (!tags.length) {
         console.log("No default exclude tags in the database");
         return;
@@ -73,6 +78,11 @@ async function addTagToDefaultExcludeList(tag) {
             return { alreadyExists: true };
         }
         await window.scrayApiCall("exclude_remove", { method: "POST", body: { tag: clean } });
+        if (window.scrayDefaultExcludeTags) {
+            [...window.scrayDefaultExcludeTags].forEach(t => {
+                if (t.toLowerCase() === clean.toLowerCase()) window.scrayDefaultExcludeTags.delete(t);
+            });
+        }
 
         // loadDefaultExcludeTags only ever adds, so a removal has to be
         // reflected in the live dropdown by hand.

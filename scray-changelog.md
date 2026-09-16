@@ -4,6 +4,63 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.170 / native 13.166 — test: Clear all ignores the default excludes and keeps them, no scroll on Clear all
+<!-- 2026-09-16T16:00Z -->
+
+**picker** — `staging - 13.170`: `randomiser.js`, `scray-exclude.js`, `VERSION`
+**native** — `stg-native - 13.166`: `assets/web/randomiser.js`, `assets/web/scray-exclude.js`, `assets/web/VERSION`
+
+(Native 13.165 was not committed before this, so native's working tree carries both.)
+
+Mac reported two problems with 13.169's Clear all:
+1. It was always on screen. It should only show when filters are in place.
+2. Tapping it scrolled the page.
+
+**1. Always on screen.** The default exclude list (`scray-exclude.js`, the `exclude_tags` table) is applied to `#excludeTagSelect` at start-up. 13.169 counted every selected exclude tag, so the defaults alone kept the pill up.
+- **Recording the defaults:** `loadDefaultExcludeTags` now keeps the list as `window.scrayDefaultExcludeTags`. `addTagToDefaultExcludeList` takes a removed tag out of it.
+- **The gate:** the pills bar skips those tags when it counts excludes, so Clear all shows only for filters beyond the defaults.
+- **What Clear all does now** (`scrayClearAllFilters`): it puts the exclude dropdown back to the default list instead of emptying it. The defaults are always on, and clearing them away was never what that pill was for. The big Clear button (`clearAllFilters`) is unchanged.
+
+**2. The scroll.** `scrayClearAllFilters` triggers `change` on each tag dropdown, and each handler runs its own filter pass. `skipSearchScroll` is one-shot and read at the end of `filterDisplayedByFilename`, so the first pass to finish used it up and a later one scrolled to the results. It's the same race 13.168 removed from the wholesale name taps.
+- **No-scroll window:** the dropdown handlers still run, since they re-widen the cascaded option lists. Clear all now sets `window.scraySuppressScrollUntil` 1.5s ahead, and `filterDisplayedByFilename` treats that window like `skipSearchScroll`, so none of the passes it starts can scroll.
+- **Also set:** `skipPanelAutoOpen`.
+
+**Tested** in headless Chromium, with the pills function lifted out of `randomiser.js` and stub filter sets:
+- **Two defaults excluded and nothing else:** `Score`, `Exclude (2)`, no Clear all.
+- **Plus one tag excluded:** `✕ Clear all` appears, with `Exclude (3)`.
+- **Defaults plus one studio excluded:** `− twistys`, then `✕ Clear all`.
+- **Syntax:** `node --check` passes on all changed files.
+- **Not tested:** the scroll window in a browser.
+
+### picker 13.169 / native 13.165 — test: Clear all pill whenever any filter is on
+<!-- 2026-09-16T15:50Z -->
+
+**picker** — `staging - 13.169`: `randomiser.js`, `VERSION`
+**native** — `stg-native - 13.165`: `assets/web/randomiser.js`, `assets/web/VERSION`
+
+(Mac confirmed picker 13.168's wholesale name taps work.)
+
+Mac asked for a clear button with the pills.
+
+**Why it was missing.** `✕ Clear all` shared the Intersect / Additive switch's gate, `scrayTotalFilterTerms() > 1`. That counts includes only: catalogue tags, facet includes and note keywords. So it stayed hidden with a single include, and with any number of excludes. Excludes are what wholesale mode's name taps make first.
+
+**The fix** (`updateFloatingTagPillsFromCommon`, both apps).
+- **New gate:** Clear all has its own, and shows when includes plus excludes come to at least one. Excludes are the facet exclude sets plus `#excludeTagSelect`'s selection.
+- **Unchanged:** the Intersect switch keeps the two-include gate, since it only means something with two. The pill's position and its action (`scrayClearAllFilters`, which clears everything) are the same.
+- **Wholesale:** in Picker, the random list re-filters after Clear all through 13.166's `scrayRefreshFilters` wrapper.
+
+**Question answered:** why some excludes sit inside the grey **Exclude (n)** pill while others show on their own.
+- **Two different exclude lists:** a folder name (catalogue tag, e.g. from a file with no stash match) goes into `#excludeTagSelect`. The bar has always consolidated those into one Exclude (n) pill with its modal behind it.
+- **Stash studios and performers** are facet excludes. Those have always had one red "− name" pill each (13.114).
+
+**Tested** in headless Chromium, with the pills function lifted out of `randomiser.js` and stub filter sets:
+- **Nothing on:** no Clear all.
+- **One studio exclude:** `− twistys`, then `✕ Clear all`.
+- **Plus a tag exclude:** the same, plus `Exclude (1)`.
+- **One include:** `web`, then `✕ Clear all`, with no Intersect switch.
+- **Two includes:** `∪ Additive`, then `✕ Clear all`.
+- **Syntax:** `node --check` passes on both files.
+
 ### browse 13.69 / picker 13.165 / native 13.164 — test: Google on every Stash nav scene, stash names survive a rename, Refresh Data refreshes stash names
 <!-- 2026-09-16T14:37Z -->
 

@@ -776,10 +776,22 @@ window.scrayClearAllFilters = function (ev) {
    // cascade re-widens the option lists. Every one of these fires a filter
    // pass, which is why this is a deliberate single action rather than
    // something done on each individual pill removal.
+   // No scroll from any of the passes this sets off (13.170 / 13.166). Each
+   // select's change handler runs its own filter pass, and skipSearchScroll is
+   // one-shot: the first pass to finish used it up and a later one scrolled
+   // the page to the results. A short window covers all of them.
+   window.scraySuppressScrollUntil = Date.now() + 1500;
+   window.skipPanelAutoOpen = true;
    ['#tagFilterLevel1Select', '#tagFilterLevel2Select', '#tagFilterLevel3Select',
-    '#tagFilterAllSelect', '#excludeTagSelect'].forEach(sel => {
+    '#tagFilterAllSelect'].forEach(sel => {
        if ($(sel).length) $(sel).val(null).trigger('change');
    });
+   // Excludes go back to the default list rather than to nothing - the
+   // defaults are always on, and Clear all only shows for filters beyond them.
+   if ($('#excludeTagSelect').length) {
+       const defaults = window.scrayDefaultExcludeTags ? [...window.scrayDefaultExcludeTags] : [];
+       $('#excludeTagSelect').val(defaults).trigger('change');
+   }
 
    if (ev && typeof window.clearSearchPillFilter === 'function') {
        window.clearSearchPillFilter(ev);
@@ -2173,14 +2185,24 @@ if (typeof window.scrayTotalFilterTerms === 'function' && window.scrayTotalFilte
        refreshFiltersFromCommonSet();
    });
    container.appendChild(ixPill);
+}
 
-   // Clear-all rides in the same gate as the intersect switch, so the two
-   // appear and disappear together. Below two terms there is nothing worth a
-   // dedicated button - one selected tag is already one tap to remove via its
-   // own pill - and the bar stays clean when nothing is filtered at all.
-   //
-   // The action itself still clears everything, search and toggles included.
-   // It is only the visibility that keys off the tag count.
+// Clear all (picker 13.169 / native 13.165): shown as soon as ANY include or
+// exclude is on - one tag, one studio filtered out, anything. The default
+// exclude list doesn't count (13.170 / 13.166): it is always applied, so
+// counting it kept the pill on screen permanently. It used to share
+// the intersect switch's two-term gate, and that gate only counted includes,
+// so a bar of excludes (which is what wholesale mode's name taps make first)
+// had no way to clear them in one go.
+//
+// The action itself still clears everything, search and toggles included.
+const scrayExcludeTerms = (window.SCRAY_FACET_CLASSES || []).reduce((n, k) => {
+   const x = (window.scrayFacetExcludes || {})[k];
+   return n + (x ? x.size : 0);
+}, 0) + (($('#excludeTagSelect').val() || [])
+   .filter(t => !(window.scrayDefaultExcludeTags && window.scrayDefaultExcludeTags.has(t))).length);
+const scrayIncludeTerms = typeof window.scrayTotalFilterTerms === 'function' ? window.scrayTotalFilterTerms() : 0;
+if (scrayIncludeTerms + scrayExcludeTerms > 0) {
    const clearPill = document.createElement("span");
    clearPill.className = "floating-tag-pill floating-tag-clearall";
    clearPill.textContent = "\u2715 Clear all";
@@ -3161,7 +3183,7 @@ if (addFilteredBtn) {
 // inside a setTimeout on the clear-filters path. So the first player open,
 // history panel or sync of the session latched it on and this scroll never
 // ran again. Consuming it here is what every one of those callers assumes.
-const skipScroll = !!window.skipSearchScroll;
+const skipScroll = !!window.skipSearchScroll || Date.now() < (window.scraySuppressScrollUntil || 0);
 window.skipSearchScroll = false;
 if (!skipScroll) {
 window.scrayScrollToResults();

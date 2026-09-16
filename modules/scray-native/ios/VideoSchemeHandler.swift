@@ -121,7 +121,13 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
         var headers = [
             "Content-Type": mimeType(for: relativePath),
             "Content-Length": "\(length)",
-            "Accept-Ranges": "bytes"
+            "Accept-Ranges": "bytes",
+            // TinEye (native 13.179): lets the page copy a frame of a phone
+            // copy onto a canvas. The page is file:// and this scheme is a
+            // different origin, so without this header a crossorigin video
+            // fails and a plain one taints the canvas. These are the user's
+            // own files served only to this web view, so '*' grants nothing.
+            "Access-Control-Allow-Origin": "*"
         ]
         if statusCode == 206 { headers["Content-Range"] = "bytes \(start)-\(end)/\(fileSize)" }
 

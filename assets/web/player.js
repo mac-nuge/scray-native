@@ -3306,6 +3306,253 @@ if (isDesktop) {
  console.log('iOS native fullscreen button attached');
 }
 
+// =========================================
+// PLAYER OVERFLOW (13.183 picker / 13.176 native; 13.184 / 13.177)
+// =========================================
+// One button, ..., straight after the volume control in every player. It opens
+// the PLAYER OVERFLOW - a menu of controls that don't need a slot on the bar:
+//
+//   ⛶  Native fullscreen   was the ⛶ button (triggerIOSNativeFullscreen -
+//                          unchanged, and still touch devices only, as the
+//                          button was)
+//   🔍 TinEye              reverse image search of the current frame
+//                          (13.186) - see TINEYE below
+//
+// Add an entry to scrayPlayerOverflowActions.
+//
+// Replaces attachIOSFullscreenButton at all three rebuild points, so the ⛶
+// button is no longer put on the bar. That function is kept, unused, in case
+// the button is ever wanted back.
+function scrayIsTouchPlayerDevice() {
+    const isTouchDevice = ('ontouchstart' in window) ||
+                          (navigator.maxTouchPoints > 0) ||
+                          (navigator.msMaxTouchPoints > 0);
+    return !(window.innerWidth >= 769 && window.innerHeight >= 600 && !isTouchDevice);
+}
+
+function scrayPlayerOverflowActions() {
+    const actions = [];
+    if (scrayIsTouchPlayerDevice()) {
+        actions.push({
+            label: '⛶  Native fullscreen',
+            onClick: () => triggerIOSNativeFullscreen()
+        });
+    }
+    actions.push({
+        label: '🔍  TinEye',
+        onClick: () => { scrayTinEyeSearch(); }
+    });
+    return actions;
+}
+
+// =========================================
+// TINEYE (picker 13.186 / native 13.179 / browse 13.71)
+// =========================================
+// Reverse image search of what is on screen:
+//   1. grab the current frame as a JPEG        scrayGrabVideoFrame
+//   2. post it to api.php, which keeps it for an hour under a random id and
+//      hands back a public link to it          tineye_frame_put
+//   3. open https://tineye.com/search?url=<that link>
+//
+// Grabbing: drawing a <video> onto a canvas only yields pixels when the video
+// is same-origin or was loaded with CORS. So the playing video is tried first;
+// if the browser refuses (SecurityError - a "tainted" canvas), a hidden copy
+// is loaded with crossorigin="anonymous" from the same source, seeked to the
+// same moment, and grabbed instead. Playback is never touched. That copy needs
+// the source to allow CORS: OneDrive's download links should; Native's own
+// scray-video:// loader sends Access-Control-Allow-Origin from native 13.179's
+// Swift, so phone copies need a new IPA build before they work.
+const SCRAY_TINEYE_MAX_W = 1920;        // ⚙️ frames wider than this are scaled down
+const SCRAY_TINEYE_JPEG_QUALITY = 0.9;  // ⚙️
+const SCRAY_TINEYE_COPY_TIMEOUT_MS = 20000;
+
+function scrayFrameToDataUrl(source, w, h) {
+    const scale = Math.min(1, SCRAY_TINEYE_MAX_W / w);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+    // Throws SecurityError on a tainted canvas - the caller's cue to use a copy.
+    return canvas.toDataURL('image/jpeg', SCRAY_TINEYE_JPEG_QUALITY);
+}
+
+async function scrayGrabFrameFromCopy(video) {
+    const src = video.currentSrc || video.src;
+    if (!src) throw new Error('no video source');
+    const at = video.currentTime || 0;
+
+    const copy = document.createElement('video');
+    copy.crossOrigin = 'anonymous';
+    copy.muted = true;
+    copy.playsInline = true;
+    copy.setAttribute('playsinline', '');
+    copy.setAttribute('webkit-playsinline', '');
+    copy.preload = 'auto';
+    copy.style.cssText = 'position:fixed;left:-10000px;top:0;width:4px;height:4px;opacity:0;pointer-events:none;';
+    document.body.appendChild(copy);
+    try {
+        await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('timed out loading the frame')), SCRAY_TINEYE_COPY_TIMEOUT_MS);
+            const done = (fn) => (arg) => { clearTimeout(timer); fn(arg); };
+            copy.addEventListener('error', done(() => reject(new Error(
+                "the video's source doesn't allow a frame to be copied"))), { once: true });
+            copy.addEventListener('loadedmetadata', () => {
+                try { copy.pause(); } catch (e) {}
+                const target = Math.min(at, Math.max(0, (copy.duration || at) - 0.05));
+                if (target < 0.05) {
+                    if (copy.readyState >= 2) done(resolve)();
+                    else copy.addEventListener('loadeddata', done(resolve), { once: true });
+                } else {
+                    copy.addEventListener('seeked', done(resolve), { once: true });
+                    copy.currentTime = target;
+                }
+            }, { once: true });
+            copy.src = src;
+            copy.load();
+            // iOS won't fetch a hidden, never-played video; a muted inline play
+            // is allowed and gets it going. Paused again as soon as it has size.
+            const p = copy.play();
+            if (p && typeof p.catch === 'function') p.catch(() => {});
+        });
+        // A frame that has only just seeked can still be undecoded for a tick.
+        if (copy.readyState < 2) await new Promise(r => setTimeout(r, 250));
+        if (!copy.videoWidth) throw new Error('the copy has no picture');
+        try {
+            return scrayFrameToDataUrl(copy, copy.videoWidth, copy.videoHeight);
+        } catch (err) {
+            if (err && err.name === 'SecurityError') {
+                throw new Error("the video's source doesn't allow a frame to be copied");
+            }
+            throw err;
+        }
+    } finally {
+        try { copy.pause(); copy.removeAttribute('src'); copy.load(); } catch (e) {}
+        copy.remove();
+    }
+}
+
+/** The frame on screen, as a JPEG data URL. */
+async function scrayGrabVideoFrame() {
+    const video = window.plyrPlayer?.media || document.querySelector('#inlineVideoContainer video');
+    if (!video || !video.videoWidth || video.readyState < 2) throw new Error('nothing on screen to grab yet');
+    try {
+        return scrayFrameToDataUrl(video, video.videoWidth, video.videoHeight);
+    } catch (err) {
+        if (!err || err.name !== 'SecurityError') throw err;
+        console.log('[tineye] playing video is cross-origin - grabbing from a CORS copy');
+    }
+    return scrayGrabFrameFromCopy(video);
+}
+window.scrayGrabVideoFrame = scrayGrabVideoFrame;
+
+/** Same routing as the stash navigator's external links (file-operations.js). */
+function scrayOpenExternalUrl(url) {
+    if (window.SCRAY_IN_APP_BROWSER) {
+        window.location.href = 'scraynative://newtab?url=' + encodeURIComponent(url);
+        return;
+    }
+    if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
+        window.ScrayBridge.openBrowser(url).catch(err => console.error('[tineye] openBrowser failed:', err));
+        return;
+    }
+    window.open(url, '_blank');
+}
+
+async function scrayTinEyeSearch() {
+    if (window.scrayTinEyeBusy) return;
+    window.scrayTinEyeBusy = true;
+    const say = (msg) => { if (typeof showPlayerFeedback === 'function') showPlayerFeedback(msg, 'top-left'); };
+
+    // A plain browser blocks a tab opened after the upload's await, so the tab
+    // is opened NOW, inside the tap, and pointed at TinEye once the link exists.
+    // Native and the in-app browser open through the bridge, which has no such
+    // rule.
+    let tab = null;
+    const viaBridge = !!(window.SCRAY_IN_APP_BROWSER || (window.ScrayBridge && window.ScrayBridge.openBrowser));
+    if (!viaBridge) {
+        try {
+            tab = window.open('', '_blank');
+            if (tab && tab.document) {
+                tab.document.title = 'TinEye';
+                tab.document.body.style.cssText = 'font:16px -apple-system,Segoe UI,sans-serif;padding:24px;color:#444;';
+                tab.document.body.textContent = 'Grabbing the frame and sending it to TinEye…';
+            }
+        } catch (e) { tab = null; }
+    }
+
+    try {
+        say('🔍 TinEye: grabbing the frame…');
+        const image = await scrayGrabVideoFrame();
+        say('🔍 TinEye: uploading…');
+
+        const api = new URL(window.SCRAY_SYNC.API_BASE);
+        api.searchParams.set('action', 'tineye_frame_put');
+        const res = await fetch(api.toString(), {
+            method: 'POST',
+            headers: { 'X-Scray-Key': window.SCRAY_SYNC.API_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image }),
+            credentials: 'same-origin'
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json || !json.ok) {
+            throw new Error((json && json.error) || `upload failed (HTTP ${res.status})`);
+        }
+        const search = json.search || ('https://tineye.com/search?url=' + encodeURIComponent(json.url));
+        console.log('[tineye] frame', json.url, '->', search);
+        if (tab && !tab.closed) tab.location.href = search;
+        else scrayOpenExternalUrl(search);
+        say('🔍 TinEye: opened');
+    } catch (err) {
+        console.error('[tineye] failed:', err);
+        if (tab && !tab.closed) { try { tab.close(); } catch (e) {} }
+        say('🔍 TinEye failed: ' + (err && err.message ? err.message : err));
+    } finally {
+        window.scrayTinEyeBusy = false;
+    }
+}
+window.scrayTinEyeSearch = scrayTinEyeSearch;
+
+function attachOverflowControls() {
+    const controls = document.querySelector('.plyr__controls');
+    if (!controls) return;
+
+    // Straight after the volume control: Plyr's slider wrapper where there is
+    // one (hidden on iOS, but still the last of the pair in the DOM), else mute.
+    const afterVolume = () => {
+        const vol = controls.querySelector(':scope > .plyr__volume');
+        const mute = controls.querySelector(':scope > [data-plyr="mute"]');
+        return vol || mute || null;
+    };
+
+    let more = controls.querySelector(':scope > .plyr-more');
+    if (!more) {
+        more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'plyr__control plyr-more';
+        more.textContent = '...';
+        more.title = 'Player overflow';
+        more.setAttribute('aria-label', 'Player overflow');
+        more.onclick = (e) => {
+            e.stopPropagation();
+            e.currentTarget.blur();
+            if (typeof showContextMenu !== 'function') return;
+            showContextMenu(scrayPlayerOverflowActions(), e);
+            // Above the player in every mode - the plain menu sits at 10001,
+            // under the docked MPB player and the fullscreen control bar.
+            const menus = document.querySelectorAll('.context-menu');
+            const menu = menus[menus.length - 1];
+            if (menu) {
+                menu.classList.add('plyr-more-menu');
+                menu.style.zIndex = '2147483600';
+            }
+        };
+    }
+
+    const anchor = afterVolume();
+    if (anchor) anchor.insertAdjacentElement('afterend', more);
+    else controls.appendChild(more);
+}
+
 function attachManualRotateButton() {
 const controls = document.querySelector('.plyr__controls');
 if (!controls) return;
@@ -5639,9 +5886,12 @@ if (!container) {
         else document.body.insertBefore(container, document.body.firstChild);
     }
 
-// Initialise Plyr with custom control order: play, stop will be inserted, fullscreen, settings, mute, volume, then progress
+// Initialise Plyr with custom control order: play, stop will be inserted, fullscreen, mute, volume, then progress
 window.plyrPlayer = new Plyr('#inlineVideoPlayer', {
-controls: ['play', 'fullscreen', 'settings', 'mute', 'volume', 'progress', 'current-time'],
+// ⚙️ No 'settings' (13.183 picker / 13.176 native): the cog only held speed,
+// which Mac doesn't use. Overflow controls live in the ... menu instead - see
+// PLAYER OVERFLOW MENU.
+controls: ['play', 'fullscreen', 'mute', 'volume', 'progress', 'current-time'],
 fullscreen: { enabled: true, fallback: true, iosNative: false, container: null },
 keyboard: { focused: false, global: false }, // Disable Plyr's keyboard shortcuts
 loop: { active: true } // Enable video looping
@@ -6908,7 +7158,7 @@ window.plyrPlayer.on('loadstart', window.scrayRebuildPlayerControls = () => {
     cleanupPlyrControls();
     attachStopButton();
     attachPIPButton();
-    attachIOSFullscreenButton();
+    attachOverflowControls(); // ... = the player overflow (native fullscreen, zoom capture)
     attachManualRotateButton();
     attachFlsToMpfsButton();
     attachScrollLockButton();
@@ -7288,7 +7538,7 @@ setupMpfsSwipeExit(); // swipe down to exit MPFS
 enableAnywhereScrubbing();
 attachStopButton();
 attachPIPButton(); // Add PIP button
-attachIOSFullscreenButton(); // Add iOS native fullscreen button
+attachOverflowControls(); // ... = the player overflow (native fullscreen, zoom capture)
 attachManualRotateButton(); // Add manual rotate-to-landscape button
 attachFlsToMpfsButton(); // Add FLS -> MPB-fullscreen button (FLS only)
 attachScrollLockButton(); // Add scroll-lock button (manual rotation only)
@@ -7907,7 +8157,7 @@ updatePlayerStateClass();
 window.plyrPlayer.on('loadedmetadata', () => {
 attachStopButton();
 attachPIPButton(); // Re-attach PIP button on new video
-attachIOSFullscreenButton(); // Re-attach iOS fullscreen button on new video
+attachOverflowControls(); // ... = the player overflow (native fullscreen, zoom capture)
 attachManualRotateButton(); // Re-attach manual rotate button on new video
 attachFlsToMpfsButton(); // Re-attach FLS -> MPFS button on new video
 attachScrollLockButton(); // Re-attach scroll-lock button on new video

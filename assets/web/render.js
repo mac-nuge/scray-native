@@ -727,11 +727,12 @@ function scrayBuildListRow(video, index, cfg) {
     [studio, perf, file].forEach(el => applyHighlightingToElement(el, window.currentSearchTerms));
   }
 
-  // ⚙️ TAP TARGETS (13.180, 13.181). Lists with a size column (main, random):
-  //   filename  plays it straight away, through the P button's own handler -
+  // ⚙️ TAP TARGETS (13.180, 13.181, 13.185). Lists with a size column (main, random):
+  //   performers, filename
+  //             plays it straight away, through the P button's own handler -
   //             no need to open the row first. If it's the video already
   //             loaded in the player, the tap stops it instead (13.182).
-  //   any other column (number, studio, performers, score, size)
+  //   number, studio, score, size
   //             opens the row, or closes it
   // History and the basket have no size column, so they keep the old
   // behaviour: closed, the line opens the row; open, it plays (13.35).
@@ -739,8 +740,8 @@ function scrayBuildListRow(video, index, cfg) {
   line.addEventListener('click', (e) => {
     if (tapBySize) {
       const t = e.target;
-      if (t.closest && t.closest('.lc-file')) {
-        // The playing video's own filename: Stop, the same full reset as the
+      if (t.closest && t.closest('.lc-file, .lc-perf')) {
+        // The playing video's own filename or performers: Stop, the same full reset as the
         // player's stop button (inlineVideoPlayer.stop = resetVideoInline).
         const cur = window.currentPlayingVideo;
         const curId = cur ? String(cur.oneDriveId ?? cur.idFromAPI ?? '') : '';
@@ -1887,9 +1888,11 @@ What the gesture stays out of:
 // for LEFT the first sits next to the row and the last against the screen
 // edge; for RIGHT the same, mirrored. The LAST in each list is the outermost
 // button - the one a full swipe runs.
+// Mac's own setup, made the default in picker 13.183 / native 13.176:
+//   left   row [B] [D] [★]      right   [S] [R] [F] row
 const SCRAY_SWIPE_DEFAULTS = {
-  left:  ['B', '★'],
-  right: ['R', 'S'],
+  left:  ['B', 'D', '★'],
+  right: ['F tally', 'R', 'S'],
   fullLeft: true,
   fullRight: true
 };

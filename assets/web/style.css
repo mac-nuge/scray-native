@@ -8011,3 +8011,45 @@ sideways ones to the script. */
   font-size: 0.72rem;
   font-weight: 600;
 }
+
+/* =========================================
+PLAYER OVERFLOW BUTTON (13.183 picker / 13.176 native; 13.184 / 13.177)
+=========================================
+The ... button, added by attachOverflowControls (player.js) after the volume
+control. It opens the player overflow menu. Sized like the ⛶ it replaced in
+each mode. */
+.plyr__controls .plyr-more {
+  min-width: 50px !important;
+  min-height: 50px !important;
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  background: transparent !important;
+  font-size: 1.3rem !important;
+  font-weight: 700;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.plyr__controls .plyr-more:hover {
+  background: rgba(255, 255, 255, 0.2) !important;
+}
+@media (max-width: 768px) and (orientation: portrait) {
+  body:not(.manual-rotate-landscape) .plyr__controls .plyr-more {
+    min-width: 38px !important;
+    min-height: 38px !important;
+    font-size: 1.1rem !important;
+  }
+}
+body.manual-rotate-landscape .plyr__controls .plyr-more,
+body.landscape-fullscreen .plyr__controls .plyr-more {
+  min-width: 32px !important;
+  min-height: 32px !important;
+  font-size: 0.75rem !important;
+  padding: 1px !important;
+}
+/* The player overflow's items, a touch larger than the list's compact menu. */
+.context-menu.plyr-more-menu .context-menu-item {
+  font-size: 0.85rem;
+  padding: 10px 14px;
+}

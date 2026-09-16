@@ -4,7 +4,135 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### picker 13.182 / native 13.175 — test: Settings modal sits clear of the corner buttons; tapping the playing video's filename stops it
+### browse 13.71 / picker 13.186 / native 13.179 — stable: TinEye in the player overflow searches the current frame (frame hosted briefly by api.php)
+<!-- 2026-09-16T20:56Z -->
+
+**browse** — `staging-browse - 13.71`: `api.php`, `VERSION.txt`
+**picker** — `staging - 13.186`: `player.js`, `VERSION`
+**native** — `stg-native - 13.179`: `assets/web/player.js`, `modules/scray-native/ios/VideoSchemeHandler.swift` (**needs a new IPA build**), `assets/web/VERSION`
+
+Mac chose the recommended route for the player overflow's TinEye entry: grab the frame on screen, host it briefly on his server, and open TinEye with a link to it.
+
+**Server** (`api.php`, TINEYE FRAMES).
+- **`tineye_frame_put`** (POST, keyed; body `{ image: dataURL }`):
+  - **Accepts:** a JPEG, PNG or WebP through the bug report's `scrayDecodeShot`, capped at 6 MB, 16px minimum and 4096px maximum per side.
+  - **Stores:** re-encodes through GD to a plain JPEG at quality 90, so only pixels are ever served back; without GD a JPEG is stored as sent. Saved to `scray-data/tineye/<32 hex>.jpg`, mode 0600.
+  - **Returns:** `{ id, url, search, expires_at }`, where `search` is `https://tineye.com/search?url=…`.
+- **`tineye_frame`** (GET, **no key**): TinEye's servers are what fetch it. Validates the id against `^[0-9a-f]{32}$`, serves `image/jpeg` with `nosniff` / `noindex`, and returns 404 once expired. It's handled right after `$action` is read, before auth, the database or the JSON content type.
+- **Housekeeping:** every put and get deletes frames older than `SCRAY_TINEYE_TTL_S` (1 hour). A put is refused with 429 once `SCRAY_TINEYE_HOURLY_CAP` (60) frames are live.
+- **Access:** not in `SCRAY_PRIVILEGED`, because Native only has the device key. **Trade-off:** anyone with the bundled key can host up to 60 re-encoded images an hour, each reachable only by its random link for an hour.
+
+**Apps** (`player.js` TINEYE, identical in both).
+- **Grab** (`scrayGrabVideoFrame`):
+  - **First try:** draw the playing `<video>` onto a canvas, scaled to at most 1920px wide, as a JPEG data URL.
+  - **Fallback:** if the canvas is tainted (`SecurityError`, a cross-origin source), a hidden muted copy loads the same `currentSrc` with `crossorigin="anonymous"`, seeks to the same time and is grabbed instead. It gets a muted inline `play()` so iOS will fetch it, has a 20s timeout, and is torn down afterwards. Playback is never touched.
+  - **No CORS on the source:** the error reads "the video's source doesn't allow a frame to be copied".
+- **Upload and open** (`scrayTinEyeSearch`):
+  - **Posts** to `tineye_frame_put` with the usual key / same-origin cookie.
+  - **Opens** the returned search. In a plain browser the tab is opened inside the tap first, showing "Grabbing the frame…", then pointed at TinEye, because a tab opened after the awaits would be popup-blocked.
+  - **Native and the in-app browser** go through the same bridge / `scraynative://newtab` routing as the stash navigator's external links.
+  - **Feedback:** progress and errors show as player feedback. A failure closes the pre-opened tab, and a busy flag stops double taps.
+- **Native local files** (`VideoSchemeHandler.swift`): the `scray-video://` responses now send `Access-Control-Allow-Origin: *`. The page is `file://` and the scheme is a different origin, so without it the copy fails. Until an IPA with this is installed, TinEye on a phone copy will report that the source doesn't allow the copy. OneDrive streams don't depend on the IPA.
+
+**Not yet verified:** whether OneDrive's download links send CORS headers. Picker (and Native streaming from OneDrive) plays from those, so the first real tap on staging is the test. If they don't, the fallback reports it cleanly and the next step would be a server-side grab.
+
+**Tested.**
+- **Server:** `php -l`, then `php -S` with stub auth.
+  - A put of a 640×360 JPEG returned an id, link and TinEye URL.
+  - The link served `image/jpeg` without a key.
+  - A non-image returned 400, a bad key 401.
+  - Traversal and malformed ids returned 404.
+  - A frame aged two hours returned 404 and was deleted.
+- **Apps:** headless Chromium, with the TINEYE block lifted from `player.js` and uploading to that server.
+  - **Same-origin video:** grabbed directly, uploaded, and the pre-opened tab navigated to TinEye.
+  - **Cross-origin video with CORS:** fell back to the copy and grabbed the same 640×360 frame (identical bytes).
+  - **Cross-origin video without CORS:** reported "the video's source doesn't allow a frame to be copied" and closed the tab.
+
+### picker 13.185 / native 13.178 — test: performers plays like the filename; Zoom capture renamed TinEye
+<!-- 2026-09-16T20:47Z -->
+
+**picker** — `staging - 13.185`: `render.js`, `player.js`, `VERSION`
+**native** — `stg-native - 13.178`: `assets/web/render.js`, `assets/web/player.js`, `assets/web/VERSION`
+
+Mac asked for two things. First, a tap-target change: studio, score and size open the row, and performers and filename play it. Second, the player overflow's Zoom capture is renamed TinEye. It's meant to grab the current frame and run a TinEye reverse image search; how to build that was a question for this round, answered in chat, and not built yet.
+
+**Tap targets** (`render.js` `scrayBuildListRow`, main and random lists).
+- **Performers and filename:** play through `_scrayPlaySpec`. On the video already loaded in the player they stop it (13.182's rule, now on both cells).
+- **Number, studio, score, size:** toggle the row open or shut. The number wasn't mentioned, so it keeps opening.
+- **Empty performers cell:** it has no height to tap, so a tap there falls through to the line and opens the row.
+
+**Player overflow** (`player.js` `scrayPlayerOverflowActions`): the entry reads "🔍 TinEye". A tap still only shows "TinEye - coming soon".
+
+**Tested** in headless Chromium with the 13.181 harness:
+- **Opening:** number, studio, score and size each opened their row.
+- **Playing:** performers (with text) and filename each played. With that row's video playing, a performers tap stopped it.
+- **Errors:** none.
+
+### picker 13.184 / native 13.177 — test: zoom capture moves into the player overflow
+<!-- 2026-09-16T20:40Z -->
+
+**picker** — `staging - 13.184`: `player.js`, `style.css`, `VERSION`
+**native** — `stg-native - 13.177`: `assets/web/player.js`, `assets/web/style.css`, `assets/web/VERSION`
+
+Mac meant the magnifying-glass-and-camera button to go inside the `...` menu, not on the bar. That menu is now called the **player overflow**.
+
+**Change** (`player.js` PLAYER OVERFLOW, `style.css`).
+- **Bar:** `attachOverflowControls()` now adds only the `...` button (titled "Player overflow"), after the volume control. The bar zoom-capture button, its SVG icon and its CSS are gone.
+- **Overflow entries** (`scrayPlayerOverflowActions`):
+  - "⛶ Native fullscreen": touch devices only, unchanged.
+  - "🔍📷 Zoom capture": everywhere. Still no function; it shows "Zoom capture - coming soon".
+  - The desktop menu's "Nothing here yet" placeholder is gone, since zoom capture is always there.
+- **Bar count:** the MPB bar is one button shorter than 13.183 (▶ ■ ↻ ⤢ 🔇 ...).
+
+**Tested** in headless Chromium with real Plyr 3.7.8, as for 13.183:
+- **Bar order:** play, fullscreen, volume, `...`, progress, time, with no zoom button on the bar.
+- **Phone:** the player overflow listed Native fullscreen and Zoom capture.
+- **Desktop:** Zoom capture only.
+- **Zoom capture:** tapping it showed the coming-soon feedback and closed the menu.
+- **Errors:** none, apart from the sandbox's blocked Plyr sprite fetch.
+
+### picker 13.183 / native 13.176 — test: Mac's swipe setup is the default; player cog gone, ... overflow menu (native fullscreen) and a zoom-capture button after volume
+<!-- 2026-09-16T20:34Z -->
+
+**picker** — `staging - 13.183`: `render.js`, `player.js`, `style.css`, `VERSION`
+**native** — `stg-native - 13.176`: `assets/web/render.js`, `assets/web/player.js`, `assets/web/style.css`, `assets/web/VERSION`
+
+Mac made two requests.
+1. Make the swipe setup from his settings screenshot the default in both apps.
+2. In every player:
+   - remove the settings cog (it only held speed)
+   - add a `...` overflow menu straight after volume
+   - move native fullscreen into that menu
+   - add a magnifying-glass-and-camera button with no function yet (to be briefed next)
+
+**1. Swipe defaults** (`render.js` `SCRAY_SWIPE_DEFAULTS`).
+- **Left:** `row [B] [D] [★]`, i.e. `['B', 'D', '★']`, full swipe on (★).
+- **Right:** `[S] [R] [F] row`, i.e. `['F tally', 'R', 'S']` listed from the row outwards, full swipe on (S).
+- **Scope:** a device that already saved its own swipe setting keeps it. This only changes what an unsaved device, or Reset, gets.
+
+**2. Player controls** (`player.js`, `style.css`).
+- **Cog:** `'settings'` is removed from the Plyr `controls` list. Nothing else read the menu; speed keys set `player.speed` directly, and `attachStopButton` already tolerated a missing settings button.
+- **New buttons:** `attachOverflowControls()` replaces `attachIOSFullscreenButton()` at all three control-rebuild points (`loadstart` rebuild, `ready`, `loadedmetadata`), so the ⛶ button no longer goes on the bar. Its function is kept, unused.
+  - The new function puts `...` (`.plyr-more`) and the zoom-capture button (`.plyr-zoom-capture`, an inline SVG of a camera with a magnifier, drawn in `currentColor`) immediately after Plyr's `.plyr__volume` wrapper, which holds mute.
+  - Both are idempotent, like the other attach functions.
+  - The random / history / basket buttons insert before fullscreen, so nothing lands between volume and `...`.
+- **`...` menu:**
+  - Opens the shared `showContextMenu` with `scrayPlayerOverflowActions()`, the one place to add entries.
+  - For now it holds "⛶ Native fullscreen" (`triggerIOSNativeFullscreen`, unchanged; touch devices only, as the button was). On desktop it reads "Nothing here yet".
+  - The menu gets `z-index 2147483600`, so it opens above the docked MPB player and the fullscreen bar; the plain context menu sits at 10001. Its items are a little larger than the list's compact menu.
+- **Zoom capture:** a tap shows "🔍📷 Zoom capture - coming soon" as player feedback.
+- **Sizing:** matches the ⛶ they replace. 50px by default, 38px in MPB portrait, 32px in FLS and landscape fullscreen (18px icon).
+- **Button count:** the MPB bar keeps its count (▶ ■ ↻ ⤢ 🔇 ... 🔍📷 against the old ▶ ■ ⛶ ↻ ⤢ ⚙ 🔇). FLS gains one button, since it never showed ⛶ but did show the cog.
+
+**Tested** in headless Chromium against real Plyr 3.7.8 (npm), with the app's `style.css` / `style-index.css` / `context-menu.js` and `attachOverflowControls` + `triggerIOSNativeFullscreen` lifted from `player.js`. At desktop 1200×800 and phone 390×844 (touch):
+- **Bar order:** play, fullscreen, volume, `...`, zoom, progress, time. No settings control. One of each new button after attaching twice.
+- **Phone:** `...` was 38px and its menu showed "⛶ Native fullscreen".
+- **Desktop:** `...` was 50px and its menu showed "Nothing here yet".
+- **Menu z-index:** 2147483600.
+- **Zoom:** a tap showed the coming-soon feedback.
+- **Errors:** the only page error was Plyr failing to fetch its icon sprite from the CDN in the sandbox.
+
+### picker 13.182 / native 13.175 — stable: Settings modal sits clear of the corner buttons; tapping the playing video's filename stops it
 <!-- 2026-09-16T20:17Z -->
 
 **picker** — `staging - 13.182`: `settings.js`, `render.js`, `VERSION`

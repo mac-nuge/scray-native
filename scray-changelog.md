@@ -4,6 +4,69 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 13.68 / picker 13.162 / native 13.161 — test: in-modal Stash search and performer profiles, autocomplete fix, rename after match
+<!-- 2026-09-16T13:37Z -->
+
+**browse** — `staging-browse - 13.68`: `api.php`, `VERSION.txt`
+**picker** — `staging - 13.162`: `scray-stash-nav.js` (new), `file-operations.js`, `scray-stash-edit.js`, `index.php`, `VERSION`
+**native** — `stg-native - 13.161`: `assets/web/scray-stash-nav.js` (new), `assets/web/file-operations.js`, `assets/web/scray-stash-edit.js`, `assets/web/index.html`, `assets/web/VERSION`
+
+(native 13.160 was still marked test when this started.)
+
+Mac asked for six things in the Stash modal:
+1. The **Filename** button searches just the words: CamelCase split, and separators that aren't spaces turned into spaces.
+2. A Stash navigator inside the modal, because stashdb.org is hard to use on a phone.
+3. Search results like bulk-stash's filename search, adapted for the apps. The list should be longer, and the words refinable in the same view.
+4. In "Enter details by hand", the autocomplete list was covering the field being typed into.
+5. A performer name should open that performer's StashDB profile, in the navigator.
+6. Once an unmatched file is matched, the rename modal should open.
+
+**Server: `stash_nav`** (`api.php`). A new read-only action. It writes nothing locally and sends StashDB queries only, so, like `stash_scene`, it isn't added to `SCRAY_PRIVILEGED`.
+- **`op: search`:** `searchScene` with a limit of 40. `stash_fn_search` wasn't reused because it replaces a file's stored proposals, and browsing shouldn't touch those.
+- **`op: performer`:** `findPerformer`, then `queryScenes` filtered to that performer, newest first, 25 to a page.
+- **Name to id:** the catalogue stores performer names only, so a chip has no id. The server looks the name up in that scene's own credits first (name, "as" credit or alias), which gets exactly that person. Only then does it fall back to `searchPerformer`: an exact name or alias match, otherwise the first result.
+- **Fallbacks:** every query has fallback selections, richest first, like the existing search. A field StashDB rejects gives a thinner card rather than an error. A profile whose scene list fails still shows, with a note.
+- **Scoring:** every scene is scored with `scrayStashScore`, bulk-stash's scorer, when the file is catalogued. The apps send the file's own cleaned words as `score_term`. Confidence then describes the file, not whatever was last typed into the search box.
+
+**Navigator** (`scray-stash-nav.js`, identical in both apps). It borrows the modal's body, footer and heading the way the details editor does.
+- **Search view:** a sticky words box with Search, de-Camel and Filename. Under it, the result count, a stashdb.org link and a **Best match / StashDB order** toggle.
+- **Cards:** a blurred thumbnail (three taps to reveal, like the modal's cover) and title, studio · date · code, and confidence. Also file length, scene length, difference (same 3% / 5% colour bands as bulk-stash) and cast shape. Performer chips, a fold-out with tags, synopsis and why-this-score, then **Accept & submit** and **StashDB ↗**.
+- **Performer view:** a portrait (blurred, the widest image taller than it is wide), name, disambiguation, gender, age, birth date, country, aliases. Facts for ethnicity, height, measurements, career and scene count. **Filter by this performer**, which follows the live filter like the modal chips, plus a stashdb.org link. Then their scenes with the same cards, **Best match / Newest**, and **Load more**. Any performer chip on any card opens their view.
+- **Back** walks the views. The last Back is labelled "Back to lookup" and puts the lookup panel back exactly as it was, with the typed words kept.
+- **Accept** is a two-tap confirm, not `confirm()`, for the same FLS / iOS reasons as the editor. It calls `stash_submit`, the route the pasted URL already used, so the match is recorded as `manual`.
+- **Offered only on an unmatched file with a fingerprint.** On a matched scene the performer profile has no Accept buttons.
+
+**Modal wiring** (`file-operations.js`, both apps).
+- **Filename:** uses `scrayStashNav.words()`. It drops the extension, turns every non-letter, non-digit, non-apostrophe run into a space, splits CamelCase, and drops WxH, 720p / 4k, fps and kbps. Example: "Busted my Stepsister taking a Shower_just_roommates_720p.mp4" becomes "Busted my Stepsister taking a Shower just roommates".
+- **Search and Filename** both open the navigator now. Return in the words box does Search.
+- **Performer chip menu:** "Open on StashDB" (a site search in the browser) is replaced by **View performer profile**. It passes the matched scene id for the name lookup.
+- **Submit refactor:** the URL Submit button and the navigator's Accept share `attachScene` / `afterAttach`. That means reload, then `scrayStashNames.refresh(true)` and `scrayLoadStashState(true)`, then the rename offer.
+- **Submit note:** a note like "stored locally, StashDB refused the fingerprint" used to be written into the panel that the reload then replaced. It now shows once on the reloaded panel.
+
+**Rename after match.** `offerRename()` opens `showRenameModal` on top of the Stash modal, which stays open underneath with the timestamps.
+- **When:** only when the file went from unmatched to matched. That covers Accept, a pasted URL, and details entered by hand for a file with no match (Save creates a `manual:` scene). Corrections to an existing match don't trigger it.
+- **Order:** it runs after the names refresh, so **Use suggested** already has the new stash name.
+- **Layering:** Native's `showRenameModal` gained an `opts.zIndex`, because the Stash modal sits at 2147483647 and the rename landed underneath. Picker's rename modal already sets that z-index itself, and it's appended later, so it stacks on top without a change.
+
+**Autocomplete** (`scray-stash-edit.js`, identical in both apps).
+- **Cause:** the list was `position: fixed`, placed from the input's `getBoundingClientRect`. With the iOS keyboard up, those measurements and fixed positioning disagree by however far the visual viewport has scrolled, so the list was drawn about one field too high, over the box being typed in.
+- **Fix:** the list now sits in the form, straight after the input, so it can't cover the box and pushes the fields below down instead.
+- **Height:** 40% of the visible height, clamped to 120–260px.
+- **Scrolling:** when it first opens under a box, the form scrolls so the field's label sits at the top of the body. That offset comes from the difference between two bounding rects, so the keyboard's viewport shift cancels out.
+- **Closing:** a tap outside now closes the list on `click` rather than `pointerdown`. Collapsing an in-flow list at pointerdown moved whatever was under the finger, and the tap landed on a different field.
+
+**Tested:**
+- **Headless Chromium** at 390×844, both apps' `file-operations.js`, API mocked:
+  - Filename fills "Busted my Stepsister taking a Shower just roommates" and opens the search view. Cards sort by confidence, and the toggle restores StashDB order.
+  - A performer chip opens the profile with 25 scenes, and Load more takes it to 50 of 60. A chip without an id sends name plus scene id. Back, then Back again, returns to the search view and then the lookup panel.
+  - Accept asks twice, calls `stash_submit`, reloads the matched panel with the note, and opens the rename modal on top.
+  - Hand-entered details on an unmatched file open the rename modal after Save.
+  - The matched-scene chip menu opens the profile with the scene id and no Accept buttons.
+  - With the viewport cut to 460px high, the studio list renders directly under its input (input bottom 152, list top 155).
+- **`stash_nav` PHP:** run against an in-memory SQLite and a stubbed `scrayStashdbPost`. Tested: search with the fallback selection, name-to-id through the scene credits and through `searchPerformer`, the profile fallback selection, portrait choice, and `queryScenes` paging variables. `php -l` is clean on `api.php`.
+- **Syntax:** `node --check` passes on all changed JS.
+- **Not tested:** the real StashDB schema for the new queries (`findPerformer`, `searchPerformer`, `queryScenes`), and the iOS keyboard itself.
+
 ### picker 13.161 / native 13.159 — test: smaller READY at the top, FLS left-third double taps, OneDrive free space
 <!-- 2026-09-16T13:30Z -->
 

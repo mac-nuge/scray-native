@@ -162,7 +162,7 @@
 #stashModal .sse-danger button.sse-small.sse-armed { background: #dc3545; color: #fff; }
 #stashModal .sse-err { color: #dc3545; font-size: .85rem; margin: 6px 0 0; }
 #stashModal .sse-err:empty { display: none; }
-#stashModal .sse-dd { position: fixed; z-index: 2147483647; background: #fff; color: #222; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.25); overflow-y: auto; -webkit-overflow-scrolling: touch; font-size: .85rem; text-align: left; }
+#stashModal .sse-dd { position: relative; z-index: 1; display: block; width: 100%; box-sizing: border-box; margin: 3px 0 0; background: #fff; color: #222; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.25); overflow-y: auto; -webkit-overflow-scrolling: touch; font-size: .85rem; text-align: left; }
 #stashModal .sse-dd[hidden] { display: none; }
 #stashModal .sse-it { display: flex; align-items: center; gap: 8px; padding: 9px 10px; cursor: pointer; border-bottom: 1px solid rgba(128,128,128,.12); }
 #stashModal .sse-it:last-child { border-bottom: none; }
@@ -212,10 +212,16 @@
     actions.appendChild(saveBtn);
     actions.appendChild(cancelBtn);
 
+    // The list sits IN the form, straight under the box being typed into
+    // (13.162 / 13.161). It used to float at position:fixed, placed from the
+    // box's measured position - but with the iOS keyboard up those measurements
+    // and fixed positioning disagree by however far the visual viewport has
+    // scrolled, and the list landed on top of the very box you were typing in.
+    // In the flow it can't cover the box; it pushes the fields below it down.
     const dd = document.createElement('div');
     dd.className = 'sse-dd';
     dd.hidden = true;
-    overlay.appendChild(dd);
+    void overlay;
 
     const finish = (saved) => {
       if (finished) return;
@@ -530,6 +536,8 @@
       if (term && !exact) ddItems.push({ type: 'new', name: term });
       ddSel = term && ddItems.length ? 0 : -1;
 
+      const wasShut = dd.hidden || dd.previousElementSibling !== inp;
+      if (dd.previousElementSibling !== inp) inp.insertAdjacentElement('afterend', dd);
       if (!ddItems.length) {
         dd.innerHTML = '<div class="sse-none">No ' + KIND_LABEL[kind] + ' matches.</div>';
       } else {
@@ -544,7 +552,7 @@
         ).join('');
       }
       dd.hidden = false;
-      place();
+      place(wasShut);
     }
 
     function highlight(i) {
@@ -560,26 +568,28 @@
       ddInput = null; ddItems = []; ddSel = -1; ddGender = null;
     }
 
-    // Below the input when there is room, above it when the keyboard has
-    // eaten the space underneath. Measured against the visual viewport,
-    // which is the part of the screen the keyboard has not covered.
-    function place() {
+    // The list is in the flow now, so placing it is only its height and, the
+    // first time it opens under a box, scrolling the form so the box and the
+    // list both sit in the part the keyboard hasn't covered. ⚙️ 0.4 of the
+    // visible height, between 120 and 260px, is the list's size.
+    function place(reveal) {
       if (!ddInput || dd.hidden) return;
       if (!document.body.contains(ddInput)) { closeDD(); return; }
-      const r = ddInput.getBoundingClientRect();
       const vv = window.visualViewport;
-      const top0 = vv ? vv.offsetTop : 0;
-      const bottom0 = vv ? vv.offsetTop + vv.height : window.innerHeight;
-      const below = bottom0 - r.bottom - 8;
-      const above = r.top - top0 - 8;
-      const width = Math.min(Math.max(r.width, 240), window.innerWidth - 16);
-      dd.style.width = width + 'px';
-      dd.style.left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) + 'px';
-      const up = below < 150 && above > below;
-      const room = Math.max(90, Math.min(280, up ? above : below));
-      dd.style.maxHeight = room + 'px';
-      const h = Math.min(dd.scrollHeight, room);
-      dd.style.top = (up ? r.top - h - 2 : r.bottom + 2) + 'px';
+      const visible = vv ? vv.height : window.innerHeight;
+      dd.style.maxHeight = Math.round(Math.max(120, Math.min(260, visible * 0.4))) + 'px';
+      if (!reveal) return;
+      // Both rectangles come from getBoundingClientRect, so whatever the
+      // keyboard has done to the viewport cancels out of the difference.
+      // The field's label stays in view unless a long chip list above the
+      // box would push the box itself too far down.
+      const wrap = ddInput.closest('.sse-f') || ddInput;
+      const hr = host.getBoundingClientRect();
+      const ir = ddInput.getBoundingClientRect();
+      const wr = wrap.getBoundingClientRect();
+      const anchor = Math.max(wr.top, ir.top - 48);
+      const delta = anchor - hr.top - 4;
+      if (Math.abs(delta) > 2) host.scrollTop += delta;
     }
 
     function pick(it) {
@@ -608,13 +618,15 @@
 
     function askGender(inp, name) {
       ddGender = name;
+      if (dd.previousElementSibling !== inp) inp.insertAdjacentElement('afterend', dd);
       ddItems = []; ddSel = -1;
       dd.innerHTML = '<div class="sse-gpick"><div>New performer <strong>' + esc(name) + '</strong> &mdash; gender?</div>' +
         '<div class="sse-gbtns">' + GENDERS.map(g =>
           '<button type="button" data-g="' + g[0] + '" title="' + esc(g[2]) + '">' + esc(g[1] === '?' ? 'Not sure' : g[1]) + '</button>'
         ).join('') + '</div></div>';
+      const wasShut = dd.hidden;
       dd.hidden = false;
-      place();
+      place(wasShut);
       dd.querySelectorAll('[data-g]').forEach(b => b.addEventListener('click', () => {
         const f = inp.dataset.f;
         newPerformers.set(nameKey(name), b.dataset.g || '');
@@ -640,24 +652,28 @@
       if (it) pick(it);
     });
 
-    const onScroll = (e) => { if (!dd.hidden && !dd.contains(e.target)) place(); };
-    const onResize = () => place();
+    const onScroll = () => {};
+    const onResize = () => place(false);
+    // On the finished tap, not pointerdown: closing collapses the list, and
+    // doing that at pointerdown moved whatever was under the finger before
+    // the tap landed - so the tap hit a different field.
     const onDocDown = (e) => {
       if (dd.hidden) return;
       if (dd.contains(e.target) || (ddInput && e.target === ddInput)) return;
+      if (e.target && e.target.closest && e.target.closest('input.sse-combo')) return;   // its own focus moves the list
       closeDD();
     };
     document.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onResize);
     window.visualViewport?.addEventListener('resize', onResize);
     window.visualViewport?.addEventListener('scroll', onResize);
-    document.addEventListener('pointerdown', onDocDown, true);
+    document.addEventListener('click', onDocDown, true);
     function detach() {
       document.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onResize);
       window.visualViewport?.removeEventListener('resize', onResize);
       window.visualViewport?.removeEventListener('scroll', onResize);
-      document.removeEventListener('pointerdown', onDocDown, true);
+      document.removeEventListener('click', onDocDown, true);
       clearTimeout(ddBlurTimer);
     }
     // The modal can be closed out from under the form (Close, backdrop,

@@ -54,7 +54,7 @@ window.scrayParseTextIntoWords = function (text) {
     return words;
 };
 
-async function showRenameModal(video) {
+async function showRenameModal(video, opts) {
 const currentName = video.filename || '';
 const extension = currentName.includes('.') ? '.' + currentName.split('.').pop() : '';
 const nameWithoutExt = currentName.replace(new RegExp(extension + '$'), '');
@@ -86,6 +86,9 @@ const noParentSuggestionBase = (noParentSuggestion && extension && noParentSugge
 
 const modal = document.createElement('div');
 modal.className = 'basket-json-modal';
+// opts.zIndex (13.162 / 13.161): opened from the Stash modal after a match,
+// which sits at the top layer - without this the rename lands underneath it.
+if (opts && opts.zIndex) modal.style.zIndex = String(opts.zIndex);
 modal.innerHTML = `
 <div class="basket-json-modal-content">
 <h3>Rename File</h3>
@@ -4117,10 +4120,13 @@ async function showStashModal(video) {
         .replace(/\b(?:\d{3,4}p|4k|x26[45]|h26[45]|hevc|aac|web-?dl|webrip|hdrip|bluray|xxx)\b/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();
-    // What the "Filename" button sends: the whole name, minus only the
-    // extension. Distinct from searchSeed, which also strips encode noise -
-    // the point of that button is that nothing else has been second-guessed.
-    const searchFullName = String(video.filename || '').replace(/\.[^.]+$/, '').trim();
+    // What the "Filename" button searches for (13.162/13.161): just the words.
+    // CamelCase is split, every separator that isn't a space (_ - . and the
+    // rest) becomes one, and resolution / fps noise goes - the same cleaning
+    // bulk-stash's de-Camel does, from scray-stash-nav.js.
+    const searchFullName = window.scrayStashNav
+        ? window.scrayStashNav.words(video.filename || '')
+        : String(video.filename || '').replace(/\.[^.]+$/, '').replace(/[_.\-]+/g, ' ').trim();
 
     const stashSearchUrl = (term) =>
         'https://stashdb.org/search?q=' + encodeURIComponent(String(term || '').trim());
@@ -4174,7 +4180,17 @@ async function showStashModal(video) {
     // While the details form is open a stray tap on the backdrop would throw
     // away everything typed, so only Cancel (or Save) leaves it.
     let editCtl = null;
-    modal.addEventListener('click', (e) => { if (e.target === modal && !editCtl) close(); });
+    let navCtl = null;
+    modal.addEventListener('click', (e) => { if (e.target === modal && !editCtl && !navCtl) close(); });
+
+    // Whether the last load() found a match. The rename offer below only
+    // fires on the change from unmatched to matched.
+    let matchedNow = false;
+    let matchedStashId = '';
+    // A note from the step that caused the next load(), shown once at the
+    // top of what it draws - a submit's "stored locally" otherwise vanished
+    // with the panel it was written into.
+    let flashNote = '';
 
     let markers = [];
 
@@ -4203,6 +4219,7 @@ async function showStashModal(video) {
         body.replaceChildren();
         body.scrollTop = 0;
         heading.textContent = 'Stash details';
+        const wasUnmatched = !matchedNow;
         editCtl = window.scrayStashEdit.open({
             host: body,
             actions: footer,
@@ -4213,11 +4230,101 @@ async function showStashModal(video) {
                 editCtl = null;
                 defaults.forEach(b => { b.style.display = b.dataset.sseDisplay || ''; });
                 heading.textContent = 'Stash lookup';
-                if (saved) { load(false); return; }
+                if (saved) {
+                    load(false).then(() => { if (wasUnmatched && matchedNow) offerRename(); });
+                    return;
+                }
                 body.replaceChildren(...kept);
                 body.scrollTop = scrollWas;
             }
         });
+    };
+
+    // ---- in-modal StashDB navigator (13.162 / 13.161) --------------------
+    // scray-stash-nav.js. Like the editor it borrows the body, the footer and
+    // the heading, and Back puts the lookup panel back exactly as it was.
+    const openNav = (start, canAccept) => {
+        if (navCtl || editCtl) return;
+        if (!window.scrayStashNav) {
+            console.error('[stash] scray-stash-nav.js is not loaded');
+            return;
+        }
+        const footer  = modal.querySelector('#stashFooter');
+        const heading = modal.querySelector('h3');
+        const kept    = [...body.childNodes];
+        const scrollWas = body.scrollTop;
+        const wasUnmatched = !matchedNow;
+        body.replaceChildren();
+        navCtl = window.scrayStashNav.open({
+            host: body,
+            actions: footer,
+            heading,
+            video,
+            videoKey: video.videoKey || window.scrayVideoKey(video.filename),
+            canAccept: !!canAccept,
+            start,
+            openExternal: openNative,
+            onAccept: (stashId) => attachScene(stashId),
+            onClose: close,
+            onDone: (result) => {
+                navCtl = null;
+                if (!document.body.contains(modal)) return;
+                if (result && result.accepted) {
+                    afterAttach(result.response, wasUnmatched);
+                    return;
+                }
+                body.replaceChildren(...kept);
+                body.scrollTop = scrollWas;
+            }
+        });
+    };
+
+    // stash_submit for this file. Throws on failure, so each caller shows the
+    // error where it was asked from.
+    const attachScene = (val) => window.scrayApiCall('stash_submit', {
+        method: 'POST',
+        body: { video_key: video.videoKey || window.scrayVideoKey(video.filename), stash_id: val }
+    });
+
+    // After a scene is attached: reload the panel, bring the names and the S
+    // button up to date, then offer the rename.
+    const afterAttach = async (sRes, wasUnmatched) => {
+        flashNote = sRes && sRes.note ? sRes.note : '';
+        // Deliberately load(false): the id is stored locally now, so this
+        // works whether or not StashDB has reindexed yet.
+        await load(false);
+
+        // The server has just written stash_matches and stash_scenes, so this
+        // file now HAS a studio/performer name - but every list on screen was
+        // drawn from the cached name table and is still printing the filename.
+        // Force the dictionary to re-fetch; its own refresh() repaints the
+        // lists when the signature moves. The state fetch is the same idea for
+        // the S button, whose signature has moved for the same reason.
+        try {
+            if (window.scrayStashNames) await window.scrayStashNames.refresh(true);
+        } catch (e) { /* names stay stale; the lists still work */ }
+        try {
+            if (typeof window.scrayLoadStashState === 'function') {
+                await window.scrayLoadStashState(true);
+            }
+        } catch (e) { /* button colour catches up on the next poll */ }
+
+        if (wasUnmatched && matchedNow) offerRename();
+    };
+
+    // ⚙️ Rename after a match (13.162 / 13.161): an unmatched file that has
+    // just been matched - by Accept, a pasted URL or details entered by hand -
+    // opens the rename modal on top, so "Use suggested" can take the new
+    // stash name straight away. Runs after the names refresh, which is what
+    // the suggestion is built from. The Stash modal stays open underneath.
+    const offerRename = () => {
+        if (!document.body.contains(modal)) return;
+        if (typeof window.showRenameModal !== 'function') return;
+        try {
+            window.showRenameModal(video, { zIndex: 2147483647 });
+        } catch (e) {
+            console.error('[stash] rename after match failed:', e);
+        }
     };
 
     async function load(force) {
@@ -4237,7 +4344,12 @@ async function showStashModal(video) {
 
         markers = r.markers || [];
         const sc = r.scene;
-        const notes = (r.notes || []).map(n => '<p style="opacity:.75;margin:4px 0;">' + esc(n) + '</p>').join('');
+        matchedNow = !!r.stash_id;
+        matchedStashId = String(r.stash_id || '');
+        const flash = flashNote;
+        flashNote = '';
+        const notes = (flash ? '<p style="margin:4px 0;color:#b8860b;">' + esc(flash) + '</p>' : '') +
+            (r.notes || []).map(n => '<p style="opacity:.75;margin:4px 0;">' + esc(n) + '</p>').join('');
 
         // Offered wherever there is no match yet. A file that is only on this
         // phone has no catalogue row for the details to belong to.
@@ -4367,10 +4479,12 @@ async function showStashModal(video) {
 
             // Typed edits stand until the next tap - the box is a real input,
             // not a read-only preview of the selection.
+            // Both open the in-modal navigator (13.162 / 13.161) rather than
+            // stashdb.org; the navigator has its own link out if it's wanted.
             modal.querySelector('#stashSearchBtn')?.addEventListener('click', () => {
                 const term = termBox.value.trim();
                 if (!term) { termBox.focus(); return; }
-                openNative(stashSearchUrl(term));
+                openNav({ type: 'search', term }, true);
             });
 
             // Escape hatch for when picking words is more faff than it is worth:
@@ -4382,7 +4496,13 @@ async function showStashModal(video) {
             modal.querySelector('#stashSearchRawBtn')?.addEventListener('click', () => {
                 if (!searchFullName) return;
                 termBox.value = searchFullName;
-                openNative(stashSearchUrl(searchFullName));
+                openNav({ type: 'search', term: searchFullName }, true);
+            });
+            termBox.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                e.stopPropagation();
+                modal.querySelector('#stashSearchBtn')?.click();
             });
 
             // Filled by ScrayBrowser's ⤴ button, which only appears on
@@ -4403,40 +4523,19 @@ async function showStashModal(video) {
                 if (!val) return;
                 sBtn.disabled = true;
                 sMsg.textContent = 'Submitting…';
+                let sRes;
                 try {
-                    const sRes = await window.scrayApiCall('stash_submit', {
-                        method: 'POST',
-                        body: { video_key: video.videoKey || window.scrayVideoKey(video.filename), stash_id: val }
-                    });
-                    // A local store with a failed upstream submit is a partial
-                    // success, not a success. Saying "Submitted" for both hides
-                    // the case where StashDB never heard about the fingerprint.
-                    sMsg.textContent = sRes && sRes.note
-                        ? sRes.note
-                        : 'Submitted. Reloading…';
-                    // Deliberately load(false): the id is stored locally now, so
-                    // this works whether or not StashDB has reindexed yet.
-                    await load(false);
-
-                    // The server has just written stash_matches and stash_scenes,
-                    // so this file now HAS a studio/performer name - but every
-                    // list on screen was drawn from the cached name table and is
-                    // still printing the filename. Force the dictionary to
-                    // re-fetch; its own refresh() repaints the lists when the
-                    // signature moves. The state fetch is the same idea for the
-                    // S button, whose signature has moved for the same reason.
-                    try {
-                        if (window.scrayStashNames) await window.scrayStashNames.refresh(true);
-                    } catch (e) { /* names stay stale; the lists still work */ }
-                    try {
-                        if (typeof window.scrayLoadStashState === 'function') {
-                            await window.scrayLoadStashState(true);
-                        }
-                    } catch (e) { /* button colour catches up on the next poll */ }
+                    sRes = await attachScene(val);
                 } catch (err) {
                     sBtn.disabled = false;
                     sMsg.innerHTML = '<span style="color:#dc3545;">' + esc(err.message) + '</span>';
+                    return;
                 }
+                // A local store with a failed upstream submit is a partial
+                // success, not a success - afterAttach shows the note on the
+                // panel it reloads, rather than here where it would vanish.
+                sMsg.textContent = 'Submitted. Reloading…';
+                await afterAttach(sRes, true);
             });
             return;
         }
@@ -4702,7 +4801,11 @@ async function showStashModal(video) {
             // routes correctly on all three surfaces - a scraynative:// hop
             // inside Native's own browser, the bridge in its main web view, and
             // a plain new tab in Picker.
-            mkItem('\u2197  Open on StashDB', () => openNative(stashSearchUrl(val)));
+            // Their StashDB profile, in the navigator (13.162 / 13.161) rather
+            // than a site search in the browser. The chip carries a name only,
+            // so the server finds the id through this scene's own credits.
+            mkItem('\u{1F464}  View performer profile', () =>
+                openNav({ type: 'performer', name: val, sceneId: matchedStashId }, false));
 
             document.body.appendChild(menu);
 

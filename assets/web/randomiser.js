@@ -448,12 +448,25 @@ clearAllBtn.className = 'tag-selection-close';
 clearAllBtn.style.background = '#f44336';
 clearAllBtn.style.flex = '1';
 clearAllBtn.textContent = defaultSet.size ? 'Clear All (keep defaults)' : 'Clear All';
+if (window.scrayWholesaleMode && window.scrayWholesaleMode.isOn()) {
+    // Wholesale (picker 13.173): this clears every filter, not just excludes,
+    // so it says so and wears the pills bar Clear all's dark red.
+    clearAllBtn.textContent = 'Clear all filters (keep defaults)';
+    clearAllBtn.style.background = '#8b0000';
+}
 clearAllBtn.title = 'Clear the excludes added this session; the default list stays on';
 clearAllBtn.addEventListener('click', () => {
     // The session excludes go; the defaults stay excluded (13.172 / 13.167).
     window.scraySuppressScrollUntil = Date.now() + 1500;
-    const keep = ($('#excludeTagSelect').val() || []).filter(isDefault);
-    $('#excludeTagSelect').val(keep).trigger('change');
+    if (window.scrayWholesaleMode && window.scrayWholesaleMode.isOn() &&
+        typeof window.scrayClearAllFilters === 'function') {
+        // Wholesale mode (picker 13.173): the same as the pills bar's Clear
+        // all there - every other filter pill goes too.
+        window.scrayClearAllFilters();
+    } else {
+        const keep = ($('#excludeTagSelect').val() || []).filter(isDefault);
+        $('#excludeTagSelect').val(keep).trigger('change');
+    }
     
     // Show success feedback
     clearAllBtn.textContent = '✅ Cleared';

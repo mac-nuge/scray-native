@@ -4,6 +4,32 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.173 / native 13.168 — test: wholesale Clear all clears every filter and the session excludes, keeps defaults, dark red
+<!-- 2026-09-16T16:44Z -->
+
+**picker** — `staging - 13.173`: `wholesale-mode.js`, `wholesale-mode.css`, `randomiser.js`, `VERSION`
+**native** — `stg-native - 13.168`: `assets/web/randomiser.js`, `assets/web/VERSION`
+
+(Native's change is a guard that does nothing there, since it has no wholesale mode. It keeps `randomiser.js` in step between the apps.)
+
+Mac reported that Clear all still wasn't clearing both the pills outside the Exclude panel and the non-default excludes. For wholesale mode only, he asked for it to do exactly that, in dark red.
+
+**Why it may have failed.** Not reproduced: the shared `scrayClearAllFilters` reads correctly (13.170). Two weak points were closed rather than guessed at:
+- **Chained refreshes:** it clears through a chain of select `change` handlers, each running its own filter pass.
+- **Defaults:** it kept them from `window.scrayDefaultExcludeTags` with exact matching only, and an empty list if start-up never recorded them. An empty list would clear the defaults too.
+- **Colour:** in the bar, Clear all was the same bright red (`#f94144`) as the Exclude (n) pill beside it, so it was easy to tap the wrong one.
+
+**Wholesale's own Clear all** (`wholesale-mode.js` wraps `scrayClearAllFilters`; outside the mode it hands straight to the original).
+- **One pass:** every pill outside the Exclude panel is cleared, and so are the folder-name excludes except the default list. That covers tag includes and the level dropdowns, the studio / performer / stash tag / note includes and excludes, note keywords, search, score, orientation, and the stash and BM toggles.
+- **No handler chain:** the dropdowns change through `'change.select2'`, then a single no-scroll refresh runs and the random list re-filters.
+- **Defaults kept:** matched case-insensitively. If `scrayDefaultExcludeTags` was never recorded, the list is fetched from the server first, so a missing list can't clear the defaults.
+- **Dark red:** `#8b0000` in the mode (`wholesale-mode.css`).
+- **The Exclude panel's Clear All** (`randomiser.js`, `showExcludeTagsModal`): in wholesale mode it calls the same clear, is labelled "Clear all filters (keep defaults)" and is dark red. Outside the mode it still clears the session excludes only, as in 13.172.
+
+**Tested** in headless Chromium with a harness copy of `wholesale-mode.js` and stub select2 selects:
+- **Starting state:** excludes `x` (session) and `misc` (default, recorded as `Misc`); tag include `other` in `#tagFilterAllSelect`; studio exclude `twistys`; performer include `jane doe`.
+- **After Clear all:** only `misc` left excluded. Everything else cleared, with one filter refresh and only `change.select2` triggers.
+
 ### picker 13.172 / native 13.167 — test: default and session excludes told apart in the exclude panel, its Clear All keeps defaults
 <!-- 2026-09-16T16:36Z -->
 

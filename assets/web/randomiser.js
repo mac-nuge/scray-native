@@ -345,7 +345,15 @@ window.mergeExcelScoresIntoVideos = mergeExcelScoresIntoVideos;
 * Show modal with all active exclude tags
 */
 function showExcludeTagsModal() {
-   const excludeTags = $('#excludeTagSelect').val() || [];
+   // Default excludes (the exclude_tags table, scray-exclude.js) and the ones
+   // added this session are told apart (picker 13.172 / native 13.167): the
+   // defaults in slate with a "default" mark, session ones in the usual red,
+   // listed first. Clear All clears the session ones and leaves the defaults
+   // on, the same as the pills bar's Clear all.
+   const defaultSet = window.scrayDefaultExcludeTags || new Set();
+   const isDefault = (t) => defaultSet.has(t);
+   const excludeTags = ($('#excludeTagSelect').val() || [])
+       .slice().sort((a, b) => (isDefault(a) - isDefault(b)) || a.localeCompare(b));
    
    if (excludeTags.length === 0) {
        alert("No exclude tags active");
@@ -362,6 +370,19 @@ function showExcludeTagsModal() {
    const title = document.createElement('h3');
    title.textContent = `Exclude Tags (${excludeTags.length})`;
    content.appendChild(title);
+
+   const legend = document.createElement('div');
+   legend.style.cssText = 'font-size:0.75rem;color:#666;margin:-4px 0 10px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;';
+   const swatch = (bg, label) => '<span style="display:inline-flex;align-items:center;gap:5px;">' +
+       '<span style="width:10px;height:10px;border-radius:3px;background:' + bg + ';display:inline-block;"></span>' + label + '</span>';
+   const syncLegend = () => {
+       const now = $('#excludeTagSelect').val() || [];
+       const nDef = now.filter(isDefault).length;
+       legend.innerHTML = swatch('#f94144', `Added this session (${now.length - nDef})`) +
+                          swatch('#5a6b7d', `Default (${nDef})`);
+   };
+   syncLegend();
+   content.appendChild(legend);
    
    const grid = document.createElement('div');
    grid.className = 'tag-selection-grid';
@@ -371,6 +392,18 @@ function showExcludeTagsModal() {
        pill.className = 'tag-selection-item tag-selection-item-exclude';
        pill.textContent = tag;
        pill.title = `Click to remove "${tag}" from excludes`;
+       if (isDefault(tag)) {
+           // Inline and !important, to beat .tag-selection-item-exclude's own
+           // !important red in style.css.
+           pill.style.setProperty('background', '#5a6b7d', 'important');
+           pill.classList.add('tag-selection-item-exclude-default');
+           const mark = document.createElement('span');
+           mark.textContent = ' default';
+           mark.style.cssText = 'font-size:0.65em;opacity:0.8;margin-left:4px;';
+           pill.appendChild(mark);
+           pill.title = `Default exclude - click to stop excluding "${tag}" for this session ` +
+                        `(it stays on the default list)`;
+       }
        
        pill.addEventListener('click', () => {
            // Remove from exclude dropdown
@@ -378,8 +411,9 @@ function showExcludeTagsModal() {
            $('#excludeTagSelect').val(currentExcludes.filter(t => t !== tag)).trigger('change');
            
            // Visual feedback
-           pill.style.background = '#28a745';
+           pill.style.setProperty('background', '#28a745', 'important');
            pill.textContent = `${tag} ✓`;
+           syncLegend();
            
            setTimeout(() => {
                pill.remove();
@@ -413,10 +447,13 @@ const clearAllBtn = document.createElement('button');
 clearAllBtn.className = 'tag-selection-close';
 clearAllBtn.style.background = '#f44336';
 clearAllBtn.style.flex = '1';
-clearAllBtn.textContent = 'Clear All';
+clearAllBtn.textContent = defaultSet.size ? 'Clear All (keep defaults)' : 'Clear All';
+clearAllBtn.title = 'Clear the excludes added this session; the default list stays on';
 clearAllBtn.addEventListener('click', () => {
-    // Clear all exclude tags
-    $('#excludeTagSelect').val([]).trigger('change');
+    // The session excludes go; the defaults stay excluded (13.172 / 13.167).
+    window.scraySuppressScrollUntil = Date.now() + 1500;
+    const keep = ($('#excludeTagSelect').val() || []).filter(isDefault);
+    $('#excludeTagSelect').val(keep).trigger('change');
     
     // Show success feedback
     clearAllBtn.textContent = '✅ Cleared';

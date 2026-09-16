@@ -4,6 +4,35 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.172 / native 13.167 — test: default and session excludes told apart in the exclude panel, its Clear All keeps defaults
+<!-- 2026-09-16T16:36Z -->
+
+**picker** — `staging - 13.172`: `randomiser.js`, `VERSION`
+**native** — `stg-native - 13.167`: `assets/web/randomiser.js`, `assets/web/VERSION`
+
+Mac asked for three things about folder-name (catalogue tag) excludes:
+1. Default excludes told apart from ones added this session.
+2. Clear all clearing the session ones and keeping the defaults.
+3. The two coloured differently in the Exclude panel.
+
+**Clear all in the pills bar** already did (2) as of picker 13.170 / native 13.166. It resets `#excludeTagSelect` to `window.scrayDefaultExcludeTags`.
+
+**The Exclude panel** (`showExcludeTagsModal`, opened from the Exclude (n) pill, both apps).
+- **Colours:** session excludes keep the usual red (`#f94144`) and are listed first. Defaults are slate (`#5a6b7d`) with a small "default" mark, set inline with `!important` to beat `.tag-selection-item-exclude`'s own `!important` red.
+- **Legend:** a line under the title reads "Added this session (n)" and "Default (n)", and updates as pills are tapped.
+- **Tapping a default** still stops excluding it for the session only. The tooltip says it stays on the default list.
+- **The panel's own Clear All** used to empty the whole exclude list, defaults included. It now keeps the defaults, labelled "Clear All (keep defaults)" when there are any, and uses 13.170's no-scroll window.
+
+**Question answered:** where the default excludes live and how they're managed.
+- **Where:** the `exclude_tags` table in the SQLite database (columns `tag`, `added_at`), read and written through `api.php`'s `exclude_get` / `exclude_add` / `exclude_remove`.
+- **Loading:** both apps read the list at start-up (`scray-exclude.js` `loadDefaultExcludeTags`).
+- **The only UI:** the tag action modal. Tap a folder or bracket tag and choose "📊 Default Exclude (SQL)". On a tag already listed, the same button asks whether to remove it.
+- **No list view:** there's no page listing the whole table. Browse's SQL console can query `exclude_tags`.
+
+**Tested** in headless Chromium, with `showExcludeTagsModal` lifted out of `randomiser.js`, Picker's `style.css`, and defaults `misc` and `junk` plus session excludes `x` and `justroommates`:
+- **Pills and legend:** session pills red, defaults slate with "default"; legend 2 / 2.
+- **Clear All (keep defaults):** left `misc` and `junk` selected.
+
 ### picker 13.170 / native 13.166 — test: Clear all ignores the default excludes and keeps them, no scroll on Clear all
 <!-- 2026-09-16T16:00Z -->
 

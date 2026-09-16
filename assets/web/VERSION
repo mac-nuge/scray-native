@@ -1,1 +1,1 @@
-stg-native - 13.166 test: Clear all ignores the default excludes and keeps them, no scroll on Clear all
+stg-native - 13.167 test: default and session excludes told apart in the exclude panel, its Clear All keeps defaults

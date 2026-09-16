@@ -4,6 +4,72 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.155 / native 13.153 — test: same rail height either way in, tighter button row, Clear
+<!-- 2026-09-16T10:30Z -->
+
+**picker** — `staging - 13.155`: `file-operations.js`, `VERSION`
+**native** — `stg-native - 13.153`: `assets/web/file-operations.js`, `assets/web/VERSION`
+
+Mac's three points, from testing 13.154 / 13.152 on the phone:
+1. Add note showed part of one row of the quick-note rail, but tapping the field itself showed two rows and a bit. They should match.
+2. There was a lot of white space around the button row. The row should sit closer to the keyboard, with the space above it going to the rail.
+3. Add a Clear button between Add note and Delete that clears the selection.
+
+**1. Tapping the field now goes through Add note's path.** In the screenshots the whole panel sat about 27pt higher after a tap on the field, and it was taller, with its bottom edge touching the keyboard's accessory bar. That is iOS's own scroll-into-view on a native focus. It moves the page, which changes what `applyKeyboardInset` measures against. Add note focuses with `preventScroll`, so it never had that shift.
+- **The change:** a `touchend` on the field that arrives while the field is unfocused, and hasn't moved more than 10px, is cancelled and handed to `focusNoteField()`, the same call Add note makes.
+- **Already focused:** taps are left alone, so the caret can still be placed and text selected.
+- **Watch for:** WKWebView has to accept a focus from `touchend` as a user gesture and raise the keyboard. Add note already relies on the same thing from a `click`. If the keyboard doesn't come up on a field tap, this is the cause.
+- **Which height wins:** the Add note one. The space reclaimed in 2 more than makes up the difference.
+
+**2. Where the white space came from** (measured in Chromium with native's `style.css`):
+- **Under the buttons (about 48px):** the global `button { margin-bottom: 10px }`, the form's UA bottom margin (17.6px), and the panel's 20px padding.
+- **Above the buttons (about 40px):** the rail's 10px bottom margin, `.file-operation-buttons`' 20px `margin-top`, and 10px of padding.
+
+**What changed:**
+- The form's margin is 0, the row's buttons have margin 0, and the row has no top margin and 8px of padding.
+- The rail's bottom margin is 2px and the panel's bottom padding is 10px.
+- `KEYBOARD_GAP_PX` went from 12 to 6.
+
+At the same panel height, the rail's visible area went from 57px to 131px: about four rows of pills instead of two.
+
+**3. Clear.** An orange button between Add note and Delete. It empties the picked notes and leaves the typed search alone, since that has its own ×. It reads "typing" at the press, like the pills, so clearing while picking keeps the keyboard up.
+- **After a Clear:** nothing is picked, so with the field inactive the next tap on a note saves it on its own (13.154's rule).
+- **Button row:** it only appears with a playhead, like Add note. With five buttons, the side padding is 2px and the gap is 6px; all five labels fit at 430px.
+
+**Tested** in headless Chromium, on both copies:
+- With touch emulation, a tap on the field focuses it through the new path.
+- Picking "kiss" and "sex", then Clear, empties the picks and keeps the field focused. After a blur, the next tap on a note saves it on its own.
+- The 13.154 checks still pass: one-tap save, multi-pick after Add note, blur-then-tap picks, and delete mode.
+- `node --check` passes on both.
+
+### picker 13.154 / native 13.152 — test: tap a quick note to save the bookmark
+<!-- 2026-09-16T10:08Z -->
+
+**picker** — `staging - 13.154`: `file-operations.js`, `VERSION`
+**native** — `stg-native - 13.152`: `assets/web/file-operations.js`, `assets/web/VERSION`
+
+Mac asked for the Add bookmark page's old one-tap quick note back: tapping a note saves the bookmark and closes the modal. To add several notes, Add note has to be activated first.
+
+**Why it had gone.** 13.151 / native 13.149 turned the rail into keyword picking, so every tap toggled a pick and saving needed Save or the timestamp. The one-tap save from before (a quick note commits straight away unless you're typing) was lost with it. Its old comment above the Save handler was still there, describing behaviour that no longer existed; it's now replaced.
+
+**The rule, in the rail's click handler.** A tap saves `{ time: playhead, note: that keyword }` and closes the modal when all of these are true:
+- the modal is in normal mode (swap and delete still only pick, since they're waiting on a row tap);
+- the note field isn't active - "active" is the same as before: tapped, typed in, or opened with Add note, read at the press, and the auto-focus on opening doesn't count;
+- nothing is picked yet, and the tapped pill isn't already picked.
+
+Otherwise it picks or unpicks as in 13.153.
+- **Why "nothing picked" counts:** once Add note has started a multi-pick, dismissing the iOS keyboard blurs the field. Without this, the next tap would save the note with only some of its keywords. The rail stays in picking mode until Save.
+- **Fresh "+ word" pills** follow the same rule. They only show while there's typed text, which normally means the field is active, so they pick.
+
+**Hint.** With nothing typed or picked, the preview line reads "Tap a note to save it, or Add note to pick several" (was "Search notes, or tap to pick them").
+
+**Tested** in headless Chromium with stubbed globals, on both copies:
+- A single tap on "sex" saves `{65s, "sex"}` next to the existing bookmark and closes the modal. The hint reads as above.
+- Add note, then "kiss" and "cowgirl": the modal stays open, the field keeps focus, and the preview reads "kiss cowgirl".
+- Blur the field, then tap "sex": it picks and doesn't save. Save then commits "kiss sex cowgirl".
+- In delete mode, a rail tap only picks.
+- `node --check` passes on both. The patch is byte-identical in picker and native.
+
 ### browse 13.64 / picker 13.153 / native 13.151 — test: keywords, and parent notes
 <!-- 2026-09-15T21:58Z -->
 

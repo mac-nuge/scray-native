@@ -2943,8 +2943,10 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     // a fixed footer that cannot move.
     const CONTENT_STYLE = `position: relative; max-width: 500px; width: 100%; transform: none; `
         + `max-height: calc(${100 - PANEL_BOTTOM_GAP_VH}vh - ${PANEL_TOP_PAD_PX}px); `
-        + 'display: flex; flex-direction: column; overflow: hidden;';
-    const FORM_STYLE = 'display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden;';
+        + 'display: flex; flex-direction: column; overflow: hidden; padding-bottom: 10px;';
+    // margin: 0 - a form picks up a bottom margin from the UA sheet, dead space
+    // under the button row.
+    const FORM_STYLE = 'display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden; margin: 0;';
     // overscroll-behavior: contain stops a flick that reaches the end of one
     // scroller from chaining out to the overlay and the page behind it, which
     // is what was dragging the whole panel around.
@@ -3130,7 +3132,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     // instead of overflowing.
     const vv = window.visualViewport;
     // ⚙️ Clear space kept between the panel's bottom edge and the keyboard.
-    const KEYBOARD_GAP_PX = 12;
+    const KEYBOARD_GAP_PX = 6;
     // ⚙️ How much of the screen has to go before it counts as the keyboard,
     // rather than a rounding difference or a toolbar.
     const KEYBOARD_MIN_PX = 80;
@@ -3301,7 +3303,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                                 <button type="button" id="swapBmBtn" class="modal-btn" title="Swap: move an existing bookmark's note to this timestamp" style="flex: 0 0 auto !important; width: auto !important; padding: 6px 10px !important; min-width: 0; margin-bottom: 0 !important; background: ${mode === 'swap' ? '#0056b3' : '#007bff'}; color: #fff; font-size: 1rem; line-height: 1;">&#8644;</button>
                             </div>
                             <div id="bmNotePreview" style="flex: 0 0 auto; font-size: 0.72rem; color: #666; margin: 0 0 8px; padding: 0 2px; min-height: 1.25em; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></div>
-                            <div id="qnWrap" style="${SCROLL_WRAP_STYLE} margin: 0 0 10px;">
+                            <div id="qnWrap" style="${SCROLL_WRAP_STYLE} margin: 0 0 2px;">
                                 <div id="qnScroll" style="${SCROLL_STYLE}">
                                     <div id="quickNotesRow" style="display: flex; flex-wrap: wrap; gap: 6px;"></div>
                                 </div>
@@ -3320,12 +3322,17 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         }
 
         const pending = working.filter(b => b.deleted).length;
+        // Five buttons share the row, so side padding is trimmed and the
+        // global 10px button margin (style.css) is dropped - it was dead space
+        // under the row.
+        const ROW_BTN = 'margin: 0 !important; min-width: 0; white-space: nowrap; padding-left: 2px !important; padding-right: 2px !important; ';
         html += `
-                <div class="file-operation-buttons" style="flex: 0 0 auto; display: flex; flex-direction: row; gap: 8px; padding-top: 10px; background: #fff;">
-                    <button type="button" id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="flex: 1; background: #28a745;">Save${pending ? ` (${pending})` : ''}</button>
-                    ${hasPlayhead ? `<button type="button" id="addNoteBtn" class="modal-btn" style="flex: 1.3; background: #007bff; color: #fff; white-space: nowrap; padding-left: 4px !important; padding-right: 4px !important;">Add note</button>` : ''}
-                    <button type="button" id="deleteBookmarksBtn" class="modal-btn" style="flex: 1; background: ${mode === 'delete' ? '#a71d2a' : '#dc3545'}; color: #fff;">Delete</button>
-                    <button type="button" id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="flex: 1;">Close</button>
+                <div class="file-operation-buttons" style="flex: 0 0 auto; display: flex; flex-direction: row; gap: 6px; margin: 0 !important; padding-top: 8px; background: #fff;">
+                    <button type="button" id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="${ROW_BTN}flex: 1; background: #28a745;">Save${pending ? ` (${pending})` : ''}</button>
+                    ${hasPlayhead ? `<button type="button" id="addNoteBtn" class="modal-btn" style="${ROW_BTN}flex: 1.3; background: #007bff; color: #fff;">Add note</button>` : ''}
+                    ${hasPlayhead ? `<button type="button" id="clearPicksBtn" class="modal-btn" title="Clear the picked notes" style="${ROW_BTN}flex: 1; background: #fd7e14; color: #fff;">Clear</button>` : ''}
+                    <button type="button" id="deleteBookmarksBtn" class="modal-btn" style="${ROW_BTN}flex: 1; background: ${mode === 'delete' ? '#a71d2a' : '#dc3545'}; color: #fff;">Delete</button>
+                    <button type="button" id="closeBookmarksBtn" class="modal-btn modal-btn-cancel" style="${ROW_BTN}flex: 1;">Close</button>
                 </div>
                 </form>
             </div>
@@ -3426,7 +3433,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                 previewEl.style.color = '#666';
                 previewEl.innerHTML = note
                     ? `Note: <b style="color: #333;">${esc(note)}</b>`
-                    : (terms.length ? 'Tap the notes this bookmark belongs under' : 'Search notes, or tap to pick them');
+                    : (terms.length ? 'Tap the notes this bookmark belongs under' : 'Tap a note to save it, or Add note to pick several');
             }
             if (clearEl) clearEl.style.display = q ? 'block' : 'none';
             modal.__sizeQuickNotes?.();
@@ -3667,6 +3674,25 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             ['touchstart', 'mousedown', 'input'].forEach(type => {
                 newNoteEl.addEventListener(type, () => { noteFieldActive = true; }, { passive: true });
             });
+            // A tap on the field opens it exactly as Add note does. Left to
+            // itself, iOS focuses with its own scroll-into-view, which shifts
+            // the page and so the panel's keyboard maths - the field tapped
+            // showed a different amount of the rail from Add note. Only a
+            // tap that arrives unfocused is taken over: once the field has
+            // focus, taps are left alone so the caret can still be placed.
+            let fieldTap = null;
+            newNoteEl.addEventListener('touchstart', (e) => {
+                const t = e.touches[0];
+                fieldTap = document.activeElement !== newNoteEl && t ? { x: t.clientX, y: t.clientY } : null;
+            }, { passive: true });
+            newNoteEl.addEventListener('touchend', (e) => {
+                const start = fieldTap;
+                fieldTap = null;
+                const t = e.changedTouches[0];
+                if (!start || !t || Math.abs(t.clientX - start.x) > 10 || Math.abs(t.clientY - start.y) > 10) return;
+                e.preventDefault();
+                focusNoteField();
+            });
             newNoteEl.addEventListener('blur', () => { noteFieldActive = false; });
             // Return picks the first pill that is not picked yet - usually the
             // "+ word" or the exact match - rather than saving. With nothing
@@ -3711,6 +3737,17 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                 const typing = pressedWhileTyping || (noteFieldActive && document.activeElement === newNoteEl);
                 pressedWhileTyping = false;
                 const at = picked.indexOf(it.word);
+                // One tap saves: outside Add note, an unpicked note is
+                // the whole bookmark - it saves and the modal closes. Picking
+                // several needs Add note (or the field tapped) first; once
+                // something is picked the rail stays in picking mode even if
+                // the keyboard goes away, so a stray tap never saves half a
+                // note. Swap and delete only ever pick, as they wait on a row.
+                if (mode === 'normal' && !typing && !picked.length && at === -1) {
+                    flushOpenEdit(false);
+                    commitAndClose({ time: newTime, note: it.word });
+                    return;
+                }
                 if (at === -1) picked.push(it.word); else picked.splice(at, 1);
                 renderResults();
                 if (typing) focusNoteField();
@@ -3742,6 +3779,28 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             if (page !== 0) modal.__goToPage?.(0, { now: true });
             (modal.__focusNoteField || focusNoteField)();
         });
+
+        // Clear: drops the picked notes, and nothing else - typed text has its
+        // own x. Read "typing" at the press, like the pills, so a clear while
+        // picking keeps the keyboard up.
+        const clearBtn = modal.querySelector('#clearPicksBtn');
+        if (clearBtn) {
+            let clearWhileTyping = false;
+            const clearPress = (e) => {
+                clearWhileTyping = noteFieldActive && document.activeElement === newNoteEl;
+                if (clearWhileTyping && e.type === 'mousedown') e.preventDefault();
+            };
+            clearBtn.addEventListener('touchstart', clearPress, { passive: true });
+            clearBtn.addEventListener('mousedown', clearPress);
+            clearBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const typing = clearWhileTyping || (noteFieldActive && document.activeElement === newNoteEl);
+                clearWhileTyping = false;
+                picked = [];
+                renderResults();
+                if (typing) focusNoteField();
+            });
+        }
 
         modal.querySelector('#deleteBookmarksBtn')?.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -3826,15 +3885,8 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             });
         }
 
-        // A quick note is the "instead of typing" path: it saves the new
-        // bookmark straight away. While swap or delete is armed it only fills
-        // the field, since the mode is waiting on a row tap. While you're
-        // typing a note, it's added to the end of what you've typed instead,
-        // and the field stays active.
-        //
-        // "Typing" is read at the PRESS, not at the click: on a phone the tap
-        // takes focus off the field before the click lands. On desktop the
-        // press is also stopped from taking focus, so the caret never leaves.
+        // Save commits the picked notes. A single quick note saves itself
+        // from the rail (see the rail's click handler above).
         modal.querySelector('#saveBookmarksBtn').addEventListener('click', (e) => {
             e.stopPropagation();
             flushOpenEdit(false);

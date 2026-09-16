@@ -727,11 +727,35 @@ function scrayBuildListRow(video, index, cfg) {
     [studio, perf, file].forEach(el => applyHighlightingToElement(el, window.currentSearchTerms));
   }
 
-  // Closed: the line opens the row. Open: the line plays it, through the P
-  // button's own handler - the open row's text is what closes it again (see
-  // ensureListRowDetail). Swapped round in 13.35: the line you tapped to open
-  // a row is where your thumb already is, so it's the one that plays.
+  // ⚙️ TAP TARGETS (13.180, 13.181). Lists with a size column (main, random):
+  //   filename  plays it straight away, through the P button's own handler -
+  //             no need to open the row first. If it's the video already
+  //             loaded in the player, the tap stops it instead (13.182).
+  //   any other column (number, studio, performers, score, size)
+  //             opens the row, or closes it
+  // History and the basket have no size column, so they keep the old
+  // behaviour: closed, the line opens the row; open, it plays (13.35).
+  const tapBySize = want.includes('lc-size');
   line.addEventListener('click', (e) => {
+    if (tapBySize) {
+      const t = e.target;
+      if (t.closest && t.closest('.lc-file')) {
+        // The playing video's own filename: Stop, the same full reset as the
+        // player's stop button (inlineVideoPlayer.stop = resetVideoInline).
+        const cur = window.currentPlayingVideo;
+        const curId = cur ? String(cur.oneDriveId ?? cur.idFromAPI ?? '') : '';
+        if (curId && curId === String(li.dataset.videoId) &&
+            window.inlineVideoPlayer && typeof window.inlineVideoPlayer.stop === 'function') {
+          window.inlineVideoPlayer.stop();
+          return;
+        }
+        if (!li._scrayPlaySpec) ensureListRowDetail(li);   // builds P's spec
+        if (li._scrayPlaySpec && li._scrayPlaySpec.onClick) li._scrayPlaySpec.onClick(e);
+        return;
+      }
+      toggleListRow(li);
+      return;
+    }
     if (li.classList.contains('lc-open') && li._scrayPlaySpec && li._scrayPlaySpec.onClick) {
       li._scrayPlaySpec.onClick(e);
       return;
@@ -1825,3 +1849,471 @@ window.scrayTryFingerprintMatch = async function (video, badgeEl) {
     badgeEl.textContent = original;
   }
 };
+
+/* =========================================
+ROW SWIPE ACTIONS (picker 13.179 / native 13.172)
+=========================================
+Swipe a row in the main list or the random list sideways, like a mail app, to
+uncover action buttons beside it. Tap one to run it; tap anywhere else to put
+the row back.
+
+  swipe LEFT  (finger moves left)   buttons uncovered on the RIGHT: B  ★
+  swipe RIGHT (finger moves right)  buttons uncovered on the LEFT:  S  R
+
+FULL SWIPE (13.180): keep going past the buttons, most of the way across the
+row, and the outermost button stretches to fill the gap - let go there and it
+runs straight away, with no second tap. Left runs ★, right runs S.
+
+SETTINGS (13.181): the above are the defaults. Settings > Swipe actions picks up
+to three buttons per side and whether a full swipe runs the outer one; it is
+saved per device (localStorage, scraySwipeActions) and read on every swipe.
+
+Every button runs the row's OWN handler - the same spec the open row's button
+group is drawn from (ensureListRowDetail) - so B, ★, S and P do exactly what
+the buttons in the open row do. Nothing is duplicated here.
+
+What the gesture stays out of:
+  - vertical scrolling: it only takes over once a drag is clearly sideways
+    (SWIPE_LOCK_PX, and more horizontal than vertical). Until then it does
+    nothing, and a drag that starts vertical is never taken.
+  - the screen edges: a touch that starts within SWIPE_EDGE_PX of either edge
+    is left to disguise.js's edge swipes (history / basket panels).
+  - folder group lines, the panels (history, basket), fullscreen, and mouse
+    input - touch only, so desktop is unchanged.
+========================================= */
+
+// ⚙️ The defaults, used until Settings saves something. Buttons are named by
+// the label the row's button specs use, listed from the row's edge outwards:
+// for LEFT the first sits next to the row and the last against the screen
+// edge; for RIGHT the same, mirrored. The LAST in each list is the outermost
+// button - the one a full swipe runs.
+const SCRAY_SWIPE_DEFAULTS = {
+  left:  ['B', '★'],
+  right: ['R', 'S'],
+  fullLeft: true,
+  fullRight: true
+};
+const SCRAY_SWIPE_STORE_KEY = 'scraySwipeActions';
+const SCRAY_SWIPE_MAX_BUTTONS = 3;
+
+// Everything a swipe can offer: the row's own button specs, by label, plus P.
+// `text` is what the narrow swipe button prints where the label is too long.
+const SCRAY_SWIPE_CHOICES = [
+  { label: 'P',              name: 'Play' },
+  { label: 'B',              name: 'Basket (add / remove)' },
+  { label: '★',              name: 'Score' },
+  { label: 'S',              name: 'Stash - scene data' },
+  { label: 'R',              name: 'Rename' },
+  { label: 'BM',             name: 'Bookmarks' },
+  { label: 'D',              name: 'Download' },
+  { label: 'Move',           name: 'Move to folder' },
+  { label: 'Stats',          name: 'Stats' },
+  { label: 'Copy Name',      name: 'Copy filename',   text: 'Copy' },
+  { label: 'Open Link',      name: 'Open in OneDrive', text: 'Link' },
+  { label: 'Refresh Data',   name: 'Refresh data',    text: 'Ref' },
+  { label: 'Refresh Folder', name: 'Refresh folder',  text: 'Fold' },
+  { label: 'F tally',        name: 'F tally',         text: 'F' },
+  { label: 'X',              name: 'Delete',          text: 'Del' }
+];
+window.SCRAY_SWIPE_CHOICES = SCRAY_SWIPE_CHOICES;
+
+/** The saved swipe setup, cleaned up, or the defaults. Never throws. */
+function scraySwipeConfig() {
+  const known = new Set(SCRAY_SWIPE_CHOICES.map(c => c.label));
+  const clean = (list, fallback) => {
+    if (!Array.isArray(list)) return fallback.slice();
+    const out = [];
+    list.forEach(l => { if (known.has(l) && !out.includes(l) && out.length < SCRAY_SWIPE_MAX_BUTTONS) out.push(l); });
+    return out;
+  };
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(SCRAY_SWIPE_STORE_KEY) || 'null'); } catch (e) { saved = null; }
+  if (!saved || typeof saved !== 'object') saved = {};
+  return {
+    left:  clean(saved.left,  SCRAY_SWIPE_DEFAULTS.left),
+    right: clean(saved.right, SCRAY_SWIPE_DEFAULTS.right),
+    fullLeft:  typeof saved.fullLeft  === 'boolean' ? saved.fullLeft  : SCRAY_SWIPE_DEFAULTS.fullLeft,
+    fullRight: typeof saved.fullRight === 'boolean' ? saved.fullRight : SCRAY_SWIPE_DEFAULTS.fullRight
+  };
+}
+window.scraySwipeConfig = scraySwipeConfig;
+
+/** Save a swipe setup (null = back to the defaults). */
+function scraySetSwipeConfig(cfg) {
+  try {
+    if (cfg == null) localStorage.removeItem(SCRAY_SWIPE_STORE_KEY);
+    else localStorage.setItem(SCRAY_SWIPE_STORE_KEY, JSON.stringify(cfg));
+  } catch (e) {
+    throw new Error('Could not save the swipe settings on this device');
+  }
+  if (typeof window.scrayCloseRowSwipe === 'function') window.scrayCloseRowSwipe();
+}
+window.scraySetSwipeConfig = scraySetSwipeConfig;
+const SCRAY_SWIPE_LISTS = '#taggedVideosContainer, #playlist';
+const SCRAY_SWIPE_BTN_W = 68;          // ⚙️ px per uncovered button
+const SCRAY_SWIPE_LOCK_PX = 12;        // ⚙️ sideways travel before the row follows the finger
+const SCRAY_SWIPE_OPEN_FRACTION = 0.4; // ⚙️ how much of the buttons must show to stay open
+const SCRAY_SWIPE_EDGE_PX = 24;        // ⚙️ matches disguise.js's EDGE
+const SCRAY_SWIPE_FULL_FRACTION = 0.6; // ⚙️ how far across the row a full swipe has to go
+
+(function scrayRowSwipe() {
+  if (window.__scrayRowSwipeBound) return;
+  window.__scrayRowSwipeBound = true;
+
+  let g = null;        // the gesture in progress
+  let open = null;     // { li, line, panel, side } - the row left open
+  let swallowClickIn = null, swallowUntil = 0;
+
+  const spring = 'transform 0.2s ease';
+
+  function specsFor(li, side) {
+    const labels = scraySwipeConfig()[side] || [];
+    if (!labels.length || typeof ensureListRowDetail !== 'function') return [];
+    const buttons = ensureListRowDetail(li) || [];
+    return labels.map(label => {
+      if (label === 'P') {
+        const p = li._scrayPlaySpec;
+        return p ? Object.assign({}, p, { label: 'P', color: p.color || '#28a745' }) : null;
+      }
+      return buttons.find(b => b && b.label === label) || null;
+    }).filter(s => s && !s.disabled && typeof s.onClick === 'function');
+  }
+
+  function buttonText(spec, li) {
+    if (spec.label === 'B') return li.classList.contains('basket-added') ? '−B' : 'B';
+    const choice = SCRAY_SWIPE_CHOICES.find(c => c.label === spec.label);
+    return (choice && choice.text) || spec.label;
+  }
+
+  function buildPanel(li, line, side) {
+    const specs = specsFor(li, side);
+    if (!specs.length) return null;
+    const panel = document.createElement('div');
+    panel.className = 'lc-swipe-actions lc-swipe-' + side;
+    panel.style.top = line.offsetTop + 'px';
+    panel.style.height = line.offsetHeight + 'px';
+    // Right-hand buttons are listed from the row outwards, so the row edge is
+    // the panel's LEFT end; left-hand ones mirror that.
+    const ordered = side === 'left' ? specs : specs.slice().reverse();
+    const outer = specs[specs.length - 1];
+    ordered.forEach(spec => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lc-swipe-btn' + (spec === outer ? ' lc-swipe-outer' : '');
+      b.textContent = buttonText(spec, li);
+      if (b.textContent.length > 2) b.classList.add('lc-swipe-btn-word');
+      if (spec.title) b.title = spec.title;
+      b.style.background = spec.color || '#555';
+      b.style.color = spec.textColor || '#fff';
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        // The handler first, while the button is still on the page - the score
+        // modal reads the event it was opened from - then the row goes back.
+        try {
+          const r = spec.onClick(e);
+          if (r && typeof r.catch === 'function') r.catch(err => console.error('[swipe] action failed:', err));
+        } catch (err) {
+          console.error('[swipe] action failed:', err);
+        }
+        closeOpen(true);
+      });
+      panel.appendChild(b);
+    });
+    panel._fullW = specs.length * SCRAY_SWIPE_BTN_W;
+    const cfg = scraySwipeConfig();
+    panel._outerSpec = (side === 'left' ? cfg.fullLeft : cfg.fullRight) ? outer : null;
+    li.appendChild(panel);
+    return panel;
+  }
+
+  function place(line, panel, offset, animate) {
+    line.style.transition = animate ? spring : 'none';
+    line.style.transform = offset ? `translateX(${offset}px)` : '';
+    if (panel) {
+      panel.style.transition = animate ? 'width 0.2s ease' : 'none';
+      panel.style.width = Math.abs(offset) + 'px';
+    }
+  }
+
+  function settleShut(li, line, panel) {
+    place(line, panel, 0, true);
+    setTimeout(() => {
+      // Something may have swiped it open again meanwhile.
+      if (open && open.li === li) return;
+      if (g && g.li === li) return;
+      if (panel && panel.parentNode) panel.remove();
+      line.style.transition = '';
+      li.classList.remove('lc-swipe-active');
+    }, 220);
+  }
+
+  function closeOpen(animate) {
+    if (!open) return;
+    const { li, line, panel } = open;
+    open = null;
+    if (!li.isConnected) return;   // the list was redrawn under it
+    if (animate) settleShut(li, line, panel);
+    else {
+      place(line, panel, 0, false);
+      if (panel) panel.remove();
+      li.classList.remove('lc-swipe-active');
+    }
+  }
+
+  function rowFrom(target) {
+    if (!target || !target.closest) return null;
+    if (target.closest('.lc-swipe-actions')) return null;
+    const li = target.closest('li.lc-row');
+    if (!li || li.classList.contains('lc-group')) return null;
+    if (!li.closest(SCRAY_SWIPE_LISTS)) return null;
+    const line = li.querySelector(':scope > .lc-line');
+    return line ? { li, line } : null;
+  }
+
+  document.addEventListener('touchstart', (e) => {
+    g = null;
+    if (!e.touches || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const inPanel = e.target && e.target.closest && e.target.closest('.lc-swipe-actions');
+
+    // A row left open goes back on any touch outside its buttons. A touch on
+    // that same row only shuts it - its tap must not also open or play it.
+    if (open && !inPanel) {
+      const wasLi = open.li;
+      closeOpen(true);
+      if (wasLi.contains(e.target)) {
+        swallowClickIn = wasLi;
+        swallowUntil = Date.now() + 600;
+        return;
+      }
+    }
+    if (inPanel) return;
+    if (document.body.classList.contains('fullscreen-active') &&
+        !document.body.classList.contains('fls-peek')) return;
+    if (t.clientX <= SCRAY_SWIPE_EDGE_PX || t.clientX >= window.innerWidth - SCRAY_SWIPE_EDGE_PX) return;
+
+    const row = rowFrom(e.target);
+    if (!row) return;
+    g = { li: row.li, line: row.line, x0: t.clientX, y0: t.clientY, locked: null, side: null, panel: null, offset: 0 };
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!g) return;
+    if (!e.touches || e.touches.length !== 1) { g = null; return; }
+    const t = e.touches[0];
+    const dx = t.clientX - g.x0;
+    const dy = t.clientY - g.y0;
+
+    if (g.locked === null) {
+      if (Math.abs(dx) < SCRAY_SWIPE_LOCK_PX && Math.abs(dy) < SCRAY_SWIPE_LOCK_PX) return;
+      if (Math.abs(dx) < SCRAY_SWIPE_LOCK_PX || Math.abs(dx) <= Math.abs(dy) * 1.2) { g = null; return; }
+      g.locked = 'h';
+      g.li.classList.add('lc-swipe-active');
+    }
+    if (e.cancelable) e.preventDefault();   // the page doesn't scroll under a sideways swipe
+
+    const side = dx < 0 ? 'left' : 'right';
+    if (side !== g.side) {
+      if (g.panel) g.panel.remove();
+      g.side = side;
+      g.panel = buildPanel(g.li, g.line, side);
+    }
+    const full = g.panel ? g.panel._fullW : 0;
+    const dist = Math.abs(dx);
+    const rowW = g.li.clientWidth || window.innerWidth;
+    // With buttons, the row follows the finger all the way across - that is
+    // how a full swipe is reached. With full swipe off for that side it meets
+    // resistance past the buttons instead. On a side with none it barely moves.
+    const fullOn = !!(g.panel && g.panel._outerSpec);
+    const shown = !full ? Math.min(dist * 0.2, 24)
+      : (fullOn || dist <= full) ? Math.min(dist, rowW)
+      : full + (dist - full) * 0.3;
+    g.offset = side === 'left' ? -shown : shown;
+    g.armed = !!full && !!g.panel._outerSpec &&
+      shown >= Math.max(full + 40, rowW * SCRAY_SWIPE_FULL_FRACTION);
+    if (g.panel) g.panel.classList.toggle('lc-swipe-armed', g.armed);
+    place(g.line, g.panel, g.offset, false);
+  }, { passive: false });
+
+  function endGesture() {
+    const cur = g;
+    g = null;
+    if (!cur || cur.locked !== 'h') return;
+    // No click should land on the row the swipe started on.
+    swallowClickIn = cur.li;
+    swallowUntil = Date.now() + 600;
+    const full = cur.panel ? cur.panel._fullW : 0;
+    if (cur.armed && cur.panel && cur.panel._outerSpec) {
+      // Full swipe: run the outermost button, then put the row back. The
+      // handler gets a stand-in event pointing at that button - the score
+      // menu opens where the event says.
+      const spec = cur.panel._outerSpec;
+      const btn = cur.panel.querySelector('.lc-swipe-outer');
+      const r = btn ? btn.getBoundingClientRect() : cur.line.getBoundingClientRect();
+      const fake = {
+        type: 'click', target: btn || cur.line, currentTarget: btn || cur.line,
+        clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+        stopPropagation() {}, preventDefault() {}
+      };
+      try {
+        const res = spec.onClick(fake);
+        if (res && typeof res.catch === 'function') res.catch(err => console.error('[swipe] full swipe failed:', err));
+      } catch (err) {
+        console.error('[swipe] full swipe failed:', err);
+      }
+      settleShut(cur.li, cur.line, cur.panel);
+      return;
+    }
+    if (full && Math.abs(cur.offset) >= full * SCRAY_SWIPE_OPEN_FRACTION) {
+      const offset = cur.side === 'left' ? -full : full;
+      place(cur.line, cur.panel, offset, true);
+      open = { li: cur.li, line: cur.line, panel: cur.panel, side: cur.side };
+    } else {
+      settleShut(cur.li, cur.line, cur.panel);
+    }
+  }
+  document.addEventListener('touchend', endGesture, { passive: true });
+  document.addEventListener('touchcancel', endGesture, { passive: true });
+
+  // Capture phase, so it runs before the row line's own click (open / play).
+  document.addEventListener('click', (e) => {
+    if (!swallowClickIn || Date.now() > swallowUntil) return;
+    if (e.target && e.target.closest && e.target.closest('.lc-swipe-actions')) return;
+    if (swallowClickIn.contains(e.target)) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    swallowClickIn = null;
+  }, true);
+
+  // Exposed for stage 2's settings and for anything that redraws a row.
+  window.scrayCloseRowSwipe = () => closeOpen(false);
+})();
+
+/* =========================================
+SETTINGS > SWIPE ACTIONS (13.181)
+=========================================
+Registered with settings.js's registry (native's settings, picker's new copy)
+as a custom row: two sides, three slots each, and a full-swipe switch per side.
+Slots are read in order and blanks are skipped, so "next to the row" is always
+the first chosen and the last chosen is the outer edge. */
+document.addEventListener('DOMContentLoaded', () => {
+  if (!window.scraySettings || typeof window.scraySettings.register !== 'function') return;
+
+  window.scraySettings.register({
+    id: 'swipeActions',
+    label: 'Swipe actions',
+    type: 'custom',
+    hint: 'Swipe a row in the list to show these buttons. A full swipe, most of the way across, runs the outer one.',
+    get: () => scraySwipeConfig(),
+    build: () => {
+      const cfg = scraySwipeConfig();
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;flex-direction:column;gap:14px;margin-top:6px;';
+
+      const selectCss = 'width:100%;box-sizing:border-box;margin:0;padding:8px;background:#2a2a2a;'
+        + 'color:#fff;border:1px solid #555;border-radius:4px;font-size:0.85rem;';
+      const sides = [
+        { key: 'left',  fullKey: 'fullLeft',  title: 'Swipe left - buttons on the right' },
+        { key: 'right', fullKey: 'fullRight', title: 'Swipe right - buttons on the left' }
+      ];
+      const slotNames = ['Next to the row', 'Middle', 'Outer edge'];
+      const controls = {};
+
+      const nameOf = (label) => (SCRAY_SWIPE_CHOICES.find(c => c.label === label) || {}).name || label;
+
+      sides.forEach(side => {
+        const box = document.createElement('div');
+        box.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid #3a3a3a;border-radius:6px;';
+
+        const head = document.createElement('div');
+        head.textContent = side.title;
+        head.style.cssText = 'font-size:0.85rem;font-weight:600;';
+        box.appendChild(head);
+
+        const preview = document.createElement('div');
+        preview.style.cssText = 'font-size:0.75rem;color:#aaa;font-family:ui-monospace,Menlo,monospace;';
+
+        const selects = [];
+        for (let i = 0; i < SCRAY_SWIPE_MAX_BUTTONS; i++) {
+          const row = document.createElement('label');
+          row.style.cssText = 'display:grid;grid-template-columns:7.5rem 1fr;align-items:center;gap:8px;margin:0;font-size:0.8rem;font-weight:normal;';
+          const txt = document.createElement('span');
+          txt.textContent = slotNames[i] || `Button ${i + 1}`;
+          const sel = document.createElement('select');
+          sel.style.cssText = selectCss;
+          const none = document.createElement('option');
+          none.value = ''; none.textContent = '- none -';
+          sel.appendChild(none);
+          SCRAY_SWIPE_CHOICES.forEach(c => {
+            const o = document.createElement('option');
+            o.value = c.label;
+            o.textContent = `${c.name} (${c.text || c.label})`;
+            sel.appendChild(o);
+          });
+          sel.value = cfg[side.key][i] || '';
+          sel.addEventListener('change', () => paint());
+          row.append(txt, sel);
+          box.appendChild(row);
+          selects.push(sel);
+        }
+
+        const fullRow = document.createElement('label');
+        fullRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0 0;font-size:0.8rem;font-weight:normal;';
+        const full = document.createElement('input');
+        full.type = 'checkbox';
+        full.checked = !!cfg[side.fullKey];
+        full.style.cssText = 'width:auto;margin:0;';
+        full.addEventListener('change', () => paint());
+        const fullTxt = document.createElement('span');
+        fullRow.append(full, fullTxt);
+        box.appendChild(fullRow);
+        box.appendChild(preview);
+
+        const chosen = () => {
+          const out = [];
+          selects.forEach(sel => { if (sel.value && !out.includes(sel.value)) out.push(sel.value); });
+          return out;
+        };
+        const paint = () => {
+          const list = chosen();
+          const outer = list[list.length - 1];
+          fullTxt.textContent = outer ? `Full swipe runs the outer button (${nameOf(outer)})` : 'Full swipe runs the outer button';
+          const btns = list.map(l => `[${(SCRAY_SWIPE_CHOICES.find(c => c.label === l) || {}).text || l}]`);
+          preview.textContent = !list.length ? 'No buttons - this swipe does nothing'
+            : side.key === 'left' ? `row ${btns.join(' ')}` : `${btns.slice().reverse().join(' ')} row`;
+        };
+        paint();
+        controls[side.key] = { selects, full, chosen, paint };
+        wrap.appendChild(box);
+      });
+
+      const reset = document.createElement('button');
+      reset.type = 'button';
+      reset.textContent = 'Reset swipes to defaults';
+      reset.style.cssText = 'width:auto;align-self:flex-start;margin:0;padding:6px 10px;background:#444;color:#fff;border:none;border-radius:4px;font-size:0.8rem;';
+      reset.addEventListener('click', () => {
+        sides.forEach(side => {
+          const c = controls[side.key];
+          c.selects.forEach((sel, i) => { sel.value = SCRAY_SWIPE_DEFAULTS[side.key][i] || ''; });
+          c.full.checked = !!SCRAY_SWIPE_DEFAULTS[side.fullKey];
+          c.paint();
+        });
+      });
+      wrap.appendChild(reset);
+
+      return {
+        el: wrap,
+        value: () => ({
+          left: controls.left.chosen(),
+          right: controls.right.chosen(),
+          fullLeft: controls.left.full.checked,
+          fullRight: controls.right.full.checked
+        }),
+        focus: () => {}
+      };
+    },
+    set: (value) => scraySetSwipeConfig(value)
+  });
+});

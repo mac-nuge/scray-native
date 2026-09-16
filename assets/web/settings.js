@@ -21,6 +21,10 @@ console.log("settings.js loaded");
    * @param {string}   def.label  shown above the control
    * @param {string}  [def.hint]  small grey text under the label
    * @param {string}  [def.type]  "url" | "text" - input type. Default "text".
+   *                              "custom" (13.172 native / 13.181 picker):
+   *                              def.build() returns { el, value(), focus?() }
+   *                              and draws its own controls; get/set/validate
+   *                              then deal in whatever value() returns.
    * @param {Function} def.get    () => current value as a string
    * @param {Function} def.set    (value) => void. May throw; the message is
    *                              shown inline and the modal stays open.
@@ -53,8 +57,24 @@ console.log("settings.js loaded");
     if (def.hint) {
       const hint = document.createElement("div");
       hint.textContent = def.hint;
-      hint.style.cssText = "font-size:0.75rem;color:#999;word-break:break-all;";
+      hint.style.cssText = "font-size:0.75rem;color:#999;word-break:break-word;";
       row.appendChild(hint);
+    }
+
+    if (def.type === "custom" && typeof def.build === "function") {
+      label.removeAttribute("for");
+      const ctl = def.build();
+      row.appendChild(ctl.el);
+      const error = document.createElement("div");
+      error.style.cssText = "font-size:0.75rem;color:#ff6b6b;display:none;";
+      row.appendChild(error);
+      // Shaped like a text row's, so open() and Save treat both alike.
+      const input = {
+        get value() { return ctl.value(); },
+        focus: () => { if (typeof ctl.focus === "function") ctl.focus(); },
+        select: () => {}
+      };
+      return { row, input, error, def };
     }
 
     const input = document.createElement("input");
@@ -93,13 +113,19 @@ console.log("settings.js loaded");
 
     const overlay = document.createElement("div");
     overlay.id = "scraySettingsOverlay";
+    // ⚙️ The bottom padding keeps Cancel / Save clear of the corner button row
+    // pinned along the bottom on phones (plus Native's extra lift) - 13.182 /
+    // native 13.175. Raise SETTINGS_BOTTOM_CLEAR_PX if they still get covered.
+    const SETTINGS_BOTTOM_CLEAR_PX = 90;
     overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.7);"
-      + "display:flex;align-items:center;justify-content:center;padding:20px;"
+      + "display:flex;align-items:center;justify-content:center;"
+      + "padding:calc(env(safe-area-inset-top, 0px) + 20px) 20px "
+      + `calc(env(safe-area-inset-bottom, 0px) + ${SETTINGS_BOTTOM_CLEAR_PX}px);`
       + "box-sizing:border-box;z-index:2147483647;";
 
     const box = document.createElement("div");
     box.style.cssText = "background:#1e1e1e;color:#fff;border-radius:8px;padding:18px;"
-      + "width:100%;max-width:480px;max-height:85vh;box-sizing:border-box;"
+      + "width:100%;max-width:480px;max-height:100%;box-sizing:border-box;"
       + "display:flex;flex-direction:column;gap:12px;overflow:hidden;";
 
     const title = document.createElement("div");

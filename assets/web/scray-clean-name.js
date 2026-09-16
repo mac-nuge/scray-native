@@ -139,6 +139,9 @@
     };
     // A studio that is its own parent says nothing twice.
     if (parts.parent && parts.parent === parts.studio) parts.parent = '';
+    // Nor does a performer who is their own studio (picker 13.179 / native
+    // 13.172 / browse 13.70): lily-carter_lily-carter_... prints the name once.
+    if (parts.performers && parts.performers === parts.studio) parts.performers = '';
 
     // The dimension is held back from the trimming below: it is four
     // characters that carry real information, and a name ending '_10' because

@@ -4,7 +4,146 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### picker 13.178 / native 13.171 — test: MPB played row always sits just above the player, pulled down too when it was higher up
+### picker 13.182 / native 13.175 — test: Settings modal sits clear of the corner buttons; tapping the playing video's filename stops it
+<!-- 2026-09-16T20:17Z -->
+
+**picker** — `staging - 13.182`: `settings.js`, `render.js`, `VERSION`
+**native** — `stg-native - 13.175`: `assets/web/settings.js`, `assets/web/render.js`, `assets/web/VERSION`
+
+Mac reported that Cancel and Save in the Settings modal were partly hidden behind the corner button row along the bottom of the phone.
+
+**Why:** the modal was centred in a 20px-padded overlay at up to 85vh tall. The corner row lives in disguise.js's dock, which is attached to `<html>` after `<body>`, so it paints over the overlay whatever its z-index. So the fix is space, not stacking.
+
+**Change** (`settings.js` `open()`, identical registry in both apps).
+- **Bottom padding:** the overlay's bottom padding is now safe area + `SETTINGS_BOTTOM_CLEAR_PX` (90px, covering the row plus Native's 30px lift). The top padding is safe area + 20px.
+- **Height:** the box's max-height is `100%` of what's left, not `85vh`. On a short screen the settings scroll inside the box and the buttons stay in view above the row.
+
+**Tested** in headless Chromium with the settings modal open (Swipe actions row). Gap between the bottom of Save and the bottom of the screen:
+- **390×844:** 135px.
+- **375×667:** 108px, with the settings scrolling inside the box.
+- **320×568:** 108px, also scrolling.
+- **Errors:** none.
+
+**Added mid-version: tapping the playing video's filename stops it** (`render.js` `scrayBuildListRow`, main and random lists).
+- **What changed:** 13.180 made a filename tap play. If that row's video is the one loaded in the player (`window.currentPlayingVideo`, matched by id, the same test as the green row), the tap now calls `inlineVideoPlayer.stop()` instead, which is `resetVideoInline`, the player's full Stop. A tap on any other filename still plays it.
+- **Tested** with the 13.181 harness and a stub `inlineVideoPlayer.stop`: a filename tap played row 1; with row 1 playing, the same tap stopped it; a tap on row 2's filename played row 2.
+
+### picker 13.181 / native 13.174 — test: any column but the filename opens a row; Settings > Swipe actions (picker gets a Settings page)
+<!-- 2026-09-16T20:13Z -->
+
+**picker** — `staging - 13.181`: `render.js`, `style.css`, `settings.js` (new), `index.php`, `bookmarks.php`, `VERSION`
+**native** — `stg-native - 13.174`: `assets/web/render.js`, `assets/web/style.css`, `assets/web/settings.js`, `assets/web/VERSION`
+
+Mac asked for two changes:
+1. Tapping any column except the filename opens a row, not just the size.
+2. Build the swipe settings after all, so every swipe can be customised.
+
+**1. Tap targets** (`render.js` `scrayBuildListRow`). In lists with a size column (main, random), the filename plays and every other cell (number, studio, performers, score, size) toggles the row open or shut. History and basket keep 13.35's rule.
+
+**2. Swipe settings.**
+- **Config** (`render.js`):
+  - The fixed `SCRAY_SWIPE_ACTIONS` table is replaced by `scraySwipeConfig()`: `{ left, right, fullLeft, fullRight }`, read from `localStorage` `scraySwipeActions` on every swipe and cleaned against `SCRAY_SWIPE_CHOICES`. It falls back to `SCRAY_SWIPE_DEFAULTS` (left `B ★`, right `R S`, full swipe on both sides).
+  - The choices are every row button spec by label: P, B, ★, S, R, BM, D, Move, Stats, Copy Name, Open Link, Refresh Data, Refresh Folder, F tally, X. Up to 3 per side.
+  - Labels too long for a 68px button print a short form (Copy, Link, Ref, Fold, F, Del) in a smaller font.
+  - A label a row doesn't have is skipped for that row. For example, Refresh Folder is picker-only.
+- **Full swipe switch:** with full swipe off for a side, a long drag meets resistance past the buttons and arms nothing.
+- **Saving:** `scraySetSwipeConfig` saves and closes any row left open. The setting is per device.
+- **The settings row** (`render.js`): registered on DOMContentLoaded as a `custom` row.
+  - Per side there are three dropdowns (Next to the row / Middle / Outer edge; blanks are skipped), a "Full swipe runs the outer button (name)" checkbox, and a live preview such as `row [B] [★]` or `[S] [R] row`.
+  - A "Reset swipes to defaults" button restores the defaults.
+- **Settings registry** (`settings.js`):
+  - Native's registry learns `type: "custom"`: `def.build()` returns `{ el, value(), focus() }`, wrapped to look like a text input so validate / Save / focus handle both kinds of row alike.
+  - Picker had no settings. It gets a copy of Native's registry and modal (the part above "Setting 1", kept identical), loaded after `render.js` in `index.php` and `bookmarks.php`, and a "Settings" link in the footer beside Change Log, the same place as Native. Native's Picker URL setting stays Native-only.
+
+**Tested** in headless Chromium, touch emulation at 390×844, real `render.js` / `settings.js` / `style.css` with stub row handlers; `php -l` on both PHP files:
+- **Tap targets:** number, studio, performers, score and size each opened the row, and the filename played without opening.
+- **Defaults:** a left swipe showed `B,★`.
+- **Modal:** Settings listed `swipeActions`. Setting left to D + X with full swipe off, and right to P, previewed `row [D] [Del]` / `[P] row` and saved that JSON.
+- **After saving:** a 300px left swipe showed `D,Del` and ran nothing; a 300px right swipe armed and played.
+- **Reset + Save:** returned to the defaults.
+- **Errors:** no page errors.
+
+### picker 13.180 / native 13.173 — test: size opens a row and the filename plays it; right swipe S R; full swipe runs the outer button
+<!-- 2026-09-16T20:05Z -->
+
+**picker** — `staging - 13.180`: `render.js`, `style.css`, `VERSION`
+**native** — `stg-native - 13.173`: `assets/web/render.js`, `assets/web/style.css`, `assets/web/VERSION`
+
+Mac liked 13.179's swipes and asked for four changes before settings (settings are skipped for now):
+1. Tapping the size opens a row.
+2. Tapping the filename plays straight away.
+3. The right swipe's P becomes R.
+4. Swiping all the way runs the outermost button: ★ on the left, S on the right.
+
+**1–2. Tap targets** (`render.js` `scrayBuildListRow`, the line's click handler).
+- **Which lists:** those with a size column, which are main and random.
+- **Size cell:** toggles the row open or shut.
+- **Filename cell:** plays through `_scrayPlaySpec`, the P button's own handler. That spec is built by `ensureListRowDetail`, so a row that has never been opened builds it first.
+- **Other cells:** the number, studio, performers and score do nothing. The swipes are how B / ★ / S / R are reached now.
+- **History and basket:** no size column, so they keep 13.35's rule (closed: the line opens; open: it plays).
+- **Wholesale mode:** its capture-phase click handler still runs first and swallows these taps, as before.
+
+**3. Right swipe** (`SCRAY_SWIPE_ACTIONS.right = ['R', 'S']`). R is the rename spec `scrayArrangeOpenRowButtons` adds, so it opens the same rename modal as the open row's R. On screen it reads `S R`, left to right.
+
+**4. Full swipe.**
+- **Following the finger:** with buttons on that side, the row now follows the finger 1:1 all the way across. It used to meet resistance past the buttons.
+- **Arming:** past `max(buttons + 40px, 60% of the row)` (`SCRAY_SWIPE_FULL_FRACTION`), the panel is armed. The outermost button (the last in each `SCRAY_SWIPE_ACTIONS` list) grows to fill the gap and the others shrink to nothing, so it's clear what letting go will do.
+- **Releasing armed:** runs that button with a stand-in event centred on it, since the score menu positions itself from `event.clientX/Y`. Then the row springs back.
+- **Releasing short of armed:** the old behaviour is unchanged. Open at 40% of the buttons, otherwise it springs back.
+
+**Tested** in headless Chromium, touch emulation at 390×844, with the real `render.js` / `style.css` and stub handlers:
+- **Size:** tapping it opened the row, and tapping again closed it.
+- **Filename:** played without opening.
+- **Studio:** did nothing.
+- **Right swipe:** 150px showed `S,R`, and tapping R opened rename.
+- **Full swipes:** a 300px swipe left armed and ran ★, with the menu event at the button; 300px right ran S. A 150px swipe left opened `B,★` without arming.
+- **Errors:** no page errors.
+
+### picker 13.179 / native 13.172 / browse 13.70 — test: rename suggestion names a performer once when they're also the studio; swipe list rows for B ★ / S P
+<!-- 2026-09-16T19:55Z -->
+
+**picker** — `staging - 13.179`: `scray-clean-name.js`, `render.js`, `style.css`, `VERSION`
+**native** — `stg-native - 13.172`: `assets/web/scray-clean-name.js`, `assets/web/render.js`, `assets/web/style.css`, `assets/web/VERSION`
+**browse** — `staging-browse - 13.70`: `scray-clean-name.js`, `VERSION.txt` (the naming rule only; browse has no list rows)
+
+Mac asked for two things:
+1. In the rename modal, when the studio and performer are the same, the suggested name should show the name once.
+2. Mail-app-style swipes on list rows: swipe left uncovers B and score, swipe right uncovers S and play.
+
+Stage 1 of the swipes has fixed actions. Stage 2, choosing what each swipe does in settings (creating a settings page in picker, which has none), waits until Mac confirms the swipe itself works.
+
+**1. Performer who is also the studio** (`scray-clean-name.js`, identical in all three repos).
+- **Where it applies:** `cleanNameFrom` already drops the parent when it equals the studio. It now also drops the performers field when, after hyphenating and censoring, it equals the studio. So `lily-carter_lily-carter_…` becomes `lily-carter_…`.
+- **Why all three files:** the rename modal's suggestion, Native's and manage-data's bulk rename all build from this one file. Files that already carry the doubled name become eligible for a clean rename again, which is how the rule is meant to work.
+- **Checked** with node:
+  - studio "Lily Carter", performer "Lily Carter" → `lily-carter_wmvf-full-low_1080.mp4`
+  - Evil Angel / Anna Lee, Bea Ray unchanged
+  - with a parent → `gamma_lily-carter_x.mp4`
+
+**2. Row swipes** (`render.js` ROW SWIPE ACTIONS, `style.css`, identical in both apps).
+- **Which lists:** rows in the main list (`#taggedVideosContainer`) and the random list (`#playlist`), including files inside an open folder group.
+- **Not included:** history and the basket, whose panels have their own swipe-to-close gestures; folder group lines; the landscape-phone panel list; and desktop (touch only).
+- **Revealing:** the row's line slides with the finger and a panel of buttons grows into the space it leaves. Swipe left gives `B ★` on the right; swipe right gives `S P` on the left. Past 40% of the buttons' width it stays open; less, it springs back. Dragging past the buttons, or on a side with none, meets resistance.
+- **The buttons:** each runs the row's own handler, the specs `ensureListRowDetail` builds for the open row's button group (P is `_scrayPlaySpec`). B, ★, S and P therefore behave exactly like the open row's buttons, including P playing through that list's handler. B reads `−B` when the file is already basketed.
+- **Closing:** tapping a button runs it, then the row goes back. Any touch elsewhere closes an open row. A tap on that same row only closes it, and doesn't open or play it (a capture-phase click swallow).
+- **Staying out of the way:**
+  - It only engages once a drag is clearly sideways (12px, and more horizontal than vertical), then stops the page scrolling. Rows get `touch-action: pan-y`.
+  - A drag that starts vertical is never taken.
+  - A touch starting within 24px of either screen edge is left to disguise.js's edge swipes for the history and basket panels.
+  - Nothing happens in fullscreen, except during an FLS peek.
+- **Tuning:** `SCRAY_SWIPE_ACTIONS` is the one table stage 2 will turn into a setting. The other ⚙️ values are button width, lock distance, open fraction and edge.
+
+**Tested** in headless Chromium, touch emulation at 390×844, driving the real `render.js` `scrayBuildListRow` with stub button specs and the real `style.css`, using CDP touch events:
+- **Swipe left:** 150px opened `B,★` at 136px; tapping B ran B and closed the row.
+- **Swipe right:** 160px opened `S,P`.
+- **Tap on the open row:** closed it without opening it.
+- **Short swipe (30px):** sprang back.
+- **Mostly vertical drag:** did nothing.
+- **Plain tap:** still opened the row.
+- **Swipe from the right edge:** ignored.
+- **P after swiping right:** ran P and closed the row. No page errors.
+
+### picker 13.178 / native 13.171 — stable: MPB played row always sits just above the player, pulled down too when it was higher up
 <!-- 2026-09-16T19:39Z -->
 
 **picker** — `staging - 13.178`: `player.js`, `VERSION`
@@ -47,7 +186,7 @@ Mac's simplified version of the idea from 13.176: in MPB the docked player cover
 - **Off-screen row:** no scroll.
 - **Touch:** a touch cancelled it.
 
-### picker 13.176 / native 13.169 — test: playing video's row green in the main list, a basketed one keeps a pink number
+### picker 13.176 / native 13.169 — stable: playing video's row green in the main list, a basketed one keeps a pink number
 <!-- 2026-09-16T19:22Z -->
 
 **picker** — `staging - 13.176`: `render.js`, `player.js`, `style.css`, `VERSION`

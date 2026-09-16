@@ -7949,3 +7949,65 @@ body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor >
    they are lowercased here, as display only. Editing the note (.bm-note-edit)
    still shows and saves exactly what is stored. */
 .bm-note-btn { text-transform: lowercase; }
+
+/* =========================================
+ROW SWIPE ACTIONS (picker 13.179 / native 13.172)
+=========================================
+render.js (ROW SWIPE ACTIONS) slides a row's line sideways and grows a panel of
+buttons into the space it leaves. The line moves, not the row, so an open row's
+details stay put underneath. pan-y hands vertical drags to the browser and
+sideways ones to the script. */
+:is(#taggedVideosContainer, #playlist) li.lc-row {
+  touch-action: pan-y;
+}
+:is(#taggedVideosContainer, #playlist) li.lc-row.lc-swipe-active {
+  position: relative;
+  overflow: hidden;
+}
+:is(#taggedVideosContainer, #playlist) li.lc-row.lc-swipe-active > .lc-line {
+  position: relative;
+  z-index: 1;
+  will-change: transform;
+}
+.lc-swipe-actions {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  width: 0;
+  overflow: hidden;
+}
+.lc-swipe-actions.lc-swipe-left  { right: 0; }
+.lc-swipe-actions.lc-swipe-right { left: 0; }
+.lc-swipe-actions .lc-swipe-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+/* Full swipe armed (13.180): the outermost button takes the whole gap, the way a
+   mail app shows which action letting go will run. */
+.lc-swipe-actions .lc-swipe-btn {
+  transition: flex-grow 0.15s ease;
+}
+.lc-swipe-actions.lc-swipe-armed .lc-swipe-btn:not(.lc-swipe-outer) {
+  flex-grow: 0;
+  flex-basis: 0;
+}
+.lc-swipe-actions.lc-swipe-armed .lc-swipe-btn.lc-swipe-outer {
+  flex-grow: 1;
+}
+/* Word labels (Copy, Link, Del, Move...) in a 68px button (13.181). */
+.lc-swipe-actions .lc-swipe-btn.lc-swipe-btn-word {
+  font-size: 0.72rem;
+  font-weight: 600;
+}

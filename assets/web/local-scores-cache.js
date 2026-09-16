@@ -602,11 +602,22 @@ function showVideoScoringModal(video, event) {
       e.stopPropagation();
       menu.remove();
       try {
+        // What Undo puts back - null when it had no score.
+        const prevScore = video.user_score ?? cachedVideoScores.get(video.oneDriveId) ?? null;
         await applyVideoScore(video, score);
         const label = score === null ? 'Score cleared' : `✅ Score: ${score}`;
-        showScoreConfirmation(
-          `${label}<br><span style="font-size: 0.5em; opacity: 0.9;">${video.filename || ''}</span>`
-        );
+        const html = `${label}<br><span style="font-size: 0.5em; opacity: 0.9;">${video.filename || ''}</span>`;
+        // With Undo, and up 50% longer than the plain one (2.25s against 1.5s).
+        if (typeof window.scrayUndoToast === 'function') {
+          window.scrayUndoToast({
+            html,
+            className: 'score-confirmation-tooltip',
+            ms: 2250,
+            onUndo: () => applyVideoScore(video, prevScore),
+          });
+        } else {
+          showScoreConfirmation(html);
+        }
         console.log(`Scored ${video.filename}: ${score === null ? 'cleared' : score + '/10'}`);
       } catch (err) {
         console.error('Failed to save score:', err);

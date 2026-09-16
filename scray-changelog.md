@@ -4,6 +4,41 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.156 / native 13.154 — test: undo on bookmark and score confirmations
+<!-- 2026-09-16T10:55Z -->
+
+**picker** — `staging - 13.156`: `scray-config.js`, `file-operations.js`, `excel-sheets.js`, `VERSION`
+**native** — `stg-native - 13.154`: `assets/web/scray-config.js`, `assets/web/file-operations.js`, `assets/web/local-scores-cache.js`, `assets/web/VERSION`
+
+Mac asked for two changes to the bookmark and score save confirmations:
+- They stay up 50% longer.
+- They get an Undo button, in case the save was a mistake. Undo asks for confirmation first, in case it was tapped by accident.
+
+(13.155 / 13.153 were confirmed and committed as stable before this.)
+
+**One helper, `window.scrayUndoToast`, in `scray-config.js`.** It's in both apps and byte-identical. The confirmations themselves live in different files in each app: picker's in `excel-sheets.js`; native's score one in `local-scores-cache.js` and its bookmark one in `db.js`. A shared helper keeps the new behaviour in one place.
+- **Appearance:** it borrows the class of the tooltip it replaces (`bookmark-confirmation-tooltip` or `score-confirmation-tooltip`), so it looks the same.
+- **Taps:** it turns `pointer-events` back on, since those tooltips are `pointer-events: none`. Touches on it stop propagating, so a score menu's outside-tap close and the player underneath don't see them.
+- **Flow:** the saved message plus **Undo**. Undo changes it to **Undo? Yes / No**, which stays up for 5s (`CONFIRM_MS`); left unanswered, the save stands. No puts the message back and restarts the timer. Yes shows "Undoing…", then "↩ Undone" or "❌ Undo failed" for 1.5s.
+- **Long filenames:** the toast is capped at the screen width and the message ellipsises, so Undo can't be pushed off the edge.
+
+**Bookmarks** (`commitAndClose`, the same in both apps). This covers every save from the modal: a quick note, Save, the timestamp button, swap, and delete.
+- **Before saving:** it takes a copy of `video.bookmarks`.
+- **After saving:** once `saveBookmarks` succeeds, the "Saving… → N bookmarks saved" tooltip is replaced by an undo toast with the same text for 1.95s (was 1.3s).
+- **Undo:** puts the copy back and calls `saveBookmarks` again. It diffs against the server in both apps, so a bookmark the save added is tombstoned, and one it deleted or moved comes back.
+- **Detached tooltip:** the undo save gets a tooltip that isn't on the page. Otherwise picker's `saveBookmarks` would pop its own "saved" message over the toast.
+- **Not changed:** a failed save keeps the old ❌ tooltip, and stash imports keep the plain confirmation.
+
+**Scores**, shown for 2.25s (was 1.5s):
+- **Picker:** the write and in-memory patching in `showVideoScoringModal` became `applyScore(score)`, unchanged apart from the variable. Undo runs it with the previous score: `video.userScore`, then the cached score, then 0, which is "unscored".
+- **Native:** Undo calls the existing `applyVideoScore(video, prev)`. The previous score is `video.user_score`, then the cached score, then `null`, which is native's "cleared".
+- **Not changed:** rename, move and exclude confirmations use `showScoreConfirmation` too, and keep it.
+
+**Tested** in headless Chromium with native's `style.css`, for both apps:
+- **Bookmarks:** a quick note shows "2 bookmarks saved | Undo". Undo shows Yes/No, No restores it, and Yes saves the original single bookmark back and shows "↩ Undone". Untouched, the toast is still up at 1.8s and gone by 2.4s.
+- **Scores:** scoring 7 on a video scored 3 writes 7; Undo → Yes writes 3 and the video reads 3 again.
+- `node --check` passes on all changed files.
+
 ### picker 13.155 / native 13.153 — test: same rail height either way in, tighter button row, Clear
 <!-- 2026-09-16T10:30Z -->
 

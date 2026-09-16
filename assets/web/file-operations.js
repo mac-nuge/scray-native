@@ -3080,6 +3080,8 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         if (extra) next.push(extra);
         next.sort((a, b) => a.time - b.time);
 
+        // What Undo puts back: the list exactly as it was before this save.
+        const before = (video.bookmarks || []).map(b => ({ ...b }));
         video.bookmarks = next;
         modal.remove();
 
@@ -3089,6 +3091,26 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         }
         try {
             await saveBookmarks(video, tip);
+            // Saved: swap the tooltip for the same message with Undo, shown 50%
+            // longer (1.95s against 1.3s). Undo saves the old list back through
+            // saveBookmarks, which diffs against the server, so a bookmark this
+            // save added is tombstoned and one it deleted comes back.
+            if (typeof window.scrayUndoToast === 'function') {
+                const html = tip ? tip.innerHTML
+                    : `${next.length} bookmark${next.length === 1 ? '' : 's'} saved`;
+                tip?.remove();
+                window.scrayUndoToast({
+                    html,
+                    className: 'bookmark-confirmation-tooltip',
+                    ms: 1950,
+                    onUndo: async () => {
+                        video.bookmarks = before.map(b => ({ ...b }));
+                        // A detached tooltip soaks up saveBookmarks' own
+                        // "saved" messages - the undo toast reports instead.
+                        await saveBookmarks(video, document.createElement('div'));
+                    },
+                });
+            }
         } catch (err) {
             console.error('Bookmark save failed:', err);
             if (tip && typeof window.updateBookmarkConfirmation === 'function') {

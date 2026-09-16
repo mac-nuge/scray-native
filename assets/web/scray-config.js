@@ -1218,3 +1218,119 @@ window.scrayAddSearchTerm = function (term) {
     load(true);
   });
 })();
+
+// =========================================
+// UNDO TOAST (picker 13.156 / native 13.154)
+// =========================================
+// A save confirmation with an Undo button, for bookmark and score saves. The
+// same look as the tooltip it replaces - it takes that tooltip's class - but
+// it can be tapped. Undo asks "Undo?" first, so a stray tap near the player
+// controls can't throw a save away; while it's asking, the toast stays up.
+//
+// window.scrayUndoToast({ html, onUndo, className, bg, ms })
+//   html      - the confirmation, as the plain tooltip would have shown it
+//   onUndo    - async; puts things back. Its rejection shows "Undo failed".
+//   className - the tooltip class to borrow (bookmark- or score-confirmation-tooltip)
+//   ms        - how long it stays up untouched
+(function () {
+  // ⚙️ How long the "Undo?" question waits for an answer before giving up
+  //    (the save stands), and how long the undone / failed result stays.
+  const CONFIRM_MS = 5000;
+  const RESULT_MS = 1500;
+
+  window.scrayUndoToast = function ({ html, onUndo, className = 'bookmark-confirmation-tooltip', bg = '#28a745', ms = 1950 }) {
+    const toast = document.createElement('div');
+    toast.className = className + ' scray-undo-toast';
+    toast.style.background = bg;
+    // The confirmation tooltips are pointer-events: none so they never block
+    // the player; this one has to take a tap.
+    toast.style.pointerEvents = 'auto';
+    toast.style.display = 'flex';
+    toast.style.alignItems = 'center';
+    toast.style.gap = '10px';
+
+    // Long filenames: the tooltip is nowrap, so cap it at the screen and
+    // let the message ellipsise rather than push Undo off the edge.
+    toast.style.maxWidth = 'calc(100vw - 24px)';
+    toast.style.boxSizing = 'border-box';
+    const msg = document.createElement('div');
+    msg.style.cssText = 'min-width: 0; overflow: hidden; text-overflow: ellipsis;';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display: flex; gap: 6px; flex: 0 0 auto;';
+    toast.append(msg, actions);
+
+    const button = (label, filled) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      // margin: 0 overrides the global button margin in style.css.
+      b.style.cssText = 'margin: 0; padding: 6px 12px; min-width: 0; width: auto; border-radius: 4px; '
+        + 'font: inherit; font-size: 0.8rem; font-weight: bold; line-height: 1.2; cursor: pointer; '
+        + 'touch-action: manipulation; color: #fff; border: 1px solid rgba(255,255,255,0.8); '
+        + `background: ${filled ? 'rgba(255,255,255,0.3)' : 'transparent'};`;
+      // Taps on the toast stay on the toast: nothing behind it (a menu's
+      // outside-click close, the player's tap-to-toggle) should see them.
+      ['touchstart', 'mousedown', 'pointerdown'].forEach(t =>
+        b.addEventListener(t, e => e.stopPropagation(), { passive: true }));
+      return b;
+    };
+    ['touchstart', 'mousedown', 'pointerdown', 'click'].forEach(t =>
+      toast.addEventListener(t, e => e.stopPropagation(), { passive: true }));
+
+    let timer = null;
+    const hideAfter = (delay) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+      }, delay);
+    };
+
+    const showSaved = () => {
+      msg.innerHTML = html;
+      actions.replaceChildren();
+      const undo = button('Undo', true);
+      undo.addEventListener('click', (e) => { e.stopPropagation(); ask(); });
+      actions.append(undo);
+    };
+
+    const ask = () => {
+      msg.textContent = 'Undo?';
+      actions.replaceChildren();
+      const yes = button('Yes', true);
+      const no = button('No', false);
+      yes.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        clearTimeout(timer);
+        msg.textContent = 'Undoing...';
+        actions.replaceChildren();
+        toast.style.background = '#6c757d';
+        try {
+          await onUndo();
+          msg.textContent = '↩ Undone';
+          toast.style.background = '#28a745';
+        } catch (err) {
+          console.error('Undo failed:', err);
+          msg.textContent = '❌ Undo failed';
+          toast.style.background = '#dc3545';
+        }
+        toast.style.pointerEvents = 'none';
+        hideAfter(RESULT_MS);
+      });
+      no.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showSaved();
+        hideAfter(ms);
+      });
+      actions.append(yes, no);
+      hideAfter(CONFIRM_MS);
+    };
+
+    showSaved();
+    document.body.appendChild(toast);
+    setTimeout(() => toast.classList.add('show'), 10);
+    hideAfter(ms);
+    return toast;
+  };
+})();
+

@@ -84,6 +84,16 @@ const noParentSuggestionBase = (noParentSuggestion && extension && noParentSugge
     ? noParentSuggestion.slice(0, -extension.length)
     : (noParentSuggestion || '');
 
+// ✎ Everywhere or this phone only, as a checkbox IN this modal (native 13.163).
+// It used to be a second modal (scray-rename.js askScope) opened on Rename,
+// which the Stash modal's rename-after-match kept burying. Same condition as
+// renameFile's: a phone file that is also in the catalogue. Ticked by default;
+// unticked renames the phone file only. Everywhere needs a connection, so
+// offline it starts unticked and can't be ticked.
+const scopeAsk = typeof isLocalVideo === 'function' && isLocalVideo(video) &&
+    video.inCatalogue === true && typeof window.scrayRenameLocal === 'function';
+const scopeOnline = navigator.onLine !== false;
+
 const modal = document.createElement('div');
 modal.className = 'basket-json-modal';
 // opts.zIndex (13.162 / 13.161): opened from the Stash modal after a match,
@@ -129,6 +139,13 @@ ${(cleanSuggestion || noParentSuggestion) ? `
  <button id="nextWordEdgeBtn" class="bracket-btn" title="Jump to next word edge">&gt;</button>
  <button id="removeWordsBtn" class="bracket-btn bracket-btn-red" title="Remove selected words and following separator">X</button>
 </div>
+
+${scopeAsk ? `
+<!-- Everywhere / this phone only (13.163) -->
+<div class="scray-delete-everywhere scray-rename-scope" style="background:#eef6ff;border-color:#b9d4f5;">
+    <label><input type="checkbox" id="renameEverywhereChk" ${scopeOnline ? 'checked' : 'disabled'}> Rename everywhere</label>
+    <span class="scray-delete-everywhere-note" id="renameScopeNote"></span>
+</div>` : ''}
 
 <!-- Rename and Cancel buttons -->
 <div style="display: flex; gap: 8px;">
@@ -574,8 +591,8 @@ if (cleanSuggestion || noParentSuggestion) {
         showName(name);
         input.value = base;
         renderWordSelector(input.value);
-        input.focus();
-        input.setSelectionRange(input.value.length, input.value.length);
+        // No focus (13.164 / 13.163): the name goes in, but the box - and on a
+        // phone the keyboard - only wakes when you tap into it yourself.
     };
     document.getElementById('useCleanNameBtn')
         ?.addEventListener('click', () => fill(cleanSuggestion, cleanSuggestionBase));
@@ -593,6 +610,21 @@ input.select();
 modal.addEventListener('click', (e) => {
 if (e.target === modal) modal.remove();
 });
+
+// The scope note says exactly what each state of the box will do - the same
+// wording the old Everywhere / This phone only question used.
+const scopeChk = scopeAsk ? document.getElementById('renameEverywhereChk') : null;
+const paintScope = () => {
+    const note = document.getElementById('renameScopeNote');
+    if (!scopeChk || !note) return;
+    note.textContent = !scopeOnline
+        ? 'Offline - everywhere needs a connection, so only this phone\u2019s file is renamed. OneDrive and the catalogue keep the old name.'
+        : scopeChk.checked
+            ? 'This file is also in the catalogue. Renames it on this phone, every OneDrive copy and the catalogue (its score, bookmarks, stash match and variants go with it). If the server refuses, nothing is renamed.'
+            : 'This phone only. OneDrive and the catalogue keep the old name, and the difference shows up in the \u270E names list.';
+};
+scopeChk?.addEventListener('change', paintScope);
+paintScope();
 
 // Cancel button
 document.getElementById('cancelRenameBtn').addEventListener('click', () => {
@@ -619,7 +651,9 @@ confirmBtn.textContent = 'Renaming...';
 
 try {
     // 13.61: what renameFile resolves with says where it was renamed.
-    const renameResult = await renameFile(video, fullNewName);
+    // The checkbox answers the scope, so renameLocal never asks its own modal.
+    const renameResult = await renameFile(video, fullNewName,
+        scopeChk ? { scope: scopeChk.checked ? 'everywhere' : 'phone' } : {});
     
     // ✅ Auto-refresh after rename
     confirmBtn.textContent = 'Refreshing...';
@@ -4098,7 +4132,9 @@ window.saveBookmarks = saveBookmarks;
  * written until you press it - the whole point of the on-demand design is that
  * triage happens here rather than leaving suggested rows in the database.
  */
-async function showStashModal(video) {
+async function showStashModal(video, openOpts) {
+    // openOpts.performer (13.163 / 13.162): open straight onto that performer's
+    // profile in the navigator - the list rows' purple names ask for this.
     document.getElementById('stashModal')?.remove();
     if (window.plyrPlayer && !window.plyrPlayer.paused) window.plyrPlayer.pause();
 
@@ -4890,6 +4926,7 @@ async function showStashModal(video) {
     }
 
     modal.querySelector('#stashRecheckBtn').addEventListener('click', () => load(true));
+    const startPerformer = openOpts && openOpts.performer ? String(openOpts.performer) : '';
 
     addBtn.addEventListener('click', async () => {
         const picked = [...modal.querySelectorAll('.stash-mk:checked')]
@@ -4949,7 +4986,11 @@ async function showStashModal(video) {
         }
     });
 
-    load(false);
+    load(false).then(() => {
+        if (startPerformer && document.body.contains(modal)) {
+            openNav({ type: 'performer', name: startPerformer, sceneId: matchedStashId }, false);
+        }
+    });
 }
 window.showStashModal = showStashModal;
 window.showRenameModal = showRenameModal;

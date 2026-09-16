@@ -369,9 +369,15 @@ const stashParts = namePlan ? namePlan.parts : null;
     // rename modal". Without this, filtering by a performer would also
     // open rename every time.
     span.style.textDecoration = 'underline';
-    span.title = `Click to filter by "${label}"`;
+    span.title = kind === 'performer' ? `Filter by, or look up, "${label}"` : `Click to filter by "${label}"`;
     span.addEventListener('click', (e) => {
       e.stopPropagation();
+      // A performer asks first (13.163 / 13.162): filter by the name, or open
+      // them in the Stash navigator. Studios still filter straight away.
+      if (kind === 'performer' && typeof window.scrayPerformerChoice === 'function') {
+        window.scrayPerformerChoice(video, label);
+        return;
+      }
       // A facet filter, not a search term. The old behaviour pushed the name
       // into the search box, where it matched anywhere in the haystack - so
       // tapping a studio also dragged in every scene whose TITLE happened to

@@ -129,6 +129,10 @@
       const modal = document.createElement("div");
       modal.className = "basket-json-modal";
       modal.id = "scrayRenameScope";
+      // Top layer, and appended after the rename modal, so it lands on top of
+      // it even when that one was raised to the top layer itself - as it is
+      // when the Stash modal opens it after a match (13.162).
+      modal.style.zIndex = "2147483647";
       const what = video
         ? `<div class="rn-pair"><div><span class="rn-lbl">From</span><span class="rn-name">${esc(video.filename)}</span></div>
            <div><span class="rn-lbl">To</span><span class="rn-name">${esc(newName)}</span></div></div>`

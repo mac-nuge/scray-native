@@ -1,5 +1,8 @@
 // scray-stash-nav.js — the Stash modal's own StashDB navigator
 // (picker 13.162 / native 13.161, needs browse 13.68's stash_nav action).
+// picker 13.163 / native 13.162: path tags under the words box, a ▶ preview,
+// a Google link on profiles, and scrayPerformerChoice for the list rows.
+// picker 13.164 / native 13.163: Unblur all.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -65,9 +68,17 @@
 #stashModal .ssn button { width: auto; min-width: 0; margin: 0; padding: 6px 12px; font-size: .8rem; line-height: 1.2; border: 1px solid #ccc; border-radius: 6px; background: #f4f4f6; color: #222; cursor: pointer; white-space: nowrap; }
 #stashModal .ssn button:disabled { opacity: .5; cursor: default; }
 #stashModal .ssn-refine { position: sticky; top: 0; z-index: 2; background: #fff; padding: 0 0 8px; border-bottom: 1px solid rgba(128,128,128,.2); margin-bottom: 8px; }
-#stashModal .ssn input.ssn-term { display: block; width: 100%; box-sizing: border-box; margin: 0 0 6px; padding: 8px 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 6px; background: #fff; color: inherit; -webkit-appearance: none; appearance: none; }
+#stashModal .ssn input.ssn-term { display: block; width: 100%; box-sizing: border-box; margin: 0 0 6px; padding: 7px 9px; font-size: 14px; border: 1px solid #ccc; border-radius: 6px; background: #fff; color: inherit; -webkit-appearance: none; appearance: none; }
 #stashModal .ssn input.ssn-term:focus { outline: none; border-color: #8b7cf0; box-shadow: 0 0 0 2px rgba(139,124,240,.25); }
 #stashModal .ssn-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+#stashModal .ssn-ptags { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 7px; }
+#stashModal .ssn-ptags:empty { display: none; }
+#stashModal .ssn .ssn-ptag { padding: 2px 9px; border-radius: 12px; border: 1px solid #b9d4f5; background: #eaf3ff; color: #0b5ed7; font-size: .76rem; }
+#stashModal .ssn .ssn-ptag.on { background: #28a745; border-color: #28a745; color: #fff; }
+#stashModal .ssn .ssn-play { padding: 6px 11px; }
+#stashModal .ssn .ssn-unblur { margin-left: auto; }
+#stashModal .ssn-topbar { justify-content: flex-end; margin: 0 0 8px; }
+#stashModal .ssn .ssn-google { padding: 1px 7px; margin-left: 6px; font-size: .7rem; font-weight: 400; vertical-align: middle; background: transparent; color: #1a73e8; border-color: rgba(26,115,232,.4); }
 #stashModal .ssn-btns button[data-go] { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
 #stashModal .ssn-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: .78rem; opacity: .8; margin: 0 0 8px; }
 #stashModal .ssn-state .ssn-err { color: #dc3545; opacity: 1; }
@@ -151,6 +162,11 @@
 
     const stack = [];
     let finished = false, busyAccept = false, loadSeq = 0;
+    // Unblur all (13.164 / 13.163): one switch for every cover and portrait in
+    // this navigator, kept across views and repaints until it's switched back.
+    let revealAll = false;
+    const unblurBtn = () => '<button type="button" class="ssn-unblur" data-unblur>' +
+      (revealAll ? '&#128584; Blur all' : '&#128065; Unblur all') + '</button>';
     const headingWas = heading ? heading.textContent : '';
 
     // The footer's own buttons are hidden, not removed, so they come back
@@ -175,6 +191,7 @@
       loadSeq++;
       host.removeEventListener('click', onClick);
       host.removeEventListener('keydown', onKey);
+      host.removeEventListener('input', onInput);
       backBtn.remove();
       closeBtn.remove();
       defaults.forEach(b => { b.style.display = b.dataset.ssnDisplay || ''; });
@@ -285,6 +302,7 @@
         if (nb) { nb.focus(); nb.setSelectionRange(nb.value.length, nb.value.length); }
       }
       paintFilter();
+      paintPtags();
     }
 
     function sortedScenes(e) {
@@ -317,6 +335,43 @@
         errHtml(e.data.note);
     }
 
+    // The file's own tags - folder tags and [bracket] tags - as pills under the
+    // words box. A tap puts the tag into the box, or takes it back out; it
+    // doesn't search, so several can be picked before pressing Search.
+    const pathTags = (() => {
+      const seen = new Set(), out = [];
+      [].concat(video.tags || [], video.bracketTags || []).forEach(t => {
+        const v = String(t ?? '').trim();
+        const k = v.toLowerCase();
+        if (!v || seen.has(k) || k === 'yet-to-upload') return;
+        seen.add(k);
+        out.push(v);
+      });
+      return out;
+    })();
+    const ptagsHtml = () => '<div class="ssn-ptags">' +
+      pathTags.map((t, i) => '<button type="button" class="ssn-ptag" data-ptag="' + i + '">' + esc(t) + '</button>').join('') +
+      '</div>';
+    const reEsc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tagRe = (t) => new RegExp('(^|\\s)' + reEsc(t) + '(?=\\s|$)', 'i');
+    function paintPtags() {
+      const box = host.querySelector('input.ssn-term');
+      if (!box) return;
+      host.querySelectorAll('.ssn-ptag').forEach(b => {
+        const t = pathTags[+b.dataset.ptag];
+        b.classList.toggle('on', !!t && tagRe(t).test(box.value));
+      });
+    }
+    function togglePtag(i) {
+      const box = host.querySelector('input.ssn-term');
+      const t = pathTags[i];
+      if (!box || !t) return;
+      box.value = tagRe(t).test(box.value)
+        ? box.value.replace(tagRe(t), ' ').replace(/\s+/g, ' ').trim()
+        : (box.value.trim() + ' ' + t).trim();
+      paintPtags();
+    }
+
     function searchHtml(e) {
       const n = e.data ? e.data.scenes.length : 0;
       const label = e.data ? (n ? n + ' result' + (n === 1 ? '' : 's') : '') : '';
@@ -329,10 +384,13 @@
           '<input class="ssn-term" type="search" enterkeyhint="search" spellcheck="false" autocomplete="off" ' +
                  'autocorrect="off" autocapitalize="off" placeholder="performer name, studio, title words&hellip;" ' +
                  'value="' + esc(e.term) + '">' +
+          ptagsHtml() +
           '<div class="ssn-btns">' +
             '<button type="button" data-go>Search</button>' +
+            '<button type="button" class="ssn-play" data-play title="Preview this file">&#9654;</button>' +
             '<button type="button" data-camel title="Split CamelCase and separators into words, drop resolution noise, then search">de-Camel</button>' +
             '<button type="button" data-fname title="Start again from this file&rsquo;s name">Filename</button>' +
+            unblurBtn() +
           '</div>' +
         '</div>' +
         stateHtml(e, label +
@@ -358,14 +416,17 @@
                       fact('Career', p.career) +
                       fact('Scenes on StashDB', p.scene_count != null ? String(p.scene_count) : '');
         prof =
+          '<div class="ssn-btnrow ssn-topbar">' + unblurBtn() + '</div>' +
           '<div class="ssn-prof">' +
             (p.image
-              ? '<div class="ssn-cover ssn-pimg" data-cover><img src="' + esc(p.image) + '" alt="" loading="lazy">' +
+              ? '<div class="ssn-cover ssn-pimg' + (revealAll ? ' shown' : '') + '" data-cover><img src="' + esc(p.image) + '" alt="" loading="lazy">' +
                 '<div class="ssn-veil">Tap 3 times</div></div>'
               : '<div class="ssn-cover ssn-pimg none">no image</div>') +
             '<div class="ssn-pmain">' +
               '<div class="ssn-pname">' + esc(p.name) +
-                (p.disambiguation ? ' <small>(' + esc(p.disambiguation) + ')</small>' : '') + '</div>' +
+                (p.disambiguation ? ' <small>(' + esc(p.disambiguation) + ')</small>' : '') +
+                '<button type="button" class="ssn-google" title="Search Google for this name" data-ext="' +
+                  esc('https://www.google.com/search?q=' + encodeURIComponent('"' + p.name + '"')) + '">Google &#8599;</button>' + '</div>' +
               (sub ? '<div class="ssn-sub">' + sub + '</div>' : '') +
               (p.aliases && p.aliases.length ? '<div class="ssn-alias">Also known as ' + esc(p.aliases.join(', ')) + '</div>' : '') +
             '</div>' +
@@ -440,7 +501,7 @@
       return '<div class="ssn-card" data-i="' + i + '">' +
         '<div class="ssn-top">' +
           (c.cover
-            ? '<div class="ssn-cover ssn-thumb" data-cover><img src="' + esc(c.cover) + '" alt="" loading="lazy">' +
+            ? '<div class="ssn-cover ssn-thumb' + (revealAll ? ' shown' : '') + '" data-cover><img src="' + esc(c.cover) + '" alt="" loading="lazy">' +
               '<div class="ssn-veil">Tap 3 times</div></div>'
             : '<div class="ssn-cover ssn-thumb none">no cover</div>') +
           '<div class="ssn-tt"><div class="ssn-title">' + esc(c.title || '(untitled scene)') + '</div>' +
@@ -555,6 +616,10 @@
 
     host.addEventListener('click', onClick);
     host.addEventListener('keydown', onKey);
+    host.addEventListener('input', onInput);
+    function onInput(ev) {
+      if (ev.target.closest && ev.target.closest('input.ssn-term')) paintPtags();
+    }
     function onClick(ev) {
       if (finished) return;
       const t = ev.target;
@@ -565,6 +630,24 @@
       const box = host.querySelector('input.ssn-term');
 
       if (btn.hasAttribute('data-go')) { search(box && box.value); box && box.blur(); return; }
+      if (btn.dataset.ptag !== undefined) { togglePtag(+btn.dataset.ptag); return; }
+      if (btn.hasAttribute('data-unblur')) {
+        revealAll = !revealAll;
+        host.querySelectorAll('.ssn-cover[data-cover]').forEach(c => {
+          c.classList.toggle('shown', revealAll);
+          coverTaps.delete(c);
+          const v = c.querySelector('.ssn-veil');
+          if (v) v.textContent = 'Tap 3 times';
+        });
+        host.querySelectorAll('[data-unblur]').forEach(b => {
+          b.innerHTML = revealAll ? '&#128584; Blur all' : '&#128065; Unblur all';
+        });
+        return;
+      }
+      if (btn.hasAttribute('data-play')) {
+        preview(video, host.closest('.basket-json-modal') || null);
+        return;
+      }
       if (btn.hasAttribute('data-camel')) {
         const v = clean(box ? box.value : '');
         if (box) box.value = v;
@@ -625,5 +708,182 @@
     };
   }
 
-  window.scrayStashNav = { open, words, clean };
+  // ---- ▶ preview (13.163 / 13.162) ----------------------------------------
+  // The file plays in the app's own player, as a PREVIEW (no history, no view,
+  // no watched time - playVideoInline's opts.preview), floated over the page
+  // the way wholesale mode's ▶ floats it. The Stash modal is hidden while it
+  // plays and comes back when the preview is closed (×, a tap on the dim
+  // backdrop, or "Back to Stash").
+  //
+  // If the file is ALREADY the one in the player - the usual case when the
+  // modal was opened from the S circle - it isn't restarted as a preview,
+  // which would lose your place: the modal just steps aside and playback
+  // carries on from where it was.
+  // ⚙️ How far in a preview opens. Wholesale uses the same quarter.
+  const PREVIEW_START_FRACTION = 0.25;
+  let pv = null;   // { overlay, same, displayWas }
+
+  function ensurePreviewCss() {
+    if (document.getElementById('scrayStashPvCss')) return;
+    const css = document.createElement('style');
+    css.id = 'scrayStashPvCss';
+    css.textContent = `
+#ssnPvScrim, #ssnPvBar, #ssnPvPill { display: none; }
+body.ssn-pv-open #ssnPvScrim { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.82); z-index: 2147482000; }
+body.ssn-pv-open #ssnPvBar { display: flex; align-items: flex-end; gap: 8px; position: absolute; bottom: 100%; left: 0; right: 0; margin-bottom: 6px; z-index: 2147482002; }
+#ssnPvBar .ssn-pv-name { flex: 1 1 auto; min-width: 0; color: #ddd; font-size: .78rem; line-height: 1.3; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; word-break: break-all; }
+#ssnPvBar button, #ssnPvPill { flex: 0 0 auto; width: auto; min-width: 0; margin: 0; padding: 6px 12px; font-size: .8rem; line-height: 1.2; background: #6c5ce7; color: #fff; border: none; border-radius: 16px; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
+body.ssn-pv-open.fullscreen-active #ssnPvScrim, body.ssn-pv-open.fullscreen-active #ssnPvBar { display: none; }
+body.ssn-pv-open:not(.fullscreen-active) #inlineVideoContainer.float-player {
+  position: fixed !important; top: calc(50% + 6vh) !important; bottom: auto !important;
+  left: 50% !important; right: auto !important; transform: translate(-50%, -50%);
+  width: min(92vw, 760px) !important; max-width: min(92vw, 760px) !important;
+  margin: 0 !important; height: auto !important; background: #000; border-radius: 6px;
+  overflow: visible !important; box-shadow: 0 10px 30px rgba(0,0,0,.55); z-index: 2147482001;
+}
+body.ssn-pv-open:not(.fullscreen-active) #inlineVideoContainer.float-player video,
+body.ssn-pv-open:not(.fullscreen-active) #inlineVideoContainer.float-player .plyr { max-height: 68vh; }
+body.ssn-pv-open:not(.fullscreen-active) #currentVideoInfo { display: none !important; }
+#ssnPvPill.on { display: block; position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 10px); z-index: 2147483647; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+body.fullscreen-active #ssnPvBar { display: none; }
+`;
+    document.head.appendChild(css);
+  }
+
+  const keyOf = (v) => v ? String(v.videoKey || (window.scrayVideoKey ? window.scrayVideoKey(v.filename || '') : v.filename || '')) : '';
+
+  function pvChrome() {
+    let scrim = document.getElementById('ssnPvScrim');
+    if (!scrim) {
+      scrim = document.createElement('div');
+      scrim.id = 'ssnPvScrim';
+      scrim.addEventListener('click', (e) => { if (e.target === scrim) endPreview(); });
+      document.body.appendChild(scrim);
+    }
+    let bar = document.getElementById('ssnPvBar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'ssnPvBar';
+      bar.innerHTML = '<span class="ssn-pv-name"></span><button type="button">&#8617; Back to Stash</button>';
+      bar.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); endPreview(); });
+      document.body.appendChild(bar);
+    }
+    let pill = document.getElementById('ssnPvPill');
+    if (!pill) {
+      pill = document.createElement('button');
+      pill.type = 'button';
+      pill.id = 'ssnPvPill';
+      pill.innerHTML = '&#8617; Back to Stash';
+      pill.addEventListener('click', (e) => { e.stopPropagation(); endPreview(); });
+      document.body.appendChild(pill);
+    }
+    return { scrim, bar, pill };
+  }
+
+  function preview(video, overlay) {
+    const player = window.inlineVideoPlayer;
+    if (!player || typeof player.play !== 'function') {
+      alert('The player isn’t ready yet.');
+      return;
+    }
+    ensurePreviewCss();
+    if (pv) endPreview();
+    const ch = pvChrome();
+    const same = !!window.currentPlayingVideo && keyOf(window.currentPlayingVideo) === keyOf(video);
+    pv = { overlay, same, displayWas: overlay ? overlay.style.display : '' };
+    if (overlay) overlay.style.display = 'none';
+
+    const container = document.getElementById('inlineVideoContainer');
+    const floatable = !same && container && !document.body.classList.contains('fullscreen-active');
+    if (floatable) {
+      ch.bar.querySelector('.ssn-pv-name').textContent = (video.path ? video.path + '/' : '') + (video.filename || '');
+      if (ch.bar.parentNode !== container) container.appendChild(ch.bar);
+      document.body.classList.add('ssn-pv-open');
+      container.classList.add('float-player');
+      pv.floated = true;
+      if (typeof window.computeBottomDock === 'function') window.computeBottomDock();
+    } else {
+      ch.pill.classList.add('on');
+    }
+
+    if (same) {
+      try { if (window.plyrPlayer && window.plyrPlayer.paused) window.plyrPlayer.play(); } catch (e) { /* stays paused */ }
+      return;
+    }
+    const durationSec = Number(video.durationMs) > 0 ? video.durationMs / 1000
+                      : (Number(video.duration) > 0 ? Number(video.duration) : 0);
+    const startAt = durationSec > 0 ? durationSec * PREVIEW_START_FRACTION : null;
+    window.lastPlayLabel = 'Preview' + (startAt != null ? ' @ ' + Math.round(PREVIEW_START_FRACTION * 100) + '%' : '');
+    try {
+      Promise.resolve(player.play(video, null, null, startAt, { preview: true }))
+        .catch(err => console.error('[stash] preview failed:', err));
+    } catch (err) {
+      console.error('[stash] preview failed:', err);
+    }
+  }
+
+  function endPreview() {
+    if (!pv) return;
+    const st = pv;
+    pv = null;
+    const bar = document.getElementById('ssnPvBar');
+    const pill = document.getElementById('ssnPvPill');
+    if (pill) pill.classList.remove('on');
+    if (st.floated) {
+      if (bar && bar.parentNode !== document.body) document.body.appendChild(bar);
+      document.body.classList.remove('ssn-pv-open');
+      document.getElementById('inlineVideoContainer')?.classList.remove('float-player');
+      if (typeof window.computeBottomDock === 'function') window.computeBottomDock();
+    }
+    if (!st.same) {
+      // The popup IS the player: hiding it alone would leave the audio going.
+      try { window.inlineVideoPlayer?.stop?.(); } catch (e) { /* already stopped */ }
+    } else {
+      try { if (window.plyrPlayer && !window.plyrPlayer.paused) window.plyrPlayer.pause(); } catch (e) { /* fine */ }
+    }
+    if (st.overlay && document.body.contains(st.overlay)) st.overlay.style.display = st.displayWas || '';
+  }
+
+  // ---- performer name in a list row (13.163 / 13.162) ----------------------
+  // The purple performer names used to filter on a tap. Now they ask: filter
+  // by the name, or look the performer up in the Stash navigator - which opens
+  // this file's Stash modal straight onto their profile.
+  function performerChoice(video, name) {
+    document.getElementById('scrayPerfChoice')?.remove();
+    const modal = document.createElement('div');
+    modal.className = 'basket-json-modal';
+    modal.id = 'scrayPerfChoice';
+    modal.style.zIndex = '2147483647';
+    const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet('performer') : null;
+    const on = !!(set && set.has(String(name).trim().toLowerCase()));
+    modal.innerHTML =
+      '<div class="basket-json-modal-content" style="max-width:340px;">' +
+        '<h3 style="margin-top:0;">' + esc(name) + '</h3>' +
+        '<div style="display:flex;flex-direction:column;gap:8px;">' +
+          '<button type="button" class="modal-btn modal-btn-primary" data-c="filter">' +
+            (on ? '&#10005; Remove from filter' : '&#8853; Filter as a tag') + '</button>' +
+          '<button type="button" class="modal-btn modal-btn-secondary" data-c="nav">&#128269; Search in Stash nav</button>' +
+          '<button type="button" class="modal-btn modal-btn-cancel" data-c="">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    const done = () => modal.remove();
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) { done(); return; }
+      const b = e.target.closest('[data-c]');
+      if (!b) return;
+      e.stopPropagation();
+      done();
+      if (b.dataset.c === 'filter') {
+        if (on) window.scrayRemoveTagFilter?.('performer', name);
+        else if (typeof window.scrayAddTagFilter === 'function') window.scrayAddTagFilter('performer', name);
+        else if (typeof window.scrayAddSearchTerm === 'function') window.scrayAddSearchTerm(name);
+      } else if (b.dataset.c === 'nav') {
+        if (typeof window.showStashModal === 'function') window.showStashModal(video, { performer: name });
+      }
+    });
+    document.body.appendChild(modal);
+  }
+
+  window.scrayStashNav = { open, words, clean, preview, endPreview };
+  window.scrayPerformerChoice = performerChoice;
 })();

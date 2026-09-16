@@ -4,6 +4,94 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.164 / native 13.163 — test: rename everywhere as a checkbox, suggested name without focus, Unblur all
+<!-- 2026-09-16T14:18Z -->
+
+**picker** — `staging - 13.164`: `file-operations.js`, `scray-stash-nav.js`, `VERSION`
+**native** — `stg-native - 13.163`: `assets/web/file-operations.js`, `assets/web/scray-stash-nav.js`, `assets/web/VERSION`
+
+(Native 13.162 was not committed before this, so native's working tree carries both.)
+
+Mac asked for three things:
+1. The rename question was still landing below the rename modal after a match. Put "everywhere or this phone only" in the rename modal itself, as a checkbox ticked by default, with the relevant details.
+2. "Use suggested" / "Use without parent" should fill the name without activating the text box. The box should only wake when tapped.
+3. An Unblur all option at the top of the Stash nav.
+
+**1. Rename everywhere checkbox** (`showRenameModal`, native only; Picker never asked this question).
+- **Where:** a blue box above Rename / Cancel, with the same look as the delete modal's "Also delete from OneDrive".
+- **When it appears:** under the same condition `renameFile` uses before handing off to `scrayRenameLocal`: a phone file (`isLocalVideo`) that is also in the catalogue.
+- **The note under it** changes with the box:
+  - **Ticked:** the file is also in the catalogue. It renames the phone file, every OneDrive copy and the catalogue row (score, bookmarks, stash match and variants go with it). If the server refuses, nothing is renamed.
+  - **Unticked:** this phone only. OneDrive and the catalogue keep the old name, and the difference turns up in the ✎ names list.
+  - **Offline:** the box starts unticked and disabled, and the note says everywhere needs a connection.
+- **On Rename:** `renameFile(video, name, { scope: 'everywhere' | 'phone' })`. `renameLocal` already skips `askScope` when a scope is passed, so no second modal is ever opened from here.
+- **`askScope` stays:** the ✎ names list's batch renames still use it.
+- **Why the modal was dropped:** 13.162's z-index on the question wasn't enough on device. With the question in the same sheet, the layering is gone.
+
+**2. Suggested name** (`showRenameModal`'s `fill`, both apps). It no longer calls `input.focus()` / `setSelectionRange`. The name goes into the box and the word selector repaints, and the keyboard only comes up when you tap into the box.
+
+**3. Unblur all** (`scray-stash-nav.js`).
+- **Where:** in the search view, a 👁 Unblur all button at the end of the Search / ▶ / de-Camel / Filename row. In a performer view, it's in its own row above the profile.
+- **What it does:** it reveals every cover and portrait at once and becomes 🙈 Blur all. The setting survives repaints, sorting, Load more and moving between views, so a newly drawn card arrives already unblurred.
+- **Single covers:** tapping one still toggles just that one. Switching all resets any half-counted three-tap on a cover.
+
+**Tested** in headless Chromium, native files, mocked:
+- **Checkbox:** a local, catalogued file shows it ticked with the everywhere note. Unticking changes the note. Rename calls `scrayRenameLocal` with `{scope: 'phone'}`, and no `#scrayRenameScope` modal appears. A OneDrive-only file shows no checkbox.
+- **Use suggested:** fills "Kari Sweets - Kari n Manna" and leaves focus on the button, not the input.
+- **Unblur all:** reveals 3 of 3 covers, stays revealed after a sort repaint, and a performer view opens with 26 of 26 revealed. Blur all hides them again.
+- **Syntax:** `node --check` passes on both apps' changed JS.
+
+### picker 13.163 / native 13.162 — test: Stash nav path tags, preview and Google link, performer name choice, rename question on top
+<!-- 2026-09-16T14:06Z -->
+
+**picker** — `staging - 13.163`: `scray-stash-nav.js`, `file-operations.js`, `ui.js`, `VERSION`
+**native** — `stg-native - 13.162`: `assets/web/scray-stash-nav.js`, `assets/web/file-operations.js`, `assets/web/ui.js`, `assets/web/scray-rename.js`, `assets/web/VERSION`
+
+(Follows picker 13.162 / native 13.161 / browse 13.68, which are still test. No server change.)
+
+Mac asked for six things:
+1. After a match, the "Everywhere / This phone only" question was hidden behind the rename modal.
+2. In the Stash nav, the file's path tags directly under the words box, tap to add to the search.
+3. A slightly smaller font in that box.
+4. A ▶ next to Search to preview the file, in the same player wholesale mode previews with.
+5. Tapping a purple performer name should ask: filter as a tag, or search the performer in the Stash nav. It used to filter straight away.
+6. A Google search link next to the name on a performer's profile, opening in the app's browser.
+
+**1. Rename question** (`scray-rename.js`, native only). `askScope`'s modal is now z-index 2147483647.
+- **Why it was hidden:** 13.161 raised the rename modal to the top layer so it would clear the Stash modal. The question stayed at the class default, 2147483000, underneath.
+- **Why this works:** the question is appended after the rename modal, so at the same z-index it stacks on top.
+- **Picker:** has no scope question, so no change there.
+
+**2. Path tags** (`scray-stash-nav.js`). This is `video.tags` plus `video.bracketTags`, de-duplicated case-insensitively. `yet-to-upload` is left out.
+- **Pills:** blue, between the box and the buttons.
+- **A tap** adds the tag to the end of the box, or takes it out if it's already there as a whole word. Pills are green while their tag is in the box, and repaint as you type.
+- **No automatic search,** so several can be picked first.
+
+**3. Font.** The box is 14px, down from 16px, with slightly less padding. Both apps' viewports have `maximum-scale=1`, so iOS doesn't zoom on focus below 16px.
+
+**4. ▶ preview** (`scrayStashNav.preview` / `endPreview`). Wholesale's popup lives in `wholesale-mode.js` / `.css`, which Native doesn't have. So the same approach is rebuilt in the shared nav file, with its own CSS injected once.
+- **Same player:** it's still the app's own player. `inlineVideoPlayer.play(video, null, null, startAt, { preview: true })` starts it a quarter of the way in, like wholesale. It records no history, view or watched time.
+- **Floated:** the player floats over a dim backdrop. It uses `.float-player`, which `computeBottomDock` already releases the dock for, under a new `body.ssn-pv-open`, so wholesale's own `ws-float-open` rules are never involved.
+- **The Stash modal** is hidden (`display:none`) while the preview plays. ↩ Back to Stash, or a tap on the backdrop, stops the preview and brings the modal back as it was.
+- **File already in the player:** this is the usual case from the S circle. It isn't restarted as a preview, which would lose your place. The modal steps aside, playback resumes if paused, and a ↩ Back to Stash pill at the top pauses it again and returns.
+- **In fullscreen:** the popup CSS doesn't apply (same guard as wholesale), so the pill is used there too.
+
+**5. Performer names in list rows** (`ui.js` `createClickablePath` chip, both apps). A performer chip now calls `scrayPerformerChoice(video, name)`, a small top-layer modal:
+- **Filter as a tag:** reads **Remove from filter** when the name is already in the filter, and falls back to `scrayAddSearchTerm` as before.
+- **Search in Stash nav:** opens that file's Stash modal. `showStashModal` gained `openOpts.performer`, and after the first lookup it goes straight to the performer's profile, with the matched scene id for the name lookup.
+- **Studio chips** still filter on the first tap.
+
+**6. Google link.** A small **Google ↗** after the name, and after any disambiguation, on the profile. It searches `"Name"` as an exact phrase and goes through `openExternal`: ScrayBrowser in Native, `scraynative://newtab` from Picker in the app's browser, a new tab elsewhere.
+
+**Tested** in headless Chromium, native files, API and player mocked:
+- **Path tags:** show karisweets / web / 2NGM / 21n. A tap toggles the tag in and out of the box and the green state follows. The box computes to 14px.
+- **▶ preview:** calls `play` with `startAt` 47.75 (25% of 3:11) and `{preview:true}`. The modal is hidden and the player is fixed with `float-player`. Back to Stash stops it and restores the modal and body class.
+- **File already playing:** no `play` call, the pill shows, and no stop on return.
+- **Google link:** `https://www.google.com/search?q=%22Sarah%22`.
+- **Performer choice:** Filter adds the facet. Search in Stash nav opens the modal onto the profile.
+- **Syntax:** `node --check` passes on all changed JS.
+- **Not tested:** the float over the real player and dock on a phone, and the rename question stacking on device.
+
 ### browse 13.68 / picker 13.162 / native 13.161 — test: in-modal Stash search and performer profiles, autocomplete fix, rename after match
 <!-- 2026-09-16T13:37Z -->
 

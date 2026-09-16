@@ -968,7 +968,11 @@ window.scrayStashNames = (function () {
 
   async function refresh(force) {
     if (!force && Date.now() - loadedAt < TTL_MS) return rows;
-    if (inFlight) return inFlight;
+    // A forced refresh that finds one already running waits for it and then
+    // asks again (13.165 / 13.164). The running one may have left before the
+    // change that prompted this one - a match or a rename just saved - and
+    // handing back its answer would keep the old names until the next trigger.
+    if (inFlight) return force ? inFlight.then(() => refresh(true)) : inFlight;
     if (typeof window.scrayApiCall !== "function") return rows;
 
     inFlight = (async () => {
@@ -1006,7 +1010,23 @@ window.scrayStashNames = (function () {
     return inFlight;
   }
 
-  return { parts, text, has, keyFor, refresh, dump: () => rows };
+  /**
+   * A rename moves a video's key, and this table is keyed by it (13.165 /
+   * 13.164). Copy the row to the new key straight away so the renamed file
+   * keeps its scene name without waiting for the server; the next refresh
+   * replaces the whole table with the server's, which has moved the row too.
+   * Copied rather than moved: a phone-only rename can leave both names live.
+   */
+  function rekey(from, to) {
+    if (!from || !to || from === to || !rows[from] || rows[to]) return false;
+    rows[to] = rows[from];
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ at: loadedAt, sig, rows }));
+    } catch { /* in memory is enough for this session */ }
+    return true;
+  }
+
+  return { parts, text, has, keyFor, refresh, rekey, dump: () => rows };
 })();
 
 /**

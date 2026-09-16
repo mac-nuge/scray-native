@@ -3,6 +3,7 @@
 // picker 13.163 / native 13.162: path tags under the words box, a ▶ preview,
 // a Google link on profiles, and scrayPerformerChoice for the list rows.
 // picker 13.164 / native 13.163: Unblur all.
+// picker 13.165 / native 13.164: a Google link on every scene card.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -77,6 +78,7 @@
 #stashModal .ssn .ssn-ptag.on { background: #28a745; border-color: #28a745; color: #fff; }
 #stashModal .ssn .ssn-play { padding: 6px 11px; }
 #stashModal .ssn .ssn-unblur { margin-left: auto; }
+#stashModal .ssn .ssn-google.ssn-google-card { margin-left: 0; padding: 6px 12px; font-size: .8rem; }
 #stashModal .ssn-topbar { justify-content: flex-end; margin: 0 0 8px; }
 #stashModal .ssn .ssn-google { padding: 1px 7px; margin-left: 6px; font-size: .7rem; font-weight: 400; vertical-align: middle; background: transparent; color: #1a73e8; border-color: rgba(26,115,232,.4); }
 #stashModal .ssn-btns button[data-go] { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
@@ -459,6 +461,16 @@
         list + more;
     }
 
+    // Google for one scene (13.165 / 13.164): the title as an exact phrase,
+    // then the studio and up to two performers to pin it down.
+    function googleUrl(c) {
+      const bits = [];
+      if (c.title) bits.push('"' + String(c.title).replace(/"/g, '') + '"');
+      if (c.studio) bits.push(c.studio);
+      (c.cast || []).slice(0, 2).forEach(p => { if (p && p.name) bits.push(p.name); });
+      return bits.length ? 'https://www.google.com/search?q=' + encodeURIComponent(bits.join(' ')) : '';
+    }
+
     function cardHtml(c, i, herePid) {
       const fileSec = Number(c.file_duration_sec) || 0;
       const sceneSec = Number(c.stash_duration_sec) || 0;
@@ -520,6 +532,8 @@
         '<div class="ssn-foot">' +
           (canAccept ? '<button type="button" class="ssn-accept" data-accept="' + i + '">Accept &amp; submit</button>' : '') +
           (c.stash_url ? '<button type="button" class="ssn-ext" data-ext="' + esc(c.stash_url) + '">StashDB &#8599;</button>' : '') +
+          (googleUrl(c) ? '<button type="button" class="ssn-google ssn-google-card" title="Search Google for this scene" data-ext="' +
+                          esc(googleUrl(c)) + '">Google &#8599;</button>' : '') +
         '</div>' +
         '<div class="ssn-cerr"></div>' +
       '</div>';

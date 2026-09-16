@@ -4,6 +4,45 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 13.69 / picker 13.165 / native 13.164 — test: Google on every Stash nav scene, stash names survive a rename, Refresh Data refreshes stash names
+<!-- 2026-09-16T14:37Z -->
+
+**browse** — `staging-browse - 13.69`: `api.php`, `VERSION.txt`
+**picker** — `staging - 13.165`: `scray-stash-nav.js`, `scray-config.js`, `file-operations.js`, `excel-sheets.js`, `VERSION`
+**native** — `stg-native - 13.164`: `assets/web/scray-stash-nav.js`, `assets/web/scray-config.js`, `assets/web/file-operations.js`, `assets/web/db.js`, `assets/web/VERSION`
+
+Mac asked for two things:
+1. A Google search on every scene listed in the Stash nav, in search results and on performer profiles.
+2. Newly stash-matched files were still showing their path instead of studio / performers, in both apps, and Refresh Data didn't fix it. Names should update as soon as a file is matched.
+
+**1. Google on every scene card** (`scray-stash-nav.js`). A **Google ↗** button sits after StashDB ↗ in each card's footer. It searches the title as an exact phrase, then the studio and up to two performers, e.g. `"Busted my stepsister taking a shower" just_roommates Sarah`. It opens through `openExternal`, the same as the other links, so in Native it opens in the app's browser.
+
+**2. Names falling back to the path.** Not reproduced against the live server: the device shell can't reach macnguyen.com. The cause below was found by reading the code, and fits both symptoms, including Refresh Data not helping.
+- **How names work:** the list names come from `stash_names`, a table keyed by **video_key**. It's signature-gated on the COUNT and MAX(updated_at) of `stash_matches`, `stash_scenes`, `stash_performers`, `stash_tags` and `stash_overrides`. The client keeps its copy in localStorage and only re-downloads when that signature moves.
+- **What a rename does:** `scrayRekeyRows` is shared by `rename_file` (Native) and `rekey` (Picker's OneDrive rename). It moves the file's `stash_matches` and `stash_overrides` rows to the new key, but changed neither count nor updated_at.
+- **So after a rename:** the signature stayed the same, and every client kept a name table with the row under the OLD key. The renamed file had no name row and was drawn from its path.
+- **Why it stuck:** Refresh Data didn't call `stash_names` at all, and the periodic refreshes were told "unchanged". The file stayed on its path until some unrelated match moved the signature.
+- **Why it started now:** 13.161's rename-after-match made "match, then rename" the normal flow, so almost every newly matched file hit this straight away.
+
+Fixes:
+- **Server** (`api.php`):
+  - `scrayRekeyRows` now stamps `updated_at` on the `stash_matches` / `stash_overrides` rows it moves.
+  - The `stash_names` and `stash_state` signatures gained `|r<MAX(sync_log.id) for field video_key>`, the latest rename, so any rename moves them.
+  - The signature format change also re-sends the full table to every client once, which repairs files already renamed before this deploy.
+- **Immediate, in the apps** (`scray-config.js`, `file-operations.js`, both apps):
+  - `scrayStashNames.rekey(from, to)` copies a row to the new key. It's copied, not moved, since a phone-only rename leaves the catalogue key where it was.
+  - `showRenameModal` records the key before renaming. Straight after `renameFile` it copies the name row across, then forces `scrayStashNames.refresh(true)` and `scrayLoadStashState(true)`.
+  - In Native, a phone-only rename keeps the same key and copies nothing. The existing `refreshAllLists` that follows repaints with the name.
+- **Refresh Data** (`refreshAfterDbPull`: `db.js` in Native, `excel-sheets.js` in Picker) now also forces the stash names and S-button state before repainting.
+- **Refresh race** (`scray-config.js`): a forced refresh that found one already in flight used to return that one's answer. If the running request left before the match or rename being saved, the new name was missed until the next trigger. A forced refresh now waits for it and then asks again.
+
+**Tested:**
+- **Server:** `php -l` is clean. On an in-memory SQLite with `scrayRekeyRows` extracted from `api.php`, a rekey moved both signatures: `stash_names` from `…|r0` to a new updated_at and `|r1`, `stash_state` likewise. The moved row carried the new key and timestamp.
+- **Headless Chromium, `scray-config.js`:** two forced refreshes started together made two `stash_names` calls, and the second result landed. `rekey` gave the renamed key the scene parts.
+- **Headless Chromium, Native `file-operations.js`, mocked:** Rename everywhere called `rekey('old name.mp4', 'new name.mp4')` plus a forced refresh. A phone-only rename kept the same key.
+- **Scene cards:** carry the Google URLs shown above.
+- **Syntax:** `node --check` passes on all changed JS.
+
 ### picker 13.164 / native 13.163 — test: rename everywhere as a checkbox, suggested name without focus, Unblur all
 <!-- 2026-09-16T14:18Z -->
 

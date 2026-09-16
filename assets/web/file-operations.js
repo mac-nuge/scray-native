@@ -649,11 +649,31 @@ const confirmBtn = document.getElementById('confirmRenameBtn');
 confirmBtn.disabled = true;
 confirmBtn.textContent = 'Renaming...';
 
+// The key this file's stash name is filed under, before the rename moves it.
+const keyBefore = video.videoKey || window.scrayVideoKey(currentName);
+
 try {
     // 13.61: what renameFile resolves with says where it was renamed.
     // The checkbox answers the scope, so renameLocal never asks its own modal.
     const renameResult = await renameFile(video, fullNewName,
         scopeChk ? { scope: scopeChk.checked ? 'everywhere' : 'phone' } : {});
+    // Stash names follow the rename (13.165 / 13.164). The name table is keyed
+    // by video key, so without this a matched file fell back to its path the
+    // moment it was renamed - and stayed that way, because the server's name
+    // signature didn't move either (browse 13.69 fixes that side). A
+    // phone-only rename leaves the catalogue key where it was.
+    try {
+        const phoneOnly = !!(renameResult && renameResult.scope === 'phone');
+        const keyAfter = phoneOnly ? keyBefore
+            : ((video.videoKey && video.videoKey !== keyBefore) ? video.videoKey : window.scrayVideoKey(fullNewName));
+        if (window.scrayStashNames && typeof window.scrayStashNames.rekey === 'function') {
+            window.scrayStashNames.rekey(keyBefore, keyAfter);
+        }
+        Promise.resolve(window.scrayStashNames?.refresh(true)).catch(() => {});
+        if (typeof window.scrayLoadStashState === 'function') {
+            Promise.resolve(window.scrayLoadStashState(true)).catch(() => {});
+        }
+    } catch (e) { console.warn('[rename] stash name carry-over failed:', e); }
     
     // ✅ Auto-refresh after rename
     confirmBtn.textContent = 'Refreshing...';

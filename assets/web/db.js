@@ -1232,6 +1232,17 @@ window.refreshAfterDbPull = async function (video) {
     }
   } catch (err) { console.warn('history re-render failed:', err); }
 
+  // Refresh Data re-fetches the stash side too (13.165 / 13.164): the scene
+  // names and the S button's matched set. Both are signature-gated, so this
+  // costs one small round trip each when nothing has changed; the names
+  // refresh repaints the lists itself when something has.
+  try {
+    await Promise.all([
+      window.scrayStashNames ? window.scrayStashNames.refresh(true) : null,
+      typeof window.scrayLoadStashState === 'function' ? window.scrayLoadStashState(true) : null
+    ]);
+  } catch (err) { console.warn('stash names refresh failed:', err); }
+
   try {
     if (typeof window.refreshAllLists === 'function') window.refreshAllLists();
     if (typeof window.populateTagDropdowns === 'function') await window.populateTagDropdowns();

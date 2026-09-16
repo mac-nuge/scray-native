@@ -4,6 +4,74 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.178 / native 13.171 — test: MPB played row always sits just above the player, pulled down too when it was higher up
+<!-- 2026-09-16T19:39Z -->
+
+**picker** — `staging - 13.178`: `player.js`, `VERSION`
+**native** — `stg-native - 13.171`: `assets/web/player.js`, `assets/web/VERSION`
+
+Mac confirmed 13.177 works, with one tweak. A played row that was already above the MPB player was left where it was, leaving a gap between it and the player. He wants it to always end up just above the player, from above as well as from below.
+
+**Change** (`player.js` `scrayKeepPlayedRowAbovePlayer`, both apps).
+- **Before:** each settle pass scrolled by `max(top moved since the tap, bottom − player top)`. That only ever lifted a row that was under the player.
+- **Now:** it scrolls by `row bottom − player top`, so a row higher up the screen scrolls down onto the player's edge too.
+- **Unchanged:** the rule for when it acts. The row has to be on screen at the moment of play, and unloaded, off-screen and folded rows are left alone. Touch or wheel still cancels.
+- **Simpler code:** the captured start position isn't needed any more. Every pass re-aligns to the player, which also undoes the play path's own scroll-to-player calls.
+- **Near the top of the page:** the browser can't scroll back far enough, so a row there stops as close as it can get.
+
+**Tested** in headless Chromium with the 13.177 harness (player top edge at 544, a competing `scrollIntoView` at 300 ms):
+- **Row below the player:** 612–663 → 493–544.
+- **Row above the player:** 214–265, with the page scrolled 500px → 493–544.
+- **Row near the top of the page:** stayed at 102–153, as there was no scroll to give back.
+- **Off-screen row:** no scroll.
+
+### picker 13.177 / native 13.170 — stable: MPB scrolls the played row to sit just above the player when it's on screen
+<!-- 2026-09-16T19:32Z -->
+
+**picker** — `staging - 13.177`: `player.js`, `VERSION`
+**native** — `stg-native - 13.170`: `assets/web/player.js`, `assets/web/VERSION`
+
+Mac's simplified version of the idea from 13.176: in MPB the docked player covers the row you tapped. Scroll just enough to lift that row above the player, but only when it came from the list or is already on screen. Nothing is revealed, and there's no segment view.
+
+**How it works** (`player.js` `scrayKeepPlayedRowAbovePlayer`, identical in both apps).
+- **Trigger:** called first thing in `playVideoInline`.
+- **When it acts:** only in MPB, and only if the video's row in `#taggedVideosContainer` is laid out and on screen when the play is asked for. That covers a tap in the list, and X / R / next landing on a row you can see.
+- **When it doesn't:** unloaded rows, rows scrolled off and files inside a closed folder group are left alone.
+- **The scroll:** each pass keeps the row's top where it was, unless that leaves its bottom under the player's top edge. Then the row is lifted just clear. It measures the whole `li`, open details included, so a row that expands on tap still clears the player.
+- **Why it captures first:** the row's position is taken before the play path runs, because the play path already scrolls the player into view in `playVideoInline` and in randomiser.js's X / R handlers. Holding the row's original top undoes those scrolls instead of chasing them.
+- **Settle passes:** at 0 / 150 / 400 / 900 / 1600 / 2500 ms, because the dock appears and resizes while the video loads. They only act once `#inlineVideoContainer` is `bottom-docked`. A newer play, or any touch or wheel from Mac, stops them.
+
+**Tested** in headless Chromium at 390×844 with the functions lifted from `player.js`, a fixed 300px docked player (top edge at 544) and 50px rows:
+- **Covered row:** a row at 612–663 expanded to 250px after the tap, and a competing `scrollIntoView` ran at 300 ms. It ended at 293–544, directly above the player.
+- **Clear row:** a row already clear at 255–306 stayed put, despite a 200px scroll during the play.
+- **Off-screen row:** no scroll.
+- **Touch:** a touch cancelled it.
+
+### picker 13.176 / native 13.169 — test: playing video's row green in the main list, a basketed one keeps a pink number
+<!-- 2026-09-16T19:22Z -->
+
+**picker** — `staging - 13.176`: `render.js`, `player.js`, `style.css`, `VERSION`
+**native** — `stg-native - 13.169`: `assets/web/render.js`, `assets/web/player.js`, `assets/web/style.css`, `assets/web/VERSION`
+
+Mac asked for the playing video to be highlighted green in the main list, wherever it is. If it's in the basket, its number should stay pink. He also asked for two bigger changes, which are not in this version and are waiting on his go-ahead:
+1. In MPB, scroll the playing row to sit directly above the player.
+2. In picker, show only the segment of the list around it, with pagination at the top as well.
+
+**How it works** (`render.js` `scrayMarkPlayingRows`, identical in both apps).
+- **Marking:** it reads `window.currentPlayingVideo` and adds `lc-playing` to every `li[data-video-id]` with that id in `#taggedVideosContainer` (and `#panelTaggedList`, the landscape-phone copy of the main list). If the row is a file inside a folder group, the group gets `lc-playing-group`, so the green shows while it's collapsed.
+- **Every render:** it runs at the end of `updateBasketHighlights`, which every main-list render and basket change already calls, so rows loaded later by the pagination buttons come in marked.
+- **Play and Stop:** `playVideoInline` calls it right after setting `currentPlayingVideo`, and Stop's full reset calls it after clearing it. The green follows every way a play starts (P, row tap, X, R, next and previous) and goes away on Stop.
+
+**CSS** (`style.css`).
+- **Colour:** green `#c8ecc9`, placed after the `basket-added` pink so it wins over it, and before `lc-selected` so a ticked row still shows as ticked.
+- **Basketed:** the number cell of a playing row that's also basketed gets the pink background.
+
+**Tested** in headless Chromium with picker's `style.css` and `scrayMarkPlayingRows` lifted from `render.js`, on stub rows (plain, basketed, and a file inside a collapsed group):
+- **Play:** the playing row turned green and the others stayed clear.
+- **Switch:** moving to a basketed row cleared the old one and made the new row green with a pink number.
+- **Groups:** the group line went green when its file played.
+- **Stop:** clearing `currentPlayingVideo` removed every mark.
+
 ### picker 13.173 / native 13.168 — test: wholesale Clear all clears every filter and the session excludes, keeps defaults, dark red
 <!-- 2026-09-16T16:44Z -->
 

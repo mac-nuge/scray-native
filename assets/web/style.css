@@ -7261,6 +7261,22 @@ specificity (the extra .lc-row class). */
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-row.basket-added {
   background-color: rgb(249, 215, 221) !important;
 }
+/* ⚙️ PLAYING (13.176): the row of the video in the player, green, in the main
+   list only - marked by scrayMarkPlayingRows in render.js. After basket-added
+   so it wins over the pink; before lc-selected so a ticked row still shows
+   ticked. A basketed playing row keeps the pink on its number instead. A folder
+   group holding the playing file gets the same green on its own line. */
+#taggedVideosContainer li.lc-row.lc-playing,
+#taggedVideosContainer li.lc-group.lc-playing-group:not(.lc-selected),
+#panelTaggedList li.lc-playing {
+  background-color: #c8ecc9 !important;
+}
+#taggedVideosContainer li.lc-row.lc-playing.basket-added > .lc-line .lc-num,
+#taggedVideosContainer li.lc-group.lc-playing-group.basket-added > .lc-line .lc-num {
+  background-color: rgb(249, 215, 221);
+  border-radius: 3px;
+  color: #333;
+}
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-row.lc-selected {
   background-color: #ffefc1 !important;
 }

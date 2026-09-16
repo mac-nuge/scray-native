@@ -17,7 +17,35 @@ function updateBasketHighlights() {
   // Folder groups (they have no video id of their own, so the loop above just
   // cleared them) - pink when every file is in the basket.
   if (typeof scrayRefreshGroupBasketState === 'function') scrayRefreshGroupBasketState();
+  scrayMarkPlayingRows();
 }
+
+/**
+* The playing video's row goes green in the main list (13.176). Keyed off
+* window.currentPlayingVideo, so it follows every way a play starts - P, a row
+* tap, X, R, next/previous. Called from updateBasketHighlights, which every list
+* render and basket change already runs, and from player.js when a play starts
+* and when Stop clears it, so the row is right wherever the list is scrolled or
+* however deep it has been loaded.
+*
+* A basketed playing row keeps its pink on the number (style.css). A folder
+* group holding the playing file is marked too, so it shows while collapsed.
+*/
+function scrayMarkPlayingRows() {
+  const v = window.currentPlayingVideo;
+  const id = v ? String(v.oneDriveId ?? v.idFromAPI ?? '') : '';
+  const lists = '#taggedVideosContainer, #panelTaggedList';
+  document.querySelectorAll(`:is(${lists}) li.lc-playing, :is(${lists}) li.lc-playing-group`).forEach(li => {
+    li.classList.remove('lc-playing', 'lc-playing-group');
+  });
+  if (!id) return;
+  document.querySelectorAll(`:is(${lists}) li[data-video-id="${CSS.escape(id)}"]`).forEach(li => {
+    li.classList.add('lc-playing');
+    const group = li.parentElement && li.parentElement.closest('li.lc-group');
+    if (group) group.classList.add('lc-playing-group');
+  });
+}
+window.scrayMarkPlayingRows = scrayMarkPlayingRows;
 
 /**
 * Build one <li> for a video row: numbering, clickable path, score badge,

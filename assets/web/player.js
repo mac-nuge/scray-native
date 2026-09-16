@@ -9583,7 +9583,87 @@ function scrayLoadingBookmarkLine() {
     return `<div class="scray-loading-bookmark" style="font-size: 0.8rem; margin-bottom: 4px;">🔖 ${name} <span style="opacity: 0.75;">@ ${time}</span></div>`;
 }
 
+// =========================================
+// MPB: KEEP THE ROW YOU PLAYED ABOVE THE PLAYER (13.177)
+// =========================================
+// The docked MPB player is position:fixed over the bottom of the page, so the
+// row you tapped often ends up underneath it. When a play starts, if that
+// video's row is on screen in the main list, the page is scrolled so the row
+// (with its open details) sits directly above the player - up if it was
+// underneath, and down if it was higher up the screen, so there's never a gap
+// between the two (13.178).
+//
+// Only a row that is ON SCREEN when the play is requested counts: tapped from
+// the list, or X / R / next landing on something you can already see. A row
+// that isn't loaded, is scrolled off, or is folded inside a closed folder group
+// is left alone - nothing is revealed and the page doesn't jump.
+//
+// Whether the row is on screen is decided BEFORE anything else runs, because
+// the play path has its own scroll-the-player-into-view calls (here and in
+// randomiser.js). Each settle pass re-measures and puts the row's bottom on the
+// player's top edge, so those calls can't carry it away. Near the top of the
+// page the browser can't scroll far enough to close the gap, and it simply
+// stops there. Passes are repeated because the dock appears and resizes as the
+// video loads; any touch or wheel from you stops them.
+const SCRAY_ROW_SETTLE_MS = [0, 150, 400, 900, 1600, 2500];
+
+function scrayIsMpbNow() {
+    return window.innerWidth <= 768 &&
+        window.matchMedia('(orientation: portrait)').matches &&
+        !manualRotationActive &&
+        !window.plyrPlayer?.fullscreen?.active &&
+        !document.body.classList.contains('fullscreen-active');
+}
+
+function scrayMainRowFor(video) {
+    const id = video ? String(video.oneDriveId ?? video.idFromAPI ?? '') : '';
+    if (!id) return null;
+    const rows = document.querySelectorAll(`#taggedVideosContainer li[data-video-id="${CSS.escape(id)}"]`);
+    for (const li of rows) {
+        // The whole row, open details included - that's what should clear the player.
+        const r = li.getBoundingClientRect();
+        if (r.height > 0) return { li, rect: r };
+    }
+    return null;
+}
+
+function scrayKeepPlayedRowAbovePlayer(video) {
+    if (!scrayIsMpbNow()) return;
+    const found = scrayMainRowFor(video);
+    if (!found) return;
+    const vh = window.innerHeight;
+    // On screen when the play was asked for - otherwise leave the page alone.
+    if (found.rect.bottom <= 0 || found.rect.top >= vh) return;
+
+    const token = (window.scrayRowSettleToken || 0) + 1;
+    window.scrayRowSettleToken = token;
+    let cancelled = false;
+    const cancel = () => { cancelled = true; };
+    window.addEventListener('touchstart', cancel, { once: true, passive: true, capture: true });
+    window.addEventListener('wheel', cancel, { once: true, passive: true, capture: true });
+
+    const settle = () => {
+        if (cancelled || token !== window.scrayRowSettleToken || !scrayIsMpbNow()) return;
+        const container = document.getElementById('inlineVideoContainer');
+        if (!container || !container.classList.contains('bottom-docked')) return;
+        const now = scrayMainRowFor(video);
+        if (!now) return;
+        const playerTop = container.getBoundingClientRect().top;
+        // Row bottom onto the player's top edge, from above or below. Measured
+        // every pass: the row opens its details as you tap it.
+        const delta = now.rect.bottom - playerTop;
+        if (Math.abs(delta) > 1) window.scrollBy({ top: delta, behavior: 'auto' });
+    };
+    SCRAY_ROW_SETTLE_MS.forEach(ms => setTimeout(() => requestAnimationFrame(settle), ms));
+    setTimeout(() => {
+        window.removeEventListener('touchstart', cancel, { capture: true });
+        window.removeEventListener('wheel', cancel, { capture: true });
+    }, SCRAY_ROW_SETTLE_MS[SCRAY_ROW_SETTLE_MS.length - 1] + 100);
+}
+
 async function playVideoInline(video, listContext = null, index = null, startAt = null, opts = {}) {
+// MPB: note where the played row is before any play-path scrolling (13.177).
+scrayKeepPlayedRowAbovePlayer(video);
 // ⚙️ Where to start this video, in seconds. Stashed here and applied once on
 // 'loadedmetadata' below, then cleared - so it survives the load without
 // leaking into whatever plays next. Replaces the old
@@ -9631,6 +9711,7 @@ currentListContext = listContext;
 currentVideoIndex = index;
 }
 window.currentPlayingVideo = video; // Store for highlight updates
+window.scrayMarkPlayingRows?.(); // green row in the main list (render.js, 13.176)
 
 // TEMP DIAGNOSTIC - remove once bookmark marker issue is resolved
 console.log('[BM DEBUG] in-memory bookmarks for', video.filename, ':', JSON.stringify(video.bookmarks));
@@ -10696,6 +10777,7 @@ try {
   // ✅ Fully clear currentPlayingVideo - Stop now returns the player all
   // the way back to its pre-play state, not just paused-at-start.
   window.currentPlayingVideo = null;
+  window.scrayMarkPlayingRows?.(); // the green row goes with it (render.js, 13.176)
   
   // Clear tracking variables
   currentListContext = null;

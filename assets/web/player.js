@@ -6085,6 +6085,58 @@ const RAIL_SIDE_MARGIN_PX = 4;
 const RAIL_ANCHOR_NUDGE_PX = -28;
 const RAIL_FADE_MS = 5000;
 const RAIL_ID = 'bookmarkTooltipRail';
+// ⚙️ Edit mode (picker 13.157 / native 13.155). The ✎ button's width on the
+// marker rail, and the width the edit rail asks for (clamped to the bar like
+// any rail).
+const RAIL_EDIT_BTN_PX = 30;
+const RAIL_EDIT_WIDTH_PX = 300;
+
+/**
+ * A button for the rail other than a bookmark chip: ✎, Adjust, Delete, Yes,
+ * No, ✕. Same touchend-first firing and dataset.firing guard as the chips
+ * (see pick() in showBookmarkRail for why). Its own class, not
+ * .bookmark-tooltip-chip, so MPB's chip background override doesn't grey out
+ * a red Delete.
+ */
+function makeRailButton(label, onTap, extraCss = '') {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'bookmark-rail-btn';
+    b.textContent = label;
+    b.style.cssText = `
+        flex-grow: 0;
+        flex-shrink: 0;
+        flex-basis: auto;
+        width: auto;
+        min-width: 0;
+        margin: 0;
+        padding: 4px 8px;
+        border: none;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.85);
+        color: #fff;
+        font-size: 0.58rem;
+        font-weight: bold;
+        line-height: 1.25;
+        text-align: center;
+        white-space: nowrap;
+        cursor: pointer;
+        ${extraCss}
+    `;
+    b.addEventListener('mousedown', (e) => e.stopPropagation());
+    b.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+    const fire = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (b.dataset.firing === '1') return;
+        b.dataset.firing = '1';
+        setTimeout(() => { delete b.dataset.firing; }, 400);
+        onTap(e);
+    };
+    b.addEventListener('touchend', fire, { passive: false });
+    b.addEventListener('click', fire);
+    return b;
+}
 
 /**
  * Remove the tooltip rail, wherever it currently lives.
@@ -6173,6 +6225,10 @@ function localOffsetWithin(el, ancestor) {
  *
  * opts.noteOnly: chip shows just the note, no timestamp. Used by the
  * jump-to-next flash, where the time is not the interesting part.
+ *
+ * opts.onEdit: adds a ✎ button at the right-hand end, called with the rail.
+ * Only the marker-tap rail passes it. rail.__place(px) re-lays the rail out
+ * at a new width, for the edit mode that rebuilds its contents.
  */
 function showBookmarkRail(group, onPick, opts = {}) {
     hideBookmarkRail();
@@ -6261,11 +6317,18 @@ function showBookmarkRail(group, onPick, opts = {}) {
         rail.appendChild(chip);
     });
 
+    if (typeof opts.onEdit === 'function') {
+        const editBtn = makeRailButton('\u270e', () => opts.onEdit(rail),
+            `flex-basis: ${RAIL_EDIT_BTN_PX}px; padding: 4px 0; font-size: 0.7rem;`);
+        editBtn.title = 'Edit bookmark';
+        rail.appendChild(editBtn);
+    }
+
     controls.appendChild(rail);
 
     // ---- place it: centred on the play button, clamped inside the bar ----
+    const place = (wanted) => {
     const maxWidth = Math.max(120, controls.clientWidth - RAIL_SIDE_MARGIN_PX * 2);
-    const wanted = group.length * CHIP_PREFERRED_PX + (group.length - 1) * CHIP_GAP_PX;
     const railWidth = Math.min(wanted, maxWidth);
     rail.style.width = railWidth + 'px';
 
@@ -6286,6 +6349,10 @@ function showBookmarkRail(group, onPick, opts = {}) {
     );
     rail.style.left = clamped + 'px';
     rail.style.transform = 'translateX(-50%)';
+    };
+    rail.__place = place;
+    place(group.length * CHIP_PREFERRED_PX + (group.length - 1) * CHIP_GAP_PX
+        + (typeof opts.onEdit === 'function' ? CHIP_GAP_PX + RAIL_EDIT_BTN_PX : 0));
 
     // TEMPORARY DIAGNOSTIC - remove once MPFS chip taps are settled.
     // Asks the browser what is actually on top at the chip's own centre,
@@ -6447,9 +6514,163 @@ const raise = (entry) => {
         .sort((a, b) => Math.abs(a.percent - entry.percent) - Math.abs(b.percent - entry.percent))
         .slice(0, BOOKMARK_RAIL_MAX_CHIPS)
         .sort((a, b) => a.percent - b.percent);
-    raisedRail = showBookmarkRail(shown, jumpTo);
+    raisedRail = showBookmarkRail(shown, jumpTo, { onEdit: (rail) => startEdit(rail, entry, shown) });
     raisedEntry = entry;
     fadeTimer = setTimeout(dismissBookmarkRail, RAIL_FADE_MS);
+};
+
+// ---- edit mode (picker 13.157 / native 13.155) --------------------------
+// ✎ on the rail turns it into an editor for one bookmark: Adjust moves it to
+// wherever the playhead is now (scrub first, then tap), Delete removes it
+// after a Yes. The rail stays up while editing - no fade, and a touch on the
+// bar scrubs instead of dismissing it (see the disarm listener below). ✕, or
+// raising a rail for another marker, leaves. Saves go through saveBookmarks,
+// like the modal's, and get the same Undo toast.
+const isEditing = () => document.getElementById(RAIL_ID)?.dataset.editing === '1';
+
+const railLabel = (text) => {
+    const label = document.createElement('div');
+    label.className = 'bookmark-tooltip-chip';
+    label.textContent = text;
+    label.title = text;
+    label.style.cssText = `
+        flex-grow: 1; flex-shrink: 1; flex-basis: 0; min-width: 0;
+        padding: 4px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.85);
+        color: #fff; font-size: 0.58rem; line-height: 1.25; text-align: center;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    `;
+    return label;
+};
+const bmText = (bm) => {
+    const note = window.scrayMapName ? window.scrayMapName('note', bm.note) : bm.note;
+    return note ? `${formatDuration(bm.time * 1000)} ${note}` : formatDuration(bm.time * 1000);
+};
+const leaveEdit = () => { raisedEntry = null; dismissBookmarkRail(); };
+const cancelBtn = () => {
+    const b = makeRailButton('\u2715', leaveEdit, 'padding: 4px 7px;');
+    b.title = 'Stop editing';
+    return b;
+};
+
+const startEdit = (rail, entry, shown) => {
+    if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
+    rail.dataset.editing = '1';
+    // Controls stay up while a rail is inside them (style.css), but the
+    // idle timer that was already running still needs a nudge.
+    try { window.scrayShowControlsNow?.(); } catch (e) {}
+    if (shown.length === 1) { editTarget(rail, entry); return; }
+    // A cluster: which one? Tapping a chip picks it instead of jumping.
+    rail.replaceChildren();
+    shown.forEach(e => {
+        const chip = makeRailButton(bmText(e.bm), () => editTarget(rail, e),
+            'flex-grow: 1; flex-shrink: 1; flex-basis: 0; overflow: hidden; text-overflow: ellipsis; font-weight: normal; outline: 1px dashed rgba(255,255,255,0.7); outline-offset: -2px;');
+        chip.title = 'Edit this one';
+        rail.appendChild(chip);
+    });
+    rail.appendChild(cancelBtn());
+    rail.__place?.(shown.length * CHIP_PREFERRED_PX + shown.length * CHIP_GAP_PX + 30);
+};
+
+const editTarget = (rail, entry) => {
+    if (!rail.isConnected) return;
+    clearInterval(rail.__adjustTick);
+    rail.replaceChildren();
+    rail.appendChild(railLabel(bmText(entry.bm)));
+    const adjust = makeRailButton('Adjust', () => adjustTo(entry), 'background: #007bff;');
+    adjust.title = 'Move this bookmark to the playhead';
+    // The label follows the playhead, so what Adjust will do is on the button.
+    const tick = () => {
+        if (!rail.isConnected) { clearInterval(rail.__adjustTick); return; }
+        const t = window.plyrPlayer?.currentTime;
+        if (typeof t === 'number' && !isNaN(t)) adjust.textContent = `Adjust \u2192 ${formatDuration(t * 1000)}`;
+    };
+    tick();
+    rail.__adjustTick = setInterval(tick, 250);
+    rail.appendChild(adjust);
+    rail.appendChild(makeRailButton('Delete', () => confirmDelete(rail, entry), 'background: #dc3545;'));
+    rail.appendChild(cancelBtn());
+    rail.__place?.(RAIL_EDIT_WIDTH_PX);
+};
+
+const confirmDelete = (rail, entry) => {
+    if (!rail.isConnected) return;
+    clearInterval(rail.__adjustTick);
+    rail.replaceChildren();
+    rail.appendChild(railLabel(`Delete ${bmText(entry.bm)}?`));
+    rail.appendChild(makeRailButton('Yes', () => deleteBm(entry), 'background: #dc3545;'));
+    rail.appendChild(makeRailButton('No', () => editTarget(rail, entry)));
+    rail.__place?.(RAIL_EDIT_WIDTH_PX);
+};
+
+/** The bookmark in the live list: same object if it's still there, else same time and note. */
+const findIndex = (list, bm) => {
+    const i = list.indexOf(bm);
+    if (i !== -1) return i;
+    const ms = Math.round(bm.time * 1000);
+    return list.findIndex(b => Math.round(b.time * 1000) === ms && (b.note || '') === (bm.note || ''));
+};
+
+const saveEdit = async (build, doneText) => {
+    const v = window.currentPlayingVideo;
+    if (!v || !Array.isArray(v.bookmarks) || typeof window.saveBookmarks !== 'function') return;
+    const before = v.bookmarks.map(b => ({ ...b }));
+    const next = build(v.bookmarks.map(b => ({ ...b })));
+    if (!next) return;
+    next.sort((a, b) => a.time - b.time);
+    leaveEdit();
+    v.bookmarks = next;
+    // A detached tooltip soaks up saveBookmarks' own "saved" messages - the
+    // undo toast below reports instead (same as the modal, 13.156).
+    try {
+        await window.saveBookmarks(v, document.createElement('div'));
+    } catch (err) {
+        console.error('Bookmark edit failed:', err);
+        window.showBookmarkConfirmation?.('\u274c Save failed', '#dc3545');
+        return;
+    }
+    if (typeof window.scrayUndoToast === 'function') {
+        window.scrayUndoToast({
+            html: doneText,
+            className: 'bookmark-confirmation-tooltip',
+            ms: 1950,
+            onUndo: async () => {
+                v.bookmarks = before.map(b => ({ ...b }));
+                await window.saveBookmarks(v, document.createElement('div'));
+            },
+        });
+    } else {
+        window.showBookmarkConfirmation?.(doneText);
+    }
+};
+
+const adjustTo = (entry) => {
+    const t = window.plyrPlayer?.currentTime;
+    if (typeof t !== 'number' || isNaN(t)) return;
+    const ms = Math.round(t * 1000);
+    const from = formatDuration(entry.bm.time * 1000);
+    const to = formatDuration(t * 1000);
+    saveEdit((list) => {
+        const i = findIndex(list, entry.bm);
+        if (i === -1) { showPlayerFeedback('Bookmark not found', 'top-left'); return null; }
+        if (Math.round(list[i].time * 1000) === ms) { showPlayerFeedback('Already there - scrub first', 'top-left'); return null; }
+        // The server keys bookmarks by time, so two at the same millisecond
+        // would become one. Refuse rather than silently merge.
+        if (list.some((b, j) => j !== i && Math.round(b.time * 1000) === ms)) {
+            showPlayerFeedback(`A bookmark is already at ${to}`, 'top-left');
+            return null;
+        }
+        list[i].time = ms / 1000;
+        return list;
+    }, `Bookmark moved ${from} \u2192 ${to}`);
+};
+
+const deleteBm = (entry) => {
+    saveEdit((list) => {
+        const i = findIndex(list, entry.bm);
+        if (i === -1) { showPlayerFeedback('Bookmark not found', 'top-left'); return null; }
+        list.splice(i, 1);
+        return list;
+    }, `Bookmark ${formatDuration(entry.bm.time * 1000)} deleted`);
 };
 
 entries.forEach(entry => {
@@ -6491,7 +6712,9 @@ entries.forEach(entry => {
     marker.addEventListener('click', tapMarker);
 
     if (!isTouchDevice) {
-        marker.addEventListener('mouseenter', () => raise(entry));
+        // Hovering past other markers on the way to the bar mustn't throw an
+        // edit away.
+        marker.addEventListener('mouseenter', () => { if (!isEditing()) raise(entry); });
     }
 });
 
@@ -6500,6 +6723,8 @@ if (isTouchDevice && !progressBar.dataset.bookmarkDisarmBound) {
     progressBar.dataset.bookmarkDisarmBound = 'true';
     progressBar.addEventListener('touchstart', (e) => {
         if (e.target.closest('.progress-bookmark-marker')) return;
+        // Editing: the touch is the scrub Adjust is waiting for.
+        if (document.getElementById(RAIL_ID)?.dataset.editing === '1') return;
         hideBookmarkRail();
     }, { passive: true });
 }

@@ -1239,6 +1239,10 @@ window.scrayAddSearchTerm = function (term) {
   const RESULT_MS = 1500;
 
   window.scrayUndoToast = function ({ html, onUndo, className = 'bookmark-confirmation-tooltip', bg = '#28a745', ms = 1950 }) {
+    // One at a time: they share a spot on screen, so a second save would sit
+    // exactly on top of the first. The newer save's toast wins - unless the
+    // older one is mid-undo, which is left to finish.
+    document.querySelectorAll('.scray-undo-toast:not([data-undoing])').forEach(t => t.remove());
     const toast = document.createElement('div');
     toast.className = className + ' scray-undo-toast';
     toast.style.background = bg;
@@ -1302,6 +1306,7 @@ window.scrayAddSearchTerm = function (term) {
       yes.addEventListener('click', async (e) => {
         e.stopPropagation();
         clearTimeout(timer);
+        toast.dataset.undoing = '1';
         msg.textContent = 'Undoing...';
         actions.replaceChildren();
         toast.style.background = '#6c757d';

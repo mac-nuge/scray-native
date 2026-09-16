@@ -3296,6 +3296,9 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         }
         listHtml += `</div></div><div id="bmScrollThumb" style="${THUMB_STYLE}"></div></div>`;   // list + #bmScroll + wrap
 
+        // Delete mode's hint, with Delete all. Shared by the paged modal and the
+        // no-playhead one, which has no pages but can still delete.
+        const deleteHint = `<div style="flex: 0 0 auto; display: flex; align-items: center; gap: 8px; font-size: 0.72rem; color: #fff; background: #dc3545; border-radius: 4px; padding: 5px 5px 5px 8px; margin: 0 0 8px;"><span style="flex: 1 1 auto; min-width: 0;">Tap bookmarks to mark them for deleting, then Save</span>${working.length ? `<button type="button" id="bmDeleteAll" style="flex: 0 0 auto; width: auto; min-width: 0; margin: 0; padding: 5px 9px; border: 1px solid #fff; border-radius: 4px; background: ${working.every(b => b.deleted) ? '#fff' : 'transparent'}; color: ${working.every(b => b.deleted) ? '#dc3545' : '#fff'}; font-size: 0.72rem; font-weight: 700; white-space: nowrap; cursor: pointer;">${working.every(b => b.deleted) ? 'Unselect all' : 'Delete all'}</button>` : ''}</div>`;
         if (hasPlayhead) {
             // Two pages side by side, swiped between like an iPhone home screen
             // (13.152 / 13.150): Add bookmark, then the existing bookmarks. The
@@ -3307,7 +3310,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             const hint = mode === 'swap'
                 ? `<div style="flex: 0 0 auto; font-size: 0.72rem; color: #fff; background: #007bff; border-radius: 4px; padding: 5px 8px; margin: 0 0 8px;">Tap a bookmark to move its note to ${formatDuration(newTime * 1000)}</div>`
                 : mode === 'delete'
-                ? `<div style="flex: 0 0 auto; font-size: 0.72rem; color: #fff; background: #dc3545; border-radius: 4px; padding: 5px 8px; margin: 0 0 8px;">Tap bookmarks to mark them for deleting, then Save</div>`
+                ? deleteHint
                 : `<div style="flex: 0 0 auto; font-size: 0.7rem; color: #999; margin: 0 0 8px;">Tap a time to jump to it, a note to edit it</div>`;
             html += `
                 <div id="bmTabs" role="tablist" style="flex: 0 0 auto; position: relative; display: flex; margin: 0 0 8px; border-bottom: 1px solid #e5e5e5;">
@@ -3340,7 +3343,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                 </div>
             `;
         } else {
-            html += listHtml;
+            html += (mode === 'delete' ? deleteHint : '') + listHtml;
         }
 
         const pending = working.filter(b => b.deleted).length;
@@ -3823,6 +3826,17 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                 if (typing) focusNoteField();
             });
         }
+
+        // Delete all (picker 13.157 / native 13.155): marks every bookmark, as if each had been tapped;
+        // Save still does the deleting. Pressed again with all marked, it
+        // unmarks them.
+        modal.querySelector('#bmDeleteAll')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            flushOpenEdit(false);
+            const mark = !working.every(b => b.deleted);
+            working.forEach(b => { b.deleted = mark; });
+            renderContent();
+        });
 
         modal.querySelector('#deleteBookmarksBtn')?.addEventListener('click', (e) => {
             e.stopPropagation();

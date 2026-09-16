@@ -4,6 +4,50 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.157 / native 13.155 — test: edit bookmarks from the progress bar, Delete all
+<!-- 2026-09-16T11:20Z -->
+
+**picker** — `staging - 13.157`: `player.js`, `file-operations.js`, `scray-config.js`, `VERSION`
+**native** — `stg-native - 13.155`: `assets/web/player.js`, `assets/web/file-operations.js`, `assets/web/scray-config.js`, `assets/web/VERSION`
+
+Mac asked for two things:
+1. The tooltip raised by tapping a progress-bar marker gets an edit button on its right. It opens an edit mode with two actions:
+   - **Adjust:** scrub to a new point, tap Adjust, and the bookmark moves there.
+   - **Delete:** removes the bookmark, after a confirm.
+2. In the bookmark modal's delete mode, a **Delete all** option that marks every bookmark for deleting.
+
+(Picker's 13.156 had been committed as test; it was set to stable and committed before this.)
+
+**1. Edit mode on the marker rail** (`player.js`, byte-identical in both apps apart from one existing comment).
+- **✎:** `showBookmarkRail` takes a new `opts.onEdit`, and only the marker-tap rail passes it, not the jump-to-next flash. It adds a 30px ✎ button after the chips. The rail's placement code became `rail.__place(width)`, so edit mode can re-lay the rail out at its own width.
+- **Buttons:** the new buttons come from `makeRailButton`, with the chips' touchend-first firing and `dataset.firing` guard. They use their own class, `bookmark-rail-btn`, because MPB's `.bookmark-tooltip-chip` background override is `!important` and would grey out a red Delete.
+- **Clusters:** with more than one chip on the rail, ✎ first asks which bookmark. The chips get a dashed outline, and tapping one picks it instead of jumping.
+- **The editor:** `[1:00 note] [Adjust → 1:35] [Delete] [✕]`. The Adjust label follows the playhead every 250ms, so the button shows where it will move the bookmark. Delete swaps to `[Delete 1:00 note?] [Yes] [No]`, and No goes back.
+- **Stays up while editing:**
+  - The 5s fade timer is cancelled.
+  - The bar's disarm listener skips a touch while `rail.dataset.editing` is set, because that touch is the scrub Adjust needs.
+  - Hovering over other markers on desktop doesn't replace the edit rail.
+  - Tapping a different marker still replaces it, and ✕ fades it out and hands the controls back through `dismissBookmarkRail`.
+- **Saving:** it goes through `saveBookmarks` on `currentPlayingVideo` with a new list, like the modal, so the server diff tombstones the old time. It is followed by the 13.156 Undo toast: "Bookmark moved 1:00 → 1:35" or "Bookmark 1:00 deleted".
+  - **Finding the bookmark:** the same object if it's still in the list, otherwise the same time (to the ms) and note.
+  - **Adjust refuses** a time another bookmark already has ("A bookmark is already at 5:00"), because the server keys bookmarks by time and the two would merge. It also refuses the bookmark's own time ("Already there - scrub first").
+  - **Afterwards:** `saveBookmarks` re-renders the markers, which clears the edit rail.
+- **Watch for:** a background sync that re-renders markers mid-edit closes the edit rail, like any rail. Adjust works in FLS as elsewhere, since the rail rotates with the controls. The Undo toast is the unrotated body one, as all bookmark confirmations have been.
+
+**2. Delete all** (`file-operations.js`). Delete mode's red hint bar now has a **Delete all** button, which marks every bookmark as if each had been tapped. Save still does the deleting, and shows the count.
+- **Toggle:** with everything marked, the button reads **Unselect all** and clears the marks.
+- **Where it shows:** the hint was only in the paged modal (with a playhead). It's now a shared `deleteHint` and also shows above the list in the no-playhead modal, which can delete but never had the hint.
+
+**Undo toast (`scray-config.js`):** a new toast now replaces one still on screen, instead of drawing over it in the same spot. A toast mid-undo is left to finish.
+
+**Tested** in headless Chromium, both apps. The rail and markers code was lifted out of `player.js` into a stub page.
+- **Adjust:** ✎ opens the editor, and Adjust follows the playhead to 1:30. A touch on the bar and 5s of waiting both leave the rail up. Adjust saves 1:00 → 1:30, with the Undo toast.
+- **Refusals:** adjusting onto an existing bookmark is refused, with no save.
+- **Clusters:** ✎ on a two-bookmark cluster shows the pick step. Picking 5:03, then Delete → No → Delete → Yes, saves without it. Undo → Yes restores it.
+- **✕:** clears the rail.
+- **Delete all,** in both the paged and no-playhead modals: Delete all → "Unselect all" with "Save (3)". Pressing again unmarks all ("Save"). Delete all then Save saves an empty list.
+- `node --check` passes on all changed files.
+
 ### picker 13.156 / native 13.154 — test: undo on bookmark and score confirmations
 <!-- 2026-09-16T10:55Z -->
 

@@ -4,6 +4,66 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.159 / native 13.157 — test: holding search clears it without asking
+<!-- 2026-09-16T12:00Z -->
+
+**picker** — `staging - 13.159`: `ui.js`, `scray-config.js`, `VERSION`
+**native** — `stg-native - 13.157`: `assets/web/ui.js`, `assets/web/scray-config.js`, `assets/web/VERSION`
+
+**Correction to 13.158 / 13.156.** Mac's "show confirmation" for hold-to-clear meant a done message, like the score confirmation. It didn't mean an "are you sure?" prompt.
+
+- **Holding the search button:** after 600ms with a term in place, it now clears straight away. It's the same clear as the pill's ×, including its "Filter cleared" tooltip by the button. The click that ends the hold is still swallowed, and a hold with no term is still just a tap.
+- **Removed:** `window.scrayConfirmToast`, which nothing else used. The shared button builder stays hoisted in the toast IIFE, where `scrayUndoToast` uses it.
+
+**Wording suggested for future requests:**
+- **"ask first"**: an are-you-sure prompt that waits for Mac's answer.
+- **"done message"**: a pop-up that just reports it happened, like the score confirmation.
+
+**Tested** in headless Chromium, both apps:
+- A tap runs the click and doesn't clear.
+- A 700ms hold clears the box and the pill mid-hold, with no prompt, and no click follows.
+- A hold with no term runs the click.
+- `node --check` passes.
+
+### picker 13.158 / native 13.156 — test: bookmark count by the diamond, jumps keep pause, hold search to clear
+<!-- 2026-09-16T11:45Z -->
+
+**picker** — `staging - 13.158`: `excel-sheets.js`, `style.css`, `player.js`, `file-operations.js`, `ui.js`, `scray-config.js`, `VERSION`
+**native** — `stg-native - 13.156`: `assets/web/local-scores-cache.js`, `assets/web/style.css`, `assets/web/player.js`, `assets/web/file-operations.js`, `assets/web/ui.js`, `assets/web/scray-config.js`, `assets/web/VERSION`
+
+Mac asked for three things:
+1. The purple ♦ marking a video with bookmarks shows the bookmark count to its left, one font size smaller and the same purple.
+2. Jumping to a bookmark while the video is paused keeps it paused.
+3. Holding the search button clears the search term if there is one, after a confirmation.
+
+**1. Count by the ♦.** A new `scrayBookmarkCount(video)`, beside `scrayHasBookmarks`, reads the same sources in the same order: the video's own array, then a JSON string, then `cachedVideoBookmarks`. It lives in picker's `excel-sheets.js` and native's `local-scores-cache.js`.
+- **Both marker shapes** (the node and the HTML string) now fill the ♦ span from `scrayBookmarkDiamondInner`: `<span class="scray-bm-count">3</span>♦`.
+- **Mounting and refresh:** it stays a single `.scray-bm-diamond` span, so the existing mount/refresh code needed no change. After a bookmark edit, the count repaints wherever the ♦ already does.
+- **CSS:** `.scray-bm-diamond .scray-bm-count` is 0.8em with a 0.12em gap, and inherits the purple.
+- **Blacklisted notes still count.** `scrayHasBookmarks` doesn't exclude them either, and the two should agree.
+
+**2. Paused stays paused.** Two jumps used to call `play()` unconditionally:
+- **The progress-bar marker and its rail chip** (`jumpTo` in `renderBookmarkMarkers`) now play only if the player wasn't paused.
+- **The bookmark modal's time pill** (`jumpTo` in `showBookmarksModal`, same video). The modal pauses the player when it opens, so it is always paused by the time of the jump. The modal now records `wasPlaying` before pausing, and the jump plays only if that was true.
+- **Unchanged:** jump-to-next (M>) never called `play()`. A modal jump into a *different* video still loads it through `inlineVideoPlayer.play`.
+
+**3. Hold the search button to clear** (`ui.js`, after the `#jumpSearchBtn` click handler).
+- **The hold:** `pointerdown` starts a 600ms timer, but only when `#filenameSearchBox` has a term. Up, leave or cancel stops it. When it fires, a confirm toast asks **Clear search "term"? Clear / No**.
+- **Clear** empties the pill input and calls `clearSearchPillFilter` with the button as the event target, so "Filter cleared" appears by the button. It's the same clear as the pill's ×.
+- **The follow-up click:** the click that ends a hold is stopped by a document capture listener, so the normal jump-to-search doesn't run as well. With no term, a hold is just a slow tap and the click runs as before.
+- **`window.scrayConfirmToast`** (`scray-config.js`): a message with Yes and No in the undo toast's style. The button builder moved up to the shared scope. Left unanswered, it goes after 5s and nothing happens.
+
+**Tested** in headless Chromium, both apps:
+- **Count:** the ♦ HTML reads `3♦` for an array of three, `1♦` for a JSON string of one, and nothing for none. The node form matches. Rendered with native's `style.css`, the count is smaller and purple (1, 3, 12).
+- **Marker taps:** tap-tap on a marker while paused seeks to 1:00 with no `play()`; while playing, it plays.
+- **Modal jumps:** opened while paused, a jump doesn't play; opened while playing, it does.
+- **Search button:**
+  - A quick tap runs the click and shows no toast.
+  - A 700ms hold shows the toast and the click doesn't run.
+  - Clear empties both the box and the pill, with "Filter cleared" positioned off the button.
+  - A hold with no term runs the click as normal.
+- `node --check` passes on all changed JS.
+
 ### picker 13.157 / native 13.155 — test: edit bookmarks from the progress bar, Delete all
 <!-- 2026-09-16T11:20Z -->
 

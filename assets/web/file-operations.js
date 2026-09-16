@@ -2912,6 +2912,10 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
 
     video.bookmarks = video.bookmarks || [];
 
+    // The modal pauses the player, so by the time a bookmark is jumped to it
+    // is always paused. What decides whether the jump plays is whether it was
+    // playing before the modal opened (picker 13.158 / native 13.156).
+    const wasPlaying = !!(window.plyrPlayer && !window.plyrPlayer.paused);
     if (window.plyrPlayer && !window.plyrPlayer.paused) {
         window.plyrPlayer.pause();
     }
@@ -3131,7 +3135,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             window.inlineVideoPlayer.play(video, null, null, time);
         } else if (window.plyrPlayer) {
             window.plyrPlayer.currentTime = time;
-            window.plyrPlayer.play();
+            if (wasPlaying) window.plyrPlayer.play();
         }
     };
 

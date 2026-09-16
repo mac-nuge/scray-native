@@ -1238,6 +1238,22 @@ window.scrayAddSearchTerm = function (term) {
   const CONFIRM_MS = 5000;
   const RESULT_MS = 1500;
 
+  const button = (label, filled) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    // margin: 0 overrides the global button margin in style.css.
+    b.style.cssText = 'margin: 0; padding: 6px 12px; min-width: 0; width: auto; border-radius: 4px; '
+      + 'font: inherit; font-size: 0.8rem; font-weight: bold; line-height: 1.2; cursor: pointer; '
+      + 'touch-action: manipulation; color: #fff; border: 1px solid rgba(255,255,255,0.8); '
+      + `background: ${filled ? 'rgba(255,255,255,0.3)' : 'transparent'};`;
+    // Taps on the toast stay on the toast: nothing behind it (a menu's
+    // outside-click close, the player's tap-to-toggle) should see them.
+    ['touchstart', 'mousedown', 'pointerdown'].forEach(t =>
+      b.addEventListener(t, e => e.stopPropagation(), { passive: true }));
+    return b;
+  };
+
   window.scrayUndoToast = function ({ html, onUndo, className = 'bookmark-confirmation-tooltip', bg = '#28a745', ms = 1950 }) {
     // One at a time: they share a spot on screen, so a second save would sit
     // exactly on top of the first. The newer save's toast wins - unless the
@@ -1263,21 +1279,6 @@ window.scrayAddSearchTerm = function (term) {
     actions.style.cssText = 'display: flex; gap: 6px; flex: 0 0 auto;';
     toast.append(msg, actions);
 
-    const button = (label, filled) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = label;
-      // margin: 0 overrides the global button margin in style.css.
-      b.style.cssText = 'margin: 0; padding: 6px 12px; min-width: 0; width: auto; border-radius: 4px; '
-        + 'font: inherit; font-size: 0.8rem; font-weight: bold; line-height: 1.2; cursor: pointer; '
-        + 'touch-action: manipulation; color: #fff; border: 1px solid rgba(255,255,255,0.8); '
-        + `background: ${filled ? 'rgba(255,255,255,0.3)' : 'transparent'};`;
-      // Taps on the toast stay on the toast: nothing behind it (a menu's
-      // outside-click close, the player's tap-to-toggle) should see them.
-      ['touchstart', 'mousedown', 'pointerdown'].forEach(t =>
-        b.addEventListener(t, e => e.stopPropagation(), { passive: true }));
-      return b;
-    };
     ['touchstart', 'mousedown', 'pointerdown', 'click'].forEach(t =>
       toast.addEventListener(t, e => e.stopPropagation(), { passive: true }));
 

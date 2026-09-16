@@ -7065,6 +7065,13 @@ specificity (the extra .lc-row class). */
   text-decoration: none;      /* never picks up the offline underline */
   cursor: default;
 }
+/* ⚙️ The bookmark count to the left of the ♦ (13.158 picker / 13.156 native):
+   the same purple (inherited), a size down from the diamond. */
+.scray-bm-diamond .scray-bm-count {
+  font-size: 0.8em;
+  margin-right: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file.lc-non-mp4 { color: #be7b7b; }
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file.lc-uncatalogued::before { content: "\26A0  "; color: #f39c12; }
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file.lc-no-onedrive::before { content: "\2B06\FE0E  "; color: #0078d4; font-weight: 700; }

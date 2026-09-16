@@ -2068,6 +2068,51 @@ if (jumpSearchBtn) {
     }
 }
     });
+
+    // ⚙️ Hold to clear (picker 13.158 / native 13.156; no prompt since
+    // 13.159 / 13.157). Holding the search button with a term in place clears
+    // it straight away - the same clear as the pill's x, with its "Filter
+    // cleared" tooltip by the button. With nothing to clear, a hold is just a
+    // slow tap and the click above runs as normal.
+    const SEARCH_HOLD_MS = 600;
+    let searchHoldTimer = null;
+    let searchHoldFired = false;
+    const searchTerm = () => (document.getElementById("filenameSearchBox")?.value || "").trim();
+    const endSearchHold = () => { clearTimeout(searchHoldTimer); searchHoldTimer = null; };
+    jumpSearchBtn.addEventListener("pointerdown", () => {
+        searchHoldFired = false;
+        endSearchHold();
+        if (!searchTerm()) return;
+        searchHoldTimer = setTimeout(() => {
+            searchHoldTimer = null;
+            if (!searchTerm()) return;
+            searchHoldFired = true;
+            try { navigator.vibrate?.(15); } catch (_) {}
+            const pill = document.getElementById("scraySearchPillInput");
+            if (pill) {
+                pill.value = "";
+                pill.blur();
+            }
+            // Positions its "Filter cleared" tooltip off the event target.
+            if (typeof window.clearSearchPillFilter === "function") {
+                window.clearSearchPillFilter({ target: jumpSearchBtn });
+            }
+            // The pill sizes itself on blur; nudge it so an emptied pill
+            // shrinks back to its stub.
+            pill?.dispatchEvent(new Event("blur"));
+        }, SEARCH_HOLD_MS);
+    });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(t => jumpSearchBtn.addEventListener(t, endSearchHold));
+    // No long-press callout or menu on the button.
+    jumpSearchBtn.addEventListener("contextmenu", (e) => { if (searchTerm()) e.preventDefault(); });
+    // The click that ends a hold must not also run the jump. Capture on
+    // document, so it's stopped before the button's own listener.
+    document.addEventListener("click", (e) => {
+        if (!searchHoldFired || !e.target.closest?.("#jumpSearchBtn")) return;
+        searchHoldFired = false;
+        e.stopPropagation();
+        e.preventDefault();
+    }, true);
 }
     // Jump to Tags (T)
     const jumpTagsBtn = document.getElementById("jumpTagsBtn");

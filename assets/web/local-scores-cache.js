@@ -118,6 +118,27 @@ function scrayHasBookmarks(video) {
 }
 window.scrayHasBookmarks = scrayHasBookmarks;
 
+/**
+ * How many bookmarks `video` has - scrayHasBookmarks' sources in the same
+ * order, counted instead of tested. Shown beside the ♦ (picker 13.158 /
+ * native 13.156).
+ */
+function scrayBookmarkCount(video) {
+    if (!video) return 0;
+    const own = video.bookmarks;
+    if (Array.isArray(own)) return own.length;
+    if (typeof own === 'string' && own.trim()) {
+        try {
+            const parsed = JSON.parse(own);
+            if (Array.isArray(parsed)) return parsed.length;
+        } catch { /* malformed - fall through to the cache */ }
+    }
+    if (typeof cachedVideoBookmarks === 'undefined' || !cachedVideoBookmarks) return 0;
+    const cached = cachedVideoBookmarks.get(video.oneDriveId);
+    return Array.isArray(cached) ? cached.length : 0;
+}
+window.scrayBookmarkCount = scrayBookmarkCount;
+
 /* ⚙️ The bookmarked marker (stg-native 13.65): a purple ♦ in front of the
    filename wherever one is drawn to be read - list rows, the open row, the
    now-playing bar, the fullscreen title, PIP and the loading card. A quick
@@ -131,12 +152,18 @@ window.scrayHasBookmarks = scrayHasBookmarks;
 const SCRAY_BM_DIAMOND = '♦';
 window.SCRAY_BM_DIAMOND = SCRAY_BM_DIAMOND;
 
+/** The count then the ♦ - the inside of the marker, shared by both shapes. */
+function scrayBookmarkDiamondInner(video) {
+    const n = scrayBookmarkCount(video);
+    return (n > 0 ? '<span class="scray-bm-count">' + n + '</span>' : '') + SCRAY_BM_DIAMOND;
+}
+
 /** A ♦ node for `video`, or null when it has no bookmarks. */
 function scrayBookmarkDiamond(video) {
     if (!scrayHasBookmarks(video)) return null;
     const span = document.createElement('span');
     span.className = 'scray-bm-diamond';
-    span.textContent = SCRAY_BM_DIAMOND;
+    span.innerHTML = scrayBookmarkDiamondInner(video);
     span.title = 'Has bookmarks';
     return span;
 }
@@ -145,7 +172,7 @@ window.scrayBookmarkDiamond = scrayBookmarkDiamond;
 /** The same marker as markup, for the innerHTML callers. '' when there are none. */
 function scrayBookmarkDiamondHtml(video) {
     return scrayHasBookmarks(video)
-        ? '<span class="scray-bm-diamond" title="Has bookmarks">' + SCRAY_BM_DIAMOND + '</span>'
+        ? '<span class="scray-bm-diamond" title="Has bookmarks">' + scrayBookmarkDiamondInner(video) + '</span>'
         : '';
 }
 window.scrayBookmarkDiamondHtml = scrayBookmarkDiamondHtml;

@@ -6485,7 +6485,9 @@ const jumpTo = (entry) => {
     hideBookmarkRail();
     if (window.plyrPlayer && !isNaN(entry.bm.time)) {
         window.plyrPlayer.currentTime = entry.bm.time;
-        window.plyrPlayer.play();
+        // Paused stays paused (picker 13.158 / native 13.156) - the jump is
+        // for looking at the spot, not for starting it.
+        if (!window.plyrPlayer.paused) window.plyrPlayer.play();
         showPlayerFeedback(`→ ${formatDuration(entry.bm.time * 1000)}`, 'top-left');
     }
 };

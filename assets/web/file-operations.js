@@ -72,6 +72,17 @@ const cleanSuggestion = window.scrayCleanNameSuggestion
 const cleanSuggestionBase = (cleanSuggestion && extension && cleanSuggestion.endsWith(extension))
     ? cleanSuggestion.slice(0, -extension.length)
     : (cleanSuggestion || '');
+// The same without the parent (picker 13.160 / native 13.158): a second
+// button, only when the suggestion has a parent to leave out and the result
+// isn't already this file's name or the full suggestion.
+const noParentSuggestion = (() => {
+    if (!window.scrayCleanNameNoParent || !window.scrayCleanNameDiffers) return null;
+    const n = window.scrayCleanNameDiffers(window.scrayCleanNameNoParent(video), currentName);
+    return n && n !== cleanSuggestion ? n : null;
+})();
+const noParentSuggestionBase = (noParentSuggestion && extension && noParentSuggestion.endsWith(extension))
+    ? noParentSuggestion.slice(0, -extension.length)
+    : (noParentSuggestion || '');
 
 const modal = document.createElement('div');
 modal.className = 'basket-json-modal';
@@ -93,10 +104,13 @@ modal.innerHTML = `
 </div>
 
 <!-- Suggested name from the stash data (13.66). Fills the box, nothing more. -->
-${cleanSuggestion ? `
+${(cleanSuggestion || noParentSuggestion) ? `
 <div class="rename-suggest" id="renameSuggestRow">
     <span class="rename-suggest-name" id="renameSuggestName"></span>
-    <button type="button" id="useCleanNameBtn" class="rename-suggest-btn" title="Put this in the box - you can still edit it before renaming">Use suggested</button>
+    <div class="rename-suggest-btns">
+        ${cleanSuggestion ? `<button type="button" id="useCleanNameBtn" class="rename-suggest-btn" title="Put this in the box - you can still edit it before renaming">Use suggested</button>` : ''}
+        ${noParentSuggestion ? `<button type="button" id="useCleanNameNoParentBtn" class="rename-suggest-btn rename-suggest-btn-alt" title="The suggestion without the parent, into the box">Use without parent</button>` : ''}
+    </div>
 </div>` : ''}
 
 <!-- Non-editable word selector by itself -->
@@ -543,19 +557,27 @@ renderWordSelector(nameWithoutExt);
 // data. Filling the box is ALL it does: the word selector, the bracket
 // buttons and Rename itself work on it exactly as if it had been typed, so
 // Everywhere / This phone only is asked at the same point as always.
-if (cleanSuggestion) {
+if (cleanSuggestion || noParentSuggestion) {
     const suggestNameEl = document.getElementById('renameSuggestName');
-    const useCleanBtn   = document.getElementById('useCleanNameBtn');
-    if (suggestNameEl) {
-        suggestNameEl.textContent = cleanSuggestion;
-        suggestNameEl.title = cleanSuggestion;
-    }
-    if (useCleanBtn) useCleanBtn.addEventListener('click', () => {
-        input.value = cleanSuggestionBase;
+    // The name shown is the one the last-tapped button used - the full
+    // suggestion to start with, when there is one.
+    const showName = (name) => {
+        if (!suggestNameEl) return;
+        suggestNameEl.textContent = name;
+        suggestNameEl.title = name;
+    };
+    showName(cleanSuggestion || noParentSuggestion);
+    const fill = (name, base) => {
+        showName(name);
+        input.value = base;
         renderWordSelector(input.value);
         input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
-    });
+    };
+    document.getElementById('useCleanNameBtn')
+        ?.addEventListener('click', () => fill(cleanSuggestion, cleanSuggestionBase));
+    document.getElementById('useCleanNameNoParentBtn')
+        ?.addEventListener('click', () => fill(noParentSuggestion, noParentSuggestionBase));
 }
 
 // Only auto-focus on desktop
@@ -682,6 +704,12 @@ if (e.key === 'Enter') {
 * Show delete confirmation modal
 */
 async function showDeleteModal(video) {
+   // ⚙️ Delete everywhere (native 13.158, needs browse 13.67's api.php): a
+   // phone file that is in the catalogue can take its OneDrive copies and its
+   // catalogue row with it. The phone holds no Graph token, so that half goes
+   // through the server's delete_file, and the phone copy is deleted only once
+   // the server has answered ok.
+   const everywhereOk = isLocalVideo(video) && video.inCatalogue === true;
    const modal = document.createElement('div');
     modal.className = 'basket-json-modal';
     modal.innerHTML = `
@@ -692,6 +720,11 @@ async function showDeleteModal(video) {
                : '<p class="file-operation-warning">This will move the file to the OneDrive Recycle bin</p>'}
            <p class="file-operation-path">${video.path || ''}</p>
            <p class="file-operation-filename"><strong>${video.filename || ''}</strong></p>
+           ${everywhereOk ? `
+           <div class="scray-delete-everywhere">
+               <label><input type="checkbox" id="deleteEverywhereChk"> Also delete from OneDrive</label>
+               <span class="scray-delete-everywhere-note">Every OneDrive copy goes to the Recycle bin and the file leaves the catalogue. Needs a connection.</span>
+           </div>` : ''}
            <div class="file-operation-buttons">
                <button id="confirmDeleteBtn" class="modal-btn modal-btn-danger">Delete</button>
                <button id="cancelDeleteBtn" class="modal-btn modal-btn-cancel">Cancel</button>
@@ -699,6 +732,12 @@ async function showDeleteModal(video) {
        </div>
    `;
    document.body.appendChild(modal);
+
+   const everywhereBox = () => document.getElementById('deleteEverywhereChk');
+   everywhereBox()?.addEventListener('change', () => {
+       const btn = document.getElementById('confirmDeleteBtn');
+       if (btn && !btn.disabled) btn.textContent = everywhereBox().checked ? 'Delete everywhere' : 'Delete';
+   });
 
    // Close on background click
    modal.addEventListener('click', (e) => {
@@ -717,6 +756,15 @@ async function showDeleteModal(video) {
        confirmBtn.textContent = 'Deleting...';
 
        try {
+           if (everywhereBox()?.checked) {
+               const res = await scrayDeleteEverywhere(video);
+               modal.remove();
+               const n = Number(res && res.onedrive_deleted) || 0;
+               alert(`Deleted everywhere: ${video.filename}\n` + (n
+                   ? `Phone, OneDrive (${n} cop${n === 1 ? 'y' : 'ies'}, in the Recycle bin) and the catalogue`
+                   : 'Phone and the catalogue - no OneDrive copy was on record'));
+               return;
+           }
            await deleteFile(video);
            modal.remove();
            alert(`Successfully deleted: ${video.filename}`);
@@ -724,10 +772,37 @@ async function showDeleteModal(video) {
            console.error('Delete failed:', err);
            alert(`Delete failed: ${err.message}`);
            confirmBtn.disabled = false;
-           confirmBtn.textContent = 'Delete';
+           confirmBtn.textContent = everywhereBox()?.checked ? 'Delete everywhere' : 'Delete';
        }
    });
 }
+
+/**
+ * The phone file, its OneDrive copies and its catalogue row (13.158).
+ * Server first - delete_file sends every OneDrive copy to the recycle bin and
+ * tombstones the row - then the phone copy. A server refusal throws before
+ * the phone file is touched.
+ */
+async function scrayDeleteEverywhere(video) {
+   const key = video.videoKey || window.scrayVideoKey(video.filename);
+   let res;
+   try {
+       res = await window.scrayApiCall('delete_file', {
+           method: 'POST',
+           body: { video_key: key, device: window.SCRAY_SYNC?.DEVICE_ID || 'native' }
+       });
+   } catch (err) {
+       const m = String((err && err.message) || err || 'failed');
+       if (/Unknown action: delete_file/i.test(m)) {
+           throw new Error("The server needs updating first (browse 13.67's api.php)");
+       }
+       throw new Error(m.replace(/^HTTP \d+: /, ''));
+   }
+   // localOnly as ever: the server has already written the tombstone.
+   await deleteLocalFile(video);
+   return res;
+}
+window.scrayDeleteEverywhere = scrayDeleteEverywhere;
 
 /**
 * Rename a file in OneDrive via Graph API

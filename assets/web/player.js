@@ -4350,6 +4350,17 @@ function attachFrameStepButtons() {
     });
     scrayRandomCircleMode();
 
+    // 0 - S, the stash modal for the video on screen (picker 13.160 / native
+    // 13.158), left of X^n / X^T. The same modal as the S button in the
+    // now-playing strip, which is tucked behind "..." in both modes.
+    const stashBtn = makeCircle('plyr-frame-stash', 'Stash', 'S');
+    setupTapButton(stashBtn, () => {
+        const v = window.currentPlayingVideo;
+        if (!v || typeof window.showStashModal !== 'function') return;
+        Promise.resolve(window.showStashModal(v))
+            .catch(err => console.error('[pause-menu] stash modal failed:', err));
+    });
+
     // 2 - history panel, opened over the fullscreen player
     const historyBtn = makeCircle('plyr-frame-history', 'History', 'H');
     setupTapButton(historyBtn, () => scrayOpenPanelOverFullscreen('history'));
@@ -4393,6 +4404,7 @@ function attachFrameStepButtons() {
     // The first slot is X^n now rather than F; see makeCircle above.
     // (Leaving them built-but-detached in 13.129 is what made this an
     // appendChild rather than an archaeology exercise.)
+    group.appendChild(stashBtn);
     group.appendChild(filterBtn);
     group.appendChild(historyBtn);
     group.appendChild(basketBtn);

@@ -739,6 +739,8 @@ console.log("scray-bugreport.js loaded");
 }
 #scrayBugActions button.primary { background: #2d6cdf; border-color: #2d6cdf; color: #fff; font-weight: 600; }
 #scrayBugActions button[disabled] { opacity: 0.5; cursor: default; }
+/* The third button's label is the longest; it gets the room. */
+#scrayBugActions #scrayBugSendMore { flex-grow: 1.7; padding-left: 6px; padding-right: 6px; line-height: 1.15; }
 #scrayBugStatus { font-size: 0.8rem; margin: -2px 0 8px; }
 #scrayBugStatus:empty { display: none; }
 #scrayBugStatus.bad { color: #ff7a6b; }
@@ -758,17 +760,43 @@ console.log("scray-bugreport.js loaded");
 
   let open = false;
   let unfit = null;   // removes the visualViewport listeners openModal adds
+  let primer = null;  // the stand-in field that holds the keyboard up (below)
+
+  function dropPrimer() {
+    if (primer) { primer.remove(); primer = null; }
+  }
 
   function close() {
     const o = document.getElementById("scrayBugOverlay");
     if (o) o.remove();
     if (unfit) { unfit(); unfit = null; }
+    dropPrimer();
     open = false;
   }
 
   async function openModal() {
     if (open) return;
     open = true;
+    // Summary ready to type into as the modal opens (picker 13.160 / native
+    // 13.158). iOS raises the keyboard only for a focus made inside the tap,
+    // and the snapshot below is awaited first - by the time Summary exists the
+    // gesture is over, which is why the old delayed focus never brought the
+    // keyboard up. So a hidden field takes focus NOW, inside the tap, and
+    // hands it to Summary once the panel is built; moving focus between two
+    // fields keeps the keyboard up.
+    dropPrimer();
+    try {
+      primer = document.createElement("input");
+      primer.type = "text";
+      primer.setAttribute("aria-hidden", "true");
+      primer.tabIndex = -1;
+      // 16px so iOS doesn't zoom; off-screen-ish but not display:none, which
+      // can't take focus.
+      primer.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;" +
+        "font-size:16px;border:0;padding:0;margin:0;";
+      document.documentElement.appendChild(primer);
+      primer.focus({ preventScroll: true });
+    } catch (_) { dropPrimer(); }
     injectStyles();
 
     // Nothing is captured for you. A screenshot is only ever a photo you
@@ -793,7 +821,7 @@ console.log("scray-bugreport.js loaded");
         </div>
         <div class="row">
           <label for="scrayBugSummary">Summary</label>
-          <input type="text" id="scrayBugSummary" maxlength="240" placeholder="One line — this becomes the ticket title">
+          <input type="text" id="scrayBugSummary" maxlength="240" enterkeyhint="send" placeholder="One line — this becomes the ticket title">
         </div>
         <div class="row">
           <label for="scrayBugDetails">What happened?</label>
@@ -801,7 +829,8 @@ console.log("scray-bugreport.js loaded");
         </div>
         <div id="scrayBugActions">
           <button type="button" id="scrayBugCancel">Cancel</button>
-          <button type="button" id="scrayBugSend" class="primary">Send to Jira</button>
+          <button type="button" id="scrayBugSend" class="primary">Send</button>
+          <button type="button" id="scrayBugSendMore" class="primary" title="File this one and keep the box open for the next">Send and add another</button>
         </div>
         <div id="scrayBugStatus"></div>
         <div class="row" id="scrayBugShotRow">
@@ -885,6 +914,7 @@ console.log("scray-bugreport.js loaded");
 
     const status  = document.getElementById("scrayBugStatus");
     const sendBtn = document.getElementById("scrayBugSend");
+    const moreBtn = document.getElementById("scrayBugSendMore");
     const summary = document.getElementById("scrayBugSummary");
 
     // ---- the screenshot row ----
@@ -951,9 +981,28 @@ console.log("scray-bugreport.js loaded");
       e.stopPropagation();
       if (e.key === "Escape") close();
     });
-    setTimeout(() => summary.focus(), 50);
+    // Straight from the primer to Summary, keyboard and all. The timeout is
+    // a second try for anything that took focus back in between.
+    summary.focus();
+    dropPrimer();
+    setTimeout(() => { if (open && document.activeElement !== summary) summary.focus(); }, 50);
 
-    sendBtn.addEventListener("click", async () => {
+    // Return on the on-screen keyboard (or Enter) in Summary sends the ticket,
+    // the same as Send. What happened? keeps Return for new lines.
+    summary.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || e.isComposing) return;
+      e.preventDefault();
+      if (!sendBtn.disabled) send(false);
+    });
+
+    sendBtn.addEventListener("click", () => send(false));
+    // Summary is focused inside the tap, before anything is awaited, so the
+    // keyboard stays up for the next ticket.
+    moreBtn.addEventListener("click", () => { summary.focus(); send(true); });
+
+    // `another`: file it and keep the panel open, emptied for the next one.
+    // The type, the attach box and the snapshot taken on opening all stay.
+    async function send(another) {
       const text = summary.value.trim();
       if (!text) {
         status.className = "bad";
@@ -963,6 +1012,7 @@ console.log("scray-bugreport.js loaded");
       }
       const include = document.getElementById("scrayBugIncl").checked;
       sendBtn.disabled = true;
+      moreBtn.disabled = true;
       status.className = "";
       status.textContent = "Filing…";
 
@@ -979,15 +1029,28 @@ console.log("scray-bugreport.js loaded");
           shot:    shot || null,
         });
         status.className = "good";
-        status.textContent = `Filed as ${res.key}. ${res.attached ? "State attached." : ""}`;
         push("log", `[bug] filed ${res.key}`);
-        setTimeout(close, 1800);
+        if (another) {
+          status.textContent = `Filed as ${res.key}. ${res.attached ? "State attached. " : ""}Next one:`;
+          summary.value = "";
+          detailsEl.value = "";
+          autoGrow();
+          shot = null;
+          paintShot("");
+          sendBtn.disabled = false;
+          moreBtn.disabled = false;
+          summary.focus();
+        } else {
+          status.textContent = `Filed as ${res.key}. ${res.attached ? "State attached." : ""}`;
+          setTimeout(close, 1800);
+        }
       } catch (err) {
         status.className = "bad";
         status.textContent = String(err && err.message ? err.message : err);
         sendBtn.disabled = false;
+        moreBtn.disabled = false;
       }
-    });
+    }
   }
 
   /**

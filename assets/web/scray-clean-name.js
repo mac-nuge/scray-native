@@ -31,6 +31,9 @@
 // TWO WAYS IN, because browse has neither the catalogue nor scray-config.js:
 //   scrayCleanNameFrom(input)  the rule itself, over plain values
 //   scrayCleanName(video)      the same, fed from a video row in the apps
+//   scrayCleanNameNoParent(video)  the same without the parent field, or null
+//                              when there is no parent to leave out (apps,
+//                              picker 13.160 / native 13.158 / browse 13.67)
 //
 // The name is built to be accepted by api.php's rename_file: no
 // " * : < > ? / \ | , no leading or trailing dot, 250 bytes or less.
@@ -170,8 +173,9 @@
    * The same, fed from a video row. Null when this video has no stash data.
    * Apps only: it reads the catalogue-wide dictionaries in scray-config.js.
    */
-  function cleanNameParts(video) {
+  function cleanNameParts(video, opts) {
     if (!video) return null;
+    const noParent = !!(opts && opts.noParent);
     const p = (window.scrayStashNames && window.scrayStashNames.parts)
       ? window.scrayStashNames.parts(video)
       : null;
@@ -183,7 +187,7 @@
       ? window.scrayNameMap.attrsFor('studio', p.studio) : {};
 
     return cleanNameFrom({
-      parent:     attrs.parent || '',
+      parent:     noParent ? '' : (attrs.parent || ''),
       studio:     p.studio,
       performers: p.performerList || [],
       title:      p.title,
@@ -195,6 +199,18 @@
   /** The suggested filename for a video, extension and all, or null. */
   function cleanName(video) {
     const parts = cleanNameParts(video);
+    return parts ? parts.name : null;
+  }
+
+  /**
+   * The suggestion with the parent left out - the rename modal's second
+   * button. Null when the full suggestion has no parent in it (none filed, or
+   * the studio is its own parent), since the two would be the same name.
+   */
+  function cleanNameNoParent(video) {
+    const full = cleanNameParts(video);
+    if (!full || !full.parent) return null;
+    const parts = cleanNameParts(video, { noParent: true });
     return parts ? parts.name : null;
   }
 
@@ -222,6 +238,7 @@
   window.scrayCleanNameFrom       = cleanNameFrom;
   window.scrayCleanNameParts      = cleanNameParts;
   window.scrayCleanName           = cleanName;
+  window.scrayCleanNameNoParent   = cleanNameNoParent;
   window.scrayCleanNameSuggestion = cleanNameSuggestion;
   window.scrayCleanNameDiffers    = differs;
 })();

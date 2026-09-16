@@ -4,6 +4,92 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 13.67 / picker 13.160 / native 13.158 — test: S circle, delete everywhere, rename without parent, Jira quick send
+<!-- 2026-09-16T12:40Z -->
+
+**browse** — `staging-browse - 13.67`: `api.php`, `scray-clean-name.js`, `VERSION.txt`
+**picker** — `staging - 13.160`: `player.js`, `file-operations.js`, `style.css`, `scray-clean-name.js`, `scray-bugreport.js`, `VERSION`
+**native** — `stg-native - 13.158`: `assets/web/player.js`, `assets/web/file-operations.js`, `assets/web/style.css`, `assets/web/scray-clean-name.js`, `assets/web/scray-bugreport.js`, `assets/web/VERSION`
+
+Mac asked for five things:
+1. An **S** (stash) circle to the left of Xt in FLS and MPFS.
+2. In Native's delete modal, an option to also delete everywhere, including OneDrive, still asked first. In Picker, the same for a file that is also on the phone.
+3. The rename modal's "Use suggested" split into **Use suggested** and **Use without parent**, when there's a parent.
+4. The Jira modal ready to type into when it opens, with Return after the summary sending the ticket.
+5. (Added mid-way.) A third Jira button, "Send and add another", and "Send to Jira" shortened to "Send".
+
+Mac's choices on (2):
+- **Picker offers the phone delete only inside Native's in-app browser.** Elsewhere the modal just notes the file is on the phone. There is no queue for Native to act on later.
+- **The option is a tick box,** and Delete reads "Delete everywhere" while it's ticked.
+
+**1. S circle** (`player.js`, both apps). `attachFrameStepButtons` puts a `plyr-frame-stash` circle first in the pause-menu group, before X^n / X^T. It opens `showStashModal(currentPlayingVideo)`, the same modal as the now-playing strip's S, which is behind "..." in fullscreen, and it has the modal circles' tap handling. The stash modal already sits at the top z-index, so it opens over the player.
+- **Width:** nine circles. In MPFS (portrait query: 34px + 5px gaps) that's 346px, from 20px off the right edge, so it clears a 375pt phone. In FLS it's 346px from `right: 170px`. Checked in Chromium at 390px: the row runs 34→380.
+
+**2. Delete everywhere.**
+- **browse — new `api.php` action `delete_file { video_key, device }`.** The phone has no Graph token, the same reason `rename_file` exists.
+  - **Which copies:** the same rule as `rename_file`: `file_instances` first, and `videos.one_drive_id` only when no instance row exists and no other row's copy holds that id.
+  - **Deleting:** each copy gets a Graph `DELETE /me/drive/items/{id}` with its account's token, sending it to that account's recycle bin. A 404 counts as already gone.
+  - **When all copies are done:** one transaction forgets their `onedrive` instance rows (phone instances stay), tombstones the row (`deleted = 1`, `offline = 0`, seq bump) and logs it to `sync_log`. It answers `{ onedrive_deleted, gone, head }`.
+  - **A copy failing part way:** a DELETE can't be undone from here, so the copies already deleted are forgotten, the row is left live, and the 502 says how many went ("1 copy was already deleted (in the recycle bin); the catalogue row was kept"). If the first copy fails, it says "nothing was deleted".
+  - **No copy on record:** the row is still tombstoned, and the answer is `onedrive_deleted: 0`.
+  - **Access:** not in `SCRAY_PRIVILEGED`, like `rename_file`, because Native needs it with the device key. **Trade-off to be aware of:** anyone holding the bundled key can now send a catalogue file's OneDrive copies to the recycle bin (recoverable there), where before they could only rename them.
+- **native — `showDeleteModal`.** A phone file that is in the catalogue (`isLocalVideo && inCatalogue === true`) gets the tick box **Also delete from OneDrive**, with the note: every OneDrive copy to the Recycle bin, out of the catalogue, needs a connection.
+  - **Ticked,** it runs the new `scrayDeleteEverywhere(video)`: `delete_file` with `videoKey` (the server's key for a matched row) first, then `deleteLocalFile`, which still passes `localOnly`, since the server has already tombstoned.
+  - **A server refusal** throws before the phone file is touched, and the modal stays open. An old server gets "The server needs updating first (browse 13.67's api.php)".
+  - **The done message** is still the modal's alert: "Deleted everywhere … Phone, OneDrive (2 copies, in the Recycle bin) and the catalogue", or "Phone and the catalogue - no OneDrive copy was on record".
+  - **Not changed:** phone files not in the catalogue, and catalogue rows that aren't on the phone.
+- **picker — `showDeleteModal`.** For a file flagged offline (`scrayIsOffline`), the modal fills in a row once it is up:
+  - **Inside Native's browser** (`scrayLocalPlay.available()`): it reads the phone folder if the cached read is stale, then either shows **Also delete from the phone** ("deleted for good - there is no recycle bin there"), or "marked as on the phone, but the file wasn't found there".
+  - **Anywhere else:** "Also on the phone - open Picker inside Native to delete it from there too."
+  - **Ticked:** OneDrive (the existing `deleteFile`, recycle bin and tombstone) goes first, then `ScrayBridge.deleteFile(path)`. The order is deliberate: the phone copy can't come back, so a OneDrive failure must leave it alone.
+  - **After the phone delete:** a "not found" still counts as done, as checkout treats it. Then `scrayMarkOffline({ off: [key] })` runs and the local-play map is invalidated.
+  - **If the phone delete fails,** the message says "Deleted from OneDrive, but not from the phone: …".
+- **Both apps:** if Delete fails, the button goes back to "Delete everywhere" or "Delete" to match the tick box. Styles are in `.scray-delete-everywhere`.
+
+**3. Use without parent.** `scray-clean-name.js`, still identical in all three repos:
+- `cleanNameParts(video, { noParent })` builds the name with the parent field blank.
+- `window.scrayCleanNameNoParent(video)` returns that name, or null when the full suggestion has no parent in it (none filed, or the studio is its own parent).
+
+In `showRenameModal` (both apps):
+- **The second button** (`rename-suggest-btn-alt`, outlined purple) shows only when the no-parent name differs from the file's current name and from the full suggestion.
+- **The row** now shows when either name is on offer, so a file already carrying the full name still gets **Use without parent**.
+- **Filling:** both buttons fill the box the same way, and the name line changes to whichever was last used.
+
+**4 and 5. Jira modal** (`scray-bugreport.js`, both apps).
+- **Keyboard on opening.** The old 50ms delayed focus never raised iOS's keyboard, because the snapshot is awaited first and the tap gesture has ended by the time Summary exists. Now `openModal` focuses a hidden 1px input synchronously, inside the tap. Once the panel is built, it moves focus to Summary and removes the stand-in; moving focus between fields keeps the keyboard up. `close()` removes the stand-in too.
+- **Return:** Summary has `enterkeyhint="send"`, and Return in it calls `send(false)`. An empty summary still gets "A summary is required." What happened? keeps Return for new lines.
+- **Buttons:** Cancel, **Send**, **Send and add another** (a little wider).
+  - **Send and add another** focuses Summary inside the tap, then files the ticket. On success it empties Summary, What happened? and the screenshot, and keeps the type and the attach tick. The status reads "Filed as SO-123. Next one:".
+  - **During filing** both send buttons are disabled.
+
+**Tested**, all in headless Chromium unless stated; `node --check` passes on every changed JS file.
+- **delete_file:** `php -l` passes, plus a harness that runs the real `delete_file` case against in-memory SQLite with Graph stubbed:
+  - Two copies: 2 DELETEs, row tombstoned with `offline` 0, the onedrive instances forgotten and the phone one kept, 3 `sync_log` lines.
+  - One 404: counted as gone and still tombstoned.
+  - Second copy 403: a 502 saying 1 copy was already deleted; row live; the failed copy's instance kept.
+  - First copy 500: "nothing was deleted".
+  - The `videos.one_drive_id` fallback deletes that id, and a row with no copy is still tombstoned.
+  - A missing, already-deleted or blank key is refused.
+- **Jira** (both apps, touch emulation, opened by a tap on a Jira Report button):
+  - Summary is focused on open, with no stand-in left behind. Buttons read Cancel / Send / Send and add another.
+  - Send and add another files the ticket with its details, empties both fields, keeps the panel open and keeps Summary focused.
+  - Typing and pressing Enter files the second ticket and closes the panel. Enter on an empty summary is refused.
+- **Rename** (both apps):
+  - With a parent: the full name plus both buttons, and each fills the box and the name line.
+  - No parent, or the studio as its own parent: only Use suggested.
+  - Already named in full: only Use without parent. Already named without the parent: only Use suggested.
+- **Delete, picker:**
+  - Not offline: no row.
+  - Offline inside Native: the tick box appears, and ticking relabels Delete. The run goes OneDrive → phone → invalidate → mark off.
+  - Unticked: OneDrive only.
+  - Phone failure: the partial message. OneDrive failure: the phone is untouched and the modal stays open.
+  - A file not found on the phone, and a file opened outside Native, each get their note.
+- **Delete, native:**
+  - A phone file in the catalogue gets the tick box. Ticked: `delete_file` with its videoKey, then the phone delete, then the "2 copies" message. Unticked: the plain delete.
+  - A server 502 or an old server leaves the phone file untouched, with a clear message. A zero-copy answer gets the no-copy wording.
+  - Not in the catalogue, or a cloud row: no box.
+- **S circle** (both apps): nine circles with S first; a tap opens the stash modal for the current video.
+
 ### picker 13.159 / native 13.157 — test: holding search clears it without asking
 <!-- 2026-09-16T12:00Z -->
 

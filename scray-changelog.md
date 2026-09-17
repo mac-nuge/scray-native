@@ -4,6 +4,33 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 13.75 / native 13.198 — test: shared Picker URL, set from browse.html
+<!-- 2026-09-17T20:50Z -->
+
+**browse** — `staging-browse - 13.75`: `api.php`, `browse.html`, `VERSION.txt`
+**native** — `stg-native - 13.198`: `assets/web/scray-config.js`, `assets/web/settings.js`, `assets/web/VERSION` (JS only)
+**picker** — no change. Picker's `scray-config.js` has never carried the Picker URL block; it's Native-only, so the two copies stay as far apart as they already were.
+
+Mac: the Picker URL's built-in default means a rebuild to change. Make it global the way live/test is — a box beside the DB dropdown in browse.html — with a URL typed into Native's Settings still winning on that device.
+
+**Three layers, most specific first** (`scrayPickerUrl` in `scray-config.js`):
+1. this device's override, from Settings (`scray_picker_url`)
+2. the shared default from browse.html, cached in `scray_picker_url_shared`
+3. `SCRAY_SYNC.PICKER_URL`, the constant in the app
+
+**Server** (`api.php`). `picker_url.txt` sits beside `db_mode.txt` in `scray-data`, one line, outside the webroot — the same shape as the DB mode, for the same reason.
+- `picker_url` reads it. Any key may: every client needs it at start-up, and it's a URL the apps already ship.
+- `picker_url_set` writes it. **The device key is refused** (`$tier === 'device'`) — it ships inside the IPA and is treated as public, and this points every app at a host. **`picker_url_set` should also go in `SCRAY_PRIVILEGED` in `scray_auth.php`** (not in this repo), which is the real denylist; the check in `api.php` is the belt to its braces.
+- A blank URL deletes the file, meaning "every app back to its built-in default". Anything else must parse as a full http(s) URL with a host, under 500 characters.
+
+**browse.html.** A `PICKER URL` box next to the DB dropdown, styled as the same chip: cyan when a shared URL is set, dim when blank. It's a *view* of the server value, like the dropdown — nothing in localStorage. Enter or blur saves, Escape reverts, and saving asks first. Not writable means disabled with a note to do it over SSH.
+
+**Native.** `scrayRefreshPickerUrlDefault()` asks the server and caches the answer 5s after `DOMContentLoaded` — nothing on screen waits for it, and the value only matters the next time a Picker button is pressed. **Failure is quiet on purpose:** offline, or an older `api.php` with no `picker_url` action, keeps the cached value rather than falling back to the built-in URL. The Settings field's placeholder is now the default actually in force, so a blank field shows what it will follow.
+
+**Checked:** `php -l api.php`, `node --check` on the changed JS and on browse.html's inline script. jsdom run of the layering: nothing set → built-in; shared only → shared; override set → override with the default still reading shared; refresh caches the server's value; server cleared → built-in; server unreachable → cached value kept.
+
+**Worth watching:** a device that has never been online since this landed shows the built-in URL until its first successful `picker_url` call. And changing the shared URL doesn't disturb an app whose Settings field has something in it — which is the intent, but is also the first thing to check when one phone won't follow.
+
 ### picker 13.200 / native 13.197 — test: Clear Database and Excel db out of the footer
 <!-- 2026-09-17T20:25Z -->
 

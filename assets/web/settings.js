@@ -230,10 +230,13 @@ window.scraySettings.register({
   id: "pickerUrl",
   label: "Picker URL",
   type: "url",
-  hint: "Where the Picker buttons and the in-app browser's home button go.",
+  hint: "Where the Picker buttons and the in-app browser's home button go. " +
+        "Leave it blank to follow the shared default set in browse.html.",
   get: () => window.scrayPickerUrl(),
-  placeholder: () => window.SCRAY_SYNC.PICKER_URL,
-  emptyMeans: "Leave blank to reset to the built-in default.",
+  // The default actually in force: the shared one from browse.html when there
+  // is one, otherwise the URL built into this app (native 13.198).
+  placeholder: () => window.scrayPickerUrlDefault(),
+  emptyMeans: "Leave blank to follow the shared default (shown above).",
   // Dry run, so Save can report the problem without half-applying anything.
   validate: (value) => {
     const trimmed = String(value || "").trim();

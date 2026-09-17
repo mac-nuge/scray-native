@@ -274,20 +274,68 @@ window.scrayWatch = function (label, work) {
 };
 
 const PICKER_URL_KEY = "scray_picker_url";
+/* The server's shared default, cached here (native 13.198). Cached rather
+   than fetched on demand because the Picker button has to work on a phone
+   with no signal, and because it is read on every press. */
+const PICKER_URL_SHARED_KEY = "scray_picker_url_shared";
 
 /**
  * Where the Picker buttons and the in-app browser's home button point.
- * A localStorage override beats the SCRAY_SYNC default, so staging, production
- * and a laptop dev server can be swapped on the device. Matters most in
- * Native, which ships as a signed IPA - editing the constant means a rebuild.
+ *
+ * Three layers, most specific first:
+ *   1. this device's own override, set in Settings
+ *   2. the shared default from browse.html, cached from api.php's picker_url
+ *   3. the SCRAY_SYNC constant built into this copy of the app
+ *
+ * Layer 2 is why a URL change no longer means a rebuild: browse.html writes
+ * it once and every app picks it up at start-up. A device with its own
+ * override in Settings ignores it, which is the point of the order.
  */
 window.scrayPickerUrl = function () {
   try {
     const override = localStorage.getItem(PICKER_URL_KEY);
     if (override) return override;
   } catch {}
+  return window.scrayPickerUrlDefault();
+};
+
+/** The default in force here: the shared one if there is one, else built-in. */
+window.scrayPickerUrlDefault = function () {
+  try {
+    const shared = localStorage.getItem(PICKER_URL_SHARED_KEY);
+    if (shared) return shared;
+  } catch {}
   return window.SCRAY_SYNC.PICKER_URL;
 };
+
+/**
+ * Ask the server what the shared default is now and cache the answer.
+ *
+ * Failure is deliberately quiet: offline, or an older api.php with no
+ * picker_url action, leaves whatever was cached last time in place rather
+ * than dropping back to the built-in URL.
+ */
+window.scrayRefreshPickerUrlDefault = async function () {
+  if (typeof window.scrayApiCall !== "function") return null;
+  try {
+    const res = await window.scrayApiCall("picker_url");
+    const url = (res && typeof res.url === "string") ? res.url.trim() : "";
+    try {
+      if (url) localStorage.setItem(PICKER_URL_SHARED_KEY, url);
+      else localStorage.removeItem(PICKER_URL_SHARED_KEY);
+    } catch {}
+    return url || null;
+  } catch (err) {
+    console.warn("[picker-url] shared default not read:", err.message || err);
+    return null;
+  }
+};
+
+// After start-up rather than during it: nothing on screen is waiting on this,
+// and the value only matters the next time a Picker button is pressed.
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(() => window.scrayRefreshPickerUrlDefault(), 5000);
+});
 
 /**
  * Pass a falsy value to clear the override and fall back to the default.
@@ -318,8 +366,8 @@ window.SCRAY_SYNC = {
 
   // Where the in-app browser's home button goes. Harmless in Picker itself,
   // which keeps this file byte-identical to Native's copy.
-  // This is the DEFAULT - the live value comes from scrayPickerUrl() below,
-  // which lets a per-device localStorage override win.
+  // This is the LAST-RESORT default - scrayPickerUrl() above prefers this
+  // device's override, then the shared default set in browse.html.
   PICKER_URL: "https://macnguyen.com/sp-staging-sql/",
   BROWSE_URL: "https://macnguyen.com/scray/browse.html",
   // Supplied by scray-key.js, generated at build time by the workflow from

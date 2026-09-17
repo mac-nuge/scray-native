@@ -345,32 +345,32 @@ window.scrayRefreshLocalFolder = function () {
   }, 1200);
 };
 
-async function scanLocalLibrary(folderNameOverride) {
-  const folderName = folderNameOverride || getActiveFolderName();
-  console.log(`scanLocalLibrary: starting for "${folderName}"`);
-  const relativePaths = await ScrayBridge.listVideoFiles();
-  console.log(`scanLocalLibrary: native returned ${relativePaths.length} file(s)`);
+/**
+* One file in the linked video folder as a saveVideos() row. `meta` comes back
+* too (null when the native read failed) so a caller adding a single file can
+* tell a real file from a path that isn't there. Split out of scanLocalLibrary
+* for scrayPlayDownloaded (native 13.195); the scan's rows are unchanged.
+*/
+async function scrayLocalVideoRow(relPath) {
+  const parts = relPath.split('/');
+  const filename = parts[parts.length - 1];
+  const folderPath = parts.slice(0, -1).join('/');
+  const encodedPath = parts.map(encodeURIComponent).join('/');
 
-  const videos = [];
-  for (let i = 0; i < relativePaths.length; i++) {
-    const relPath = relativePaths[i];
-    const parts = relPath.split('/');
-    const filename = parts[parts.length - 1];
-    const folderPath = parts.slice(0, -1).join('/');
-    const encodedPath = parts.map(encodeURIComponent).join('/');
+  let meta = null;
+  try {
+    meta = await ScrayBridge.getVideoMetadata(relPath);
+  } catch (err) {
+    console.warn(`getVideoMetadata failed for ${relPath}: ${err.message}`);
+  }
 
-    let meta = null;
-    try {
-      meta = await ScrayBridge.getVideoMetadata(relPath);
-    } catch (err) {
-      console.warn(`getVideoMetadata failed for ${relPath}: ${err.message}`);
-    }
+  const width = meta?.width ?? null;
+  const height = meta?.height ?? null;
+  const orientation = deriveOrientation(width, height); // see db.js
 
-    const width = meta?.width ?? null;
-    const height = meta?.height ?? null;
-    const orientation = deriveOrientation(width, height); // see db.js
-
-    videos.push({
+  return {
+    meta,
+    row: {
       idFromAPI: relPath,
       name: filename,
       path: folderPath,
@@ -384,7 +384,20 @@ async function scanLocalLibrary(folderNameOverride) {
       bitrate: meta?.bitrate ?? null,
       createdDateTime: meta?.createdDate ?? null,
       lastModifiedDateTime: meta?.modifiedDate ?? null
-    });
+    }
+  };
+}
+window.scrayLocalVideoRow = scrayLocalVideoRow;
+
+async function scanLocalLibrary(folderNameOverride) {
+  const folderName = folderNameOverride || getActiveFolderName();
+  console.log(`scanLocalLibrary: starting for "${folderName}"`);
+  const relativePaths = await ScrayBridge.listVideoFiles();
+  console.log(`scanLocalLibrary: native returned ${relativePaths.length} file(s)`);
+
+  const videos = [];
+  for (let i = 0; i < relativePaths.length; i++) {
+    videos.push((await scrayLocalVideoRow(relativePaths[i])).row);
 
     if ((i + 1) % 100 === 0) {
       console.log(`scanLocalLibrary: metadata read ${i + 1}/${relativePaths.length}`);

@@ -30,6 +30,14 @@ class BookmarkStore {
     /// land in a SEPARATELY chosen folder (ScrayDownloadFolder), so a refresh
     /// whose two folders differ would fetch files the app never sees as
     /// offline. The page compares the two names and refuses to start.
+    /// The linked video folder itself (native 13.195), so the download list
+    /// can tell whether a finished download is somewhere the library scan will
+    /// see it. Its scope is already held for the life of the app.
+    var rootURL: URL? {
+        ensureResolved()
+        return resolvedRoot
+    }
+
     var folderName: String? {
         ensureResolved()
         return resolvedRoot?.lastPathComponent

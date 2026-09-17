@@ -859,8 +859,19 @@ final class ScrayBrowserViewController: UIViewController,
         list.onPause  = { [weak self] id in self?.pauseDownload(id: id) }
         list.onResume = { [weak self] id in self?.resumeDownload(id: id) }
         list.onRetry  = { [weak self] id in self?.retryDownload(id: id) }
+        list.onPlayInScray = { [weak self] path in self?.playDownloaded(relativePath: path) }
         let nav = UINavigationController(rootViewController: list)
         presentSafely(nav)
+    }
+
+    /// A finished download tapped in the Downloads list, and it's in the video
+    /// folder (native 13.195). Same hop as Picker's N button: the player is
+    /// behind the browser, so close it first - asking the browser's presenter
+    /// takes Downloads, sitting on top, down with it - then hand over.
+    private func playDownloaded(relativePath: String) {
+        (presentingViewController ?? self).dismiss(animated: true) {
+            ScrayNativeView.current?.playDownloadedFile(relativePath: relativePath)
+        }
     }
 
     @objc private func moreTapped() {

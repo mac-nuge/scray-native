@@ -58,6 +58,20 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
         }
     }
 
+    /// Play a finished download from ScrayBrowser's Downloads list (native
+    /// 13.195). `relativePath` is the file's path inside the linked video
+    /// folder - a local row's oneDriveId. Called after the browser has gone.
+    func playDownloadedFile(relativePath: String) {
+        let escaped = relativePath
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        DispatchQueue.main.async {
+            self.webView.evaluateJavaScript(
+                "window.scrayPlayDownloaded && window.scrayPlayDownloaded('\(escaped)');"
+            )
+        }
+    }
+
     func playVideo(key: String) {
         let escaped = key
             .replacingOccurrences(of: "\\", with: "\\\\")

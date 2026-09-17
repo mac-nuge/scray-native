@@ -1,4 +1,5 @@
 import UIKit
+import AVKit
 
 // ============================================================================
 // The download list behind the tray button and the ⋯ menu.
@@ -403,8 +404,14 @@ final class ScrayDownloadsViewController: UITableViewController {
     var onPause: ((String) -> Void)?
     var onResume: ((String) -> Void)?
     var onRetry: ((String) -> Void)?
+    /// A finished video inside the linked video folder was tapped (native
+    /// 13.195). Gets the path relative to that folder; the browser closes and
+    /// Scray's player takes it from there.
+    var onPlayInScray: ((String) -> Void)?
 
     private var reloadScheduled = false
+    /// Scope held open while iOS's player reads a file from a picked folder.
+    private var scopedPlaybackURL: URL?
     private let emptyLabel = UILabel()
 
     override func viewDidLoad() {
@@ -428,12 +435,16 @@ final class ScrayDownloadsViewController: UITableViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         ScrayDownloadCenter.shared.onChange = { [weak self] in self?.scheduleReload() }
+        // Back from iOS's player (presented full screen, so this fires).
+        releasePlaybackScope()
         refresh()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         ScrayDownloadCenter.shared.onChange = nil
+        // The whole list going away, not just the player going up over it.
+        if navigationController?.isBeingDismissed == true || isBeingDismissed { releasePlaybackScope() }
     }
 
     /// Progress fires per chunk; reloading the table that often would fight
@@ -499,6 +510,22 @@ final class ScrayDownloadsViewController: UITableViewController {
               let url = record.savedURL,
               FileManager.default.fileExists(atPath: url.path) else { return }
 
+        // A video plays instead of opening the share sheet (native 13.195):
+        // in Scray's player when it's in the linked video folder, so scores
+        // and history work; otherwise in iOS's player if AVPlayer can read it.
+        // Anything else - and mkv/avi outside the library - still shares.
+        let ext = url.pathExtension.lowercased()
+        if Self.libraryExtensions.contains(ext),
+           let play = onPlayInScray,
+           let relative = Self.libraryRelativePath(of: url) {
+            play(relative)
+            return
+        }
+        if Self.systemPlayerExtensions.contains(ext) {
+            playInSystemPlayer(url)
+            return
+        }
+
         // A file inside a user-picked folder is only readable while its
         // security scope is held, and the share sheet reads it asynchronously
         // — so the scope stays open until the sheet goes away.
@@ -526,6 +553,48 @@ final class ScrayDownloadsViewController: UITableViewController {
             done(true)
         }
         return UISwipeActionsConfiguration(actions: [remove])
+    }
+
+    // ---- Playing a download (native 13.195) --------------------------------
+
+    /// What BookmarkStore.listVideoFiles counts as a video.
+    private static let libraryExtensions: Set<String> = ["mp4", "mkv", "mov", "m4v", "avi"]
+    /// What AVPlayer can open on its own.
+    private static let systemPlayerExtensions: Set<String> = ["mp4", "mov", "m4v"]
+
+    /// The file's path inside the linked video folder, as the library scan
+    /// would list it, or nil if it isn't in there.
+    private static func libraryRelativePath(of url: URL) -> String? {
+        guard let root = BookmarkStore.shared.rootURL else { return nil }
+        let norm = { (u: URL) in u.standardizedFileURL.resolvingSymlinksInPath().path }
+        let rootPath = norm(root)
+        let filePath = norm(url)
+        if filePath.hasPrefix(rootPath + "/") {
+            return String(filePath.dropFirst(rootPath.count + 1))
+        }
+        // Two bookmarks to the same folder don't always resolve to the same
+        // path spelling. Downloads land at the top of the download folder, so
+        // a parent with the video folder's name is taken as that folder - the
+        // same test Wholesale's pre-flight makes. If that's wrong, the page
+        // finds no such file and says so.
+        if url.deletingLastPathComponent().lastPathComponent == root.lastPathComponent {
+            return url.lastPathComponent
+        }
+        return nil
+    }
+
+    private func playInSystemPlayer(_ url: URL) {
+        releasePlaybackScope()
+        if url.startAccessingSecurityScopedResource() { scopedPlaybackURL = url }
+        let player = AVPlayerViewController()
+        player.player = AVPlayer(url: url)
+        player.modalPresentationStyle = .fullScreen
+        present(player, animated: true) { player.player?.play() }
+    }
+
+    private func releasePlaybackScope() {
+        scopedPlaybackURL?.stopAccessingSecurityScopedResource()
+        scopedPlaybackURL = nil
     }
 
     private func record(at indexPath: IndexPath) -> ScrayDownloadRecord? {

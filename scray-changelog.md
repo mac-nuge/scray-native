@@ -4,6 +4,42 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 13.195 — test: tapping a finished download plays it
+<!-- 2026-09-17T17:45Z -->
+
+**native** — `stg-native - 13.195`: `modules/scray-native/ios/ScrayDownloadCenter.swift`, `ScrayBrowser.swift`, `ScrayNativeView.swift`, `BookmarkStore.swift`, `assets/web/scray-bridge.js`, `assets/web/local-library.js`, `assets/web/VERSION`. **Swift, so it needs an IPA build.**
+
+Mac: tapping a completed download in the browser's Downloads list opened the share sheet. He wanted it to play. When he was asked which player, he chose Scray's own, with iOS's player as the fallback.
+
+**What a tap does now** (`ScrayDownloadsViewController.didSelectRowAt`):
+1. **A video (mp4/mkv/mov/m4v/avi) inside the linked video folder → Scray's player.**
+   - The list asks `libraryRelativePath(of:)` for the file's path inside `BookmarkStore.shared.rootURL` (new accessor). That's what `listVideoFiles` would list, so it's a local row's `oneDriveId`.
+   - Paths are compared after `standardizedFileURL.resolvingSymlinksInPath()`.
+   - Two bookmarks to the same folder don't always resolve to the same path, so there's a fallback: if the file's parent folder has the video folder's name, its path there is just the filename. Downloads always land at the top of the download folder, and it's the same name test Wholesale's pre-flight uses.
+   - `onPlayInScray` → `ScrayBrowser.playDownloaded` → `presentingViewController.dismiss`. That closes the browser and Downloads on top of it together, and the browser's own `viewDidDisappear` still starts its library rescan. Then `ScrayNativeView.playDownloadedFile` → `window.scrayPlayDownloaded(relPath)`.
+2. **Otherwise, mp4/mov/m4v → iOS's player** (`AVPlayerViewController`, full screen, over the list). The file's security scope is held while it plays. It's released when the list reappears or is dismissed.
+3. **Anything else** (mkv/avi outside the library, non-video files) → the share sheet as before.
+
+**`scrayPlayDownloaded`** (`scray-bridge.js`, beside `scrayPlayByKey`):
+- Looks for the local row with `driveId === "local"` and `oneDriveId === relPath`.
+- **Not there yet** (the browser's rescan is debounced 1.2s and reads metadata for every file, which is slow on a big folder): it builds that one file's row with `scrayLocalVideoRow` and saves it with `saveVideos(..., "local", "local")`. The rescan then finds it already there.
+- If native can't read metadata for the path, which happens when the name fallback guessed wrong, nothing is saved and an alert explains why.
+- Plays through `inlineVideoPlayer.play`, in the main list's context when the file is in there, as `scrayPlayByKey` does.
+
+**`local-library.js`** (CRLF kept): the per-file row building inside `scanLocalLibrary` moved into `scrayLocalVideoRow(relPath)` → `{ meta, row }`. The scan's rows are unchanged.
+
+**Checked:**
+- `node --check` on both JS files.
+- A vm test of `scrayPlayDownloaded` covering three cases:
+  - A row already present → plays in main context, index 1, nothing saved.
+  - A new file → one row saved with the right id/path/URL/dimensions, then played.
+  - Metadata unreadable → alert, nothing saved or played.
+- **Swift not compiled here** (no toolchain). Read through: no `deinit` added, because a main-actor call there would warn or error depending on Swift mode.
+
+**Worth watching:**
+- Whether the rescan on the way out and the single-row save collide. They write the same id with the same values, so they shouldn't.
+- On a device where the download folder isn't the video folder, whether the path comparison catches a sub-folder layout.
+
 ### picker 13.193 / native 13.194 — test: Stats modal rewired
 <!-- 2026-09-17T16:40Z -->
 

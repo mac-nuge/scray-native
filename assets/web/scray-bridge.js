@@ -92,3 +92,49 @@ window.scrayPlayByKey = async function (key) {
     return false;
   }
 };
+
+/**
+ * A finished download tapped in ScrayBrowser's Downloads list (native 13.195).
+ *
+ * Swift has already checked the file is inside the linked video folder and
+ * worked out its path there - which is exactly a local row's oneDriveId - and
+ * closed the browser. The full rescan the browser starts on its way out takes
+ * a while on a big folder, so rather than wait for it, a file the list doesn't
+ * have yet is read and saved on its own first; the rescan then finds it there.
+ */
+window.scrayPlayDownloaded = async function (relPath) {
+  relPath = String(relPath || "");
+  if (!relPath) return false;
+  try {
+    const find = async () => (await window.getAllVideos())
+      .find(v => v.driveId === "local" && v.oneDriveId === relPath);
+
+    let match = await find();
+    if (!match) {
+      const got = await window.scrayLocalVideoRow(relPath);
+      // No metadata means native couldn't open that path in the video folder -
+      // a download folder that only shares the video folder's name. Don't save
+      // a row for a file that isn't there.
+      if (!got.meta) {
+        alert(`That download isn't in the video folder, so Scray can't play it.\n\n${relPath}`);
+        return false;
+      }
+      await saveVideos([got.row], getActiveFolderName(), "local", "local");
+      match = await find();
+    }
+    if (!match) {
+      alert(`Couldn't find that download in the list.\n\n${relPath}`);
+      return false;
+    }
+
+    // As scrayPlayByKey: in the main list's context where it's in there.
+    const list = (window.paginationState && window.paginationState.allVideos) || [];
+    const idx = list.findIndex(v => v.oneDriveId === match.oneDriveId);
+    window.inlineVideoPlayer.play(match, idx >= 0 ? "main" : null, idx >= 0 ? idx : null);
+    return true;
+  } catch (err) {
+    console.error("scrayPlayDownloaded failed:", err);
+    alert(`Couldn't play that download: ${err.message || err}`);
+    return false;
+  }
+};

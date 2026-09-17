@@ -4100,7 +4100,9 @@ searchBox.addEventListener("keydown", (e) => {
           // answer that costs nothing when unchanged is never stale.
           if (next.value !== "any" && typeof window.scrayLoadStashState === "function") {
               window.scrayLoadStashState()
-                  .then(() => { filterDisplayedByFilename(); })
+                  // 13.187: this second pass didn't set skipSearchScroll, so
+                  // it was the one that scrolled the page down to the list.
+                  .then(() => { window.skipSearchScroll = true; filterDisplayedByFilename(); })
                   .catch(() => {});
           }
           window.skipSearchScroll = true;

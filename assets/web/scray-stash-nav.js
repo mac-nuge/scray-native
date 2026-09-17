@@ -145,6 +145,21 @@
 #stashModal .ssn .ssn-filter.on { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
 #stashModal .ssn-h { font-weight: 600; font-size: .85rem; margin: 4px 0 6px; }
 #stashModal .ssn .ssn-loadmore { display: block; width: 100%; padding: 10px; margin: 0 0 10px; }
+#stashModal .ssn-studio { margin: 0 0 10px; }
+#stashModal .ssn-studio-row { display: flex; gap: 6px; align-items: center; }
+#stashModal .ssn .ssn-studio-btn { flex: 1 1 auto; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+#stashModal .ssn .ssn-studio-btn.on { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
+#stashModal .ssn-studio-pop { margin-top: 6px; border: 1px solid #ccc; border-radius: 6px; background: #fff; padding: 6px; }
+#stashModal .ssn input.ssn-studio-find { display: block; width: 100%; box-sizing: border-box; margin: 0 0 6px; padding: 7px 9px; font-size: 14px; border: 1px solid #ccc; border-radius: 6px; background: #fff; color: inherit; -webkit-appearance: none; appearance: none; }
+#stashModal .ssn-studio-list { max-height: 40vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+#stashModal .ssn .ssn-studio-opt { display: flex; width: 100%; justify-content: space-between; gap: 8px; border: none; border-bottom: 1px solid #f0f0f0; border-radius: 0; background: transparent; padding: 8px 6px; text-align: left; white-space: normal; }
+#stashModal .ssn .ssn-studio-opt.on { color: #6c5ce7; font-weight: 700; }
+/* 13.188: the search hides options with the hidden attribute, but the
+   display:flex above outranks the browser's own [hidden] rule - so nothing
+   ever disappeared. */
+#stashModal .ssn .ssn-studio-opt[hidden], #stashModal .ssn-studio-none[hidden] { display: none; }
+#stashModal .ssn .ssn-studio-opt small { opacity: .6; flex: 0 0 auto; }
+#stashModal .ssn-studio-none { padding: 8px 6px; font-size: .8rem; opacity: .6; }
 `;
     document.head.appendChild(css);
   }
@@ -228,11 +243,13 @@
     }
 
     // ---- loading ---------------------------------------------------------
-    async function load(entry, more) {
+    // keep: a studio change re-fetches page 1 but leaves the profile and the
+    // current scenes on screen until the new ones land.
+    async function load(entry, more, keep) {
       const seq = ++loadSeq;
       entry.busy = true;
       entry.error = '';
-      if (!more) entry.data = null;
+      if (!more && !keep) entry.data = null;
       paint(false, true);
       let res;
       try {
@@ -245,6 +262,8 @@
           if (entry.id) body.id = entry.id;
           body.name = entry.name || '';
           if (entry.sceneId) body.scene_id = entry.sceneId;
+          // Studio filter on the scene list (13.187 / browse 13.72).
+          if (entry.studio && entry.studio.id) body.studio_id = entry.studio.id;
           body.page = more ? (entry.data.page || 1) + 1 : 1;
         }
         res = await api('stash_nav', { method: 'POST', body });
@@ -265,6 +284,9 @@
         entry.data.note = res.note || '';
       } else {
         entry.data = Object.assign({}, res, { scenes: res.scenes || [], lastCount: (res.scenes || []).length });
+        // The performer's studios, from the unfiltered first load. Kept across
+        // a studio change so the list doesn't shrink to the one picked.
+        if (entry.type === 'performer' && Array.isArray(res.studios) && !entry.studios) entry.studios = res.studios;
         if (entry.type === 'performer' && res.performer) {
           entry.id = res.performer.id;
           entry.name = res.performer.name || entry.name;
@@ -285,6 +307,8 @@
       const box = host.querySelector('input.ssn-term');
       if (box && e.type === 'search' && keepScroll) e.term = box.value;
       const hadFocus = box && document.activeElement === box;
+      const studioBox = host.querySelector('input.ssn-studio-find');
+      const studioHadFocus = studioBox && document.activeElement === studioBox;
 
       if (heading) {
         heading.textContent = e.type === 'search'
@@ -303,6 +327,12 @@
         const nb = host.querySelector('input.ssn-term');
         if (nb) { nb.focus(); nb.setSelectionRange(nb.value.length, nb.value.length); }
       }
+      if (studioHadFocus || e.studioFocus) {
+        e.studioFocus = false;
+        const sb = host.querySelector('input.ssn-studio-find');
+        if (sb) { try { sb.focus({ preventScroll: true }); } catch (_) { sb.focus(); } }
+      }
+      paintStudioList();
       paintFilter();
       paintPtags();
     }
@@ -455,10 +485,76 @@
         ? '<button type="button" class="ssn-loadmore" data-more' + (e.busy ? ' disabled' : '') + '>' +
             (e.busy ? 'Loading&hellip;' : 'Load more (' + n + ' of ' + d.count + ')') + '</button>'
         : '';
-      return prof +
+      return prof + studioHtml(e) +
         '<div class="ssn-state"><span class="ssn-h">' + label + '</span>' + sortHtml(e, 'Newest') + '</div>' +
         errHtml(e.error) + errHtml(d && d.note) +
         list + more;
+    }
+
+    // ---- studio filter on a profile (13.187) ------------------------------
+    // A searchable dropdown of the studios this performer has worked for.
+    // The list comes from StashDB via api.php (browse 13.72); if that isn't
+    // available it falls back to the studios on the scenes loaded so far.
+    // Picking one re-asks StashDB for their scenes at that studio only, so
+    // the count and Load more are for the filtered list.
+    function studioOptions(e) {
+      if (Array.isArray(e.studios) && e.studios.length) return e.studios;
+      const seen = new Map();
+      ((e.data && e.data.scenes) || []).forEach(s => {
+        if (!s.studio_id || !s.studio) return;
+        const o = seen.get(s.studio_id) || { id: s.studio_id, name: s.studio, count: 0 };
+        o.count++;
+        seen.set(s.studio_id, o);
+      });
+      return [...seen.values()].sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
+    }
+
+    function studioHtml(e) {
+      if (!e.data || !e.data.performer) return '';
+      const opts = studioOptions(e);
+      if (!opts.length && !e.studio) return '';
+      const cur = e.studio;
+      let pop = '';
+      if (e.studioOpen) {
+        pop = '<div class="ssn-studio-pop">' +
+          '<input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
+            'autocorrect="off" autocapitalize="off" placeholder="Search studios&hellip;" value="' + esc(e.studioTerm || '') + '">' +
+          '<div class="ssn-studio-list">' +
+            '<button type="button" class="ssn-studio-opt' + (!cur ? ' on' : '') + '" data-studio-pick="">All studios</button>' +
+            opts.map(o => '<button type="button" class="ssn-studio-opt' + (cur && cur.id === o.id ? ' on' : '') + '" ' +
+              'data-studio-pick="' + esc(o.id) + '" data-studio-name="' + esc(o.name) + '">' +
+              '<span>' + esc(o.name) + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>').join('') +
+            '<div class="ssn-studio-none" hidden>No studio matches</div>' +
+          '</div>' +
+        '</div>';
+      }
+      return '<div class="ssn-studio">' +
+        '<div class="ssn-studio-row">' +
+          '<button type="button" class="ssn-studio-btn' + (cur ? ' on' : '') + '" data-studio-toggle>' +
+            'Studio: ' + esc(cur ? cur.name : 'All studios') + ' ' + (e.studioOpen ? '&#9652;' : '&#9662;') + '</button>' +
+          (cur ? '<button type="button" data-studio-pick="" title="Show all studios">&#10005;</button>' : '') +
+        '</div>' + pop +
+      '</div>';
+    }
+
+    // Narrows the open list to what's typed, without a repaint (which would
+    // close the keyboard).
+    function paintStudioList() {
+      const e = top();
+      const box = host.querySelector('input.ssn-studio-find');
+      if (!e || !box) return;
+      const q = box.value.trim().toLowerCase();
+      e.studioTerm = box.value;
+      let shown = 0;
+      host.querySelectorAll('.ssn-studio-opt[data-studio-name]').forEach(b => {
+        const hit = !q || b.dataset.studioName.toLowerCase().includes(q);
+        b.hidden = !hit;
+        if (hit) shown++;
+      });
+      const all = host.querySelector('.ssn-studio-opt[data-studio-pick=""]');
+      if (all) all.hidden = !!q;
+      const none = host.querySelector('.ssn-studio-none');
+      if (none) none.hidden = shown > 0 || !q;
     }
 
     // Google for one scene (13.165 / 13.164): the title as an exact phrase,
@@ -633,6 +729,7 @@
     host.addEventListener('input', onInput);
     function onInput(ev) {
       if (ev.target.closest && ev.target.closest('input.ssn-term')) paintPtags();
+      if (ev.target.closest && ev.target.closest('input.ssn-studio-find')) paintStudioList();
     }
     function onClick(ev) {
       if (finished) return;
@@ -674,6 +771,27 @@
         search(v);
         return;
       }
+      if (btn.hasAttribute('data-studio-toggle')) {
+        const e = top();
+        if (!e) return;
+        e.studioOpen = !e.studioOpen;
+        e.studioFocus = e.studioOpen;
+        paint(false, true);
+        return;
+      }
+      if (btn.dataset.studioPick !== undefined) {
+        const e = top();
+        if (!e || e.type !== 'performer') return;
+        const id = btn.dataset.studioPick;
+        const next = id ? { id, name: btn.dataset.studioName || '' } : null;
+        e.studioOpen = false;
+        e.studioTerm = '';
+        if ((next && e.studio && e.studio.id === next.id) || (!next && !e.studio)) { paint(false, true); return; }
+        e.studio = next;
+        e.sort = 'order';
+        load(e, false, true);
+        return;
+      }
       if (btn.dataset.sort) {
         const e = top();
         if (e && e.sort !== btn.dataset.sort) { e.sort = btn.dataset.sort; paint(false, true); }
@@ -701,6 +819,12 @@
       }
     }
     function onKey(ev) {
+      const sbox = ev.target.closest && ev.target.closest('input.ssn-studio-find');
+      if (sbox) {
+        ev.stopPropagation();        // not the player's single-key shortcuts
+        if (ev.key === 'Enter') { ev.preventDefault(); sbox.blur(); }
+        return;
+      }
       const box = ev.target.closest && ev.target.closest('input.ssn-term');
       if (!box) return;
       ev.stopPropagation();          // not the player's single-key shortcuts

@@ -4,6 +4,62 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 13.188 — test: studio filter search in the performer profile actually hides non-matching studios
+<!-- 2026-09-17T12:29Z -->
+
+**native** — `stg-native - 13.188`: `assets/web/scray-stash-nav.js`, `assets/web/VERSION` (JS only)
+
+Mac confirmed the rest of browse 13.72 / native 13.187 works, so browse 13.72 is now marked stable. The one failure: typing in the studio dropdown's search box didn't narrow the list.
+
+**Cause:** `paintStudioList` hides non-matching options with the `hidden` attribute, but the options are styled `display: flex`. An author `display` rule outranks the browser's built-in `[hidden] { display: none }`, so every option stayed visible. The jsdom test missed it because jsdom doesn't apply the stylesheet.
+
+**Fix:** added `#stashModal .ssn .ssn-studio-opt[hidden], #stashModal .ssn-studio-none[hidden] { display: none; }` to the navigator's CSS.
+
+**Tested:** `node --check`. The cascade reasoning was checked by hand; not re-run on a device.
+
+### browse 13.72 / native 13.187 — test: stash toggle doesn't scroll, studio filter on performer profiles, list names wrap in full, uploads panel clears the bottom buttons, > and M> in MPB
+<!-- 2026-09-17T12:20Z -->
+
+**browse** — `staging-browse - 13.72`: `api.php`, `VERSION.txt`
+**native** — `stg-native - 13.187`: `assets/web/randomiser.js`, `assets/web/scray-stash-nav.js`, `assets/web/style.css`, `assets/web/VERSION` (JS/CSS only)
+
+Five quick requests from Mac.
+
+**1. Stash toggle scrolled to the list** (`randomiser.js`).
+- **Cause:** arming Matched/Unmatched runs the filter twice. It runs once straight away with `skipSearchScroll` set, and again after `scrayLoadStashState()` refreshes the matched set. The second pass didn't set the flag. `skipSearchScroll` is one-shot, so that pass scrolled to the results.
+- **Fix:** it now sets the flag too.
+
+**2. Studio filter on a performer profile** (`scray-stash-nav.js`, `api.php` `stash_nav` op `performer`).
+- **The control:** a "Studio: All studios ▾" button sits under the profile. It opens a list with a search box: the studios the performer has worked for, busiest first, each with its scene count. Typing narrows the list without a repaint, so the keyboard stays up. Picking one re-fetches page 1 for that studio only; the profile and current scenes stay on screen until the new ones land. ✕ or "All studios" clears it. Load more carries the filter.
+- **Server side:**
+  - `studio_id` (a UUID) adds `studios: {value: [id], modifier: INCLUDES}` to `queryScenes`.
+  - On page 1 the server asks `findPerformer { studios { scene_count studio { id name } } }` and returns them as `studios: [{id, name, count}]`.
+  - That query is wrapped on its own: if StashDB refuses it, `studios` is null, the profile is unaffected, and the app builds its list from the studios on the scenes it has loaded.
+  - Scene cards now carry `studio_id` so that fallback can filter too. The first scene selection asks for `studio { id name }`; the older fallback selections are unchanged.
+- **Not checked against StashDB:** the `findPerformer.studios` field was not tested against the live API, which is why the fallback exists.
+
+**3. Main list names wrap in full** (`style.css`, LIST COLUMNS).
+- **Change:** studio, performer and filename cells dropped `-webkit-line-clamp: 2` and the ellipsis for plain wrapping (`display: block`, `white-space: normal`, `overflow-wrap: anywhere`), keeping `line-height: 1.2` and the font sizes.
+- **Row height:** rows are `min-height: var(--lc-row-h)`, so one- or two-line names look as before and longer ones make their row taller.
+- **Also covers:** history and basket, which share the same row rules.
+- **Unchanged:** the bookmarks view's note cell stays at two lines.
+
+**4. Uploads panel hidden behind the bottom button row** (`style.css`).
+- **Cause:** the covering row in Mac's screenshot is the disguise dock (X R H Xⁿ Xb 🔍 BM 🌐 COL). It lives on `<html>` at the 32-bit z-index ceiling, so no z-index on the panel can beat it.
+- **Fix:** on phones (≤1024px) the panel now sits 88px up (`--upload-panel-lift`, clear of the Native dock at 36px + ~40px tall) and is capped so it can't run off the top. The queue still scrolls inside it. The minimised pill lifts with it.
+
+**5. > and M> in MPB** (`style.css`): removed the two MPB-only hide rules. Both are now shown in MPB, MPFS and FLS. Their order needs no CSS: > is attached before M>, both before fullscreen. MPB's row was described as tight when they were hidden, so it may need a shrink if it crowds.
+
+**Tested:**
+- `node --check` on both JS files, `php -l` on `api.php`.
+- jsdom run of the navigator against a stubbed `scrayApiCall`:
+  - The profile shows the studio button; the list shows both studios with counts.
+  - Typing "braz" leaves only Brazzers.
+  - Picking it keeps the profile while loading, sends `studio_id`, and shows its 3 scenes.
+  - Clearing sends no `studio_id` and shows all 6.
+- Not run against StashDB or on a device.
+- Picker not yet ported (native first). The `api.php` change is inert for Picker until its navigator sends `studio_id`.
+
 ### native 13.186 — test: one-finger tap-then-drag zoom works in the play/pause zone too, not just the left zone
 <!-- 2026-09-17T11:50Z -->
 

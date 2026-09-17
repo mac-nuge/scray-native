@@ -3135,9 +3135,7 @@ body:not(.manual-rotate-landscape) .plyr-history-sequence {
    in MPFS as well as FLS, so the two fullscreen modes have the same
    next-bookmark control in the same slot. Hidden in MPB only, where the row
    is too tight for it. */
-body:not(.manual-rotate-landscape):not(.portrait-fullscreen) .plyr-basket-quick {
-    display: none !important;
-}
+/* 13.187: shown in MPB as well now, on Mac's request - rule removed. */
 
 /* ⚙️ > (play next) shows in MPFS too (13.137), in the slot immediately before
    M>. Same treatment as M> above and for the same reason: it was in the
@@ -3151,9 +3149,7 @@ body:not(.manual-rotate-landscape):not(.portrait-fullscreen) .plyr-basket-quick 
    attachBasketQuickButton() at all three call sites and both insert before the
    fullscreen control, so > lands ahead of M> in the DOM, and neither carries a
    flex order to undo that. */
-body:not(.manual-rotate-landscape):not(.portrait-fullscreen) .plyr-play-next {
-    display: none !important;
-}
+/* 13.187: shown in MPB as well now, on Mac's request - rule removed. */
 
 /* BM gives up its slot to M> in MPFS - the bookmark modal is on the pause-menu
    circle there now, which it wasn't when this exception was written. In MPB
@@ -7091,19 +7087,17 @@ specificity (the extra .lc-row class). */
   font-size: inherit !important;
   line-height: inherit !important;
 }
-/* Names wrap onto a second line inside the row rather than cutting off after
-   one, then end in an ellipsis. Two lines at line-height 1.2 is 25px at
-   --lc-font, inside the 30px row - so the row height doesn't change. Long
-   filenames with no spaces break wherever they have to. */
+/* Names wrap onto as many lines as they need (13.187 - was capped at two with
+   an ellipsis). One or two lines still fit the 30px row, so short names look
+   exactly as before; a longer one makes its row taller. Long filenames with no
+   spaces break wherever they have to. */
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-row .lc-studio,
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-row .lc-perf,
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) li.lc-row .lc-file {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  display: block;
   white-space: normal;
   overflow-wrap: anywhere;
+  text-overflow: clip;
   line-height: 1.2 !important;
 }
 /* A fixed size, not one that grows on an open row: the column is only as wide
@@ -7910,6 +7904,17 @@ body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor >
   background: #fff; color: #222; border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.35);
   padding: 10px 12px; font-size: 0.82rem; max-height: 55vh; overflow-y: auto; box-sizing: border-box; }
 #scrayUploadPanel.is-min { left: auto; padding: 0; background: none; box-shadow: none; overflow: visible; }
+/* ⚙️ Phones (13.187): the disguise's bottom button row (X R H ... COL) sits
+   over the bottom of the screen and was covering the panel's last rows. Lift
+   the panel clear of it; the list still scrolls inside the panel. Nudge
+   UPLOAD_PANEL_LIFT if that row ever moves. */
+@media (max-width: 1024px) {
+  #scrayUploadPanel {
+    --upload-panel-lift: 88px; /* ⚙️ UPLOAD_PANEL_LIFT */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + var(--upload-panel-lift));
+    max-height: min(55vh, calc(100vh - var(--upload-panel-lift) - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px) - 20px));
+  }
+}
 #scrayUploadPanel .up-pill { background: #0078d4; color: #fff; border: 0; border-radius: 999px; padding: 9px 14px;
   font-size: 0.85rem; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.35); cursor: pointer; }
 #scrayUploadPanel .up-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }

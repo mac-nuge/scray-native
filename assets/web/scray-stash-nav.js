@@ -6,6 +6,11 @@
 // picker 13.165 / native 13.164: a Google link on every scene card.
 // native 13.189 (browse 13.74): "In library" on cards already matched to a
 // file, and Back to Stash sits just above the video when it was already playing.
+// native 13.190 / picker 13.189: In library opens the file in Picker - from
+// Native through the in-app browser (Picker's ?play=<video_key>), and inside
+// Picker as a preview, the way ▶ previews this modal's own file.
+// native 13.191 / picker 13.190: the studio search lifts itself clear of the
+// keyboard, and In library shows on this modal's own file too.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -212,6 +217,7 @@
       host.removeEventListener('click', onClick);
       host.removeEventListener('keydown', onKey);
       host.removeEventListener('input', onInput);
+      host.removeEventListener('focusin', onFocusIn);
       backBtn.remove();
       closeBtn.remove();
       defaults.forEach(b => { b.style.display = b.dataset.ssnDisplay || ''; });
@@ -571,10 +577,11 @@
     }
 
     // In library (native 13.189 / browse 13.74): stash_nav lists the catalogue
-    // files already matched to this scene. Offered unless the only one is the
-    // file this modal is for - that one is already on screen.
+    // files already matched to this scene. 13.191 / 13.190: the file this modal
+    // is for counts too - it was left out as "already on screen", which made a
+    // performer profile opened from a list row the one list missing a link.
     function libOthers(c) {
-      return (c.library || []).filter(l => l && l.video_key && l.video_key !== key);
+      return (c.library || []).filter(l => l && l.video_key);
     }
     function libHtml(c, i) {
       const lib = libOthers(c);
@@ -588,6 +595,26 @@
       const c = e && e.data && e.data.scenes[i];
       const l = c && libOthers(c)[0];
       if (!l) return;
+
+      // Native's main web view: the file belongs to the catalogue, which this
+      // phone may not hold, so it opens in Picker in the in-app browser. The
+      // modal stays as it was underneath.
+      if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
+        const base = typeof window.scrayPickerUrl === 'function' ? window.scrayPickerUrl() : '';
+        if (!base) { alert('No Picker address is set.'); return; }
+        let url;
+        try {
+          const u = new URL(base);
+          u.searchParams.set('play', l.video_key);
+          url = u.toString();
+        } catch (err) {
+          url = base + (base.indexOf('?') >= 0 ? '&' : '?') + 'play=' + encodeURIComponent(l.video_key);
+        }
+        openExternal(url);
+        return;
+      }
+
+      // Picker: it's in this library, so preview it right here.
       let match = null;
       try {
         const all = typeof window.getAllVideos === 'function' ? await window.getAllVideos() : [];
@@ -597,7 +624,7 @@
       }
       if (finished) return;
       if (!match) {
-        alert('That file isn\u2019t in this device\u2019s library.\n\n' + (l.path ? l.path + '/' : '') + l.filename);
+        alert('That file isn\u2019t in the library here yet - it may need a sync.\n\n' + (l.path ? l.path + '/' : '') + l.filename);
         return;
       }
       preview(match, host.closest('.basket-json-modal') || null);
@@ -764,6 +791,30 @@
     host.addEventListener('click', onClick);
     host.addEventListener('keydown', onKey);
     host.addEventListener('input', onInput);
+    host.addEventListener('focusin', onFocusIn);
+
+    // Studio search above the keyboard (13.191 / 13.190). Focusing the box
+    // scrolls the modal so the box sits at the top of it, with the list
+    // underneath in whatever the keyboard leaves. Bottom padding goes on
+    // first so there is always room to scroll that far - the next repaint
+    // (picking a studio, closing the list) drops it with the rest of the view.
+    // Not on a desktop browser: no keyboard, and nothing to get out of the way of.
+    function liftStudioBox() {
+      if (finished) return;
+      const box = host.querySelector('input.ssn-studio-find');
+      if (!box || document.activeElement !== box) return;
+      const wrap = host.querySelector('.ssn');
+      if (wrap && !wrap.style.paddingBottom) wrap.style.paddingBottom = '60vh';
+      const delta = box.getBoundingClientRect().top - host.getBoundingClientRect().top - 8;
+      if (Math.abs(delta) > 2) host.scrollTop += delta;
+    }
+    function onFocusIn(ev) {
+      if (!ev.target.closest || !ev.target.closest('input.ssn-studio-find')) return;
+      if (typeof window.scrayNoAutoScroll === 'function' && window.scrayNoAutoScroll()) return;
+      liftStudioBox();
+      // Again once the keyboard is up: iOS can nudge things while it animates.
+      setTimeout(liftStudioBox, 350);
+    }
     function onInput(ev) {
       if (ev.target.closest && ev.target.closest('input.ssn-term')) paintPtags();
       if (ev.target.closest && ev.target.closest('input.ssn-studio-find')) paintStudioList();
@@ -1101,6 +1152,71 @@ body.fullscreen-active #ssnPvBar { display: none; }
     });
     document.body.appendChild(modal);
   }
+
+  // ---- ?play=<video_key> (picker 13.189 / native 13.190) ------------------
+  // What Native's In library link opens. Waits for the lock screen, the player
+  // and the library, plays the file in the main list's context where it can,
+  // then takes the parameter off the address so a reload doesn't play it again.
+  // Native's own index.html is never opened with it, so this only ever runs in
+  // Picker - in a desktop browser or in Native's in-app browser.
+  (function playFromUrl() {
+    // Native's main web view has the full bridge (openBrowser). Picker inside
+    // Native's in-app browser gets a smaller bridge without it, and must run.
+    if (window.ScrayBridge && window.ScrayBridge.openBrowser) return;
+    let key = '';
+    try { key = new URL(location.href).searchParams.get('play') || ''; } catch (e) { return; }
+    key = String(key).normalize('NFC').trim().toLowerCase();
+    if (!key) return;
+
+    const dropParam = () => {
+      try {
+        const u = new URL(location.href);
+        u.searchParams.delete('play');
+        history.replaceState(history.state, '', u.toString());
+      } catch (e) { /* the address keeps it; harmless */ }
+    };
+    // ⚙️ How long to wait for the library before giving up (a first sync on a
+    // fresh browser can take a while).
+    const GIVE_UP_MS = 120000;
+    const started = Date.now();
+    let busy = false;
+
+    const tick = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const lock = document.getElementById('lockOverlay');
+        const locked = lock && getComputedStyle(lock).display !== 'none';
+        const player = window.inlineVideoPlayer;
+        if (!locked && player && typeof player.play === 'function' && typeof window.getAllVideos === 'function') {
+          const all = await window.getAllVideos();
+          const match = (all || []).find(v =>
+            (v.videoKey || (window.scrayVideoKey ? window.scrayVideoKey(v.filename || '') : '')) === key);
+          if (match) {
+            clearInterval(timer);
+            dropParam();
+            const list = (window.paginationState && window.paginationState.allVideos) || [];
+            const idx = list.findIndex(v => v.oneDriveId === match.oneDriveId);
+            window.lastPlayLabel = 'From Stash';
+            player.play(match, idx >= 0 ? 'main' : null, idx >= 0 ? idx : null);
+            return;
+          }
+        }
+        if (Date.now() - started > GIVE_UP_MS) {
+          clearInterval(timer);
+          dropParam();
+          alert('Couldn\u2019t find that file in the library.\n\nKey: ' + key);
+        }
+      } catch (err) {
+        console.error('[stash] play from URL failed:', err);
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = setInterval(tick, 1000);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tick, { once: true });
+    else tick();
+  })();
 
   window.scrayStashNav = { open, words, clean, preview, endPreview };
   window.scrayPerformerChoice = performerChoice;

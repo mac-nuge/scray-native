@@ -4,11 +4,54 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 13.191 / picker 13.190 — test: studio search clears the keyboard, In library on the modal's own file
+<!-- 2026-09-17T15:10Z -->
+
+**native** — `stg-native - 13.191`: `assets/web/scray-stash-nav.js`, `assets/web/VERSION` (JS only)
+**picker** — `staging - 13.190`: `scray-stash-nav.js`, `VERSION`
+
+Two small requests from Mac. `scray-stash-nav.js` stays byte-identical in both.
+
+**1. Studio search hidden under the keyboard.**
+- Focusing the studio filter's search box now scrolls the modal body so the box sits at its top, with the studio list underneath in whatever space the keyboard leaves. It runs on focus and again 350ms later, because iOS can shift things while the keyboard animates.
+- The view gets `padding-bottom: 60vh` first, so there's always room to scroll that far on a short profile. The padding isn't removed on blur, because a layout shift between focusout and click could move the studio option out from under the tap. The next repaint (picking a studio, closing the list) drops it.
+- Skipped where `scrayNoAutoScroll()` says desktop (Picker in a desktop browser). There's no keyboard there.
+
+**2. No In library link on the file the modal was opened for.**
+- That was deliberate in 13.189: `libOthers` dropped the modal's own file as "already on screen". But a performer profile opened from a list row's name is for that row's file, so its own scene was the one card missing the link. The filter is gone; every matched file counts.
+- Tapping it on the modal's own file works like any other: Native opens it in Picker, and Picker previews it (carrying on in place if it's already the file playing).
+
+### native 13.190 / picker 13.189 — test: In library opens in Picker, stash nav ported to Picker, desktop auto-scroll check by browser type
+<!-- 2026-09-17T14:45Z -->
+
+**native** — `stg-native - 13.190`: `assets/web/scray-stash-nav.js`, `assets/web/VERSION` (JS only)
+**picker** — `staging - 13.189`: `scray-stash-nav.js`, `file-operations.js`, `scray-config.js`, `index.php`, `VERSION`
+
+Mac's feedback on browse 13.74 / native 13.189 / picker 13.188. Everything else in those passed; browse 13.74 is marked stable.
+
+**1. In library said "That file isn't in this device's library"** (`scray-stash-nav.js`).
+- **Cause:** native 13.189 looked the file up in `getAllVideos()`, which in Native is the phone's own files. Mac wanted it to open in Picker.
+- **Native:** in the main web view (the full bridge, `ScrayBridge.openBrowser`), In library opens `scrayPickerUrl()` with `?play=<video_key>` in the in-app browser. The Stash modal stays as it was underneath.
+- **Picker:** the same button previews the file right there with the navigator's ▶ preview, so Back to Stash returns to the list. This covers Picker in a desktop browser and inside Native's in-app browser, whose smaller bridge has no `openBrowser`. A key missing from the local library gets a "may need a sync" alert.
+- **`?play=` in Picker:** a block at the end of `scray-stash-nav.js`, which skips itself in Native's main web view. It polls once a second until the lock overlay is hidden, `inlineVideoPlayer` exists and `getAllVideos()` holds the key. Then it plays the file in the main list's context where it can, labelled "From Stash", and removes `play` from the address with `history.replaceState`. It gives up with an alert after 2 minutes.
+
+**2. Stash nav and Stash modal ported to Picker.**
+- `scray-stash-nav.js` is byte-identical to Native's again. Picker's copy had stopped at native 13.186, so this also brings the performer-profile studio filter (native 13.187/13.188, needs browse 13.72, already live) and 13.189's In library button and Back to Stash placement.
+- `file-operations.js` `showStashModal` gets the 13.189 changes: generic "Stash / Loading…" with only Close until the first load, and the modal closing with "✅ Stash matched" once the rename is offered. Picker's existing differences (the `scraynative://newtab` hop, `scrayNoteStashMatch`) are untouched.
+
+**3. Desktop still auto-scrolled while typing** (`scray-config.js`, `index.php`, Picker only).
+- **Likely cause:** 13.188's `scrayNoAutoScroll()` asked `(hover: hover) and (pointer: fine)`. A Windows touchscreen machine can report itself as a touch pointer, which reads as "not desktop", so every guarded scroll still ran. Every path from typing into the filter goes through the guarded `scrayScrollToResults`, so a false answer from the check is the only way it could still scroll. Not confirmed on Mac's machine.
+- **Fix:** desktop is now decided by the browser. Anything but iPhone/iPad/iPod/Android/Mobile, iPadOS (Macintosh agent with touch points) or Native's in-app browser counts as desktop. The `scray_desktop_autoscroll = "1"` override still turns the scrolls back on.
+- Also guarded: the unlock screen's scroll to the console in `index.php`.
+- If it still scrolls, `scrayNoAutoScroll()` in the desktop console should answer `true`. If it does, there is a scroll path not yet found.
+
 ### browse 13.74 / native 13.189 — test: stash nav In library link, generic Stash loading, Back to Stash above the video, Stash modal closes after a match
 <!-- 2026-09-17T14:22Z -->
 
 **browse** — `staging-browse - 13.74`: `api.php`, `VERSION.txt`
 **native** — `stg-native - 13.189`: `assets/web/scray-stash-nav.js`, `assets/web/file-operations.js`, `assets/web/VERSION` (JS only)
+
+**Stable:** browse 13.74 (the `library` field works). Native 13.189 passed except In library, which native 13.190 reworks.
 
 Four requests from Mac. Native first; not yet ported to Picker, whose `scray-stash-nav.js` is also still behind native 13.187/13.188.
 

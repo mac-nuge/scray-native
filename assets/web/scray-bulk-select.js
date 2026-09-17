@@ -14,13 +14,19 @@
 //
 // The history and basket lists have their own tick on the number
 // (cfg.select) - they are not in SCRAY_BULK_LISTS, so the two never meet.
+//
+// picker 13.202 / native 13.200: the main list only (the random panel was
+// dropped), and the studio cell selects as well as the number - the number
+// alone is a narrow target on a phone.
 
 (function scrayBulkSelect() {
   if (window.__scrayBulkSelectBound) return;
   window.__scrayBulkSelectBound = true;
 
-  // ⚙️ Which lists take part. The main list and the random panel.
-  const SCRAY_BULK_LISTS = ['taggedVideosContainer', 'playlist'];
+  // ⚙️ Which lists take part. The main list, and only the main list.
+  const SCRAY_BULK_LISTS = ['taggedVideosContainer'];
+  // ⚙️ What a tap or drag lands on to select a row.
+  const SCRAY_BULK_HANDLES = '.lc-num, .lc-studio';
   // ⚙️ Gap between the action bar and the corner buttons it sits above.
   const BAR_GAP_PX = 8;
 
@@ -37,9 +43,9 @@
   const idOf = (video) => String(video?.oneDriveId ?? video?.idFromAPI ?? '');
 
   const rowOf = (el) => {
-    const num = el?.closest?.('.lc-num');
-    if (!num) return null;
-    const li = num.closest('li.lc-row');
+    const handle = el?.closest?.(SCRAY_BULK_HANDLES);
+    if (!handle) return null;
+    const li = handle.closest('li.lc-row');
     if (!li || !li._scrayVideo) return null;            // group lines have no file
     const host = li.closest('#' + SCRAY_BULK_LISTS.join(', #'));
     return host ? li : null;
@@ -83,14 +89,23 @@
     return bar;
   }
 
-  /** Sit just above the corner buttons, whatever height that stack is. */
+  /**
+   * Sit just above the corner buttons, whatever height that stack is.
+   *
+   * Measured as a HEIGHT and added to the corner stack's own bottom offset,
+   * not as a distance from the top of the window (picker 13.202 / native
+   * 13.200). The first version read getBoundingClientRect().top, which is 0
+   * while the stack is hidden or not laid out yet - and a bottom of nearly
+   * the window's height put the bar up under the Dynamic Island.
+   */
   function placeBar() {
     if (!bar) return;
     const corner = document.getElementById('cornerButtons');
-    if (!corner) { bar.style.bottom = '80px'; return; }
-    const rect = corner.getBoundingClientRect();
-    const above = Math.max(10, window.innerHeight - rect.top + BAR_GAP_PX);
-    bar.style.bottom = `${Math.round(above)}px`;
+    const h = corner ? corner.offsetHeight : 0;
+    // A sane height when the stack is hidden, so the bar still clears it
+    // when it comes back.
+    const clearance = (h > 0 ? h : 90) + BAR_GAP_PX;
+    bar.style.bottom = `calc(env(safe-area-inset-bottom, 0px) + 10px + ${Math.round(clearance)}px)`;
   }
 
   function paintBar() {

@@ -320,8 +320,11 @@ final class ScrayDownloadCell: UITableViewCell {
     @objc private func retryTapped() { onRetry?() }
     @objc private func removeTapped() { onRemove?() }
 
-    func configure(with r: ScrayDownloadRecord) {
-        nameLabel.text = r.filename
+    /// `number` is the row's position in the list, printed in front of the
+    /// name (native 13.200) so a list of near-identical names can be talked
+    /// about. Newest is 1, the same order the list itself reads in.
+    func configure(with r: ScrayDownloadRecord, number: Int? = nil) {
+        nameLabel.text = number.map { "\($0). \(r.filename)" } ?? r.filename
         let f = Self.formatter
 
         // Controls only make sense while there's something to control.
@@ -462,6 +465,13 @@ final class ScrayDownloadsViewController: UITableViewController {
         let center = ScrayDownloadCenter.shared
         emptyLabel.isHidden = !center.records.isEmpty
         navigationItem.rightBarButtonItem?.isEnabled = center.hasFinished
+        // How many are in the list, and how many of those are still moving
+        // (native 13.200): "Downloads (12)" or "Downloads (12 · 3 active)".
+        let total = center.records.count
+        let active = center.activeCount
+        title = total == 0
+            ? "Downloads"
+            : (active > 0 ? "Downloads (\(total) · \(active) active)" : "Downloads (\(total))")
         tableView.reloadData()
     }
 
@@ -480,7 +490,7 @@ final class ScrayDownloadsViewController: UITableViewController {
         let cell = tableView.dequeueReusableCell(withIdentifier: "dl", for: indexPath)
         if let cell = cell as? ScrayDownloadCell,
            let record = record(at: indexPath) {
-            cell.configure(with: record)
+            cell.configure(with: record, number: indexPath.row + 1)
             cell.onPauseResume = { [weak self] in
                 guard let self = self else { return }
                 if record.state == .paused { self.onResume?(record.id) }

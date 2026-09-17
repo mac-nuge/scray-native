@@ -8074,23 +8074,27 @@ body.landscape-fullscreen .plyr__controls .plyr-more {
 
 /* =========================================
 BULK SELECT (picker 13.201 / native 13.199) - scray-bulk-select.js
-Tap a row number to select, or drag down the numbers. touch-action on the
-number is load-bearing: without it the list scrolls instead of selecting.
+Tap a row's number or studio to select, or drag down them. touch-action is
+load-bearing: without it the list scrolls instead of selecting.
+Main list only (picker 13.202 / native 13.200).
 ========================================= */
-:is(#taggedVideosContainer, #playlist) li.lc-row .lc-num {
+#taggedVideosContainer li.lc-row :is(.lc-num, .lc-studio) {
   touch-action: none;
 }
 
-:is(#taggedVideosContainer, #playlist) li.lc-row.lc-bulk-selected > .lc-line {
+#taggedVideosContainer li.lc-row.lc-bulk-selected > .lc-line {
   background: #ffd84a;
 }
 
-:is(#taggedVideosContainer, #playlist) li.lc-row.lc-bulk-selected > .lc-line .lc-cell {
+#taggedVideosContainer li.lc-row.lc-bulk-selected > .lc-line .lc-cell {
   color: #000;
 }
 
 #bulkActionBar {
   position: fixed;
+  /* Overwritten by placeBar() once the corner stack has been measured; this
+     is what it sits at until then, and if that measurement ever fails. */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 108px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 9998;              /* just under #cornerButtons (9999) */

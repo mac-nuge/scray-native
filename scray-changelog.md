@@ -4,6 +4,30 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.202 / native 13.200 — test: bulk select fixes, numbered download list
+<!-- 2026-09-17T22:20Z -->
+
+**picker** — `staging - 13.202`: `scray-bulk-select.js`, `style.css`, `VERSION`
+**native** — `stg-native - 13.200`: `assets/web/scray-bulk-select.js`, `assets/web/style.css`, `assets/web/VERSION`, plus `modules/scray-native/ios/ScrayDownloadCenter.swift` (**Swift — the download list half needs an IPA build**)
+
+Mac's first pass over 13.201 / 13.199, plus one addition.
+
+**1. Random panel dropped.** `SCRAY_BULK_LISTS` is `['taggedVideosContainer']` — the main list only. The CSS selectors lost their `#playlist` half with it.
+
+**2. The bar was appearing at the top of the screen, under the Dynamic Island.** The cause: `placeBar` set `bottom` from `getBoundingClientRect().top` of `#cornerButtons`, which is **0** whenever that stack is hidden or hasn't been laid out — and `innerHeight - 0` is a bottom offset of nearly the whole window, which puts the bar at the top.
+- It now measures `offsetHeight` (a height, not a position) and adds it to the corner stack's own bottom offset: `calc(env(safe-area-inset-bottom, 0px) + 10px + <height + 8>px)`, which is the same formula `#cornerButtons` uses plus the gap. A hidden stack falls back to 90px rather than to zero.
+- `#bulkActionBar` also has a sane `bottom` in CSS now, so it is never unplaced even before the first measurement.
+
+**3. The number was a narrow target**, so the studio cell selects too: `SCRAY_BULK_HANDLES = '.lc-num, .lc-studio'`, with `touch-action: none` on both. Everything else — drag, the click swallow, the yellow line — is unchanged and now just has two handles.
+
+**4. Download list: counts and numbers** (`ScrayDownloadCenter.swift`).
+- The title reads **"Downloads (12)"**, or **"Downloads (12 · 3 active)"** while transfers are in flight, and plain "Downloads" when the list is empty. It's set in `refresh()`, which already runs on every change, so the count follows the list without a second code path.
+- Each row's name is prefixed with its position — `1. name.mp4` — newest first, the order the list already reads in. `configure(with:number:)` takes it from `indexPath.row + 1`; the parameter is optional, so nothing else calling it had to change.
+
+**Checked:** `node --check`, and the jsdom run again with a studio cell on each row: a tap on the number selects, a tap on the studio of the same row deselects, a drag takes three, a re-render keeps them, Basket and Delete get all of them.
+
+**Worth watching:** the studio cell is wide, and it's also the cell a tap used to open the row with. If opening a row by its studio is muscle memory, that's the part to shout about.
+
 ### picker 13.201 / native 13.199 — test: bulk select, download clash prompt, red Clear
 <!-- 2026-09-17T21:55Z -->
 

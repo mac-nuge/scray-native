@@ -4,6 +4,49 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.200 / native 13.197 — test: Clear Database and Excel db out of the footer
+<!-- 2026-09-17T20:25Z -->
+
+**picker** — `staging - 13.200`: `index.php`, `VERSION`
+**native** — `stg-native - 13.197`: `assets/web/index.html`, `assets/web/VERSION` (HTML only)
+
+Mac: take Clear Database and Excel db off the footer line in both apps.
+
+- Both links are deleted outright, not parked. `ui.js` binds Clear Database behind an `if (clearCacheBtn)`, so it simply doesn't bind now; the Excel db link was markup only, a plain `excel.cloud.microsoft` URL with no code behind it.
+- Footers now read: picker — version, db mode, Checkout, Settings, Change Log. Native — version, db mode, sync status, Settings, Change Log, DB (13.196).
+- **Clear Database was the only way to wipe this device's IndexedDB from the UI.** Nothing else offers it, so if it's wanted back it should go in the Settings modal rather than the footer. Noted here so the next person looking for it knows where it went.
+
+### picker 13.198 / native 13.196 — test: button rows tidied
+<!-- 2026-09-17T19:45Z -->
+
+**picker** — `staging - 13.198`: `index.php`, `auth.js`, `VERSION`
+**native** — `stg-native - 13.196`: `assets/web/index.html`, `assets/web/style.css`, `assets/web/VERSION` (JS/HTML only, no IPA needed)
+
+Mac's tidy-up of the button rows in both apps. No styling was changed anywhere — everything keeps the look it had, including Export CSV, which is styled from `#secondaryButtonsRow`'s rules in its new home.
+
+**Native.**
+- **Top row is Folder / Refresh / Picker.** DB and Browser are parked with `display:none` rather than deleted, so the handlers in `index.html`'s inline script still have something to bind to.
+  - **DB** moved to the footer line at the bottom of the page, beside Settings and Change Log, as `#dbConsoleLink`. Both it and the parked button share one `openDbConsole` handler. It was the only way into `browse.html` from the app, so it needed somewhere to go.
+  - **Browser** was already covered by the browser's own always-on-top 🌐 button (13.108).
+- **Second row is Orientation / Stash / BM / Uncat on one line.** The `.secondary-row-break` forced-wrap element from 13.62 is gone, along with its CSS rule. `flex-wrap` stays on, because `scray-rename.js` adds a "✎ N names" pill after Uncat when there are renames to review, and that one should wrap rather than squeeze the four.
+- **Export CSV** moved to `#bottomCsvRow` at the foot of the page, where "Show only duplicates" was. It's added to every `#secondaryButtonsRow` rule in `style.css` — sizing, colour, portrait/desktop/landscape visibility — so it is the same button in a different place. It still proxies to the hidden `#exportCsvBtn`.
+- **"Show only duplicates"** hidden, not deleted: `randomiser.js` reads `#filterDuplicatesOnly` on every filter pass, and unchecked is exactly "no duplicate filter".
+
+**Picker.**
+- **Top row is OneDrive / Refresh / Remove all**; Orientation moved down to the filter row, which is now Orientation / Offline / Stash / BM. Four cycling labels in one row is tight — that's what the old comment warned about — so this is the row to watch on a narrow phone.
+- **Remove all** (`removeAllAccounts` in `auth.js`) replaces tapping ×, twice, on every pill:
+  - One `confirm()` listing the accounts — a real "are you sure", not the done pop-up.
+  - Then it empties `accountsData`, saves, deletes every video row whose `accountName` is one of them in a single IndexedDB transaction (deletes queued synchronously — an `await` inside lets the transaction auto-commit and the rest throw), removes the pills, repopulates the tag dropdowns and re-filters the list.
+  - Ends on a `showSyncConfirmation` giving the counts.
+  - **Remembered folders are kept** — they live in their own `scray_last_folders` key, not in `scray_accounts` — so Add OneDrive and Fetch all can put everything back.
+  - The button disables itself and reads "Removing…" while it works, and failures alert rather than leave it stuck.
+
+**Checked:** `node --check auth.js`. Markup and CSS read through; nothing else references `.secondary-row-break`, and `wholesale-mode.js` still finds `.top-buttons-row-filters` for its own insert.
+
+**Note:** the `.secondary-row-break` CSS rule only came out of **native's** `style.css`. Picker's copy still has it, harmless — picker has no `#secondaryButtonsRow`.
+
+**Worth watching:** whether the picker filter row's four labels stay readable as they cycle (Offline: All / Offline: Yes, Stash: …), and whether Remove all leaves any stale pill behind when an account was mid-fetch.
+
 ### native 13.195 — test: tapping a finished download plays it
 <!-- 2026-09-17T17:45Z -->
 

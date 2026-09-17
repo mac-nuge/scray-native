@@ -6802,27 +6802,27 @@ width: 100%;
 SECONDARY BUTTON ROW (MOBILE PORTRAIT ONLY)
 Orientation toggle + Export/Import CSV, matched to .top-buttons-row sizing
 ========================================= */
-#secondaryButtonsRow {
+#secondaryButtonsRow,
+#bottomCsvRow {
 display: none;
 }
 
 @media (max-width: 768px) and (orientation: portrait) {
-/* 13.62: two lines - the three filter cycles, then Uncat / names / CSV. The
-   .secondary-row-break in the markup is a full-width flex item that forces
-   the wrap, so each line shares its width out on its own. */
-#secondaryButtonsRow {
+/* 13.196: one line - Orientation / Stash / BM / Uncat. Export CSV moved to
+   #bottomCsvRow at the foot of the page and is styled from here, so it keeps
+   the look it had on this row. Wrapping stays on for scray-rename.js's
+   "✎ N names" pill, which appears after Uncat when there is one. */
+#secondaryButtonsRow,
+#bottomCsvRow {
   display: flex !important;
   flex-wrap: wrap;
   gap: 3px;
   margin: 4px 0 8px 0;
   width: 100%;
 }
-#secondaryButtonsRow > .secondary-row-break {
-  flex: 0 0 100%;
-  height: 0;
-}
 
-#secondaryButtonsRow button {
+#secondaryButtonsRow button,
+#bottomCsvRow button {
   flex: 1;
   background: #555;
   color: white;
@@ -6839,7 +6839,8 @@ display: none;
   transition: background 0.2s ease;
 }
 
-#secondaryButtonsRow button:active {
+#secondaryButtonsRow button:active,
+#bottomCsvRow button:active {
   transform: scale(0.97);
 }
 
@@ -6851,12 +6852,14 @@ display: none;
 
 /* Desktop: show as normal-sized inline buttons */
 @media (min-width: 769px) {
-#secondaryButtonsRow {
+#secondaryButtonsRow,
+#bottomCsvRow {
   display: block !important;
   margin: 8px 0;
 }
 
-#secondaryButtonsRow button {
+#secondaryButtonsRow button,
+#bottomCsvRow button {
   display: inline-block;
   width: auto;
   background: #555;
@@ -6871,7 +6874,8 @@ display: none;
 }
 
 @media (orientation: landscape) {
-#secondaryButtonsRow {
+#secondaryButtonsRow,
+#bottomCsvRow {
   display: none !important;
 }
 }

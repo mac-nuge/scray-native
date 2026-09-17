@@ -211,11 +211,15 @@
         }
       });
 
-      document.getElementById('openBrowseBtn')?.addEventListener('click', (e) => {
+      // The DB console: the footer link (13.196) and the parked top-row button
+      // both land here.
+      const openDbConsole = (e) => {
         e.preventDefault();
         openInAppBrowser((window.SCRAY_SYNC && window.SCRAY_SYNC.BROWSE_URL)
           || 'https://macnguyen.com/scray/browse.html');
-      });
+      };
+      document.getElementById('openBrowseBtn')?.addEventListener('click', openDbConsole);
+      document.getElementById('dbConsoleLink')?.addEventListener('click', openDbConsole);
 
       // Passing no URL at all is what the bridge reads as "resume wherever the
       // browser was left" - same tab list, same page, same cookie jar. Outside
@@ -515,8 +519,12 @@
 <button id="pickFolderBtn">Folder</button>
 <button id="rescanLibraryBtn">Refresh</button>
 <button id="openPickerBtn" title="Open Picker in the in-app browser">Picker</button>
-<button id="openBrowseBtn" title="Open the DB console in the in-app browser">DB</button>
-<button id="openBrowserBtn" title="Re-open the in-app browser where you left it">Browser</button>
+<!-- Retired 13.196, parked rather than deleted so their handlers above still
+     have something to bind to. DB moved to the footer line at the bottom of
+     the page; Browser was already covered by the browser's own always-on-top
+     🌐 button. -->
+<button id="openBrowseBtn" title="Open the DB console in the in-app browser" style="display:none">DB</button>
+<button id="openBrowserBtn" title="Re-open the in-app browser where you left it" style="display:none">Browser</button>
 </div>
 
 <!-- ✅ Secondary compact row (mobile portrait only) -->
@@ -524,10 +532,11 @@
 <button id="orientationToggleBtn" title="Cycle orientation filter">Orientation</button>
 <button id="stashFilterToggleBtn" data-state="any" title="Cycle StashDB match filter">Stash</button>
 <button id="bookmarkFilterToggleBtn" data-state="any" title="Cycle bookmark filter">BM</button>
-<!-- 13.62: filters on the first line; Uncat, names and CSV on the second -->
-<div class="secondary-row-break" aria-hidden="true"></div>
+<!-- 13.196: all four filters on one line. The forced wrap (13.62) went with
+     Export CSV, which now sits at the bottom of the page. scray-rename.js
+     still adds its "✎ N names" pill after Uncat when there is something to
+     review, and that one wraps on its own. -->
 <button id="uncataloguedToggleBtn" data-active="0" title="Show only files on this phone that aren't in the catalogue">Uncat: All</button>
-<button id="mobileExportCsvBtn">Export CSV</button>
 </div>
 
 <!-- ✅ Folder pills (reuses the existing .account-pill styling) -->
@@ -675,12 +684,21 @@
 
  <br>
 
-<!-- Show Duplicates Filter -->
-<div style="margin-top: 8px;" class="duplicatesRow">
+<!-- Show Duplicates Filter - retired 13.196. Hidden, not deleted: randomiser.js
+     reads #filterDuplicatesOnly while filtering, and unchecked means "no
+     duplicate filter", which is the behaviour without the control. -->
+<div style="margin-top: 8px; display:none;" class="duplicatesRow">
 <label>
   <input type="checkbox" id="filterDuplicatesOnly">
   Show only duplicates
 </label>
+</div>
+
+<!-- Export CSV, moved off the filter row (13.196). Styled with
+     #secondaryButtonsRow in style.css so it looks exactly as it did. It
+     proxies clicks to the hidden #exportCsvBtn below. -->
+<div id="bottomCsvRow">
+<button id="mobileExportCsvBtn">Export CSV</button>
 </div>
 
 <br>
@@ -699,7 +717,7 @@
 
 <div id="bottomSpacer" style="height:0px;"></div>
 
-<div id="versionCorner" style="font-size: 0.85rem; text-align: right; margin-top: 40px; padding: 6px 10px calc(env(safe-area-inset-bottom, 0px) + 96px) 10px;"><span id="appVersion"></span> | <span id="dbModePill"></span> | <span id="syncStatus" style="cursor:pointer; text-decoration:underline dotted;" title="Tap to sync">⚪ not synced</span> | <a href="#" id="settingsLink">Settings</a> | <a href="#" id="changelogLink">Change Log</a> | <a href="#" id="clearCacheBtn" style="color: #999;">Clear Database</a> | <a href="https://excel.cloud.microsoft/open/onedrive/?docId=FC889D210229F431%21SD3D6F40D45714290BBFEEBBA760F157C&driveId=FC889D210229F431&wdOrigin=APPHOME-WEB.DIRECT%2CAPPHOME-WEB.JUMPBACKIN-OCDI&wdPreviousSession=5f06762c-3c19-4dc2-8e7c-d6a4ca5b55b6&wdPreviousSessionSrc=AppHomeWeb&ct=1769467854718" target="_blank">Excel db</a>
+<div id="versionCorner" style="font-size: 0.85rem; text-align: right; margin-top: 40px; padding: 6px 10px calc(env(safe-area-inset-bottom, 0px) + 96px) 10px;"><span id="appVersion"></span> | <span id="dbModePill"></span> | <span id="syncStatus" style="cursor:pointer; text-decoration:underline dotted;" title="Tap to sync">⚪ not synced</span> | <a href="#" id="settingsLink">Settings</a> | <a href="#" id="changelogLink">Change Log</a> | <a href="#" id="dbConsoleLink">DB</a>
 </div>
 
 <script>

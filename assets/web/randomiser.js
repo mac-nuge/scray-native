@@ -1105,6 +1105,198 @@ function scrayCloudAttrValues(kind, name, def) {
    return seen.size ? [...seen.values()] : [SCRAY_CLOUD_UNSET];
 }
 
+/* =========================================
+   Cross-app hand-off (native 13.192 / picker 13.191)
+
+   Native and Picker can pass a filter or a search to each other:
+     - Native's main web view opens Picker in the in-app browser with
+       ?xapp=<payload>, and Picker applies it once it has loaded.
+     - Picker inside that browser hops to scraynative://play?key=scraycmd:<payload>.
+       ScrayBrowser.swift already treats every scraynative:// link other than
+       newtab as "dismiss, then hand `key` to scrayPlayByKey", so scray-bridge.js
+       spots the prefix and applies it here - no Swift change, no IPA build.
+   Picker in an ordinary browser has no way into the app, so it offers
+   nothing (the same rule as the list rows' "N" button).
+
+   Payload: base64url of JSON, one of
+     { filter: { kind, inc: [...], exc: [...], kw?: [...], kwAll?, intersect? } }
+     { search: "term", quote: bool }
+   A filter REPLACES that one class in the receiving app (its includes,
+   excludes and, for notes, keywords) and leaves the other classes alone.
+   ========================================= */
+window.scrayCrossAppTarget = function () {
+   if (window.ScrayBridge && window.ScrayBridge.openBrowser) return 'Picker';
+   if (window.SCRAY_IN_APP_BROWSER) return 'Native';
+   return null;
+};
+
+function scrayXappEncode(obj) {
+   return btoa(unescape(encodeURIComponent(JSON.stringify(obj))))
+       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function scrayXappDecode(str) {
+   const s = String(str || '').replace(/-/g, '+').replace(/_/g, '/');
+   return JSON.parse(decodeURIComponent(escape(atob(s + '==='.slice((s.length + 3) % 4)))));
+}
+
+window.scrayCrossAppOpen = function (cmd) {
+   const target = window.scrayCrossAppTarget();
+   if (!target || !cmd) return false;
+   const payload = scrayXappEncode(cmd);
+   if (target === 'Picker') {
+       const base = typeof window.scrayPickerUrl === 'function' ? window.scrayPickerUrl() : '';
+       if (!base) { alert('No Picker address is set.'); return false; }
+       let url;
+       try {
+           const u = new URL(base);
+           u.searchParams.set('xapp', payload);
+           url = u.toString();
+       } catch (e) {
+           url = base + (base.indexOf('?') >= 0 ? '&' : '?') + 'xapp=' + encodeURIComponent(payload);
+       }
+       window.ScrayBridge.openBrowser(url).catch(err => console.error('[xapp] openBrowser failed:', err));
+       return true;
+   }
+   window.location.href = 'scraynative://play?key=' + encodeURIComponent('scraycmd:' + payload);
+   return true;
+};
+
+function scrayXappConfirm(msg) {
+   const fn = window.showScoreConfirmation || (typeof showScoreConfirmation === 'function' ? showScoreConfirmation : null);
+   if (fn) fn(msg);
+}
+
+/** Apply a received command. Returns true when something was applied. */
+window.scrayCrossAppApply = function (cmd) {
+   if (!cmd || typeof cmd !== 'object') return false;
+   const from = window.scrayCrossAppTarget() === 'Picker' ? 'Picker' : 'Native';
+
+   if (cmd.filter && cmd.filter.kind) {
+       const f = cmd.filter;
+       const kind = String(f.kind);
+       const set = scrayFacetSet(kind);
+       if (!set) return false;
+       const norm = (v) => kind === 'tag' ? String(v).trim() : String(v).trim().toLowerCase();
+       set.clear();
+       (f.inc || []).map(norm).filter(Boolean).forEach(v => set.add(v));
+       if (kind === 'tag') {
+           const $sel = typeof $ === 'function' ? $('#excludeTagSelect') : null;
+           if ($sel && $sel.length) {
+               const exc = (f.exc || []).map(norm).filter(Boolean);
+               exc.forEach(v => {
+                   if (!$sel.find('option').filter(function () { return this.value === v; }).length) {
+                       $sel.append(new Option(v, v, false, false));
+                   }
+               });
+               $sel.val(exc).trigger('change');
+           }
+       } else {
+           const ex = scrayFacetExcludeSet(kind);
+           if (ex) { ex.clear(); (f.exc || []).map(norm).filter(Boolean).forEach(v => ex.add(v)); }
+       }
+       if (kind === 'note' && window.scrayNoteKeywordFilter) {
+           window.scrayNoteKeywordFilter.clear();
+           (f.kw || []).map(v => String(v).trim()).filter(Boolean).forEach(v => window.scrayNoteKeywordFilter.add(v));
+           if (typeof f.kwAll === 'boolean') window.scrayNoteKeywordIntersect = f.kwAll;
+       }
+       if (typeof f.intersect === 'boolean') window.scrayTagIntersect = f.intersect;
+       window.skipSearchScroll = true;
+       scrayRefreshFilters();
+       const label = (window.SCRAY_FACET_META[kind] || {}).label || kind;
+       scrayXappConfirm('✅ ' + label + ' filter from ' + from);
+       return true;
+   }
+
+   if (typeof cmd.search === 'string' && cmd.search.trim()) {
+       const box = document.getElementById('filenameSearchBox');
+       if (!box) return false;
+       // The search REPLACES what was in the box, the way the rename modal's
+       // own 🔍 does.
+       box.value = '';
+       const panelBox = document.getElementById('panelSearchBox');
+       if (panelBox) panelBox.value = '';
+       const term = cmd.search.trim();
+       if (cmd.quote && typeof window.scrayAddSearchTerm === 'function') {
+           window.scrayAddSearchTerm(term);
+       } else {
+           box.value = term;
+           const clearX = document.getElementById('clearSearchX');
+           if (clearX) clearX.style.display = 'block';
+           if (panelBox) panelBox.value = term;
+           window.skipSearchScroll = true;
+           window.skipPanelAutoOpen = true;
+           if (typeof filterDisplayedByFilename === 'function') filterDisplayedByFilename();
+       }
+       // The pills bar mirrors the box; nudge it so the pill shows the term.
+       if (typeof updateFloatingTagPillsFromCommon === 'function') updateFloatingTagPillsFromCommon();
+       scrayXappConfirm('✅ Search from ' + from);
+       return true;
+   }
+   return false;
+};
+
+/** scray-bridge.js hands over the part after "scraycmd:". */
+window.scrayCrossAppReceive = function (payload) {
+   try {
+       return window.scrayCrossAppApply(scrayXappDecode(payload));
+   } catch (err) {
+       console.error('[xapp] could not read the hand-off:', err);
+       alert('Couldn’t read what was sent from Picker.');
+       return false;
+   }
+};
+
+// Picker opened with ?xapp=. Waits for the lock screen, the filters and the
+// library, applies it, then takes the parameter off the address so a reload
+// doesn't apply it again. Not in Native's main web view, which is never opened
+// with it.
+(function scrayXappFromUrl() {
+   if (window.ScrayBridge && window.ScrayBridge.openBrowser) return;
+   let payload = '';
+   try { payload = new URL(location.href).searchParams.get('xapp') || ''; } catch (e) { return; }
+   if (!payload) return;
+   const dropParam = () => {
+       try {
+           const u = new URL(location.href);
+           u.searchParams.delete('xapp');
+           history.replaceState(history.state, '', u.toString());
+       } catch (e) { /* stays in the address; harmless */ }
+   };
+   let cmd;
+   try { cmd = scrayXappDecode(payload); } catch (e) { dropParam(); return; }
+   // ⚙️ How long to wait for the page to be ready before giving up.
+   const GIVE_UP_MS = 120000;
+   const started = Date.now();
+   let busy = false, timer = null;
+   const tick = async () => {
+       if (busy) return;
+       busy = true;
+       try {
+           const lock = document.getElementById('lockOverlay');
+           const locked = lock && getComputedStyle(lock).display !== 'none';
+           const ready = !locked
+               && document.getElementById('filenameSearchBox')
+               && typeof window.refreshFiltersFromCommonSet === 'function'
+               && typeof window.getAllVideos === 'function';
+           if (ready) {
+               const all = await window.getAllVideos();
+               if (all && all.length) {
+                   clearInterval(timer);
+                   dropParam();
+                   window.scrayCrossAppApply(cmd);
+                   return;
+               }
+           }
+           if (Date.now() - started > GIVE_UP_MS) { clearInterval(timer); dropParam(); }
+       } catch (err) {
+           console.error('[xapp] apply from URL failed:', err);
+       } finally {
+           busy = false;
+       }
+   };
+   timer = setInterval(tick, 1000);
+})();
+
 /**
  * The big picker that replaced the AT dropdown.
  *
@@ -1139,6 +1331,54 @@ async function showTagCloudModal(kind) {
    search.className = 'scray-cloud-search';
    search.placeholder = 'Narrow this list\u2026';
    controls.appendChild(search);
+
+   // Filter / search in the other app (native 13.192 / picker 13.191), just
+   // under the box. Filter takes this class's selection - includes, excludes
+   // and a note cloud's keywords; Search (studios and performers) takes the
+   // one selected value and needs exactly one.
+   const xappTarget = typeof window.scrayCrossAppTarget === 'function' ? window.scrayCrossAppTarget() : null;
+   let xappFilterBtn = null, xappSearchBtn = null;
+   if (xappTarget) {
+       const xrow = document.createElement('div');
+       xrow.className = 'scray-cloud-xapp';
+       xrow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px;';
+       const mkX = (label, fn) => {
+           const b = document.createElement('button');
+           b.type = 'button';
+           b.className = 'scray-cloud-toggle';
+           b.style.cssText = 'background:#6c5ce7;border-color:#6c5ce7;color:#fff;';
+           b.textContent = label;
+           b.addEventListener('click', fn);
+           xrow.appendChild(b);
+           return b;
+       };
+       xappFilterBtn = mkX('Filter in ' + xappTarget, () => {
+           const exc = kind === 'tag'
+               ? ((typeof $ === 'function' && $('#excludeTagSelect').val()) || [])
+               : [...(scrayFacetExcludeSet(kind) || [])];
+           const kw = kind === 'note' ? [...(window.scrayNoteKeywordFilter || [])] : [];
+           if (!set.size && !exc.length && !kw.length) {
+               alert('Select something first.');
+               return;
+           }
+           const filter = { kind, inc: [...set], exc, intersect: !!window.scrayTagIntersect };
+           if (kind === 'note') { filter.kw = kw; filter.kwAll = !!window.scrayNoteKeywordIntersect; }
+           window.scrayCrossAppOpen({ filter });
+       });
+       if (kind === 'studio' || kind === 'performer') {
+           xappSearchBtn = mkX('Search in ' + xappTarget, () => {
+               if (set.size !== 1) {
+                   alert('Search needs exactly one selected (green) ' + (kind === 'studio' ? 'studio' : 'performer') + '.');
+                   return;
+               }
+               window.scrayCrossAppOpen({ search: [...set][0], quote: true });
+           });
+       }
+       controls.appendChild(xrow);
+   }
+   const paintXapp = () => {
+       if (xappSearchBtn) xappSearchBtn.style.opacity = set.size === 1 ? '' : '.45';
+   };
    // NOTE cloud (picker 13.148 / stg-native 13.146): keywords are the way
    // in now, so the box narrows the Keyword chips, and the notes below
    // follow - a note shows when one of its keywords matches the term.
@@ -1370,6 +1610,7 @@ async function showTagCloudModal(kind) {
            + set.size + ' selected'
            + (ex ? ', ' + ex + ' excluded' : '')
            + ', ' + shown + ' shown';
+       paintXapp();
    }
 
    function renderGrid() {

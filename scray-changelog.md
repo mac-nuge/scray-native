@@ -4,6 +4,38 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 13.192 / picker 13.191 — test: FLS left-third halves swapped, filter and search in the other app from the tag clouds and rename
+<!-- 2026-09-17T15:40Z -->
+
+**native** — `stg-native - 13.192`: `assets/web/player.js`, `assets/web/randomiser.js`, `assets/web/file-operations.js`, `assets/web/scray-bridge.js`, `assets/web/VERSION` (JS only, no IPA build)
+**picker** — `staging - 13.191`: `player.js`, `randomiser.js`, `file-operations.js`, `VERSION`
+
+Three requests from Mac.
+
+**1. FLS left third: halves swapped** (`player.js` `handleDoubleTap`, landscape branch).
+- Double tap in the top half now switches to MPFS, and the bottom half jumps to the next marker. The guide line is unchanged; only its comment moved.
+
+**2. Filter / search in the other app from the tag clouds** (`randomiser.js` `showTagCloudModal`).
+- A row just under the "Narrow this list…" box:
+  - **Filter in Picker / Native** on every cloud (AT, STU, PERF, STAG, NOTE).
+  - **Search in Picker / Native** on STU and PERF only.
+- **Filter** sends this class's selection: the includes (green), the excludes (red), and for NOTE the picked keywords with their any/all switch. The global Tag intersect switch goes too. The receiving app **replaces that one class** with it and leaves its other classes alone. With nothing selected it says so rather than sending an empty filter.
+- **Search** needs exactly one green selection; the button dims otherwise and explains on tap. The receiving app puts the name in its search box (quoted, via `scrayAddSearchTerm`), replacing what was there.
+- Either way the receiving app shows a "✅ … from Picker/Native" pop-up.
+
+**3. Search in the other app from the rename modal** (`file-operations.js` `showRenameModal`).
+- A "P🔍" (Native) / "N🔍" (Picker) button right after 🔍. It takes the same selected-word range 🔍 does and replaces the other app's search box with it. The rename modal stays open for when you come back.
+
+**How the hand-off travels** (a new cross-app block in `randomiser.js`, shared).
+- `scrayCrossAppTarget()`:
+  - Native's main web view (the full bridge with `openBrowser`) → "Picker".
+  - Picker inside Native's in-app browser (`SCRAY_IN_APP_BROWSER`) → "Native".
+  - Anything else (Picker in a desktop browser) → null, and no buttons are drawn. There's no way into the app from there, the same rule as the list rows' "N" button.
+- Payload: base64url of JSON, either `{ filter: {...} }` or `{ search, quote }`.
+- **Native → Picker:** `openBrowser(scrayPickerUrl() + ?xapp=<payload>)`. Picker waits for the lock screen, `refreshFiltersFromCommonSet` and a non-empty `getAllVideos()`, applies it, and removes `xapp` from the address. It gives up quietly after 2 minutes.
+- **Picker → Native:** `scraynative://play?key=scraycmd:<payload>`. `ScrayBrowser.swift` already treats every `scraynative://` link except `newtab` as "dismiss the browser, then pass `key` to `scrayPlayByKey`". `scray-bridge.js` checks for the `scraycmd:` prefix *before* lower-casing (the payload is case-sensitive base64) and hands it to `scrayCrossAppReceive`. That's why no Swift change or IPA build is needed.
+- **Watch for:** Swift hands the command to whichever page the main web view is on. On the bookmarks page a filter still applies, but a search has no box to go into.
+
 ### native 13.191 / picker 13.190 — test: studio search clears the keyboard, In library on the modal's own file
 <!-- 2026-09-17T15:10Z -->
 

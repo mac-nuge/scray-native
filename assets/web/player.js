@@ -4792,8 +4792,8 @@ function attachFrameStepButtons() {
             guides.appendChild(seg);
         });
 
-        // FLS: the left third's halves - next bookmark above, MPFS below
-        // (picker 13.161 / native 13.159).
+        // FLS: the left third's halves - MPFS above, next bookmark below
+        // (picker 13.161 / native 13.159; swapped in picker 13.191 / native 13.192).
         const flsSplit = document.createElement('div');
         flsSplit.className = 'fls-tap-split';
         guides.appendChild(flsSplit);
@@ -8547,11 +8547,12 @@ if (isLandscape && isMobile) {
     if (inLeftThird) {
         // ⚙️ Two halves, as seen in landscape (picker 13.161 / native 13.159).
         // Was the triple-tap zone for next bookmark.
-        //   TOP    -> next bookmark (what the triple tap did)
-        //   BOTTOM -> MPFS: leaves FLS for plain portrait fullscreen, the
+        //   TOP    -> MPFS: leaves FLS for plain portrait fullscreen, the
         //             same as the rotate button while fullscreen is on
-        // The split is drawn by .fls-tap-split in the guides.
-        if (effTapY < effRect.height / 2) {
+        //   BOTTOM -> next bookmark (what the triple tap did)
+        // Swapped round in native 13.192 / picker 13.191 - next bookmark was
+        // on top. The split is drawn by .fls-tap-split in the guides.
+        if (effTapY >= effRect.height / 2) {
             window.scrayNextBookmark?.();
         } else if (typeof window.toggleManualRotation === 'function' && manualRotationActive) {
             window.toggleManualRotation();

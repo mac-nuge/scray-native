@@ -59,6 +59,15 @@ window.ScrayBridge = {
  * calls this on the main web view once the dismissal animation has finished.
  */
 window.scrayPlayByKey = async function (key) {
+  // A filter or search handed over from Picker (native 13.192), riding the
+  // same hop - see the cross-app block in randomiser.js. Checked before the
+  // key is lower-cased: the payload is base64 and case matters.
+  const raw = String(key || "").trim();
+  if (raw.indexOf("scraycmd:") === 0) {
+    return typeof window.scrayCrossAppReceive === "function"
+      ? window.scrayCrossAppReceive(raw.slice(9))
+      : false;
+  }
   key = String(key || "").normalize("NFC").trim().toLowerCase();
   if (!key) return false;
   try {

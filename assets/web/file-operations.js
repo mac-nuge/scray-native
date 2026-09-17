@@ -134,6 +134,7 @@ ${(cleanSuggestion || noParentSuggestion) ? `
 <!-- All action buttons in one row (Add to Search first on mobile) -->
 <div class="rename-action-buttons" style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
  <button id="addToSearchBtn" class="bracket-btn bracket-btn-search" title="Add selected words to search filter">🔍</button>
+ ${(typeof window.scrayCrossAppTarget === 'function' && window.scrayCrossAppTarget()) ? `<button id="addToSearchXappBtn" class="bracket-btn bracket-btn-search" title="Search for the selected words in ${window.scrayCrossAppTarget()}">${window.scrayCrossAppTarget().charAt(0)}🔍</button>` : ''}
  <button id="addBracketsBtn" class="bracket-btn" title="Add brackets around selected words">[  ]</button>
  <button id="prevWordEdgeBtn" class="bracket-btn" title="Jump to previous word edge">&lt;</button>
  <button id="nextWordEdgeBtn" class="bracket-btn" title="Jump to next word edge">&gt;</button>
@@ -402,6 +403,24 @@ renderWordSelector(newText);
 });
 
 // Add to Search button handler
+// Search in the other app (native 13.192 / picker 13.191): the same words the
+// 🔍 takes, sent to Picker from Native or to Native from Picker's tab in the
+// in-app browser. The rename modal stays open for when you come back.
+document.getElementById('addToSearchXappBtn')?.addEventListener('click', () => {
+if (selectedWords.size === 0) {
+  alert('Please select at least one word to search for');
+  return;
+}
+const picked = Array.from(selectedWords).sort((a, b) => a - b);
+const lo = picked[0], hi = picked[picked.length - 1];
+let text = '';
+parseTextIntoWords(input.value).forEach((w, i) => {
+  if (i >= lo && i <= hi) text += w.isSeparator ? ' ' : w.word;
+});
+text = text.replace(/\s+/g, ' ').trim();
+if (text) window.scrayCrossAppOpen({ search: text, quote: false });
+});
+
 const addToSearchBtn = document.getElementById('addToSearchBtn');
 addToSearchBtn.addEventListener('click', () => {
 if (selectedWords.size === 0) {

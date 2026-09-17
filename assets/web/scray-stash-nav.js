@@ -4,6 +4,8 @@
 // a Google link on profiles, and scrayPerformerChoice for the list rows.
 // picker 13.164 / native 13.163: Unblur all.
 // picker 13.165 / native 13.164: a Google link on every scene card.
+// native 13.189 (browse 13.74): "In library" on cards already matched to a
+// file, and Back to Stash sits just above the video when it was already playing.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -79,6 +81,7 @@
 #stashModal .ssn .ssn-play { padding: 6px 11px; }
 #stashModal .ssn .ssn-unblur { margin-left: auto; }
 #stashModal .ssn .ssn-google.ssn-google-card { margin-left: 0; padding: 6px 12px; font-size: .8rem; }
+#stashModal .ssn .ssn-lib { background: #28a745; border-color: #28a745; color: #fff; }
 #stashModal .ssn-topbar { justify-content: flex-end; margin: 0 0 8px; }
 #stashModal .ssn .ssn-google { padding: 1px 7px; margin-left: 6px; font-size: .7rem; font-weight: 400; vertical-align: middle; background: transparent; color: #1a73e8; border-color: rgba(26,115,232,.4); }
 #stashModal .ssn-btns button[data-go] { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
@@ -567,6 +570,39 @@
       return bits.length ? 'https://www.google.com/search?q=' + encodeURIComponent(bits.join(' ')) : '';
     }
 
+    // In library (native 13.189 / browse 13.74): stash_nav lists the catalogue
+    // files already matched to this scene. Offered unless the only one is the
+    // file this modal is for - that one is already on screen.
+    function libOthers(c) {
+      return (c.library || []).filter(l => l && l.video_key && l.video_key !== key);
+    }
+    function libHtml(c, i) {
+      const lib = libOthers(c);
+      if (!lib.length) return '';
+      const names = lib.map(l => (l.path ? l.path + '/' : '') + l.filename).join('\n');
+      return '<button type="button" class="ssn-lib" data-lib="' + i + '" title="' + esc(names) + '">' +
+        '&#9654; In library' + (lib.length > 1 ? ' (' + lib.length + ')' : '') + '</button>';
+    }
+    async function openLibrary(i) {
+      const e = top();
+      const c = e && e.data && e.data.scenes[i];
+      const l = c && libOthers(c)[0];
+      if (!l) return;
+      let match = null;
+      try {
+        const all = typeof window.getAllVideos === 'function' ? await window.getAllVideos() : [];
+        match = all.find(v => (v.videoKey || (window.scrayVideoKey ? window.scrayVideoKey(v.filename || '') : '')) === l.video_key) || null;
+      } catch (err) {
+        console.error('[stash] library lookup failed:', err);
+      }
+      if (finished) return;
+      if (!match) {
+        alert('That file isn\u2019t in this device\u2019s library.\n\n' + (l.path ? l.path + '/' : '') + l.filename);
+        return;
+      }
+      preview(match, host.closest('.basket-json-modal') || null);
+    }
+
     function cardHtml(c, i, herePid) {
       const fileSec = Number(c.file_duration_sec) || 0;
       const sceneSec = Number(c.stash_duration_sec) || 0;
@@ -630,6 +666,7 @@
           (c.stash_url ? '<button type="button" class="ssn-ext" data-ext="' + esc(c.stash_url) + '">StashDB &#8599;</button>' : '') +
           (googleUrl(c) ? '<button type="button" class="ssn-google ssn-google-card" title="Search Google for this scene" data-ext="' +
                           esc(googleUrl(c)) + '">Google &#8599;</button>' : '') +
+          libHtml(c, i) +
         '</div>' +
         '<div class="ssn-cerr"></div>' +
       '</div>';
@@ -798,6 +835,7 @@
         return;
       }
       if (btn.dataset.ext) { openExternal(btn.dataset.ext); return; }
+      if (btn.dataset.lib !== undefined) { openLibrary(+btn.dataset.lib); return; }
       if (btn.dataset.accept !== undefined) { accept(btn); return; }
       if (btn.hasAttribute('data-more')) { const e = top(); if (e && !e.busy) load(e, true); return; }
       if (btn.hasAttribute('data-filter')) {
@@ -942,6 +980,7 @@ body.fullscreen-active #ssnPvBar { display: none; }
       if (typeof window.computeBottomDock === 'function') window.computeBottomDock();
     } else {
       ch.pill.classList.add('on');
+      pinPill(ch.pill);
     }
 
     if (same) {
@@ -960,13 +999,54 @@ body.fullscreen-active #ssnPvBar { display: none; }
     }
   }
 
+  // Back to Stash beside the video (native 13.189). When the file was already
+  // playing, the player stays where it is on the page, so the pill follows it:
+  // centred just above the video, kept on screen, and over the top of the
+  // video when there is no room above. In fullscreen the stylesheet's top
+  // placement stands - the video is the whole screen there anyway.
+  let pillRaf = 0;
+  let safeTop = null;
+  function readSafeTop() {
+    if (safeTop !== null) return safeTop;
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top, 0px);';
+    document.body.appendChild(probe);
+    safeTop = parseFloat(getComputedStyle(probe).paddingTop) || 0;
+    probe.remove();
+    return safeTop;
+  }
+  function pinPill(pill) {
+    cancelAnimationFrame(pillRaf);
+    const tick = () => {
+      if (!pill.classList.contains('on')) { pillRaf = 0; return; }
+      const container = document.getElementById('inlineVideoContainer');
+      const target = container && (container.querySelector('.plyr') || container.querySelector('video') || container);
+      const r = target && target.getBoundingClientRect();
+      if (document.body.classList.contains('fullscreen-active') || !r || !r.width || !r.height) {
+        pill.style.top = ''; pill.style.left = '';
+      } else {
+        const h = pill.offsetHeight || 30;
+        const minTop = readSafeTop() + 6;
+        const maxTop = window.innerHeight - h - 6;
+        let t = r.top - h - 6;
+        if (t < minTop) t = Math.min(r.top + 6, maxTop);
+        pill.style.top = Math.max(minTop, Math.min(maxTop, t)) + 'px';
+        pill.style.left = Math.max(8, Math.min(window.innerWidth - 8, r.left + r.width / 2)) + 'px';
+      }
+      pillRaf = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
   function endPreview() {
     if (!pv) return;
     const st = pv;
     pv = null;
+    cancelAnimationFrame(pillRaf);
+    pillRaf = 0;
     const bar = document.getElementById('ssnPvBar');
     const pill = document.getElementById('ssnPvPill');
-    if (pill) pill.classList.remove('on');
+    if (pill) { pill.classList.remove('on'); pill.style.top = ''; pill.style.left = ''; }
     if (st.floated) {
       if (bar && bar.parentNode !== document.body) document.body.appendChild(bar);
       document.body.classList.remove('ssn-pv-open');

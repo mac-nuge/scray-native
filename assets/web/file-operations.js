@@ -4228,16 +4228,19 @@ async function showStashModal(video, openOpts) {
         // sheet. ⚙️ Nudge that if the footer sits too high or too low.
         '<div class="basket-json-modal-content" style="transform:none;max-width:640px;' +
              'max-height:82vh;display:flex;flex-direction:column;overflow:hidden;">' +
-          '<h3 style="margin-top:0;flex:0 0 auto;">Stash lookup</h3>' +
+          // Generic until the first load lands (13.189): the modal may be on its
+          // way to a performer profile, where a lookup heading and the
+          // timestamp buttons mean nothing.
+          '<h3 style="margin-top:0;flex:0 0 auto;">Stash</h3>' +
           // min-height:0 is load-bearing: a flex item's default min-height is
           // auto, which refuses to shrink below its content and would push the
           // footer back out of view no matter what overflow says.
           '<div id="stashBody" style="flex:1 1 auto;min-height:0;overflow-y:auto;' +
-               '-webkit-overflow-scrolling:touch;">Looking up&hellip;</div>' +
+               '-webkit-overflow-scrolling:touch;">Loading&hellip;</div>' +
           '<div id="stashFooter" style="display:flex;gap:8px;margin-top:14px;flex:0 0 auto;">' +
             '<button id="stashAddBtn" class="modal-btn modal-btn-primary" ' +
-                    'style="flex:1;background:#28a745;" disabled>Add timestamps</button>' +
-            '<button id="stashRecheckBtn" class="modal-btn modal-btn-secondary">Re-check</button>' +
+                    'style="flex:1;background:#28a745;display:none;" disabled>Add timestamps</button>' +
+            '<button id="stashRecheckBtn" class="modal-btn modal-btn-secondary" style="display:none;">Re-check</button>' +
             '<button id="stashCloseBtn" class="modal-btn modal-btn-cancel">Close</button>' +
           '</div>' +
         '</div>';
@@ -4245,6 +4248,15 @@ async function showStashModal(video, openOpts) {
 
     const body      = modal.querySelector('#stashBody');
     const addBtn    = modal.querySelector('#stashAddBtn');
+    const recheckBtn = modal.querySelector('#stashRecheckBtn');
+    // The lookup's own buttons only while its panel is on screen (13.189).
+    // Hidden during every load; the editor and the navigator hide and restore
+    // them themselves, so this stays out of the way while either is open.
+    const lookupButtons = (show) => {
+        if (navCtl || editCtl) return;
+        addBtn.style.display = show ? '' : 'none';
+        recheckBtn.style.display = show ? '' : 'none';
+    };
     const close     = () => { window.scrayStashUrlFromBrowser = null; modal.remove(); };
     modal.querySelector('#stashCloseBtn').addEventListener('click', close);
     // While the details form is open a stray tap on the backdrop would throw
@@ -4360,6 +4372,7 @@ async function showStashModal(video, openOpts) {
     // button up to date, then offer the rename.
     const afterAttach = async (sRes, wasUnmatched) => {
         flashNote = sRes && sRes.note ? sRes.note : '';
+        lastAttachNote = flashNote;
         // Deliberately load(false): the id is stored locally now, so this
         // works whether or not StashDB has reindexed yet.
         await load(false);
@@ -4387,19 +4400,51 @@ async function showStashModal(video, openOpts) {
     // opens the rename modal on top, so "Use suggested" can take the new
     // stash name straight away. Runs after the names refresh, which is what
     // the suggestion is built from. The Stash modal stays open underneath.
+    // 13.189: the Stash modal no longer stays open underneath. The match is
+    // done by now (stash_submit has already copied any timestamps into the
+    // bookmarks), so it closes with a done pop-up and the rename is left on
+    // its own. The pop-up goes up after the rename modal so it lands on top.
     const offerRename = () => {
         if (!document.body.contains(modal)) return;
-        if (typeof window.showRenameModal !== 'function') return;
-        try {
-            window.showRenameModal(video, { zIndex: 2147483647 });
-        } catch (e) {
-            console.error('[stash] rename after match failed:', e);
+        close();
+        if (typeof window.showRenameModal === 'function') {
+            try {
+                window.showRenameModal(video, { zIndex: 2147483647 });
+            } catch (e) {
+                console.error('[stash] rename after match failed:', e);
+            }
         }
+        const partial = /refused|could not/i.test(lastAttachNote);
+        if (typeof window.showScoreConfirmation === 'function') {
+            window.showScoreConfirmation(partial ? '⚠️ Stash matched - stored locally' : '✅ Stash matched',
+                                         partial ? '#b8860b' : undefined);
+        } else if (typeof showScoreConfirmation === 'function') {
+            showScoreConfirmation(partial ? '⚠️ Stash matched - stored locally' : '✅ Stash matched',
+                                  partial ? '#b8860b' : undefined);
+        }
+        lastAttachNote = '';
     };
+    let lastAttachNote = '';
 
+    let loadedOnce = false;
     async function load(force) {
-        body.innerHTML = 'Looking up&hellip; <small style="opacity:.7">' +
-                         '(fingerprint, then StashDB, then timestamp.trade)</small>';
+        lookupButtons(false);
+        try {
+            await loadPanel(force);
+        } finally {
+            if (!loadedOnce) {
+                loadedOnce = true;
+                const h = modal.querySelector('h3');
+                if (h && !navCtl && !editCtl) h.textContent = 'Stash lookup';
+            }
+            lookupButtons(true);
+        }
+    }
+
+    async function loadPanel(force) {
+        body.innerHTML = loadedOnce
+            ? 'Looking up&hellip; <small style="opacity:.7">(fingerprint, then StashDB, then timestamp.trade)</small>'
+            : 'Loading&hellip;';
         addBtn.disabled = true;
         let r;
         try {
@@ -4959,7 +5004,7 @@ async function showStashModal(video, openOpts) {
         refreshAddBtn();
     }
 
-    modal.querySelector('#stashRecheckBtn').addEventListener('click', () => load(true));
+    recheckBtn.addEventListener('click', () => load(true));
     const startPerformer = openOpts && openOpts.performer ? String(openOpts.performer) : '';
 
     addBtn.addEventListener('click', async () => {

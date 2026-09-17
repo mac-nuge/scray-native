@@ -4,6 +4,32 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 13.74 / native 13.189 — test: stash nav In library link, generic Stash loading, Back to Stash above the video, Stash modal closes after a match
+<!-- 2026-09-17T14:22Z -->
+
+**browse** — `staging-browse - 13.74`: `api.php`, `VERSION.txt`
+**native** — `stg-native - 13.189`: `assets/web/scray-stash-nav.js`, `assets/web/file-operations.js`, `assets/web/VERSION` (JS only)
+
+Four requests from Mac. Native first; not yet ported to Picker, whose `scray-stash-nav.js` is also still behind native 13.187/13.188.
+
+**1. In library link on scene cards** (`api.php` `stash_nav`, `scray-stash-nav.js`).
+- `stash_nav` now adds `library: [{video_key, filename, path}]` to every scene card, in search and performer results. It comes from `stash_matches` joined to non-deleted `videos` on `stash_id`, so it's the stash connection, not a fresh fingerprint check. A failed lookup only logs and leaves `library` empty.
+- The card shows a green "▶ In library" button (with a count when there's more than one copy) after Google. It is left off when the only match is the file the modal is for.
+- Tapping it finds the file in `getAllVideos()` by key and plays it with the navigator's existing ▶ preview, so Back to Stash returns to the list. A file the server knows but this device doesn't have gets an alert instead.
+
+**2. Generic loading before any Stash modal** (`file-operations.js` `showStashModal`).
+- The modal opens as "Stash" / "Loading…" with only Close. Add timestamps and Re-check are hidden during every `load()` and shown when it finishes, success or failure. The heading becomes "Stash lookup" after the first load.
+- Opening straight onto a performer profile goes load → navigator in the same tick, so the lookup buttons never paint.
+- Re-check still shows the detailed "fingerprint, then StashDB, then timestamp.trade" text; the first load says just "Loading…".
+
+**3. Back to Stash sits above the video** (`scray-stash-nav.js` preview).
+- When the file was already playing, the preview doesn't float the player; it showed a pill fixed at the top of the screen. The pill now tracks the player's `.plyr` (or `video`) rect every frame while it's up: centred, 6px above the video, kept on screen, and over the top of the video when there's no room above. The top clamp includes `env(safe-area-inset-top)`.
+- In fullscreen the inline position is cleared and the stylesheet's top placement stands. The loop stops in `endPreview()`.
+
+**4. Stash modal closes after a match** (`file-operations.js` `offerRename`).
+- On unmatched → matched (Accept, pasted URL, or details saved by hand), the Stash modal now closes, the rename modal opens on its own, and a "✅ Stash matched" pop-up goes up over it. When `stash_submit`'s note says StashDB refused the fingerprint, it reads "⚠️ Stash matched - stored locally" in amber instead.
+- Nothing is lost by closing: `stash_submit` already copies the scene's timestamps into the bookmarks.
+
 ### native 13.188 — test: studio filter search in the performer profile actually hides non-matching studios
 <!-- 2026-09-17T12:29Z -->
 

@@ -180,6 +180,15 @@ min-width: 0;
  background: #0056b3;
 }
 
+/* Clear stands out from the sort cycles - it undoes them (picker 13.201 / native 13.199). */
+.sort-btn.sort-btn-clear {
+ background: #f44336;
+}
+
+.sort-btn.sort-btn-clear:hover {
+ background: #c62828;
+}
+
 /* Desktop: slightly larger text */
 @media (min-width: 769px) {
 .sort-btn {
@@ -8062,3 +8071,69 @@ body.landscape-fullscreen .plyr__controls .plyr-more {
   font-size: 0.85rem;
   padding: 10px 14px;
 }
+
+/* =========================================
+BULK SELECT (picker 13.201 / native 13.199) - scray-bulk-select.js
+Tap a row number to select, or drag down the numbers. touch-action on the
+number is load-bearing: without it the list scrolls instead of selecting.
+========================================= */
+:is(#taggedVideosContainer, #playlist) li.lc-row .lc-num {
+  touch-action: none;
+}
+
+:is(#taggedVideosContainer, #playlist) li.lc-row.lc-bulk-selected > .lc-line {
+  background: #ffd84a;
+}
+
+:is(#taggedVideosContainer, #playlist) li.lc-row.lc-bulk-selected > .lc-line .lc-cell {
+  color: #000;
+}
+
+#bulkActionBar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9998;              /* just under #cornerButtons (9999) */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 20px);
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(30, 30, 30, 0.95);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+
+#bulkActionBar[hidden] { display: none; }
+
+#bulkActionBar .bulk-count {
+  color: #ffd84a;
+  font-size: 0.75rem;
+  font-weight: bold;
+  min-width: 1.8em;
+  text-align: center;
+}
+
+#bulkActionBar .bulk-btn {
+  width: auto;
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 0.7rem;
+  line-height: 1.1;
+  color: white;
+  background: #555;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#bulkActionBar .bulk-basket  { background: #e91e63; }
+#bulkActionBar .bulk-refresh { background: #17a2b8; }
+#bulkActionBar .bulk-delete  { background: #f44336; }
+#bulkActionBar .bulk-clear   { background: #333; }
+#bulkActionBar .bulk-btn:active { transform: scale(0.97); }
+
+/* The player owns the screen in fullscreen - the corner buttons go, so does
+   this. The selection itself is kept. */
+body.fullscreen-active:not(.fls-peek) #bulkActionBar { display: none !important; }

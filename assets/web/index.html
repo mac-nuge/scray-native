@@ -63,7 +63,10 @@
     // Last, and it has to be: it wraps randomiser.js's filter, stats and cloud
     // functions and reveals disguise.js's view button, so both must already
     // have run. document.write keeps this list strictly in order.
-    "scray-views.js"
+    "scray-views.js",
+    // Only needs the lists to exist at click time, not at load, so its
+    // position here is not load-bearing.
+    "scray-bulk-select.js"
   ];
   localScripts.forEach(src => {
     document.write(`<script src="${src}?v=${cacheBustVer}"><\/script>`);

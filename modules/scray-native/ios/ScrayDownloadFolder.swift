@@ -53,10 +53,25 @@ final class ScrayDownloadFolder: NSObject, UIDocumentPickerDelegate {
         pickCompletion = nil
     }
 
+    /// The file already in the remembered folder under this name, or nil
+    /// (native 13.199). Used to ask before a download lands on top of one.
+    func existingFile(named name: String) -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else { return nil }
+        var stale = false
+        guard let folder = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale) else { return nil }
+        guard folder.startAccessingSecurityScopedResource() else { return nil }
+        defer { folder.stopAccessingSecurityScopedResource() }
+        let candidate = folder.appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
+    }
+
     /// Copies into the remembered folder. Returns the saved URL, or nil if
     /// there is no folder or it's no longer reachable — the caller falls back
     /// to the export sheet rather than losing the file.
-    func save(fileURL: URL) -> URL? {
+    ///
+    /// `overwrite` (native 13.199) replaces a file of the same name instead of
+    /// saving beside it as "name 2.mp4". The caller has asked by then.
+    func save(fileURL: URL, overwrite: Bool = false) -> URL? {
         guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else { return nil }
 
         var stale = false
@@ -68,7 +83,17 @@ final class ScrayDownloadFolder: NSObject, UIDocumentPickerDelegate {
             UserDefaults.standard.set(refreshed, forKey: Self.bookmarkKey)
         }
 
-        let dest = Self.uniquified(folder.appendingPathComponent(fileURL.lastPathComponent))
+        let wanted = folder.appendingPathComponent(fileURL.lastPathComponent)
+        var dest = Self.uniquified(wanted)
+        if overwrite {
+            // Remove first: moveItem/copyItem both throw onto an existing
+            // path. A failed remove falls through to the uniquified name
+            // rather than losing the download.
+            if (try? FileManager.default.removeItem(at: wanted)) != nil
+                || !FileManager.default.fileExists(atPath: wanted.path) {
+                dest = wanted
+            }
+        }
         do {
             // Same volume — which the app container and an On My iPhone folder
             // usually are — makes this free. Cross-volume throws, and the copy

@@ -4,6 +4,38 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.201 / native 13.199 — test: bulk select, download clash prompt, red Clear
+<!-- 2026-09-17T21:55Z -->
+
+**picker** — `staging - 13.201`: `scray-bulk-select.js` (new), `style.css`, `index.php`, `VERSION`
+**native** — `stg-native - 13.199`: `assets/web/scray-bulk-select.js` (new), `assets/web/style.css`, `assets/web/index.html`, `assets/web/VERSION`, plus `modules/scray-native/ios/ScrayFileClash.swift` (new), `ScrayDownloadFolder.swift`, `ScrayBrowser.swift`. **The download half is Swift — it needs an IPA build. Bulk select and the red Clear are JS/CSS only.**
+
+Three requests from Mac.
+
+**1. Bulk select on the list** (`scray-bulk-select.js`, identical in both apps).
+- Tap a row's number to select it — the line goes yellow — or press on a number and drag down to take a run of them. Dragging repeats whatever the first tap did, so a drag over selected rows clears them.
+- A bar appears just above the corner buttons: the count, **Basket**, **Refresh Data**, **Delete**, and ✕ to clear. Each applies to everything selected.
+- **Main list and the random panel** (`#taggedVideosContainer`, `#playlist`), as asked. History and basket already use the number as their own tick (`cfg.select` in `scrayBuildListRow`), so they're left out and the two systems never meet.
+- **Not in `render.js`.** Rows are rebuilt constantly — pagination, a variant swap, a re-filter — so selection is kept by video id in the module and a `MutationObserver` re-paints rows as they arrive. `render.js` didn't have to change at all.
+- **Gestures:** pointer events, not click. `elementFromPoint` on move, because a touch pointer is captured by the element it started on and no other row would hear from it. `touch-action: none` on `.lc-num` in CSS is load-bearing — without it the list scrolls instead of selecting. The tap is swallowed in the capture phase so the row doesn't also open.
+- **Actions** reuse what's already there: `addToBasket` (which ignores anything already in the basket, so the count comes from the basket's own length), `refreshVideoFromDb` + `refreshAfterDbPull` per file with the count showing `done/total`, and `showBulkDeleteModal`, which brings its own confirmation and removes the rows. Each ends with the usual done pop-up.
+- A row without a `_scrayVideo` — a folder group line — can't be selected.
+
+**2. Download clash.** **First, the check: it never replaced.** `ScrayDownloadFolder.save` runs every download through `uniquified()`, so a second copy landed as `name 2.mp4` — quietly, and the library scan then shows both.
+- `existingFile(named:)` is new; `save(fileURL:overwrite:)` takes a flag and removes the existing file first when it's set (falling back to the uniquified name if the remove fails, rather than losing the download).
+- `ScrayFileClash.swift` is the prompt: filename, both sizes, **Replace / Keep both / Cancel**, and a tick — *Do this for the rest of this run* — which is **off by default**, so by default every clash asks. Not a `UIAlertController`: an alert's actions can be pressed but not toggled, so it's a small card of its own.
+- The remembered answer lives on the browser as `clashChoiceForRun` and is cleared once nothing is downloading, so the next batch asks again. **Cancel never remembers** — that would silently drop the rest of the queue. Cancel discards the temp file and marks the row failed with why.
+- All downloads go through `ScrayBrowser`'s `deliver`, including a basket checkout's, so this covers them.
+
+**3. Clear button.** `.sort-btn.sort-btn-clear` is red (`#f44336`, `#c62828` on hover) in both apps. It undoes the sorts rather than being one of them.
+
+**Checked:** `node --check` on the new module. A jsdom run: tap selects and paints the bar, tapping again deselects and hides it, a drag takes three rows, a re-render re-paints a selected row, Basket adds all three and clears the selection, Delete hands the right files to `showBulkDeleteModal`. Swift not compiled here — no toolchain.
+
+**Worth watching:**
+- Whether a vertical drag down the numbers ever trips the row-swipe gesture in `render.js`. It locks on sideways travel, so it shouldn't, but that's the interaction to try first.
+- The action bar sits above `#cornerButtons` by measuring it; if the corner stack grows a row mid-selection the bar re-measures on resize only.
+- Whether "Keep both" plus a later scan leaves you with `name 2.mp4` rows you then have to tidy — the old behaviour, now at least chosen.
+
 ### browse 13.75 / native 13.198 — test: shared Picker URL, set from browse.html
 <!-- 2026-09-17T20:50Z -->
 

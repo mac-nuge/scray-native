@@ -1924,14 +1924,49 @@ final class ScrayBrowserViewController: UIViewController,
             deliverOnMain(fileURL: fileURL, jobID: jobID, saved: nil)
             return
         }
-        DispatchQueue.global(qos: .userInitiated).async {
-            let saved = ScrayDownloadFolder.shared.save(fileURL: fileURL)
-            self.deliverOnMain(fileURL: fileURL, jobID: jobID, saved: saved)
+
+        let copy: (Bool) -> Void = { overwrite in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let saved = ScrayDownloadFolder.shared.save(fileURL: fileURL, overwrite: overwrite)
+                self.deliverOnMain(fileURL: fileURL, jobID: jobID, saved: saved)
+            }
+        }
+
+        // A name already in the folder used to become "name 2.mp4" without a
+        // word (native 13.199). Ask - unless this run has already answered.
+        DispatchQueue.main.async {
+            let name = fileURL.lastPathComponent
+            guard let existing = ScrayDownloadFolder.shared.existingFile(named: name) else {
+                copy(false)
+                return
+            }
+            if let remembered = self.clashChoiceForRun {
+                copy(remembered == .replace)
+                return
+            }
+            ScrayFileClashPrompt.ask(filename: name, existing: existing, incoming: fileURL, from: self) { choice, remember in
+                guard let choice = choice else {
+                    // Cancelled: the bytes are already downloaded, but nothing
+                    // is written into the folder and the row says so.
+                    try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
+                    if let id = jobID { ScrayDownloadCenter.shared.fail(id: id, message: "Not saved - a file with that name is already there") }
+                    return
+                }
+                if remember { self.clashChoiceForRun = choice }
+                copy(choice == .replace)
+            }
         }
     }
 
+    /// What "Replace" / "Keep both" was answered for THIS run, when the tick
+    /// was on (native 13.199). Cleared once the queue empties in
+    /// deliverOnMain, so the next batch asks again.
+    private var clashChoiceForRun: ScrayClashChoice?
+
     private func deliverOnMain(fileURL: URL, jobID: String?, saved: URL?) {
         DispatchQueue.main.async {
+            // The run is over once nothing is still transferring.
+            if ScrayDownloadCenter.shared.activeCount == 0 { self.clashChoiceForRun = nil }
             if let saved = saved {
                 try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
                 if let id = jobID { ScrayDownloadCenter.shared.finish(id: id, savedURL: saved) }

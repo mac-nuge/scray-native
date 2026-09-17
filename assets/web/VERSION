@@ -1,1 +1,1 @@
-stg-native - 13.193 stable: pills bar Clear all keeps only the default folder excludes, no scroll after hold-to-clear search
+stg-native - 13.194 stable: Stats modal rewired - works again, reads this device's row first, then the catalogue by video_key

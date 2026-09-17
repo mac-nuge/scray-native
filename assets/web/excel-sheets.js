@@ -2786,118 +2786,7 @@ function showVideoScoringModal(video, event) {
    }, 100);
 }
 
-// Show video stats modal (read-only view from Excel)
-async function showVideoStatsModal(video) {
-const sheetData = await getVideoFromExcel(video.oneDriveId);
-
-// Calculate quality metrics
-const width = video.width || null;
-const height = video.height || null;
-const sizeBytes = video.sizeBytes || 0;
-const durationMs = video.durationMs || null;
-const storedBitrate = video.bitrate || null;
-
-// Resolution category
-let resolutionCategory = 'Unknown';
-if (width && height) {
-    const pixels = width * height;
-    if (pixels >= 7680 * 4320) resolutionCategory = '8K';
-    else if (pixels >= 3840 * 2160) resolutionCategory = '4K (UHD)';
-    else if (pixels >= 2560 * 1440) resolutionCategory = '2K (QHD)';
-    else if (pixels >= 1920 * 1080) resolutionCategory = 'Full HD (1080p)';
-    else if (pixels >= 1280 * 720) resolutionCategory = 'HD (720p)';
-    else if (pixels >= 854 * 480) resolutionCategory = 'SD (480p)';
-    else resolutionCategory = 'Low Resolution';
-}
-
-// Average bitrate (prefer stored OneDrive bitrate, fallback to calculated)
-let bitrateText = 'N/A';
-if (storedBitrate) {
-    // Use OneDrive's reported bitrate
-    const mbps = storedBitrate / 1000000; // convert to Mbps
-    bitrateText = `${mbps.toFixed(2)} Mbps (OneDrive)`;
-} else if (durationMs && durationMs > 0 && sizeBytes > 0) {
-    // Calculate from file size and duration
-    const durationSeconds = durationMs / 1000;
-    const bitrate = (sizeBytes * 8) / durationSeconds; // bits per second
-    const mbps = bitrate / 1000000; // convert to Mbps
-    bitrateText = `${mbps.toFixed(2)} Mbps (calculated)`;
-}
-
-// Bits per pixel (quality indicator - higher is better)
-let bitsPerPixelText = 'N/A';
-if (width && height && durationMs && durationMs > 0 && sizeBytes > 0) {
-    const totalPixels = width * height;
-    const durationSeconds = durationMs / 1000;
-    const totalFramePixels = totalPixels * (30 * durationSeconds); // Assume 30fps
-    const bitsPerPixel = (sizeBytes * 8) / totalFramePixels;
-    bitsPerPixelText = `${bitsPerPixel.toFixed(3)} bpp`;
-    
-    // Add quality indicator
-    if (bitsPerPixel >= 0.5) bitsPerPixelText += ' (Excellent)';
-    else if (bitsPerPixel >= 0.3) bitsPerPixelText += ' (High)';
-    else if (bitsPerPixel >= 0.2) bitsPerPixelText += ' (Good)';
-    else if (bitsPerPixel >= 0.1) bitsPerPixelText += ' (Medium)';
-    else bitsPerPixelText += ' (Low)';
-}
-
-// Use video data with fallback to "No tracking data" for Google Sheets fields
-const filename = sheetData?.filename || video.filename || 'Unknown';
-const path = sheetData?.path || video.path || 'Unknown';
-const viewCount = sheetData?.view_count ?? 'No tracking data';
-const userScore = sheetData?.user_score ?? 'No tracking data';
-const firstSeen = sheetData?.first_seen ? new Date(sheetData.first_seen).toLocaleString() : 'No tracking data';
-const lastPlayed = sheetData?.last_played ? new Date(sheetData.last_played).toLocaleString() : 'No tracking data';
-const notes = sheetData?.notes || '';
-
-const modal = document.createElement('div');
-modal.className = 'basket-json-modal';
-modal.innerHTML = `
-    <div class="basket-json-modal-content" style="max-width: 500px;">
-        <h3>📊 Video Stats</h3>
-        <div style="text-align: left; margin: 16px 0; font-size: 0.9rem;">
-            <p style="margin: 8px 0;"><strong>Filename:</strong><br>${filename}</p>
-            <p style="margin: 8px 0;"><strong>Path:</strong><br>${path}</p>
-            
-            <hr style="margin: 12px 0; border: none; border-top: 1px solid #ddd;">
-            
-            <p style="margin: 8px 0;"><strong>File Size:</strong> ${formatFileSize(sizeBytes)}</p>
-            <p style="margin: 8px 0;"><strong>Duration:</strong> ${formatDuration(durationMs)}</p>
-            <p style="margin: 8px 0;"><strong>Dimensions:</strong> ${width && height ? `${width} × ${height}` : 'Unknown'}</p>
-            <p style="margin: 8px 0;"><strong>Resolution:</strong> ${resolutionCategory}</p>
-            <p style="margin: 8px 0;"><strong>Average Bitrate:</strong> ${bitrateText}</p>
-            <p style="margin: 8px 0;"><strong>Quality:</strong> ${bitsPerPixelText}</p>
-            
-            <hr style="margin: 12px 0; border: none; border-top: 1px solid #ddd;">
-            
-            <p style="margin: 8px 0;"><strong>Views:</strong> ${viewCount}</p>
-            <p style="margin: 8px 0;"><strong>Score:</strong> ${typeof userScore === 'number' ? userScore + '/10' : userScore}</p>
-            <p style="margin: 8px 0;"><strong>First Seen:</strong> ${firstSeen}</p>
-            <p style="margin: 8px 0;"><strong>Last Played:</strong> ${lastPlayed}</p>
-            ${notes ? `<p style="margin: 8px 0;"><strong>Notes:</strong><br>${notes}</p>` : ''}
-        </div>
-        <button id="statsCloseBtn" class="modal-btn modal-btn-cancel">Close</button>
-    </div>
-`;
-document.body.appendChild(modal);
-
-document.getElementById('statsCloseBtn').addEventListener('click', () => {
-  modal.remove();
-});
-
-modal.addEventListener('click', (e) => {
-  if (e.target === modal) modal.remove();
-});
-
-// ESC key to close
-const statsEscHandler = (e) => {
-  if (e.key === 'Escape') {
-      modal.remove();
-      document.removeEventListener('keydown', statsEscHandler);
-  }
-};
-document.addEventListener('keydown', statsEscHandler);
-}
+// The Stats modal lives in render.js now (picker 13.193 / native 13.194).
 
 /**
 * Show confirm modal for F tally increment
@@ -3652,7 +3541,6 @@ window.getVideoFromExcel = getVideoFromExcel;
 window.loadAllVideosFromExcel = loadAllVideosFromExcel;
 window.loadAllVideoScoresFromExcel = loadAllVideoScoresFromExcel;
 window.showVideoScoringModal = showVideoScoringModal;
-window.showVideoStatsModal = showVideoStatsModal;
 window.excelAccessToken = excelAccessToken;
 window.exportToExcelOnline = exportToExcelOnline;
 window.saveScoresToIndexedDB = saveScoresToIndexedDB;

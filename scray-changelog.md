@@ -4,6 +4,29 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.193 / native 13.194 — test: Stats modal rewired
+<!-- 2026-09-17T16:40Z -->
+
+**picker** — `staging - 13.193`: `render.js`, `excel-sheets.js`, `VERSION`
+**native** — `stg-native - 13.194`: `assets/web/render.js`, `assets/web/excel-sheets.js`, `assets/web/VERSION` (JS only)
+
+Mac: Stats did nothing in Native, showed "No tracking data" for most lines in Picker, and was slow.
+
+**Causes.**
+- **Native:** the modal lived in `excel-sheets.js`, which Native's `index.html` doesn't load (Native loads `local-scores-cache.js` in its place). `window.showVideoStatsModal` was never defined, and every Stats button checks for it and quietly does nothing.
+- **Picker:** the modal called `getVideoFromExcel(video.oneDriveId)`, which calls the server's `get`. `get` has addressed rows by `video_key` for a long time; the oneDriveId matched nothing, so every tracking field fell back to "No tracking data".
+- **Slow:** Picker waited for that server call before showing anything.
+
+**Rewire** (`render.js`, identical in both apps; the old function and its export are removed from both `excel-sheets.js`).
+- The modal opens straight away with "Loading…". It paints from this device's row in IndexedDB, read by `oneDriveId`: Picker's `videos` store, or Native's `videoSource` + `videoMeta` merged. Whichever stores exist are read, so the same code serves both.
+- It then asks `get` for the catalogue row by `video_key` ("Checking the catalogue…" underneath) and repaints with it. It skips this for a file with `inCatalogue === false` (a phone-only file). If the server fails or has no row, the note says the numbers are this device's only.
+- **Merging:**
+  - Views and Time watched take the larger of device and catalogue.
+  - First seen takes the earlier, Last played the later.
+  - Score: the device's own wins, since the outbox may not have pushed yet, then the list row's, then the catalogue's. It's read through `scrayListScore`, so Picker's `userScore` and Native's `user_score` both work.
+- **Same stats as before.** Native gains Time watched, which only Picker had. Empty values now read "0", "None yet", "Not scored", "Never" or "Unknown" instead of "No tracking data". Filename, path and notes are HTML-escaped.
+- **Checked:** a jsdom + fake-indexeddb smoke test of the module covering a Picker row merged with a catalogue row, a Native phone-only file, and a failed server call.
+
 ### picker 13.192 / native 13.193 — test: pills bar Clear all keeps only the default folder excludes, no scroll after hold-to-clear search
 <!-- 2026-09-17T16:05Z -->
 

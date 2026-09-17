@@ -2320,3 +2320,170 @@ document.addEventListener('DOMContentLoaded', () => {
     set: (value) => scraySetSwipeConfig(value)
   });
 });
+
+
+/* =========================================
+   📊 Stats modal (picker 13.193 / native 13.194)
+
+   Was excel-sheets.js's showVideoStatsModal, which stopped working in two
+   different ways:
+     - Native doesn't load excel-sheets.js at all, so the Stats button
+       found no function and did nothing.
+     - Picker asked the server's `get` for the file's oneDriveId, but `get`
+       addresses rows by video_key now - so it found nothing and every
+       tracking line read "No tracking data". It was also one server round
+       trip before anything showed, which is the slowness.
+
+   Now it paints straight away from this device's own copy of the row
+   (IndexedDB: Picker's `videos` store, Native's videoSource + videoMeta),
+   then asks the server for the catalogue row by video_key and fills in
+   anything newer. Counters take the larger of the two, first seen the
+   earlier; a score set on this device wins over the server's, which may
+   not have caught up with the outbox yet. A file that isn't in the
+   catalogue (a phone-only file in Native) skips the server step.
+   Same stats as before, plus Time watched in Native too.
+   ========================================= */
+async function scrayStatsLocalRow(video) {
+    const id = video && video.oneDriveId;
+    if (!id || typeof openDB !== 'function') return null;
+    try {
+        const db = await openDB();
+        const names = Array.from(db.objectStoreNames || []);
+        const read = (store) => new Promise(resolve => {
+            try {
+                const r = db.transaction(store, 'readonly').objectStore(store).get(id);
+                r.onsuccess = () => resolve(r.result || null);
+                r.onerror = () => resolve(null);
+            } catch (e) { resolve(null); }
+        });
+        const parts = await Promise.all(['videos', 'videoSource', 'videoMeta'].filter(n => names.includes(n)).map(read));
+        const found = parts.filter(Boolean);
+        return found.length ? Object.assign({}, ...found) : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function showVideoStatsModal(video) {
+    if (!video) return;
+    document.getElementById('scrayStatsModal')?.remove();
+
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const num = (v) => { const n = Number(v); return (v === null || v === undefined || v === '' || isNaN(n)) ? null : n; };
+    const time = (v) => { if (!v) return null; const t = new Date(v).getTime(); return isNaN(t) ? null : t; };
+    const maxNum = (a, b) => (a === null ? b : (b === null ? a : Math.max(a, b)));
+    const scoreOf = (v) => {
+        if (!v) return null;
+        const s = typeof window.scrayListScore === 'function' ? window.scrayListScore(v) : (v.userScore ?? v.user_score);
+        return (s === null || s === undefined || s === '') ? null : s;
+    };
+
+    const modal = document.createElement('div');
+    modal.className = 'basket-json-modal';
+    modal.id = 'scrayStatsModal';
+    modal.innerHTML =
+        '<div class="basket-json-modal-content" style="max-width:500px;">' +
+          '<h3>📊 Video Stats</h3>' +
+          '<div class="scray-stats-body" style="text-align:left;margin:16px 0;font-size:0.9rem;">Loading&hellip;</div>' +
+          '<div class="scray-stats-note" style="font-size:.75rem;opacity:.6;margin:-8px 0 10px;"></div>' +
+          '<button type="button" class="modal-btn modal-btn-cancel scray-stats-close">Close</button>' +
+        '</div>';
+    document.body.appendChild(modal);
+    const bodyEl = modal.querySelector('.scray-stats-body');
+    const noteEl = modal.querySelector('.scray-stats-note');
+
+    const escHandler = (e) => { if (e.key === 'Escape') close(); };
+    const close = () => { modal.remove(); document.removeEventListener('keydown', escHandler); };
+    modal.querySelector('.scray-stats-close').addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    document.addEventListener('keydown', escHandler);
+
+    const paint = (local, server) => {
+        const base = Object.assign({}, server || {}, video, local || {});
+        const width = num(base.width), height = num(base.height);
+        const sizeBytes = num(base.sizeBytes) || 0;
+        const durationMs = num(base.durationMs);
+        const storedBitrate = num(base.bitrate);
+
+        let resolution = 'Unknown';
+        if (width && height) {
+            const px = width * height;
+            resolution = px >= 7680 * 4320 ? '8K'
+                : px >= 3840 * 2160 ? '4K (UHD)'
+                : px >= 2560 * 1440 ? '2K (QHD)'
+                : px >= 1920 * 1080 ? 'Full HD (1080p)'
+                : px >= 1280 * 720 ? 'HD (720p)'
+                : px >= 854 * 480 ? 'SD (480p)'
+                : 'Low Resolution';
+        }
+
+        let bitrateText = 'N/A';
+        if (storedBitrate) bitrateText = (storedBitrate / 1e6).toFixed(2) + ' Mbps (OneDrive)';
+        else if (durationMs > 0 && sizeBytes > 0) bitrateText = ((sizeBytes * 8) / (durationMs / 1000) / 1e6).toFixed(2) + ' Mbps (calculated)';
+
+        let qualityText = 'N/A';
+        if (width && height && durationMs > 0 && sizeBytes > 0) {
+            // Assumes 30fps, as it always has.
+            const bpp = (sizeBytes * 8) / (width * height * 30 * (durationMs / 1000));
+            qualityText = bpp.toFixed(3) + ' bpp (' +
+                (bpp >= 0.5 ? 'Excellent' : bpp >= 0.3 ? 'High' : bpp >= 0.2 ? 'Good' : bpp >= 0.1 ? 'Medium' : 'Low') + ')';
+        }
+
+        const srcs = [local, video, server].filter(Boolean);
+        let views = null, watched = null, firstSeen = null, lastPlayed = null;
+        srcs.forEach(s => {
+            views = maxNum(views, num(s.view_count));
+            watched = maxNum(watched, num(s.time_viewed));
+            const f = time(s.first_seen); if (f !== null && (firstSeen === null || f < firstSeen)) firstSeen = f;
+            const l = time(s.last_played); if (l !== null && (lastPlayed === null || l > lastPlayed)) lastPlayed = l;
+        });
+        const score = scoreOf(local) ?? scoreOf(video) ?? scoreOf(server);
+        const notes = (local && local.notes) || video.notes || (server && server.notes) || '';
+
+        const viewsText = views === null ? '0' : String(views);
+        const watchedText = watched > 0 ? formatDuration(watched * 1000) : 'None yet';
+        const scoreText = score === null ? 'Not scored' : (Number(score) === 0 ? 'N/A' : score + '/10');
+        const when = (t) => t === null ? 'Never' : new Date(t).toLocaleString();
+
+        const row = (k, v) => '<p style="margin:8px 0;"><strong>' + k + ':</strong> ' + v + '</p>';
+        const hr = '<hr style="margin:12px 0;border:none;border-top:1px solid #ddd;">';
+        bodyEl.innerHTML =
+            '<p style="margin:8px 0;"><strong>Filename:</strong><br>' + esc(base.filename || 'Unknown') + '</p>' +
+            '<p style="margin:8px 0;"><strong>Path:</strong><br>' + esc(base.path || 'Unknown') + '</p>' +
+            hr +
+            row('File Size', esc(sizeBytes ? formatFileSize(sizeBytes) : 'Unknown')) +
+            row('Duration', esc(durationMs ? formatDuration(durationMs) : 'Unknown')) +
+            row('Dimensions', width && height ? width + ' × ' + height : 'Unknown') +
+            row('Resolution', resolution) +
+            row('Average Bitrate', bitrateText) +
+            row('Quality', qualityText) +
+            hr +
+            row('Views', viewsText) +
+            row('Time watched', watchedText) +
+            row('Score', esc(scoreText)) +
+            row('First Seen', esc(firstSeen === null ? 'Unknown' : new Date(firstSeen).toLocaleString())) +
+            row('Last Played', esc(when(lastPlayed))) +
+            (notes ? '<p style="margin:8px 0;"><strong>Notes:</strong><br>' + esc(notes) + '</p>' : '');
+    };
+
+    const local = await scrayStatsLocalRow(video);
+    if (!document.body.contains(modal)) return;
+    paint(local, null);
+
+    // The catalogue's copy. Not for a file the catalogue doesn't have.
+    const merged = Object.assign({}, video, local || {});
+    const key = merged.videoKey || (merged.filename && typeof window.scrayVideoKey === 'function' ? window.scrayVideoKey(merged.filename) : '');
+    if (!key || merged.inCatalogue === false || typeof window.scrayApiCall !== 'function') return;
+    noteEl.textContent = 'Checking the catalogue…';
+    try {
+        const res = await window.scrayApiCall('get', { params: { id: key } });
+        if (!document.body.contains(modal)) return;
+        const row = res && res.video;
+        const server = row ? (typeof window.scrayDbRowToApp === 'function' ? window.scrayDbRowToApp(row) : row) : null;
+        if (server) paint(local, server);
+        noteEl.textContent = server ? '' : 'Not in the catalogue - this device’s numbers only.';
+    } catch (err) {
+        if (document.body.contains(modal)) noteEl.textContent = 'Couldn’t reach the catalogue - this device’s numbers only.';
+    }
+}
+window.showVideoStatsModal = showVideoStatsModal;

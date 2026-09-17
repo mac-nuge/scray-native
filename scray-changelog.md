@@ -4,6 +4,28 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.192 / native 13.193 — test: pills bar Clear all keeps only the default folder excludes, no scroll after hold-to-clear search
+<!-- 2026-09-17T16:05Z -->
+
+**picker** — `staging - 13.192`: `randomiser.js`, `VERSION`
+**native** — `stg-native - 13.193`: `assets/web/randomiser.js`, `assets/web/VERSION` (JS only)
+
+Two requests from Mac.
+
+**1. Pills bar "✕ Clear all" outside wholesale should clear the non-default folder excludes the way wholesale's Clear all does.**
+- **Before:** `scrayClearAllFilters` set `#excludeTagSelect` to the default list outright (`val([...scrayDefaultExcludeTags])`).
+- **Now:** wholesale's rule (picker 13.173). Of what's excluded right now, a tag stays only if it's on the default list, compared case-insensitively. When `scrayDefaultExcludeTags` was never recorded, it's read with `fetchDefaultExcludeTags()` first and applied when that lands. If the list can't be read, the excludes are left alone rather than all cleared. The select is only changed when something is actually removed.
+- **Behaviour differences from before:**
+  - A default you removed this session stays removed (as in wholesale), rather than coming back on Clear all.
+  - A default whose stored case differed from its tag option is no longer dropped. select2 silently discards a `val()` with no exact option.
+  - With the list not loaded, the defaults are no longer wiped.
+- **Not reproduced:** from the code, the old version should already have removed non-default excludes. If Mac still sees folder excludes survive Clear all, the next step is to find out exactly which ones stay, and whether they're on the default list.
+- Includes, the other classes, search and toggles are cleared exactly as before; wholesale's own Clear all is unchanged.
+
+**2. Auto-scroll after clearing the search by holding the corner 🔍** (`randomiser.js` `clearSearchPillFilter`, both apps).
+- **Cause:** the hold calls `clearSearchPillFilter`, which re-ran the filter without `skipSearchScroll`. That pass ended in `scrayScrollToResults` and moved the page to the results.
+- **Fix:** `clearSearchPillFilter` now sets `skipSearchScroll` plus a 1.5s `scraySuppressScrollUntil` before its filter pass, covering a second pass too. Every way of clearing the search through it (the hold, the pill's bin, Clear all with an event) no longer scrolls. The page still scrolls on phones when you *type* a search, as before.
+
 ### native 13.192 / picker 13.191 — test: FLS left-third halves swapped, filter and search in the other app from the tag clouds and rename
 <!-- 2026-09-17T15:40Z -->
 

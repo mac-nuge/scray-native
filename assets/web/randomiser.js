@@ -836,11 +836,31 @@ window.scrayClearAllFilters = function (ev) {
     '#tagFilterAllSelect'].forEach(sel => {
        if ($(sel).length) $(sel).val(null).trigger('change');
    });
-   // Excludes go back to the default list rather than to nothing - the
-   // defaults are always on, and Clear all only shows for filters beyond them.
-   if ($('#excludeTagSelect').length) {
-       const defaults = window.scrayDefaultExcludeTags ? [...window.scrayDefaultExcludeTags] : [];
-       $('#excludeTagSelect').val(defaults).trigger('change');
+   // Folder excludes: only the DEFAULT ones stay - wholesale's Clear all rule
+   // (picker 13.173), now outside wholesale too (picker 13.192 / native 13.193).
+   // Of what is excluded right now, a tag stays only if it is on the default
+   // list, matched without regard to case. Before, this set the select to the
+   // default list outright: a default whose case differed from the tag's own
+   // option was silently dropped by select2, and with the list not loaded yet
+   // every exclude went, defaults included. If start-up never recorded the
+   // list it is read from the server first, so a missing list can't clear
+   // the defaults.
+   const $ex = $('#excludeTagSelect');
+   if ($ex.length) {
+       const keepDefaults = (defaults) => {
+           const defLower = new Set([...(defaults || [])].map(t => String(t).toLowerCase()));
+           const now  = $ex.val() || [];
+           const keep = now.filter(t => defLower.has(String(t).toLowerCase()));
+           if (keep.length !== now.length) $ex.val(keep).trigger('change');
+       };
+       if (window.scrayDefaultExcludeTags) {
+           keepDefaults(window.scrayDefaultExcludeTags);
+       } else if (typeof window.fetchDefaultExcludeTags === 'function') {
+           window.fetchDefaultExcludeTags().then(tags => {
+               window.scrayDefaultExcludeTags = window.scrayDefaultExcludeTags || new Set(tags);
+               keepDefaults(window.scrayDefaultExcludeTags);
+           }).catch(() => { /* list unreadable: leave the excludes as they are */ });
+       }
    }
 
    if (ev && typeof window.clearSearchPillFilter === 'function') {
@@ -2095,6 +2115,12 @@ window.clearSearchPillFilter = function (e) {
 
     // ✅ Prevent panel from auto-opening
     window.skipPanelAutoOpen = true;
+    // Clearing the search is not a reason to move the page (picker 13.192 /
+    // native 13.193). Holding the corner 🔍 comes through here, and the filter
+    // pass below ended by scrolling to the results. The short window covers
+    // a second pass as well (the pill's blur, wholesale's random re-filter).
+    window.skipSearchScroll = true;
+    window.scraySuppressScrollUntil = Date.now() + 1500;
 
     // Trigger filter refresh
     if (typeof filterDisplayedByFilename === 'function') {

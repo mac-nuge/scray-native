@@ -54,6 +54,10 @@
     "scray-upload.js",
     "scray-rename.js",
     "player.js",
+    // Performance monitor, above the console (13.180/13.181). After player.js, which
+    // it reads; before the lock screen script below, which asks it whether
+    // this load is its own "Refresh page".
+    "scray-perf.js",
     "disguise.js",
     "settings.js",
     // Last, and it has to be: it wraps randomiser.js's filter, stats and cloud
@@ -280,7 +284,11 @@
   const overlayEl = document.getElementById("lockOverlay");
   const errorEl = document.getElementById("lockError");
   const versionTapEl = document.getElementById("lockOverlayVersion");
-  window.addEventListener('load', () => { inputEl.focus(); });
+  // The performance monitor's "Refresh page" (scray-perf.js, 13.180) reloads
+  // a page you had already unlocked seconds ago - don't ask again. One-shot:
+  // scray-perf.js consumes its mark, so a later reload locks as normal.
+  const skipLockForRefresh = !!window.scrayPerfRefreshed;
+  window.addEventListener('load', () => { if (!skipLockForRefresh) inputEl.focus(); });
 
   function unlockApp() {
     overlayEl.style.display = "none";
@@ -394,6 +402,8 @@
     }
     tapResetTimer = setTimeout(() => { tapCount = 0; }, 1500);
   });
+
+  if (skipLockForRefresh) unlockApp();
 })();
 </script>
 
@@ -698,21 +708,54 @@ const inlineConsole = document.getElementById('inlineConsole');
 const copyBtn = document.getElementById('inlineConsoleCopyBtn');
 if (!inlineConsole) return;
 
+// ✅ PERFORMANCE (native 13.180): this used to add a <div> per console line
+// forever and read scrollHeight (a forced layout) on every single one. Over a
+// long session that was thousands of nodes, and every log - including the
+// per-video and per-gesture ones - cost more than the last. Now: capped,
+// truncated, and written at most once a frame.
+const INLINE_CONSOLE_MAX_LINES = 250;  // ⚙️ lines kept on screen (oldest dropped)
+const INLINE_CONSOLE_MAX_CHARS = 1000; // ⚙️ per line
+
 function formatArg(arg) {
-  if (arg instanceof Error) return arg.stack || `${arg.name}: ${arg.message}`;
-  if (typeof arg === 'object') {
-    try { return JSON.stringify(arg, null, 2); } 
+  if (arg instanceof Error) return (arg.stack || `${arg.name}: ${arg.message}`).slice(0, INLINE_CONSOLE_MAX_CHARS);
+  if (arg && typeof arg === 'object') {
+    try { return String(JSON.stringify(arg)).slice(0, INLINE_CONSOLE_MAX_CHARS); }
     catch (e) { return String(arg); }
   }
-  return String(arg);
+  return String(arg).slice(0, INLINE_CONSOLE_MAX_CHARS);
+}
+
+let inlineConsolePending = [];
+let inlineConsoleFlushQueued = false;
+
+function flushInlineConsole() {
+  inlineConsoleFlushQueued = false;
+  const batch = inlineConsolePending.slice(-INLINE_CONSOLE_MAX_LINES);
+  inlineConsolePending = [];
+  const frag = document.createDocumentFragment();
+  batch.forEach(({ text, type }) => {
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    entry.textContent = text;
+    frag.appendChild(entry);
+  });
+  inlineConsole.appendChild(frag);
+  let extra = inlineConsole.childElementCount - INLINE_CONSOLE_MAX_LINES;
+  while (extra-- > 0 && inlineConsole.firstChild) inlineConsole.firstChild.remove();
+  inlineConsole.scrollTop = inlineConsole.scrollHeight;
 }
 
 function appendToInlineConsole(args, type = 'log') {
-  const entry = document.createElement('div');
-  entry.className = `log-entry ${type}`;
-  entry.textContent = args.map(formatArg).join(' ');
-  inlineConsole.appendChild(entry);
-  inlineConsole.scrollTop = inlineConsole.scrollHeight;
+  let text;
+  try { text = args.map(formatArg).join(' '); } catch (e) { return; }
+  inlineConsolePending.push({ text, type });
+  if (inlineConsolePending.length > INLINE_CONSOLE_MAX_LINES * 2) {
+    inlineConsolePending = inlineConsolePending.slice(-INLINE_CONSOLE_MAX_LINES);
+  }
+  if (!inlineConsoleFlushQueued) {
+    inlineConsoleFlushQueued = true;
+    requestAnimationFrame(flushInlineConsole);
+  }
 }
 
 const origLog = console.log;

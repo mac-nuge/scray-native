@@ -13,7 +13,7 @@ class ScriptMessageProxy: NSObject, WKScriptMessageHandler {
     }
 }
 
-class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
+class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     let webView: WKWebView
     let messageProxy = ScriptMessageProxy()
 
@@ -45,6 +45,15 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
         DispatchQueue.main.async {
             self.webView.evaluateJavaScript(
                 "window.scrayStashUrlFromBrowser && window.scrayStashUrlFromBrowser('\(escaped)');"
+            )
+        }
+    }
+
+    /// iOS says memory is short. The page drops what it can (13.180).
+    func notifyMemoryWarning() {
+        DispatchQueue.main.async {
+            self.webView.evaluateJavaScript(
+                "window.scrayOnMemoryWarning && window.scrayOnMemoryWarning();"
             )
         }
     }
@@ -96,8 +105,11 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
         // ✅ Without a UI delegate, WKWebView silently ignores alert()/confirm()
         // and confirm() returns false
         webView.uiDelegate = self
+        // Only for webViewWebContentProcessDidTerminate below (13.180).
+        webView.navigationDelegate = self
         addSubview(webView)
         ScrayNativeView.current = self
+        ScrayMemoryStats.shared.start()
     }
 
     override func layoutSubviews() {
@@ -115,9 +127,9 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
         }
 
         let payload = body["payload"]
-        DispatchQueue.main.async { [weak self] in
-            self?.webView.evaluateJavaScript("console.log('[Bridge build=\(BuildInfo.id)] received action=<' + '\(action)' + '> length=\(action.count)');")
-        }
+        // (13.180: no longer console.logs every bridge message - the
+        // performance monitor calls memoryStats every couple of seconds, and
+        // each log was a JS evaluation plus a line in the on-page console.)
 
         switch action {
         case "pickFolder":
@@ -296,6 +308,9 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
                 ScrayUploads.shared.forget(id: uploadId)
             }
             resolve(id: id, result: ["success": true])
+        case "memoryStats":
+            // Performance monitor by the console (13.180).
+            resolve(id: id, result: ScrayMemoryStats.shared.snapshot())
         case "debugBundle":
             let resourcePath = Bundle.main.resourcePath ?? "nil"
             let rootContents = (try? FileManager.default.contentsOfDirectory(atPath: resourcePath)) ?? []
@@ -308,6 +323,16 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate {
         default:
             reject(id: id, error: "Unknown action: \(action)")
         }
+    }
+
+    // MARK: - WKNavigationDelegate (web process killed)
+
+    /// iOS can kill the page's WebContent process outright when memory runs
+    /// out. The web view is then left blank and dead until the app restarts -
+    /// indistinguishable from "it ground to a halt". Reload instead, which is
+    /// what a restart was doing anyway (13.180).
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        webView.reload()
     }
 
     // MARK: - WKUIDelegate (new windows)

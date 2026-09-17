@@ -29,6 +29,9 @@ window.ScrayBridge = {
   listVideoFiles: () => callNative('listVideoFiles'),
   debugBundle: () => callNative('debugBundle'),
   deviceStorage: () => callNative('deviceStorage'),
+  // Performance monitor by the console (13.180) - ScrayMemoryStats.swift.
+  // Rejects with "Unknown action" on an older IPA.
+  memoryStats: () => callNative('memoryStats'),
   getVideoDuration: (relativePath) => callNative('getVideoDuration', relativePath),
   getVideoMetadata: (relativePath) => callNative('getVideoMetadata', relativePath),
   exportCsv: (csvText, filename) => callNative('exportCsv', { csv: csvText, filename }),

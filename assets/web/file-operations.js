@@ -3031,8 +3031,22 @@ function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
         }
     });
 
-    window.addEventListener('scroll', place, true);
-    window.addEventListener('resize', place);
+    // ✅ PERFORMANCE (native 13.180): the bookmark modal rebuilds its rows with
+    // innerHTML, so every edit render attached a fresh pair of these to window
+    // and none was ever removed - each keeping a dead modal and the full note
+    // list alive, and the capture-phase scroll one firing on every scroll in
+    // the app. They now take themselves off once the field has left the page.
+    const onViewportChange = () => {
+        if (!input.isConnected) {
+            close();
+            window.removeEventListener('scroll', onViewportChange, true);
+            window.removeEventListener('resize', onViewportChange);
+            return;
+        }
+        place();
+    };
+    window.addEventListener('scroll', onViewportChange, true);
+    window.addEventListener('resize', onViewportChange);
 }
 window.scrayAttachNoteAutocomplete = scrayAttachNoteAutocomplete;
 

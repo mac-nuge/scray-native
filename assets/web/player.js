@@ -108,29 +108,16 @@ const MANUAL_ROTATE_PROPS = [
 ];
 
 function getManualRotationFullscreenElement() {
-    // Is a fullscreen-ish mode actually active?
-    //
-    // This used to be guaranteed by the caller, and the "last resort" branch
-    // below logged on that assumption. It stopped holding when the title bar
-    // became shared with the mini-player: ensureVideoTitleBar() now calls
-    // this from inline and MPB/MPFS too, and updatePlayerStateClass() calls THAT
-    // on every resize - which on mobile means every address-bar show/hide.
-    // Hence the console filling with "falling back to generic .plyr
-    // container". The fallback is correct and always was; only the logging
-    // was wrong, so the logs are now gated on genuinely expecting a
-    // fullscreen element and not finding one.
-    const expectsFullscreen = manualRotationActive
-        || !!(window.plyrPlayer && window.plyrPlayer.fullscreen && window.plyrPlayer.fullscreen.active)
-        || document.body.classList.contains('manual-rotate-landscape')
-        || document.body.classList.contains('portrait-fullscreen')
-        || document.body.classList.contains('landscape-fullscreen');
+    // Called from inline, MPB, MPFS and FLS alike (the title bar is shared),
+    // on every resize and body class change, and per move of the FLS drag.
+    // It used to log which element it picked each time; 13.180 dropped those
+    // logs as hot-path noise - the fallbacks were always correct.
 
     // Prefer the real Fullscreen API element when available
     const nativeEl = document.fullscreenElement || document.webkitFullscreenElement || null;
     if (nativeEl) {
-        if (expectsFullscreen) {
-            console.log('[rotate] using native fullscreen element:', nativeEl.className || nativeEl.tagName);
-        }
+        // (13.180: per-call [rotate] logs removed - this runs on every FLS drag
+        // move and every body class change in fullscreen.)
         return nativeEl;
     }
 
@@ -141,9 +128,6 @@ function getManualRotationFullscreenElement() {
     const fallbackEl = document.querySelector('.plyr--fullscreen-fallback')
         || document.querySelector('.plyr--fullscreen');
     if (fallbackEl) {
-        if (expectsFullscreen) {
-            console.log('[rotate] using fallback fullscreen element:', fallbackEl.className);
-        }
         return fallbackEl;
     }
 
@@ -154,7 +138,6 @@ function getManualRotationFullscreenElement() {
     // time, not a failure - worth a line only when we expected better.
     const plyrContainer = document.querySelector('#inlineVideoContainer .plyr') || document.querySelector('.plyr');
     if (plyrContainer) {
-        if (expectsFullscreen) console.log('[rotate] falling back to generic .plyr container');
         return plyrContainer;
     }
 
@@ -623,14 +606,6 @@ function getManualRotationTargets() {
     // ✅ Small title bar at the very top of the player, showing the current
     // filename. Shared with MPFS/MPB now - see ensureVideoTitleBar above.
     const title = ensureVideoTitleBar();
-    console.log('[rotate] targets found:', {
-        container: !!container,
-        wrapper: !!wrapper,
-        video: !!video,
-        controls: !!controls,
-        progressBar: !!progressBar,
-        title: !!title
-    });
     return { container, wrapper, video, controls, progressBar, title };
 }
 
@@ -1415,7 +1390,6 @@ function applyManualRotationStyles() {
     // mobile browser chrome show/hide during fullscreen transitions
     const screenW = window.innerWidth;
     const screenH = window.innerHeight;
-    console.log('[rotate] applying with screen size', screenW, 'x', screenH);
 
     // Incorporate the manual position offset (px) directly into the
     // container's vertical anchor. Since 'top' sets the untransformed
@@ -1584,11 +1558,8 @@ function applyManualRotationStyles() {
         'z-index': '2147483647'
     });
 
-    // Log the actual computed size after applying, to confirm it took effect
-    if (container) {
-        const rect = container.getBoundingClientRect();
-        console.log('[rotate] container rect after apply:', rect.width, 'x', rect.height, 'at', rect.top, rect.left);
-    }
+    // (13.180: the post-apply getBoundingClientRect + log is gone - a forced
+    // layout per call, and this runs per move of the FLS reposition drag.)
 }
 
 function removeManualRotationStyles() {
@@ -2194,6 +2165,7 @@ function computeBottomDock() {
     const gapBetweenStackItems = 6; // small breathing room between info bar / player / filter bar
 
     const infoHeight = videoInfo ? videoInfo.offsetHeight : 0;
+
     // MUST run BEFORE reading container.offsetHeight - fitting the video
     // shrinks the container, and the dock offsets below are derived from
     // that height. Measuring first would use the pre-fit (overflowing) value.
@@ -4462,28 +4434,8 @@ function flashBookmarkTooltip(bm) {
     }
     console.log('[bm-flash] rail raised for', bm.note || formatDuration(time * 1000));
 
-    // TEMPORARY DIAGNOSTIC - remove once this is settled.
-    // Measures every way a correctly-built chip can end up invisible, rather
-    // than guessing at them one at a time. Deferred a frame so layout has run.
-    requestAnimationFrame(() => {
-        const plyr = document.querySelector('.plyr');
-        const c = document.querySelector('.plyr__controls');
-        const r = document.getElementById(RAIL_ID);
-        console.log('[bm-flash] state ' + JSON.stringify({
-            railInDom: !!r,
-            railRect: r ? r.getBoundingClientRect().toJSON() : null,
-            railOpacity: r ? getComputedStyle(r).opacity : null,
-            chipCount: r ? r.children.length : 0,
-            chipText: r && r.firstChild ? r.firstChild.textContent : null,
-            controlsOpacity: c ? getComputedStyle(c).opacity : null,
-            controlsVisibility: c ? getComputedStyle(c).visibility : null,
-            controlsOverflow: c ? getComputedStyle(c).overflow : null,
-            controlsRect: c ? c.getBoundingClientRect().toJSON() : null,
-            hideControlsClass: !!plyr?.classList.contains('plyr--hide-controls'),
-            paused: window.plyrPlayer?.paused,
-            fls: document.body.classList.contains('manual-rotate-landscape')
-        }));
-    });
+    // (13.180: the temporary [bm-flash] layout diagnostic that measured the
+    // rail with getComputedStyle x4 on every M> press is gone.)
 
     // Something else can tear the rail down mid-flash: renderBookmarkMarkers()
     // opens with hideBookmarkRail(), and a background sync pull triggers it.
@@ -5299,6 +5251,13 @@ let xOffset = 0;
 let yOffset = 0;
 
 handle.addEventListener('mousedown', dragStart);
+// Replaced per PIP entry rather than stacked (13.180) - each entry used to add
+// another pair that kept the old PIP box alive.
+if (window.__scrayPipDragDoc) {
+    document.removeEventListener('mousemove', window.__scrayPipDragDoc.drag);
+    document.removeEventListener('mouseup', window.__scrayPipDragDoc.dragEnd);
+}
+window.__scrayPipDragDoc = { drag, dragEnd };
 document.addEventListener('mousemove', drag);
 document.addEventListener('mouseup', dragEnd);
 
@@ -5383,6 +5342,11 @@ let isResizing = false;
 let startX, startY, startWidth, startHeight;
 
 resizeHandle.addEventListener('mousedown', startResize);
+if (window.__scrayPipResizeDoc) {
+    document.removeEventListener('mousemove', window.__scrayPipResizeDoc.resize);
+    document.removeEventListener('mouseup', window.__scrayPipResizeDoc.stopResize);
+}
+window.__scrayPipResizeDoc = { resize, stopResize };
 document.addEventListener('mousemove', resize);
 document.addEventListener('mouseup', stopResize);
 
@@ -5606,18 +5570,29 @@ function scrayPlaceMpbTapTiers() {
     guides.style.setProperty('--scray-mpb-q1-split', (p.top + p.height / 2 - w.top) + 'px');
 }
 
+// ✅ PERFORMANCE (13.180): classList.add/remove writes the class attribute
+// even when nothing changes, and every such write wakes each body-class
+// MutationObserver in the app (four of them). scraySleepTapGuides(0) runs on
+// every touchmove of a drag, so a scrub was re-running all four - and their
+// layout work - per finger movement. Only write when the class really flips.
+function scraySetGuidesAwake(on) {
+    if (document.body.classList.contains('scray-guides-awake') !== on) {
+        document.body.classList.toggle('scray-guides-awake', on);
+    }
+}
+
 function scrayWakeTapGuides() {
     clearTimeout(scrayGuidesTimer);
     scrayPlaceMpbTapTiers();
-    document.body.classList.add('scray-guides-awake');
+    scraySetGuidesAwake(true);
 }
 
 function scraySleepTapGuides(afterMs) {
     clearTimeout(scrayGuidesTimer);
     if (afterMs > 0) {
-        scrayGuidesTimer = setTimeout(() => document.body.classList.remove('scray-guides-awake'), afterMs);
+        scrayGuidesTimer = setTimeout(() => scraySetGuidesAwake(false), afterMs);
     } else {
-        document.body.classList.remove('scray-guides-awake');
+        scraySetGuidesAwake(false);
     }
 }
 
@@ -5755,6 +5730,66 @@ function scrayControlsMayShow(player, railUp) {
     // 'waiting', its recent-touch-seek grace. Not a reason on its own.
     return false;
 }
+
+// ============================================================================
+// PLYR LISTENER PRUNE (native 13.180)
+// Plyr records every listener it binds in player.eventListeners and only ever
+// empties that list on a FULL destroy. A source change is a soft destroy: it
+// throws the <video>, wrapper and control bar away, builds new ones and binds
+// ~100 fresh listeners - but the records for the old ones stay. Those records
+// kept every previous <video> (still loading Plyr's blank.mp4 and forwarding
+// its events into the container), every old control bar and every closure
+// hanging off them alive for the whole session. Plus one more 'click'
+// handler on the persistent container per video.
+//
+// Called straight after each source swap with the elements that swap
+// replaced (and about once a minute by scray-perf.js with none). Only
+// listeners on detached Plyr-built elements are removed, and only the newest
+// container click is kept. Checked against Plyr 3.7.8 in jsdom: 20 source
+// swaps grew the list 352 -> 3,563 records before, and hold flat at 183 with
+// this, with the new <video> and the play button still wired.
+// ============================================================================
+function scrayPrunePlyrListeners(player, prev) {
+    try {
+        if (!player || !Array.isArray(player.eventListeners)) return;
+        prev = prev || {};
+        const stale = [prev.media, prev.wrapper, prev.controls]
+            .filter(el => el && el.nodeType === 1 && !el.isConnected);
+        const container = player.elements && player.elements.container;
+        const records = player.eventListeners;
+        let lastContainerClick = -1;
+        records.forEach((r, i) => {
+            if (r && r.element === container && r.type === 'click') lastContainerClick = i;
+        });
+        const keep = [];
+        records.forEach((r, i) => {
+            const el = r && r.element;
+            const isOldClick = el === container && r.type === 'click' && i !== lastContainerClick;
+            const detached = !!el && el.nodeType === 1 && !el.isConnected;
+            // Anything Plyr built for a previous source: inside the elements
+            // the swap replaced, an old <video>, or an old control (Plyr keeps
+            // its play buttons in an array, so they are detached on their own).
+            const onStale = detached && (
+                stale.some(s => s === el || s.contains(el))
+                || (el.tagName === 'VIDEO' && el !== player.media)
+                || !!(el.closest && el.closest('.plyr__controls, .plyr__video-wrapper, .plyr__control'))
+            );
+            if (isOldClick || onStale) {
+                try { el.removeEventListener(r.type, r.callback, r.options); } catch (_) {}
+            } else {
+                keep.push(r);
+            }
+        });
+        player.eventListeners = keep;
+        // Stop the old element's blank.mp4 load and let WebKit free its media
+        // player now rather than whenever GC gets round to it.
+        const oldMedia = prev.media;
+        if (oldMedia && oldMedia !== player.media && !oldMedia.isConnected) {
+            try { oldMedia.removeAttribute('src'); oldMedia.load(); } catch (_) {}
+        }
+    } catch (e) { /* housekeeping must never break playback */ }
+}
+window.scrayPrunePlyrListeners = scrayPrunePlyrListeners;
 
 function scrayInstallControlsPolicy(player) {
     if (!player || player.__scrayControlsPolicy) return;
@@ -5941,16 +5976,25 @@ const COMMON_TIMEZONES = [
 let currentClockTimezone = localStorage.getItem('scray_clock_timezone') || 'Europe/London';
 
 // Update clock every second
+// ✅ PERFORMANCE (13.180): building an Intl.DateTimeFormat is slow in
+// JavaScriptCore and this ran every second for the whole session. One
+// formatter per timezone, and no DOM write unless the text changed.
+let ukClockFormatter = null;
+let ukClockFormatterZone = null;
 function updateUKClock() {
-    const now = new Date();
-    const clockTime = new Intl.DateTimeFormat('en-GB', {
-        timeZone: currentClockTimezone,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    }).format(now);
-    ukClock.textContent = clockTime;
+    if (document.hidden) return;
+    if (!ukClockFormatter || ukClockFormatterZone !== currentClockTimezone) {
+        ukClockFormatter = new Intl.DateTimeFormat('en-GB', {
+            timeZone: currentClockTimezone,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+        ukClockFormatterZone = currentClockTimezone;
+    }
+    const clockTime = ukClockFormatter.format(new Date());
+    if (ukClock.textContent !== clockTime) ukClock.textContent = clockTime;
 }
 
 updateUKClock(); // Initial update
@@ -6149,11 +6193,19 @@ progressBar.addEventListener('mouseleave', () => {
 isDesktopSeeking = false;
 });
 
-window.addEventListener('mouseup', () => {
+// ✅ PERFORMANCE (native 13.180): this function runs for every new video and
+// used to add one more window mouseup per run - each holding the previous,
+// already removed bar alive, and all of them firing on every tap (iOS sends a
+// mouseup after each). Replace the previous one instead of stacking.
+if (window.__scrayPermanentBarMouseUp) {
+    window.removeEventListener('mouseup', window.__scrayPermanentBarMouseUp);
+}
+window.__scrayPermanentBarMouseUp = () => {
 if (isDesktopSeeking) {
 isDesktopSeeking = false;
 }
-});
+};
+window.addEventListener('mouseup', window.__scrayPermanentBarMouseUp);
 
 // Mobile: touch to seek
 let isSeeking = false;
@@ -6622,22 +6674,7 @@ function showBookmarkRail(group, onPick, opts = {}) {
     place(group.length * CHIP_PREFERRED_PX + (group.length - 1) * CHIP_GAP_PX
         + (typeof opts.onEdit === 'function' ? CHIP_GAP_PX + RAIL_EDIT_BTN_PX : 0));
 
-    // TEMPORARY DIAGNOSTIC - remove once MPFS chip taps are settled.
-    // Asks the browser what is actually on top at the chip's own centre,
-    // rather than reasoning about z-index and geometry from the outside.
-    setTimeout(() => {
-        const b = rail.getBoundingClientRect();
-        const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
-        console.log('[rail] ' + JSON.stringify({
-            rect: b.toJSON(),
-            topEl: top ? (top.tagName + '|' + String(top.className || '').slice(0, 70)) : null,
-            topIsChip: !!(top && top.closest && top.closest('#' + RAIL_ID)),
-            controlsPE: getComputedStyle(controls).pointerEvents,
-            controlsOpacity: getComputedStyle(controls).opacity,
-            hideControls: !!document.querySelector('.plyr')?.classList.contains('plyr--hide-controls'),
-            body: document.body.className
-        }));
-    }, 0);
+    // (13.180: temporary [rail] hit-test diagnostic removed.)
 
     return rail;
 }
@@ -9947,7 +9984,7 @@ if (previewDelayMs > 0) {
         return;
     }
 }
-console.log("playVideoInline CALLED with video =", video);
+console.log("playVideoInline CALLED with", video && video.filename);
 // A play out of history walks the MAIN list from here on - see
 // scrayPlaceHistoryPlay. Note this rewrites what is REMEMBERED, not the
 // listContext this function was called with: the H< reset guard further down
@@ -9963,12 +10000,8 @@ currentVideoIndex = index;
 window.currentPlayingVideo = video; // Store for highlight updates
 window.scrayMarkPlayingRows?.(); // green row in the main list (render.js, 13.176)
 
-// TEMP DIAGNOSTIC - remove once bookmark marker issue is resolved
-console.log('[BM DEBUG] in-memory bookmarks for', video.filename, ':', JSON.stringify(video.bookmarks));
-getAllVideos().then(vs => {
-  const dbVideo = vs.find(v => v.oneDriveId === video.oneDriveId);
-  console.log('[BM DEBUG] in-DB bookmarks for', video.filename, ':', JSON.stringify(dbVideo?.bookmarks));
-});
+// (13.180: the temporary [BM DEBUG] diagnostic that read the WHOLE database on
+// every play just to log one video's bookmarks is gone.)
 
 // Remember whether forced (manual-rotate) landscape mode was active
 // before this video starts loading, so we can restore it below - some
@@ -10768,6 +10801,12 @@ if (unplayable) {
     return;
 }
 
+// Captured for scrayPrunePlyrListeners - the swap below replaces all three.
+const scrayPrevPlyrParts = {
+    media: window.plyrPlayer.media,
+    wrapper: window.plyrPlayer.elements && window.plyrPlayer.elements.wrapper,
+    controls: window.plyrPlayer.elements && window.plyrPlayer.elements.controls
+};
 try {
 window.plyrPlayer.source = {
     type: 'video',
@@ -10801,6 +10840,9 @@ if (video.driveId === "local" && typeof ScrayBridge !== 'undefined') {
 // intermediate version - no bare bar, no progress widget appearing and then
 // being stripped, no buttons popping in one reflow at a time.
 window.scrayRebuildPlayerControls?.();
+
+// Drop Plyr's records of the listeners on what the swap just threw away.
+scrayPrunePlyrListeners(window.plyrPlayer, scrayPrevPlyrParts);
 
 //  Setting .source rebuilds Plyr's internal video-wrapper/video
 // elements, which wipes their inline rotation styles immediately -
@@ -10898,7 +10940,7 @@ if (window.fullscreenReloadActive) {
 // Download video
 // ========================
 async function downloadVideoInline(video) {
- console.log("downloadVideoInline CALLED with video =", video);
+ console.log("downloadVideoInline CALLED with", video && video.filename);
  
  try {
      video = await refreshVideoBeforeUse(video);
@@ -11234,32 +11276,11 @@ if (!videoInfo && container && window.currentPlayingVideo) {
 // Check periodically (every 2 seconds) if video info needs restoration
 setInterval(ensureVideoInfoExists, 2000);
 
-// Also check on common events that might trigger DOM changes
-document.addEventListener('DOMContentLoaded', () => {
-// Watch for mutations that might remove the video info element
-// ✅ PERFORMANCE: without debouncing, this callback re-ran synchronously
-// on every single DOM mutation anywhere in the page (e.g. once per row
-// while a large playlist re-renders). Coalesce bursts of mutations into
-// a single check per animation frame instead.
-let mutationCheckScheduled = false;
-const observer = new MutationObserver((mutations) => {
-    if (mutationCheckScheduled) return;
-    mutationCheckScheduled = true;
-    requestAnimationFrame(() => {
-        mutationCheckScheduled = false;
-        const videoInfo = document.getElementById('currentVideoInfo');
-        if (!videoInfo && window.currentPlayingVideo) {
-            console.warn('Video info removed by mutation - restoring');
-            ensureVideoInfoExists();
-        }
-    });
-});
-
-// Observe the body for child removals
-observer.observe(document.body, {
-    childList: true,
-    subtree: true
-});
-});
+// ✅ PERFORMANCE (native 13.180): a second copy of this safeguard used to
+// watch EVERY DOM change in the whole page (subtree MutationObserver on
+// <body>) - the clock ticking, the timestamp on every timeupdate, list
+// re-renders - to do the same check the 2-second poll above already does.
+// That turned every DOM write in the app into extra work. Removed; the poll
+// stays.
 
 })();

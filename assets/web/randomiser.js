@@ -2325,7 +2325,13 @@ function refreshFiltersFromCommonSet() {
 // Bind dropdown changes to update global set & cascade options
 function bindDropdownWithCascade(selectId, cascadeFn) {
    const sel = $(`#${selectId}`);
-   sel.on('change', function () {
+   // ✅ PERFORMANCE (native 13.180): populateTagDropdowns runs again after
+   // every rename, move, refresh, folder scan... Re-initialising select2 only
+   // drops ITS OWN handlers, so a plain .on('change') stacked one more
+   // cascade per run - each holding a full copy of the catalogue - and a
+   // single tag change ended up running the whole filter N times over.
+   // Namespaced and replaced, there is only ever the latest one.
+   sel.off('change.scray').on('change.scray', function () {
        const newSelection = sel.val() || [];
 
        // Find tags from this dropdown in the global set
@@ -2529,7 +2535,8 @@ select.select2({
 });
 
 // Bind change event: refresh pill bar and filter list immediately
-select.on('change', function () {
+// (namespaced + replaced so repeat populates don't stack handlers - 13.180)
+select.off('change.scray').on('change.scray', function () {
     updateFloatingTagPillsFromCommon(); // pills bar now shows exclude pills too
     window.skipSearchScroll = true;
     filterDisplayedByFilename();        // re-filter using current includes/excludes
@@ -2849,8 +2856,8 @@ async function populateMimeTypeFilter() {
    minimumResultsForSearch: 0
  });
  
- // Refresh filters when selection changes
- select.on('change', function() {
+ // Refresh filters when selection changes (replaced, not stacked - 13.180)
+ select.off('change.scray').on('change.scray', function() {
    window.skipSearchScroll = true;
    filterDisplayedByFilename();
  });

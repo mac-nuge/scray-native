@@ -52,7 +52,58 @@ const META_FIELDS = new Set([
 ]);
 window.VIDEO_META_FIELDS = META_FIELDS;
 
+// ✅ PERFORMANCE (native 13.180): every openDB() used to open a brand new
+// IndexedDB connection and nothing ever closed one - a watch-time flush alone
+// opened six or seven, the sync status poll two more every 30s, every play a
+// few more. One shared connection now. It lets go by itself when something
+// needs the database back (deleteDatabase in scrayResetMirror, a version
+// upgrade from another page) and the next call simply opens a fresh one.
+//
+// iOS can drop a page's IndexedDB connection while the app is in the
+// background ("Connection to Indexed Database server lost"). Opening fresh
+// every time used to paper over that for free, so the shared one is let go
+// whenever the page is hidden, and checked before it is handed out.
+let scraySharedDBPromise = null;
+let scraySharedDB = null;
+
+function scrayReleaseSharedDB() {
+  const db = scraySharedDB;
+  scraySharedDB = null;
+  scraySharedDBPromise = null;
+  if (db) { try { db.close(); } catch (e) {} }
+}
+
+// Only forgotten, not closed, on hide: anything mid-way through using it
+// finishes normally, its versionchange handler still closes it for a delete,
+// and GC takes it after that.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { scraySharedDB = null; scraySharedDBPromise = null; }
+});
+
 function openDB() {
+  if (scraySharedDB) {
+    try {
+      // Throws synchronously on a closed / lost connection.
+      scraySharedDB.transaction(STORE_NAME, 'readonly');
+      return Promise.resolve(scraySharedDB);
+    } catch (e) {
+      scrayReleaseSharedDB();
+    }
+  }
+  if (scraySharedDBPromise) return scraySharedDBPromise;
+  scraySharedDBPromise = openDBConnection().then((db) => {
+    scraySharedDB = db;
+    db.onversionchange = () => { if (scraySharedDB === db) scrayReleaseSharedDB(); else { try { db.close(); } catch (e) {} } };
+    db.onclose = () => { if (scraySharedDB === db) { scraySharedDB = null; scraySharedDBPromise = null; } };
+    return db;
+  }, (err) => {
+    scraySharedDBPromise = null;
+    throw err;
+  });
+  return scraySharedDBPromise;
+}
+
+function openDBConnection() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 

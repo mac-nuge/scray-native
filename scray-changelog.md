@@ -4,6 +4,78 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 13.180 — test: long sessions stay quick - leak fixes, off-main-thread video serving, memory monitor under the player
+<!-- 2026-09-17T09:57Z -->
+
+**native** — `stg-native - 13.180`: `assets/web/player.js`, `assets/web/randomiser.js`, `assets/web/db.js`, `assets/web/file-operations.js`, `assets/web/random-panel.js`, `assets/web/scray-bridge.js`, `assets/web/index.html`, new `assets/web/scray-perf.js`, `modules/scray-native/ios/VideoSchemeHandler.swift`, `modules/scray-native/ios/ScrayNativeView.swift`, new `modules/scray-native/ios/ScrayMemoryStats.swift` (**Swift parts need a new IPA build**), `assets/web/VERSION`
+
+Mac reported that after 15–20+ minutes Native gets sluggish: gestures lag, the scrub gets inaccurate, it sometimes grinds to a halt, and the phone warms up. A restart fixes it. He asked for three things: a fix, something that clears whatever builds up during use, and a simple memory gauge under the player. He also asked for a sweep for redundant or legacy code.
+
+**Diagnosis.** A restart helping means something builds up over the session. Four parallel audits covered player.js (both halves), the list/filter modules, and the rest of the web layer. Every accumulating item below was checked against its call sites. The Plyr finding was also reproduced against Plyr 3.7.8's source in jsdom. No single runaway loop turned up; it's several leaks that grow per video, per render or per log line, plus main-thread blocking on the native side.
+
+**What built up (fixed):**
+- **Plyr kept every old player** (`scrayPrunePlyrListeners`, player.js). A `plyrPlayer.source =` swap is a soft destroy: it rebuilds the `<video>`, wrapper and controls but never forgets the listener records for the old ones. That kept every previous `<video>` alive, still loading Plyr's blank.mp4 and forwarding its events into the container, along with old control bars and every closure on them, plus one more container `click` handler per video. In jsdom, 20 swaps grew `eventListeners` from 352 to 3,563. With the prune right after each swap it holds flat at 183, and the new video's events and the play button still work.
+- **The on-page console grew forever** (index.html). One `<div>` per console line was never removed, full pretty-printed JSON was logged, and `scrollHeight` was read after every line (a forced layout). The Swift side added to it: a log per bridge message, and a log per video range request WebKit cancelled, which happens constantly while seeking. Now capped at 250 lines and 1,000 characters each, written at most once a frame. The Swift logs are gone.
+- **Tag dropdown handlers stacked** (randomiser.js). `populateTagDropdowns` re-runs after rename, move, refresh, folder scan, and every download landing from the in-app browser (`scrayRefreshLocalFolder`). Its `.on('change')` handlers survive select2 re-init, so each run added five more, each holding a full catalogue copy. After N runs, one tag change ran the whole filter N times. Now namespaced (`change.scray`) and replaced.
+- **Window listeners per video / per render.**
+  - The permanent progress bar added a window `mouseup` for every new video, each keeping its removed bar alive, all firing on every tap.
+  - The bookmark note autocomplete added window `scroll`/`resize` on every modal render.
+  - PIP drag/resize added document listeners on every PIP entry.
+  - All three are now replaced or self-removing.
+- **IndexedDB connections** (db.js). Every `openDB()` opened a new connection and nothing closed them; a single watch-time flush opened six or seven. Now one shared connection. It is let go on page hide (iOS can drop idle connections in the background), checked before reuse, and closes itself for `deleteDatabase` (reset mirror). Tested in fake-indexeddb: 4 calls = 1 open, delete isn't blocked, reopens after.
+
+**Hot-path work removed:**
+- **Scrubbing:** `scraySleepTapGuides(0)` rewrote the body class on every touchmove, which woke all four body-class MutationObservers per finger movement. It now only writes when the class actually flips.
+- **Per-call `[rotate]` logs:** removed from `getManualRotationFullscreenElement` / `getManualRotationTargets` / `applyManualRotationStyles`, along with a post-apply `getBoundingClientRect` done only for logging. These run on every FLS drag move.
+- **Leftover temporary diagnostics:**
+  - `[BM DEBUG]` read the **whole database on every play**.
+  - `[bm-flash]` did four `getComputedStyle` calls per M>.
+  - `[rail]` hit-tested per rail.
+- **Whole-page MutationObserver:** a legacy "video info safeguard" observer on `<body>` with `subtree:true` duplicated the 2-second poll beside it. Removed; the poll stays.
+- **Clock:** it built a new `Intl.DateTimeFormat` every second. Now one formatter per timezone.
+- **Whole-object logging:** `playVideoInline` / `downloadVideoInline` logged the entire video object. Now they log the filename.
+- **Bug fix (random-panel.js):** `appendToTaggedListInPanel` referenced `videosToRender`, which isn't defined there. It threw after appending, so "show more" in the landscape panel appended the same rows again each time.
+
+**Native side (VideoSchemeHandler.swift, rewritten):**
+- **Off the main thread:** the old handler read the requested range on the main thread, inside WebKit's `start` callback. Every buffering request blocked touches and the scrub for the length of a disk read. Reads now run on a serial background queue.
+- **Chunked:** responses are streamed in 512 KB pieces instead of one allocation per range.
+- **Bounded handles:** open file handles are capped at three most-recently-used. Before, one per video ever played stayed open.
+- **No stalls from reused addresses:** stopped tasks were kept in a Set keyed by `ObjectIdentifier` and never removed. A new request that happened to reuse a freed task's address was silently skipped as "cancelled", a plausible "grinds to a halt". Live tasks are now held strongly until they finish or stop, and every delivery checks on main that the task is still live.
+- **Crash recovery (ScrayNativeView):** `webViewWebContentProcessDidTerminate` reloads the page. Before, if iOS killed the web process for memory, the view just sat dead until a restart.
+
+**Monitor** (scray-perf.js + ScrayMemoryStats.swift).
+- **Where:** one line directly under the player, joining the docked stack between the player and the now-playing bar (`computeBottomDock`). Hidden when the player is idle or fullscreen.
+- **What it shows:** `● mem % · fps · lag · DOM · PL · thermal`.
+  - **mem:** the app's `phys_footprint` as a share of footprint + `os_proc_available_memory()`, i.e. how close the app is to iOS's kill limit.
+  - **fps:** a half-second rAF sample.
+  - **lag:** timer lateness.
+  - **DOM:** element count.
+  - **PL:** Plyr listener records, which should now stay flat.
+  - **thermal:** from `ProcessInfo.thermalState`.
+  - **Dot:** green, amber or red from the worst of these. It stays red for two minutes after an iOS memory warning.
+- **Tap for details:** a breakdown, plus **↻ Refresh page**. That reloads the page, which gives the same clean slate as a restart. It then reopens the current video at the same point and skips the lock screen, via a one-shot sessionStorage mark valid for 30s.
+- **Cost:** one 2-second timer, a short frame sample, the DOM count every 6s, and nothing while hidden. About once a minute it also runs the Plyr prune as housekeeping.
+- **On an iOS memory warning:** Swift calls `scrayOnMemoryWarning`, which prunes and trims the on-page console to 50 lines.
+- **Limitation:** the page itself runs in WebKit's separate WebContent process, and iOS gives apps no way to read another process's memory. So `mem` covers the app process only; DOM, PL, fps and lag are the page-side proxies.
+- **Before the new IPA:** everything JS-side works straight away in the dev client. `mem` and thermal show `–` until the 13.180 IPA is installed; the bridge rejects `memoryStats` as an unknown action.
+
+**Not done yet (candidates for the next round, once monitor readings are in):**
+- History rewrites up to 500 full video objects to localStorage and rebuilds all rows on every play.
+- The filter search runs the full pipeline per keystroke with no debounce.
+- render.js has a document-level non-passive `touchmove`.
+- The disguise "+P" modes run a per-frame `querySelectorAll` + rect loop for the whole session. The default grey mode keeps a full-screen `backdrop-filter` over the playing video, which is steady GPU work (warmth).
+- Modal Escape-key listeners are only removed on Escape, which a phone never sends.
+- Automatic refresh when idle and strained: held back until the monitor shows whether the fixes alone keep it flat.
+- Picker port of the shared-code fixes after Native confirmation.
+
+**Tested.**
+- **Syntax:** `node --check` on every changed JS file.
+- **jsdom + Plyr 3.7.8:** listener growth before and after the prune; new media still forwards events; play button still wired.
+- **jsdom:** scray-perf.js places itself after the player, renders from a stubbed bridge, the tap expands the details, a memory warning while idle doesn't throw, and the refresh mark round-trips and is consumed once.
+- **jsdom:** inline console holds 250 lines after 2,000 logs.
+- **fake-indexeddb:** shared connection (see above).
+- **Swift:** not compiled here, so the IPA build is the first compile.
+
 ### browse 13.71 / picker 13.186 / native 13.179 — stable: TinEye in the player overflow searches the current frame (frame hosted briefly by api.php)
 <!-- 2026-09-16T20:56Z -->
 

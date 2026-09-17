@@ -828,7 +828,10 @@ onClick: async (e) => {
  });
  
  // Update pagination controls
- paginationState.currentEndIndex = startIndex + videosToRender.length;
+ // 13.180: was `videosToRender.length` - a variable that only exists in
+ // renderTaggedListInPanel, so this threw AFTER appending, the index never
+ // moved and the next "show more" appended the same rows again.
+ paginationState.currentEndIndex = startIndex + videos.length;
  const paginationControls = document.getElementById("panelPaginationControls");
  if (paginationControls) {
    paginationControls.style.display = paginationState.currentEndIndex >= paginationState.allVideos.length ? 'none' : 'flex';

@@ -2494,6 +2494,23 @@ const JOG_MULT_BOTTOM = 128;
 const JOG_MULT_MIDDLE = 64;
 const JOG_MULT_TOP    = 32; 
 
+// ⚙️ Proportional scrub (playing): the speed zone is decided ONCE, where the
+// finger is when the drag is confirmed, and held for the whole drag (13.183).
+// It used to be re-read on every touchmove, so a finger drifting across the
+// zone line mid-drag switched x3 <-> x1 and re-scaled the WHOLE offset:
+// drifting up out of the bottom zone while dragging forwards threw the video
+// backwards, and drifting down into it tripled a small scrub into a huge
+// jump. Jog already locked its tier for exactly this reason.
+let scrubZoneMultiplier = 1;
+let scrubZoneLocked = false;
+// ⚙️ Dead zone (px). Direction is only decided after 10px, and the first seek
+// used to include those 10px - on a long video an instant jump of a minute
+// or more before the finger had really moved. Offset now counts from the
+// edge of this dead zone, so a scrub starts from where the video was.
+const SCRUB_DEAD_ZONE_PX = 10;
+// For the [scrub] line in the console on release.
+let scrubLogPx = 0;
+
 let jogEligible = false;   // paused on mobile - jog rather than seek
 let jogActive = false;     // jog has actually engaged
 let jogStartTime = 0;
@@ -2556,6 +2573,9 @@ startTime = window.plyrPlayer.currentTime;
 isHorizontalDrag = false;
 isDetermined = false;
 scrubbing = false; // Don't activate yet - wait to determine direction
+scrubZoneLocked = false;
+scrubZoneMultiplier = 1;
+scrubLogPx = 0;
 
 // A drag beginning on the left-half frame-step zones jogs rather than
 // scrubs. Only flagged here, not engaged: engaging now would swallow the
@@ -2693,6 +2713,19 @@ if (!zoomBlocksSwipe && isDetermined && !isHorizontalDrag && e && e.changedTouch
     }
 }
 
+// One line per scrub in the on-page console (13.183) - if a scrub lands
+// somewhere it shouldn't, "send report" straight after captures what it did.
+if (scrubSessionActive) {
+    try {
+        const dur = window.plyrPlayer.duration;
+        const to = pendingScrubTime !== null ? pendingScrubTime : window.plyrPlayer.currentTime;
+        const from = jogActive ? jogStartTime : startTime;
+        const how = jogActive ? `jog ${jogMultiplier}x` : `drag x${scrubZoneMultiplier}`;
+        console.log(`[scrub] ${how} ${formatDuration(from * 1000)} -> ${formatDuration(to * 1000)}`
+            + ` (${Math.round(scrubLogPx)}px${manualRotationActive ? ' FLS' : ''}, video ${formatDuration((dur || 0) * 1000)})`);
+    } catch (_) {}
+}
+
 scrubbing = false;
 isHorizontalDrag = false;
 isDetermined = false;
@@ -2804,6 +2837,11 @@ return;
 // or a plain tap would pause the video.
 if (scrubbing && !scrubSessionActive) {
     scrubSessionActive = true;
+    // Re-read the position now the drag is confirmed: a playing video has
+    // moved on since touchstart.
+    if (window.plyrPlayer && isFinite(window.plyrPlayer.currentTime)) {
+        startTime = window.plyrPlayer.currentTime;
+    }
     window.scrayScrubSeek.begin();
 }
 if (!scrubbing) {
@@ -2829,6 +2867,7 @@ if (jogEligible) {
     // so the video's own horizontal axis is the screen's Y.
     // ⚙️ If back/forward come out reversed, negate this.
     const jogDelta = manualRotationActive ? (currentY - startY) : (currentX - startX);
+    scrubLogPx = jogDelta;
 
     const steps = jogDelta / JOG_PX_PER_STEP;
     let newTime = jogStartTime + (steps * FRAME_STEP_DURATION * jogMultiplier);
@@ -2862,42 +2901,43 @@ if (jogEligible) {
 
 const rect = wrapper.getBoundingClientRect();
      const rotated = manualRotationActive;
+     const duration = window.plyrPlayer.duration;
+     const seekAxisSize = rotated ? rect.height : rect.width;
+     // A player not laid out yet (a new video still sizing itself, or a
+     // wrapper Plyr has already replaced) measures near zero, and dividing by
+     // it turned a few pixels into the whole video. Nothing sensible to do
+     // with that frame - skip it (13.183).
+     if (!(seekAxisSize >= 60) || !(duration > 0) || !isFinite(duration)) return;
      
      // Seeking distance: normally driven by horizontal screen movement /
      // element width; when rotated, driven by vertical screen movement /
      // element height instead (the video's own horizontal axis)
-     let fractionMoved;
-     if (rotated) {
-         const deltaYSigned = currentY - startY;
-         fractionMoved = deltaYSigned / rect.height;
-     } else {
-         const deltaXSigned = currentX - startX;
-         fractionMoved = deltaXSigned / rect.width;
-     }
+     const deltaSigned = rotated ? (currentY - startY) : (currentX - startX);
+     const beyondDeadZone = Math.sign(deltaSigned) * Math.max(0, Math.abs(deltaSigned) - SCRUB_DEAD_ZONE_PX);
+     const fractionMoved = beyondDeadZone / seekAxisSize;
+     scrubLogPx = deltaSigned;
      
-     // Zone speed multiplier: normally keyed off vertical tap position
-     // (near screen bottom = faster seeking); when rotated, keyed off
-     // horizontal tap position instead (the video's own vertical axis)
-     let distanceFromEdge, edgeAxisSize;
-     if (rotated) {
-         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-         edgeAxisSize = rect.width;
-         distanceFromEdge = edgeAxisSize - (clientX - rect.left);
-     } else {
-         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-         edgeAxisSize = rect.height;
-         distanceFromEdge = edgeAxisSize - (clientY - rect.top);
+     // Zone speed multiplier: normally keyed off vertical position (near the
+     // bottom of the video = faster seeking); when rotated, keyed off
+     // horizontal position instead (the video's own vertical axis).
+     // Decided once, on the first move of the drag, and held - see
+     // scrubZoneMultiplier above.
+     if (!scrubZoneLocked) {
+         let distanceFromEdge, edgeAxisSize;
+         if (rotated) {
+             edgeAxisSize = rect.width;
+             distanceFromEdge = edgeAxisSize - (currentX - rect.left);
+         } else {
+             edgeAxisSize = rect.height;
+             distanceFromEdge = edgeAxisSize - (currentY - rect.top);
+         }
+         // ⚙️ Bottom 20% of the video = x3, everywhere else x1.
+         scrubZoneMultiplier = distanceFromEdge < edgeAxisSize * 0.2 ? 3 : 1;
+         scrubZoneLocked = true;
      }
+     const zoneMultiplier = scrubZoneMultiplier;
      
-     let zoneMultiplier = 1;
-     if (distanceFromEdge < edgeAxisSize * 0.2) {
-     zoneMultiplier = 3;
-     } else if (distanceFromEdge < edgeAxisSize * 0.4) {
-     zoneMultiplier = 1;
-     }
-     
-     // FIX: Use window.plyrPlayer instead of player
-     let newTime = startTime + (fractionMoved * window.plyrPlayer.duration * zoneMultiplier);
+     let newTime = startTime + (fractionMoved * duration * zoneMultiplier);
      newTime = Math.max(0, Math.min(newTime, window.plyrPlayer.duration));
      
      // ✅ PERFORMANCE: touchmove can fire 60-120x/sec, far faster than a
@@ -2962,8 +3002,14 @@ const isLandscapeMobile = window.innerWidth <= 1024; // gate on mobile width onl
 if (isLandscapeMobile) {
    // Wait for controls to exist in DOM
    setTimeout(() => {
+       // This run's wrapper may already have been replaced by a newer video
+       // (two switches inside 500ms). Binding its handlers to the NEW bar
+       // measured a detached wrapper - zero size - and flung the scrub to the
+       // start or end. The newer run binds its own (13.183).
+       if (!wrapper.isConnected) return;
        const controls = document.querySelector('.plyr__controls');
-       if (controls) {
+       if (controls && !controls.__scrayLandscapeScrubBound) {
+           controls.__scrayLandscapeScrubBound = true;
            let rotateDragStartY = null;
            let rotateDragStartOffset = 0;
 
@@ -4021,6 +4067,17 @@ window.scrayScrubSeek = (function () {
             // video mid-drag, which would otherwise pop them up over the frame
             // you are trying to look at.
             document.body.classList.add('scray-scrubbing');
+            // A start point still being applied (bookmark row, X^T random
+            // time) gives way to the scrub (13.183). scrayApplyPendingStartAt
+            // waits up to 20s for a seekable source and re-writes the seek up
+            // to 10 times - a scrub in that window was either dragged back to
+            // the start point or, if the source only became seekable after
+            // it, thrown there on the next canplay. Clearing it makes the
+            // running chain see itself superseded and stop.
+            if (window.scrayPendingStartAt != null) {
+                console.log('[scrub] cancelled the pending start point - the scrub wins');
+                window.scrayPendingStartAt = null;
+            }
             // Controls policy: no bar and no grid for a scrub.
             if (typeof window.scrayOnScrubBegin === 'function') window.scrayOnScrubBegin();
             target = null;
@@ -6254,6 +6311,9 @@ progressTouchStartY = t.clientY;
 progressDragStarted = false;
 const percent = progressFractionFromPoint(t.clientX, t.clientY);
 const seekTime = percent * window.plyrPlayer.duration;
+// A tap on the bar is a destination too - a start point still being applied
+// must not drag it back (13.183, as scrayScrubSeek.begin does for drags).
+window.scrayPendingStartAt = null;
 
 const filled = progressBar.querySelector('.permanent-progress-filled');
 if (filled) filled.style.width = `${percent * 100}%`;

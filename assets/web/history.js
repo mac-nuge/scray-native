@@ -30,10 +30,39 @@ selectedHistoryIds.clear();
 renderHistory();
 }
 
-function saveHistory() {
-localStorage.setItem("scray_history", JSON.stringify(historyVideos));
-window.historyVideos = historyVideos;
+// ✅ PERFORMANCE (native 13.182): saving writes up to 500 full video records
+// to localStorage in one synchronous JSON.stringify - and it ran on every
+// play, right as the new video was loading, and again on every bookmark or
+// score save. Saves are now gathered into one write a moment later. Anything
+// pending is written straight away if the app is backgrounded or the page is
+// reloaded (Refresh page included), so nothing is lost.
+const HISTORY_SAVE_DELAY_MS = 1500; // ⚙️
+let historySaveTimer = null;
+let historySavePending = false;
+
+function flushHistorySave() {
+clearTimeout(historySaveTimer);
+historySaveTimer = null;
+if (!historySavePending) return;
+historySavePending = false;
+try {
+    localStorage.setItem("scray_history", JSON.stringify(historyVideos));
+} catch (err) {
+    console.error("Saving history failed:", err);
 }
+}
+
+function saveHistory() {
+window.historyVideos = historyVideos;
+historySavePending = true;
+clearTimeout(historySaveTimer);
+historySaveTimer = setTimeout(flushHistorySave, HISTORY_SAVE_DELAY_MS);
+}
+
+document.addEventListener("visibilitychange", () => {
+if (document.hidden) flushHistorySave();
+});
+window.addEventListener("pagehide", flushHistorySave);
 
 /**
  * Drop every history entry for a file that no longer exists on the device.
@@ -68,9 +97,12 @@ if (countEl) countEl.textContent = historyVideos.length;
 // ✅ Update history highlights based on basket contents
 function updateHistoryHighlights() {
 const allHistoryItems = document.querySelectorAll('#historyList li');
+if (!allHistoryItems.length) return;
+// One lookup set, not a scan of the basket per row (13.182).
+const inBasket = new Set((basketVideos || []).map(v => v.oneDriveId));
 allHistoryItems.forEach(li => {
     const videoIdInLi = li.dataset.videoId;
-    if (basketVideos.some(v => v.oneDriveId === videoIdInLi)) {
+    if (inBasket.has(videoIdInLi)) {
         li.classList.add('basket-added');
     } else {
         li.classList.remove('basket-added');
@@ -78,7 +110,24 @@ allHistoryItems.forEach(li => {
 });
 }
 
+// ✅ PERFORMANCE (native 13.182): renderHistory used to rebuild all (up to 500)
+// rows, each with its button set, on every play - with the panel shut. While
+// the panel is closed it now only notes that the rows are out of date and
+// keeps the H (n) count right; the rows are built when the panel opens.
+let historyRowsStale = true;
+
+function historyPanelIsOpen() {
+const panel = document.getElementById("historyPanel");
+return !!(panel && panel.classList.contains("history-open"));
+}
+
 function renderHistory() {
+if (!historyPanelIsOpen()) {
+    historyRowsStale = true;
+    updateHistoryCount();
+    return;
+}
+historyRowsStale = false;
 const historyList = document.getElementById("historyList");
 if (!historyList) return;
 historyList.innerHTML = '';
@@ -349,6 +398,8 @@ const panel = document.getElementById("historyPanel");
 if (!panel) return;
 const isOpening = open ?? !panel.classList.contains("history-open");
 panel.classList.toggle("history-open", isOpening);
+// Rows are only built while the panel is open (13.182) - catch up now.
+if (isOpening && historyRowsStale) renderHistory();
 }
 
 function clearHistory() {
@@ -483,6 +534,7 @@ window.addToHistory = addToHistory;
 window.toggleHistory = toggleHistory;
 window.clearHistory = clearHistory;
 window.saveHistory = saveHistory;
+window.flushHistorySave = flushHistorySave;
 window.renderHistory = renderHistory;
 window.clearHistorySelection = clearHistorySelection;
 window.exportHistorySubsetToCSV = exportHistorySubsetToCSV;
@@ -599,11 +651,11 @@ if (e.target === overlay) {
 // ESC key to close
 const historyTagEscHandler = (e) => {
   if (e.key === 'Escape') {
-      document.body.removeChild(overlay);
+      overlay.remove();
       document.removeEventListener('keydown', historyTagEscHandler);
   }
 };
-document.addEventListener('keydown', historyTagEscHandler);
+window.scrayEscapeWhileOpen(overlay, historyTagEscHandler); // not left behind on close (13.182)
 
 document.body.appendChild(overlay);
 }

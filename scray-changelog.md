@@ -4,6 +4,87 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 13.183 — test: scrub speed zone locks where the drag starts, small scrubs no longer jump, scrubbing cancels a pending start point
+<!-- 2026-09-17T11:40Z -->
+
+**native** — `stg-native - 13.183`: `assets/web/player.js`, `assets/web/VERSION` (JS only)
+
+Mac reported two things: a small scrub in the middle of the player at the start of a video jumps to around the middle of the video, and a forward scrub sometimes goes backwards. He also asked how scrubbing works (answered in chat, with no change requested to the design).
+
+**Cause, both bugs:** the speed zone was re-read on every touchmove. In `enableAnywhereScrubbing`'s playing-video path, `zoneMultiplier` was worked out from the finger's *current* position each move: bottom 20% of the video ×3, otherwise ×1. The offset is position-based (start + distance/width × duration × zone), so a finger drifting across the 20% line mid-drag re-scaled the *whole* accumulated offset.
+- **Drift down into the bottom zone:** a small scrub is tripled. Worked example, 46.6-min video on a 390px-wide player: starting at 1:00 and dragging 60px while drifting into the zone landed at ~22:30, about the middle.
+- **Drift up out of it while dragging forwards:** the offset drops to a third and the video goes backwards. Same video starting at 10:00: the seek went ~24:20 → ~18:20 while the finger kept moving right.
+- The paused jog path already locked its tier at the start of the drag for exactly this reason; the playing path never did.
+
+**Fixes (player.js, ANYWHERE SCRUBBING):**
+- **Zone locked** (`scrubZoneMultiplier`): the zone is decided once, on the first move of a confirmed drag, and held until release. The 20–40% branch that also set ×1 was dead and is gone. The tuning is unchanged: bottom 20% ×3, elsewhere ×1.
+- **Dead zone** (`SCRUB_DEAD_ZONE_PX` = 10): direction is decided after 10px, and the first seek used to include those pixels, an instant jump of over a minute on a long video. The offset now counts from the edge of the dead zone, and returning to the start point still lands on the start time.
+- **Start re-read:** `startTime` is taken again when the drag is confirmed, not only at touchstart, because a playing video has moved on in between.
+- **Size guard:** if the player measures under 60px along the seek axis, or the duration isn't known yet, that frame is skipped. Before, a not-yet-laid-out or replaced wrapper was divided by ~0 and flung the video to either end.
+- **Stale landscape bar handlers:** the real-landscape control-bar handlers (bound 500ms after `ready`) now bail if that run's wrapper has already been replaced by a newer video, and bind at most once per bar.
+- **Start points yield:** `scrayScrubSeek.begin()` and a progress-bar tap clear `scrayPendingStartAt`. Bookmark-row and X^T starts run `scrayApplyPendingStartAt`, which waits up to 20s for a seekable source and re-writes the seek up to 10 times. A scrub in that window was dragged back to the start point, or thrown there on the next `canplay`. The running chain now sees itself superseded and stops.
+- **Diagnostics:** one `[scrub]` line per scrub in the on-page console, showing mode/tier, from → to, pixels, FLS, and video length. If a scrub still misbehaves, "send report" right after captures it.
+
+**Tested:** `node --check`. `enableAnywhereScrubbing` was lifted out of player.js and run against stubbed touches, 2795s video, 390×220 player:
+- **Centre start drifting into the bottom zone, 60px forward:** 1:00 → 6:58 (×1 held). The old code gave ~22:30.
+- **Bottom start drifting up, forward:** seeks strictly increasing (×3 held). The old code went backwards.
+- **Zero-size wrapper:** no seeks issued.
+
+### native 13.182 — test: history saves and draws lazily, search waits for a typing pause, pop-ups don't leave listeners, disguise +P stops measuring every frame
+<!-- 2026-09-17T10:50Z -->
+
+**native** — `stg-native - 13.182`: `assets/web/history.js`, `assets/web/randomiser.js`, `assets/web/scray-config.js`, `assets/web/ui.js`, `assets/web/basket.js`, `assets/web/file-operations.js`, `assets/web/scray-basket-sync.js`, `assets/web/disguise.js`, `assets/web/VERSION` (JS only, no IPA build needed)
+
+The second performance round proposed after 13.180. Mac said to go ahead with all four before answering which disguise mode he uses, so the disguise part is limited to the change that doesn't alter how anything looks.
+
+**1. History** (`history.js`).
+- **Saving:** `saveHistory` wrote up to 500 full video records to localStorage in one synchronous `JSON.stringify`. That happened on every play, right as the new video loads, and again on every bookmark or score save. Saves are now gathered into one write 1.5s after the last change. Anything pending is written immediately on `visibilitychange` (hidden) and `pagehide`, which covers backgrounding, reloads and the monitor's Refresh page. `flushHistorySave` is exported.
+- **Rows:** `renderHistory` rebuilt every row (each with its button set) on every play, even with the panel shut. While the panel is closed it now only updates the H (n) count and marks the rows stale. `toggleHistory` builds them when the panel opens. Every caller already goes through `toggleHistory` to open it, including the fullscreen panel path.
+- **Highlights:** `updateHistoryHighlights` builds one basket-id Set instead of scanning the basket per row.
+- **Not done:** storing slim entries instead of full video copies. Rows, play-through, basket, CSV export and several other modules read fields straight off the stored entries, so it would be a data-model change with a lot to re-test, for little extra gain now that the write is batched.
+
+**2. Search** (`randomiser.js`).
+- **Typing pause:** the main search box's input handler ran the whole filter pass on every keystroke. It now waits for a 150ms pause (`SEARCH_TYPING_PAUSE_MS`). The X and the landscape panel's box still update instantly. The panel box and the in-player pill both drive the main box, so they get the same behaviour.
+- **Overtaken passes:** `filterDisplayedByFilename` now numbers each call (`scrayFilterDisplayedPass`). A pass that finds a newer one started while it was reading the catalogue stops before drawing. Its caller then waits for the newest pass to finish, so every `await filterDisplayedByFilename()` still returns with the final list on screen. This also fixes older results occasionally landing last, and Clear all's five change events drawing the list five times.
+
+**3. Pop-up Escape listeners** (`scray-config.js` ESCAPE WHILE OPEN).
+- **Registry:** `window.scrayEscapeWhileOpen(el, handler)` adds one shared keydown listener that calls a handler only while its element is on the page. It forgets entries once their element has gone (after a 1s grace, because several pop-ups register just before they're appended).
+- **Converted sites** (each previously only removed its document listener on Escape, which a phone never sends):
+  - exclude tags, search-pill bin and score filter (`randomiser.js`)
+  - tag action (`ui.js`)
+  - basket export / import / paste / import action / tag selector (`basket.js`)
+  - move and refresh folder (`file-operations.js`)
+  - history tag selector (`history.js`)
+  - playlist picker (`scray-basket-sync.js`)
+- **Bug fix:** the basket, history and exclude tag selectors' Escape used `document.body.removeChild` on an overlay that could already be gone. They now use `overlay.remove()`.
+- **Left as they were:** context menus, the score and F-tally menus, and the stash navigator already clean up on tap-outside or close.
+- **Legacy:** `scray-basket-sync.js` isn't loaded by `index.html` or `bookmarks.html` in Native, so that change is inert. It may be a candidate for removal.
+
+**4. Disguise** (`disguise.js`).
+- **"+P" modes (Inv +P, GrInv +P):** these ran `trackHole` every animation frame for the whole session: `querySelectorAll` over six selectors plus a rect read per match, playing or not. Tracking now runs in 900ms bursts woken by touches, scrolls, resizes, transitions and animations, play and `loadedmetadata`, and any body or player class change (via `syncStateClasses`). A 1-second idle check is the safety net. The hole follows the player exactly as before while anything is moving.
+- **`applyRowState`:** it rewrote every corner button's `hidden` and `order` on every class change in the player subtree. It now returns early unless the fullscreen/idle state or the button count changed.
+- **Open question for Mac:** Grey / Invert / Grey + Invert keep a full-screen `backdrop-filter` over the playing video, recomputed on the GPU every frame (likely heat). The only real fix is dropping the tint while the video is fullscreen, which changes how it looks, so it's waiting on which mode he uses and whether he wants that.
+
+**Tested.**
+- **Syntax:** `node --check` on every changed file.
+- **jsdom, Escape registry:** 50 pop-ups closed by button then one open, and a single Escape calls only the open one's handler.
+- **jsdom, history:** 20 plays with the panel shut built 0 rows and made 0 writes straight away, then 1 write after the pause. Opening the panel built all 20 rows, and a further play was flushed on visibilitychange (hidden).
+- **Overtaken passes:** with three overlapping calls finishing out of order, only the newest drew, and all three callers returned after it.
+
+### native 13.181 — test: performance monitor moved from under the player to above the console
+<!-- 2026-09-17T10:25Z -->
+
+**native** — `stg-native - 13.181`: `assets/web/scray-perf.js`, `assets/web/player.js`, `assets/web/index.html`, `assets/web/scray-bridge.js` (comment), `modules/scray-native/ios/ScrayMemoryStats.swift` and `ScrayNativeView.swift` (comments only - no new build needed for this change), `assets/web/VERSION`
+
+Mac asked for 13.180's monitor to sit by the console rather than under the player. It was under the player only because "directly below the monitor" in the original request was read as "below the video".
+
+- **Placement:** an ordinary in-flow line directly above `#inlineConsole`, restyled to match the console box (light background, same border).
+- **Player layout:** the 13.180 additions to `computeBottomDock` (the `perf-bottom-docked` class, and adding the monitor's height into the dock stack and video fit) are removed, so the docked player is back exactly as it was before 13.180.
+- **When it runs:** no longer hidden while the player is idle, since it isn't part of the player now. It still pauses in fullscreen (unless FLS peek is showing the page) and while the app is hidden.
+- **Unchanged:** readings, tap-for-details and Refresh page.
+
+**Tested:** `node --check`. jsdom: the monitor lands directly above the console and renders with nothing playing.
+
 ### native 13.180 — test: long sessions stay quick - leak fixes, off-main-thread video serving, memory monitor under the player
 <!-- 2026-09-17T09:57Z -->
 

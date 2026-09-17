@@ -374,7 +374,7 @@ window.showPlaylistPickerModal = async function () {
       document.removeEventListener("keydown", escHandler);
     }
   };
-  document.addEventListener("keydown", escHandler);
+  window.scrayEscapeWhileOpen(modal, escHandler); // not left behind on close (13.182)
 
   modal.querySelectorAll(".basket-picker-load-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {

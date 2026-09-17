@@ -1360,3 +1360,40 @@ window.scrayAddSearchTerm = function (term) {
   };
 })();
 
+// ============================================================================
+// ESCAPE WHILE OPEN (native 13.182)
+// Pop-ups used to add a document keydown listener for Escape and only take it
+// off when Escape was pressed - which a phone never does. So every pop-up
+// opened left one behind for the rest of the session, holding the closed
+// pop-up and everything it referenced. They register here instead: one
+// shared Escape listener, calling a handler only while its element is still
+// on the page, and forgetting entries once their element has gone - however
+// the pop-up was closed.
+// ============================================================================
+(function () {
+  const entries = [];
+
+  function prune() {
+    const now = Date.now();
+    for (let i = entries.length - 1; i >= 0; i--) {
+      // A pop-up is often registered a moment before it is appended, so only
+      // entries that have had time to show and have since gone are dropped.
+      if (!entries[i].el.isConnected && now - entries[i].at > 1000) entries.splice(i, 1);
+    }
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !entries.length) return;
+    prune();
+    entries.slice().reverse().forEach((entry) => {
+      if (!entry.el.isConnected) return;
+      try { entry.fn(e); } catch (err) { console.error('[escape] handler failed:', err); }
+    });
+  });
+
+  window.scrayEscapeWhileOpen = function (el, fn) {
+    if (!el || typeof fn !== 'function') return;
+    prune();
+    entries.push({ el, fn, at: Date.now() });
+  };
+})();

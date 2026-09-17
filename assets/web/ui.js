@@ -268,7 +268,7 @@ const tagActionEscHandler = (e) => {
       document.removeEventListener('keydown', tagActionEscHandler);
   }
 };
-document.addEventListener('keydown', tagActionEscHandler);
+window.scrayEscapeWhileOpen(modal, tagActionEscHandler); // not left behind on close (13.182)
  });
 }
 

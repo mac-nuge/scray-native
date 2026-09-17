@@ -502,11 +502,11 @@ overlay.addEventListener('click', (e) => {
 // ESC key to close
 const excludeTagEscHandler = (e) => {
   if (e.key === 'Escape') {
-      document.body.removeChild(overlay);
+      overlay.remove();
       document.removeEventListener('keydown', excludeTagEscHandler);
   }
 };
-document.addEventListener('keydown', excludeTagEscHandler);
+window.scrayEscapeWhileOpen(overlay, excludeTagEscHandler); // not left behind on close (13.182)
 
 document.body.appendChild(overlay);
 }
@@ -1806,7 +1806,7 @@ function ensureSearchPillPopup() {
             document.removeEventListener('keydown', escHandler);
         }
     };
-    document.addEventListener('keydown', escHandler);
+    window.scrayEscapeWhileOpen(popup, escHandler); // not left behind on close (13.182)
 }
 
 function dismissSearchPillPopup() {
@@ -2820,7 +2820,7 @@ if (e.key === 'Escape') {
    // ✅ FIX: Attach to overlay instead of document
  overlay.addEventListener('click', closeHandler);
  overlay.addEventListener('touchstart', closeHandler);
- document.addEventListener('keydown', escapeHandler);
+ window.scrayEscapeWhileOpen(overlay, escapeHandler); // not left behind on close (13.182)
 }
 
 window.showScoreFilterModal = showScoreFilterModal;
@@ -3172,7 +3172,33 @@ return true;
 /* =========================================
 Updated filterDisplayedByFilename
 ========================================= */
+// ✅ PERFORMANCE (native 13.182): OVERTAKEN PASSES. A pass reads the whole
+// catalogue (async) before it draws, so quick changes - typing, a Clear all
+// that fires five selects - used to leave several passes in flight at once,
+// each drawing the full list in turn, and an older one could land LAST and
+// put stale results on screen. Each call now takes a number; a pass that
+// finds a newer one started while it was reading stops before drawing, and
+// its caller waits for the newest to finish, so anything awaiting this still
+// sees the list as it ends up.
+let scrayFilterSeq = 0;
+let scrayFilterLatest = Promise.resolve();
+
 async function filterDisplayedByFilename() {
+const seq = ++scrayFilterSeq;
+const run = scrayFilterDisplayedPass(seq);
+scrayFilterLatest = run.catch(() => {});
+try {
+    await run;
+} finally {
+    let waited = null;
+    while (waited !== scrayFilterLatest) {
+        waited = scrayFilterLatest;
+        await waited;
+    }
+}
+}
+
+async function scrayFilterDisplayedPass(seq) {
 const searchEl = document.getElementById("filenameSearchBox");
 const searchText = searchEl.value.trim();
 
@@ -3182,6 +3208,7 @@ const minDurationMs = getDurationMsFromInputs("minMinutes", "minSeconds");
 const maxDurationMs = getDurationMsFromInputs("maxMinutes", "maxSeconds");
 
 let videos = await getFilteredVideos(includeTags, excludeTags, minDurationMs, maxDurationMs);
+if (seq !== scrayFilterSeq) return; // overtaken - the newer pass draws
 
 // ✅ Track search terms for highlighting
  if (searchText.length > 0) {
@@ -3891,6 +3918,10 @@ if (typeof updatePanelSortButton === 'function') {
   const clearX = document.getElementById("clearSearchX");
   const clearFiltersBtn = document.getElementById("clearFiltersBtn");
 
+  // ⚙️ How long typing has to pause before the list filters.
+  const SEARCH_TYPING_PAUSE_MS = 150;
+  let searchTypingTimer = null;
+
   searchBox.addEventListener("input", () => {
   clearX.style.display = searchBox.value ? "block" : "none";
   
@@ -3904,14 +3935,21 @@ if (typeof updatePanelSortButton === 'function') {
     }
   }
   
-  // Prevent panel from auto-opening in landscape mobile
-  window.skipPanelAutoOpen = true;
-  // Prevent scroll jump while typing in the filter bar
-  window.skipSearchScroll = true;
-  filterDisplayedByFilename();
-  // Re-apply top-of-page scroll after every keystroke - the list
-  // re-render can otherwise shift the page and pull scroll back down
-  scrollListIntoViewForFilter();
+  // ✅ PERFORMANCE (native 13.182): the whole filter - catalogue read, sort,
+  // grouping, list rebuild, pills - used to run on EVERY keystroke. It now
+  // runs once typing pauses. The X and the panel box above still update
+  // instantly.
+  clearTimeout(searchTypingTimer);
+  searchTypingTimer = setTimeout(() => {
+      // Prevent panel from auto-opening in landscape mobile
+      window.skipPanelAutoOpen = true;
+      // Prevent scroll jump while typing in the filter bar
+      window.skipSearchScroll = true;
+      filterDisplayedByFilename();
+      // Re-apply top-of-page scroll after the re-render - it can otherwise
+      // shift the page and pull scroll back down
+      scrollListIntoViewForFilter();
+  }, SEARCH_TYPING_PAUSE_MS);
 });
 
 // ✅ Enter key to blur and dismiss keyboard (all devices)

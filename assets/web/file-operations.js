@@ -1679,7 +1679,7 @@ if (e.key === 'Escape') {
     document.removeEventListener('keydown', moveEscHandler);
 }
 };
-document.addEventListener('keydown', moveEscHandler);
+window.scrayEscapeWhileOpen(modal, moveEscHandler); // not left behind on close (13.182)
 
 // Go to Folder button
 goToFolderBtn.addEventListener('click', async () => {
@@ -2750,7 +2750,7 @@ return new Promise((resolve) => {
             document.removeEventListener('keydown', escHandler);
         }
     };
-    document.addEventListener('keydown', escHandler);
+    window.scrayEscapeWhileOpen(modal, escHandler); // not left behind on close (13.182)
 });
 }
 

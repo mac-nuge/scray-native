@@ -1331,15 +1331,42 @@
       }
     }
 
+    // ✅ PERFORMANCE (native 13.182): the "+P" modes used to run this every
+    // frame for the whole session - a querySelectorAll over six selectors
+    // and a getBoundingClientRect on each match, 60 times a second, playing
+    // or not, forcing a layout per frame in the middle of every gesture. The
+    // player only moves when something happens, so tracking now runs in short
+    // bursts after the things that can move it (touches, scrolls, resizes,
+    // transitions, player/body class changes), plus one quiet check a second
+    // as a safety net. The hole follows exactly as before while anything is
+    // moving; it just stops measuring when nothing is.
+    const HOLE_BURST_MS = 900;      // ⚙️ keep tracking this long after a wake
+    const HOLE_IDLE_CHECK_MS = 1000; // ⚙️ safety-net check while idle
+    let holeUntil = 0;
+
     function trackHole() {
       applyTint();
-      holeRaf = MODE_EXEMPT_PLAYER[state.mode] ? requestAnimationFrame(trackHole) : null;
+      holeRaf = (MODE_EXEMPT_PLAYER[state.mode] && !document.hidden
+                 && performance.now() < holeUntil)
+        ? requestAnimationFrame(trackHole) : null;
     }
 
-    function startHoleTracking() {
-      if (holeRaf || !MODE_EXEMPT_PLAYER[state.mode]) return;
-      holeRaf = requestAnimationFrame(trackHole);
+    function startHoleTracking(ms) {
+      if (!MODE_EXEMPT_PLAYER[state.mode]) return;
+      holeUntil = Math.max(holeUntil, performance.now() + (ms || HOLE_BURST_MS));
+      if (!holeRaf) holeRaf = requestAnimationFrame(trackHole);
     }
+
+    const wakeHole = () => { if (MODE_EXEMPT_PLAYER[state.mode]) startHoleTracking(); };
+    ['touchstart', 'touchmove', 'touchend', 'scroll', 'transitionend', 'animationend']
+      .forEach(t => document.addEventListener(t, wakeHole, { capture: true, passive: true }));
+    window.addEventListener('resize', wakeHole, { passive: true });
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', wakeHole, { passive: true });
+    document.addEventListener('play', wakeHole, true);
+    document.addEventListener('loadedmetadata', wakeHole, true);
+    setInterval(() => {
+      if (!holeRaf && MODE_EXEMPT_PLAYER[state.mode] && !document.hidden) applyTint();
+    }, HOLE_IDLE_CHECK_MS);
 
     // Diagnostic: run scrayDisguiseDebug() in the console while a video is up.
     window.scrayDisguiseDebug = function () {
@@ -1796,10 +1823,17 @@
     // this is belt and braces, and it is what the state function reads, so the
     // two cannot disagree about what fullscreen shows.
     const ROW_FULLSCREEN = [];
+    let lastRowState = null;
     function applyRowState(isFullscreen) {
       if (!strip) return;
+      // Runs on every class change in the player - only rewrite the row when
+      // the state it depends on actually flipped (13.182).
+      const btns = strip.querySelectorAll('.burger-btn');
+      const key = (isFullscreen ? 'fs' : 'idle') + ':' + btns.length;
+      if (key === lastRowState) return;
+      lastRowState = key;
       const want = isFullscreen ? ROW_FULLSCREEN : ROW_IDLE;
-      strip.querySelectorAll('.burger-btn').forEach(btn => {
+      btns.forEach(btn => {
         const at = want.indexOf(btn.id);
         btn.hidden = at === -1;
         // flex order, so the row reads in the requested sequence without the
@@ -1837,6 +1871,7 @@
 
     function syncStateClasses() {
       const b = document.body;
+      if (typeof startHoleTracking === 'function') startHoleTracking(); // +P hole may move (13.182)
       const mpfs = b.classList.contains('portrait-fullscreen')
         && !b.classList.contains('manual-rotate-landscape');
       // FLS counts too: both put the player over the whole screen, and the

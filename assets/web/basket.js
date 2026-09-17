@@ -1263,7 +1263,7 @@ const exportEscHandler = (e) => {
       document.removeEventListener('keydown', exportEscHandler);
   }
 };
-document.addEventListener('keydown', exportEscHandler);
+window.scrayEscapeWhileOpen(modal, exportEscHandler); // not left behind on close (13.182)
 }
 
 // Export to file (compressed format - IDs only)
@@ -1364,7 +1364,7 @@ const importEscHandler = (e) => {
       document.removeEventListener('keydown', importEscHandler);
   }
 };
-document.addEventListener('keydown', importEscHandler);
+window.scrayEscapeWhileOpen(modal, importEscHandler); // not left behind on close (13.182)
 }
 
 // Show paste JSON textarea modal
@@ -1433,7 +1433,7 @@ const pasteEscHandler = (e) => {
       document.removeEventListener('keydown', pasteEscHandler);
   }
 };
-document.addEventListener('keydown', pasteEscHandler);
+window.scrayEscapeWhileOpen(modal, pasteEscHandler); // not left behind on close (13.182)
 }
 
 // Import from file (original behavior)
@@ -1634,7 +1634,7 @@ const importActionEscHandler = (e) => {
       document.removeEventListener('keydown', importActionEscHandler);
   }
 };
-document.addEventListener('keydown', importActionEscHandler);
+window.scrayEscapeWhileOpen(modal, importActionEscHandler); // not left behind on close (13.182)
 });
 }
 
@@ -1813,11 +1813,11 @@ if (e.target === overlay) {
 // ESC key to close
 const basketTagEscHandler = (e) => {
   if (e.key === 'Escape') {
-      document.body.removeChild(overlay);
+      overlay.remove();
       document.removeEventListener('keydown', basketTagEscHandler);
   }
 };
-document.addEventListener('keydown', basketTagEscHandler);
+window.scrayEscapeWhileOpen(overlay, basketTagEscHandler); // not left behind on close (13.182)
 
 document.body.appendChild(overlay);
 }

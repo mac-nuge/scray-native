@@ -4,6 +4,35 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 13.184 — test: only a touch the scrub accepted can scrub - no jump to the finger's position at the start of a video
+<!-- 2026-09-17T12:30Z -->
+
+**native** — `stg-native - 13.184`: `assets/web/player.js`, `assets/web/VERSION` (JS only)
+
+The jump was still happening after 13.183. Mac pinned it down in FLS: a scrub near the video's bottom-right (bottom-left of the physical screen in portrait), at the start of a video, sends the progress bar almost straight to the point under the finger.
+
+**Diagnosis.**
+- **The clue:** "straight to the point under the finger" is an absolute mapping, but the anywhere-scrub is relative (start + distance).
+- **How a relative scrub goes absolute:** in `enableAnywhereScrubbing`, `scrubMove` acted on any touchmove reaching the wrapper, whether or not `startScrub` had accepted that touch.
+- **When `startScrub` doesn't accept it:** it can bail early and leave `startX`/`startY` from an earlier gesture. The early exits are:
+  - the pinch grace window (`scrayZoomBlocksGestures`, 400ms–2s after any zoom gesture)
+  - a frame-step hold
+  - a control under the finger
+  - the touchdown never reaching it at all
+- **At the start of a video:** each video gets a fresh closure, where `startX`/`startY` are still 0 and `startTime` is 0. The "offset" is then the finger's distance from the screen edge along the seek axis, which in FLS is the screen's Y. So the video jumps to roughly the finger's position, and the zone Mac described (far down the screen) lands well into the video.
+- **Not confirmed on device:** which early exit fires there.
+
+**Fix.**
+- **Armed touches only:** `scrubTouchArmed` / `scrubTouchId`. Only the touch `startScrub` accepted can scrub. It is armed at the end of `startScrub` and cleared on release, touchcancel and the pinch handover. `scrubMove` also ignores a touch with a different identifier.
+- **Diagnostics:**
+  - The `[scrub]` release line now includes the start point and the player's size.
+  - A progress-bar touchdown logs `[bar] touch at x,y -> time (bar rect)`.
+  - If a jump still happens, a report taken straight after shows which path moved the video: the anywhere-scrub or the progress bar.
+
+**Tested.** `node --check`. `enableAnywhereScrubbing` was lifted out and run against stubbed touches:
+- **Touchmoves with no accepted touchdown:** 0 seeks.
+- **13.183's drags** (zone lock, monotonic forward, zero-size wrapper): unchanged results.
+
 ### native 13.183 — test: scrub speed zone locks where the drag starts, small scrubs no longer jump, scrubbing cancels a pending start point
 <!-- 2026-09-17T11:40Z -->
 

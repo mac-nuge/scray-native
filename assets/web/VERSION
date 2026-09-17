@@ -1,1 +1,1 @@
-stg-native - 13.183 test: scrub speed zone locks where the drag starts, small scrubs no longer jump, scrubbing cancels a pending start point
+stg-native - 13.184 stable: only a touch the scrub accepted can scrub - no jump to the finger's position at the start of a video

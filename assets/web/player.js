@@ -2510,6 +2510,16 @@ let scrubZoneLocked = false;
 const SCRUB_DEAD_ZONE_PX = 10;
 // For the [scrub] line in the console on release.
 let scrubLogPx = 0;
+// ⚙️ ACCEPTED TOUCH (13.184). scrubMove used to act on ANY touchmove reaching
+// the wrapper, whether or not startScrub had accepted that touch. When
+// startScrub bailed early (pinch grace window, frame-step hold, a control
+// under the finger) or never saw the touchdown at all, startX/startY were
+// left from an earlier gesture - or still 0 on a freshly loaded video, with
+// startTime 0 too. The "offset" was then the finger's distance from the
+// screen edge, so the video jumped to roughly where the finger was along the
+// seek axis. Only the touch startScrub armed can scrub now.
+let scrubTouchArmed = false;
+let scrubTouchId = null;
 
 let jogEligible = false;   // paused on mobile - jog rather than seek
 let jogActive = false;     // jog has actually engaged
@@ -2524,6 +2534,7 @@ showPlayerFeedback(formatDuration(newTime * 1000), 'top-left');
 // closure-local to this function, so the zoom module can't reach in - it raises
 // window.scrayZoomBlocksGestures() instead and this does the teardown.
 const cancelScrubForZoom = () => {
+    scrubTouchArmed = false;
     if (scrubSessionActive) {
         scrubSessionActive = false;
         window.scrayScrubSeek.end();
@@ -2537,6 +2548,7 @@ const cancelScrubForZoom = () => {
 };
 
 const startScrub = (e) => {
+scrubTouchArmed = false; // armed below, only once this touch is accepted
 // A second finger down means a pinch-zoom, not a scrub. Bail before any jog or
 // seek state is armed, and tear down whatever the FIRST finger already started
 // - the zoom module owns the gesture from here.
@@ -2576,6 +2588,8 @@ scrubbing = false; // Don't activate yet - wait to determine direction
 scrubZoneLocked = false;
 scrubZoneMultiplier = 1;
 scrubLogPx = 0;
+scrubTouchArmed = true;
+scrubTouchId = e.touches && e.touches[0] ? e.touches[0].identifier : null;
 
 // A drag beginning on the left-half frame-step zones jogs rather than
 // scrubs. Only flagged here, not engaged: engaging now would swallow the
@@ -2721,14 +2735,17 @@ if (scrubSessionActive) {
         const to = pendingScrubTime !== null ? pendingScrubTime : window.plyrPlayer.currentTime;
         const from = jogActive ? jogStartTime : startTime;
         const how = jogActive ? `jog ${jogMultiplier}x` : `drag x${scrubZoneMultiplier}`;
+        const wr = wrapper.getBoundingClientRect();
         console.log(`[scrub] ${how} ${formatDuration(from * 1000)} -> ${formatDuration(to * 1000)}`
-            + ` (${Math.round(scrubLogPx)}px${manualRotationActive ? ' FLS' : ''}, video ${formatDuration((dur || 0) * 1000)})`);
+            + ` (${Math.round(scrubLogPx)}px${manualRotationActive ? ' FLS' : ''}, from ${Math.round(startX)},${Math.round(startY)}`
+            + `, player ${Math.round(wr.width)}x${Math.round(wr.height)}, video ${formatDuration((dur || 0) * 1000)})`);
     } catch (_) {}
 }
 
 scrubbing = false;
 isHorizontalDrag = false;
 isDetermined = false;
+scrubTouchArmed = false;
 
 // Jog reset belongs HERE, on release - it was only ever being cleared at
 // touch-down, so nothing knew a jog had just finished.
@@ -2769,6 +2786,9 @@ if ((e.touches && e.touches.length > 1) || window.scrayZoomBlocksGestures?.()) {
 if (window.frameStepHolding) {
 return;
 }
+// Not a touch startScrub accepted - see scrubTouchArmed.
+if (!scrubTouchArmed) return;
+if (e.touches && e.touches[0] && scrubTouchId !== null && e.touches[0].identifier !== scrubTouchId) return;
 
 const currentX = e.touches ? e.touches[0].clientX : e.clientX;
 const currentY = e.touches ? e.touches[0].clientY : e.clientY;
@@ -2981,6 +3001,7 @@ wrapper.addEventListener('touchmove', scrubMove, { passive: false });
 // paused mid-drag with the seek session still open. Close it here, without
 // running any of stopScrub's swipe-gesture handling.
 wrapper.addEventListener('touchcancel', () => {
+    scrubTouchArmed = false;
     if (scrubSessionActive) {
         scrubSessionActive = false;
         window.scrayScrubSeek.end(pendingScrubTime);
@@ -6314,6 +6335,11 @@ const seekTime = percent * window.plyrPlayer.duration;
 // A tap on the bar is a destination too - a start point still being applied
 // must not drag it back (13.183, as scrayScrubSeek.begin does for drags).
 window.scrayPendingStartAt = null;
+try {
+    const br = progressBar.getBoundingClientRect();
+    console.log(`[bar] touch at ${Math.round(t.clientX)},${Math.round(t.clientY)} -> ${formatDuration(seekTime * 1000)}`
+        + ` (bar ${Math.round(br.left)},${Math.round(br.top)} ${Math.round(br.width)}x${Math.round(br.height)})`);
+} catch (_) {}
 
 const filled = progressBar.querySelector('.permanent-progress-filled');
 if (filled) filled.style.width = `${percent * 100}%`;

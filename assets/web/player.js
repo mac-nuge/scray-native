@@ -952,7 +952,8 @@ if (!window.__scrayZoomInstalled) {
 }
 
 // =========================================
-// ⚙️ ONE-FINGER ZOOM  (13.55: tap, then touch again and drag, in the left zone)
+// ⚙️ ONE-FINGER ZOOM  (13.55: tap, then touch again and drag, in the left zone;
+//    13.186: the play/pause zone as well - see SCRAY_OFZ_INCLUDES_PLAY_PAUSE)
 // =========================================
 // The left zone is the slice of the picture left of the grid's leftmost line.
 // It is measured exactly the way handleDoubleTap measures its zones, so it
@@ -987,6 +988,10 @@ let ofzLastTapAt = 0;   // when the last left-zone tap lifted
 let ofzTouch = null;    // the touch being watched, until it lifts
 
 // Which part of the picture a screen point is in, by handleDoubleTap's rules.
+// ⚙️ 13.186: the left zone AND the play/pause zone next to it - so FLS and
+// device landscape take the left two thirds, MPB and MPFS the left half.
+// Set SCRAY_OFZ_INCLUDES_PLAY_PAUSE false to go back to the left zone only.
+const SCRAY_OFZ_INCLUDES_PLAY_PAUSE = true;
 function scrayOneFingerZoomInZone(x, y) {
     const t = scrayZoomTargets(true);
     if (!t) return false;
@@ -998,16 +1003,20 @@ function scrayOneFingerZoomInZone(x, y) {
     const ly = remap ? remap.y : y - rect.top;
     const w = remap ? remap.width : rect.width;
     const h = remap ? remap.height : rect.height;
-    // FLS and device landscape: thirds - the left third is left of the first line.
-    if (isForcedOrRealLandscapeMobile() && window.innerWidth <= 1024) return lx < w / 3;
+    // FLS and device landscape: thirds - the left third is left of the first
+    // line, the play/pause third left of the second.
+    if (isForcedOrRealLandscapeMobile() && window.innerWidth <= 1024) {
+        return lx < (SCRAY_OFZ_INCLUDES_PLAY_PAUSE ? (w / 3) * 2 : w / 3);
+    }
     // MPFS keeps its zones inside the band (see MPFS_BAND_* in handleDoubleTap).
     if (document.body.classList.contains('portrait-fullscreen')) {
         const top = h / 3;
         const bottom = Math.max(top + 1, h - 152);
         if (ly < top || ly > bottom) return false;
     }
-    // MPB and MPFS: quarters - the left quarter is left of the first line.
-    return lx < w / 4;
+    // MPB and MPFS: quarters - the left quarter is left of the first line,
+    // the play/pause quarter left of the middle one.
+    return lx < (SCRAY_OFZ_INCLUDES_PLAY_PAUSE ? w / 2 : w / 4);
 }
 
 // Things on the picture that run their own touch.
@@ -1179,6 +1188,17 @@ let mpfsPanStartY = 0;
 let mpfsPanLastLocal = { x: 0, y: 0 };
 let mpfsPanClickBlockUntil = 0;
 let mpfsPanFromBar = false;  // started on the bar, not above the grid
+// ⚙️ PAN ZONES WHILE ZOOMED (13.185). A touch that lands in any pan zone -
+// the bar, the strip above the grid, or (new) the play/pause zone - belongs
+// to the pan from touchdown: the scrub doesn't arm and the swipe gestures
+// (FLS exit / peek, device-landscape and MPFS swipe-down exit) don't track
+// it, whether or not it goes on to move. Taps are untouched: a pan only
+// commits after MPFS_CONTROLS_PAN_COMMIT_PX, so the double tap still plays
+// and pauses. Cleared a tick after the finger lifts, once every touchend
+// listener has had its look.
+let scrayPanZoneTouch = false;
+window.scrayPanZoneTouch = () => scrayPanZoneTouch;
+window.scrayPanActive = () => mpfsPanActive;
 // A control-area touch whose raise is waiting to see if it is a tap (13.88).
 let scrayGesturePendingRaise = false;
 
@@ -1216,6 +1236,35 @@ function scrayTopGridLineLocalY(wrapper) {
     return null;
 }
 
+// Whether a screen point is in the play/pause double-tap zone, by
+// handleDoubleTap's own rules (13.185):
+//   FLS / device landscape: the middle third
+//   MPFS: the second quarter, inside the double-tap band
+//   MPB:  the second quarter, full height
+// Measured like scrayOneFingerZoomInZone, against the same container.
+// Keep in step with handleDoubleTap if its zones move.
+function scrayPointInPlayPauseZone(x, y) {
+    const t = scrayZoomTargets(true);
+    if (!t) return false;
+    const rect = t.container.getBoundingClientRect();
+    if (!rect.width || !rect.height) return false;
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return false;
+    const remap = manualRotationActive ? remapForManualRotation(x, y, rect) : null;
+    const lx = remap ? remap.x : x - rect.left;
+    const ly = remap ? remap.y : y - rect.top;
+    const w = remap ? remap.width : rect.width;
+    const h = remap ? remap.height : rect.height;
+    if (isForcedOrRealLandscapeMobile() && window.innerWidth <= 1024) {
+        return lx >= w / 3 && lx < (w / 3) * 2;
+    }
+    if (document.body.classList.contains('portrait-fullscreen')) {
+        const top = h / 3;                       // MPFS_BAND_TOP_FRAC
+        const bottom = Math.max(top + 1, h - 152); // MPFS_BAND_BOTTOM_PX
+        if (ly < top || ly > bottom) return false;
+    }
+    return lx >= w / 4 && lx < w / 2;
+}
+
 // Whether a screen point is on the picture, above the grid's top edge.
 function scrayPointAboveTopGridLine(x, y) {
     const t = scrayZoomTargets(true);
@@ -1231,6 +1280,7 @@ function scrayPointAboveTopGridLine(x, y) {
 function mpfsControlsPanStart(e) {
     mpfsPanArmed = false;
     mpfsPanActive = false;
+    scrayPanZoneTouch = false;
     if (!e.touches || e.touches.length !== 1) return;
     if (!mpfsControlsPanEligible()) return;
 
@@ -1254,9 +1304,12 @@ function mpfsControlsPanStart(e) {
         if (window.scrayZoomBlocksGestures()) return;
         const t = scrayZoomTargets(true);
         if (!t || !t.container.contains(target)) return;
-        if (!scrayPointAboveTopGridLine(e.touches[0].clientX, e.touches[0].clientY)) return;
+        const px = e.touches[0].clientX, py = e.touches[0].clientY;
+        // The strip above the grid, or the play/pause zone (13.185).
+        if (!scrayPointAboveTopGridLine(px, py) && !scrayPointInPlayPauseZone(px, py)) return;
     }
     mpfsPanFromBar = onBar;
+    scrayPanZoneTouch = true;
 
     mpfsPanStartX = e.touches[0].clientX;
     mpfsPanStartY = e.touches[0].clientY;
@@ -1293,6 +1346,9 @@ function mpfsControlsPanMove(e) {
             e.stopPropagation();
             if (e.cancelable) e.preventDefault();
         }
+        // From the picture: don't let MPB's page start scrolling under a
+        // touch that is heading for a pan (13.185).
+        if (!mpfsPanFromBar && e.cancelable) e.preventDefault();
         // Commit on a drag in any direction. A tap has to stay a tap so the
         // buttons keep working.
         if (Math.max(Math.abs(d.x), Math.abs(d.y)) < MPFS_CONTROLS_PAN_COMMIT_PX) return;
@@ -1302,10 +1358,14 @@ function mpfsControlsPanMove(e) {
         mpfsPanLastLocal = d;
         if (!mpfsPanFromBar) {
             // From the picture: the scrub, swipes and tap counters stand down,
-            // and the grid and a bar this touch raised go away, as for a scrub.
+            // and a bar this touch raised goes away, as for a scrub.
             window.scrayZoomGestureActive = true;
             if (typeof window.scrayOnScrubBegin === 'function') window.scrayOnScrubBegin();
         }
+        // The grid stays up for the whole pan, from any zone (13.185) - it is
+        // what you steer by. The touchmove that would otherwise put it away
+        // checks scrayPanActive, and it lingers as usual once the finger lifts.
+        if (typeof scrayWakeTapGuides === 'function') scrayWakeTapGuides();
     }
 
     // Owned from here - keep Plyr's own bar handlers out of it.
@@ -1340,6 +1400,8 @@ function mpfsControlsPanEnd(e) {
     }
     mpfsPanArmed = false;
     mpfsPanActive = false;
+    // After the other touchend listeners (stopScrub's swipes run on window).
+    if (scrayPanZoneTouch) setTimeout(() => { scrayPanZoneTouch = false; }, 0);
 }
 
 if (!window.__scrayMpfsControlsPanInstalled) {
@@ -2556,6 +2618,12 @@ if ((e.touches && e.touches.length > 1) || window.scrayZoomBlocksGestures?.()) {
     cancelScrubForZoom();
     return;
 }
+// Zoomed, and the touch is in a pan zone: it pans, never scrubs (13.185).
+if (window.scrayPanZoneTouch?.()) {
+    isDetermined = false;
+    isHorizontalDrag = false;
+    return;
+}
 // ✅ Only block in mini-player
 const isMiniPlayer = document.getElementById('inlineVideoContainer')?.classList.contains('mini-player');
 
@@ -2695,6 +2763,7 @@ const stopScrub = (e) => {
 //   - e.touches.length: another finger is still down, so this touchend is
 //     not the end of the gesture at all.
 const zoomBlocksSwipe = !!window.scrayZoomBlocksGestures?.() ||
+    !!window.scrayPanZoneTouch?.() || // a zoomed pan-zone touch is never a swipe (13.185)
     !!(e && e.touches && e.touches.length > 0);
 
 if (!zoomBlocksSwipe && isDetermined && !isHorizontalDrag && e && e.changedTouches && e.changedTouches[0]) {
@@ -3123,6 +3192,8 @@ function setupMpfsSwipeExit() {
         // Don't even arm tracking in the tail of a pinch: the last finger of
         // a two-finger gesture can land a fresh single-touch touchstart.
         if (window.scrayZoomBlocksGestures?.()) return;
+        // Zoomed, in a pan zone: that touch pans, it doesn't swipe (13.185).
+        if (window.scrayPanZoneTouch?.()) return;
 
         const touch = e.touches[0];
         const target = touch.target;
@@ -5742,6 +5813,8 @@ document.addEventListener('touchmove', (e) => {
     // controls it was waiting on never appear at all.
     if (scrayGesturePendingRaise && dragged) scrayGesturePendingRaise = false;
     if (!scrayGestureOnPicture) return;
+    // A zoomed pan steers by the grid - leave it up (13.185).
+    if (window.scrayPanActive && window.scrayPanActive()) return;
     // A drag, not a tap: the grid is for tapping. In MPB that includes a
     // swipe scrolling the list through the player.
     if (dragged) scraySleepTapGuides(0);
@@ -5752,7 +5825,7 @@ document.addEventListener('touchmove', (e) => {
 // drag) goes back; a bar that was already up stays. scrayScrubSeek.begin calls
 // this the moment a drag is confirmed.
 window.scrayOnScrubBegin = function () {
-    scraySleepTapGuides(0);
+    if (!(window.scrayPanActive && window.scrayPanActive())) scraySleepTapGuides(0);
     // From here the drag is a scrub, wherever it started - its touchmoves are
     // not control-area touches any more.
     scrayGestureInControls = false;

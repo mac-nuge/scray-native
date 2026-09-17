@@ -4,8 +4,59 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### native 13.184 — test: only a touch the scrub accepted can scrub - no jump to the finger's position at the start of a video
-<!-- 2026-09-17T12:30Z -->
+### native 13.186 — test: one-finger tap-then-drag zoom works in the play/pause zone too, not just the left zone
+<!-- 2026-09-17T11:50Z -->
+
+**native** — `stg-native - 13.186`: `assets/web/player.js`, `assets/web/VERSION` (JS only)
+
+Mac asked for the one-finger zoom (tap, then touch again and drag up to zoom in, down to zoom out) to work in the play/pause zone as well as the left zone. He asked whether that would conflict with anything, in particular the swipe up/down gestures.
+
+**Change:** `scrayOneFingerZoomInZone` now covers the left zone plus the play/pause zone beside it. In FLS and device landscape that is the left two thirds; in MPB and MPFS the left half (MPFS still inside the double-tap band). `SCRAY_OFZ_INCLUDES_PLAY_PAUSE = false` reverts to the left zone only.
+
+**Conflict review (no further code needed):**
+- **Double tap to play/pause:** unaffected. A zoom only commits once the second touch moves 8px; a double tap doesn't move, so it still reaches `handleDoubleTap`.
+- **Swipes:** a plain swipe has no preceding tap, so the zoom never arms (`armed` needs a tap lifted within 300ms) and hands the touch back at 8px. Swipes affected:
+  - FLS exit / peek
+  - device-landscape and MPFS swipe-down exit
+  - MPB page scroll
+  - An armed zoom that commits raises `scrayZoomGestureActive` and stops its own touchend, so no swipe fires on release. That is the same path the left zone has used since 13.55.
+  - **Only overlap:** a tap followed within 300ms by an up/down drag in these zones is now a zoom rather than a swipe or scroll.
+- **Scrub:** tap-then-drag needs the drag mostly up/down to commit. A sideways drag is left to the scrub at 100%, or to 13.185's pan when zoomed.
+- **13.185 pan from the play/pause zone:** the zoom's listeners run first. An armed up/down drag becomes a zoom and the pan yields (`ofzTouch.mode` check). An unarmed drag, or a sideways one, pans. So while zoomed, a tap immediately before an up/down drag there zooms rather than pans.
+
+**Tested:** `node --check`. Not run on a device.
+
+### native 13.185 — test: zoomed - pan from the play/pause zone too; pan zones never scrub or swipe; grid stays up while panning
+<!-- 2026-09-17T11:45Z -->
+
+**native** — `stg-native - 13.185`: `assets/web/player.js`, `assets/web/VERSION` (JS only)
+
+Mac asked for three changes to panning a zoomed video, in every player (MPB, MPFS, FLS):
+1. A drag can also start a pan from inside the play/pause zone.
+2. In every pan zone (the new one, and the existing bar and strip above the grid), scrubbing and the swipe up/down gestures are off.
+3. The grid guide stays visible while the finger is panning.
+
+**What changed (player.js, CONTROLS PAN):**
+- **Play/pause zone** (`scrayPointInPlayPauseZone`): the zone follows `handleDoubleTap`'s own rules, measured against the same container as `scrayOneFingerZoomInZone`:
+  - FLS and device landscape: the middle third.
+  - MPFS: the second quarter, inside the double-tap band (a third down to 152px off the bottom).
+  - MPB: the second quarter, full height.
+  - If `handleDoubleTap`'s zones move, this has to move with them.
+- **Where a pan can start:** `mpfsControlsPanStart` now arms from the bar, the strip above the grid, or the play/pause zone.
+- **Pan-zone touches** (`scrayPanZoneTouch`, `window.scrayPanZoneTouch()`): a touch that lands in any pan zone while zoomed is flagged from touchdown. The flag is cleared a tick after the finger lifts.
+  - `startScrub` doesn't arm for it, so neither the scrub nor jog can start there.
+  - `stopScrub` treats it as never a swipe (FLS swipe to exit or peek, device-landscape swipe-down exit).
+  - MPFS's swipe-down exit doesn't track it.
+  - Before this, a committed pan already stopped these through `stopPropagation`. The flag also covers the touch before it commits, and the bar pans that never raised `scrayZoomGestureActive`.
+- **Taps still work:** a pan only commits after 8px, so a double tap in the play/pause zone still plays and pauses.
+- **MPB page scroll:** in MPB, a picture pan-zone touch now calls `preventDefault` before it commits, so the page doesn't start scrolling under a pan. While zoomed, the page can't be scrolled by dragging in those zones.
+- **Grid:** a committed pan (from any zone) calls `scrayWakeTapGuides`. Two things that normally hide the grid on a drag now leave it up while `scrayPanActive()` is true: the controls-policy touchmove and `scrayOnScrubBegin`. It lingers and fades as usual once the finger lifts.
+- **Play state:** this applies whether the zoomed video is playing or paused, so a paused, zoomed video no longer jogs from the play/pause zone.
+
+**Tested:** `node --check`, plus a scope check that the new helpers resolve from the pan handlers. Not run on a device.
+
+### native 13.184 — stable: only a touch the scrub accepted can scrub - no jump to the finger's position at the start of a video
+<!-- 2026-09-17T11:35Z -->
 
 **native** — `stg-native - 13.184`: `assets/web/player.js`, `assets/web/VERSION` (JS only)
 
@@ -34,7 +85,7 @@ The jump was still happening after 13.183. Mac pinned it down in FLS: a scrub ne
 - **13.183's drags** (zone lock, monotonic forward, zero-size wrapper): unchanged results.
 
 ### native 13.183 — test: scrub speed zone locks where the drag starts, small scrubs no longer jump, scrubbing cancels a pending start point
-<!-- 2026-09-17T11:40Z -->
+<!-- 2026-09-17T11:20Z -->
 
 **native** — `stg-native - 13.183`: `assets/web/player.js`, `assets/web/VERSION` (JS only)
 

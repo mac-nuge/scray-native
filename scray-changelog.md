@@ -4,6 +4,50 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.20 — test: ‹P button in the in-app browser, back to Picker
+<!-- 2026-09-18T15:20Z -->
+
+**native** — `stg-native - 14.20`: `modules/scray-native/ios/ScrayBrowser.swift`, `assets/web/VERSION` (**Swift — needs an IPA build**)
+
+Mac: the "‹ Picker" button from TinEye, but on the browser's bottom bar whenever Picker sends me to an external link — a purple ‹P between ✕ and ‹, only lit when I've landed on an external page from Picker.
+
+- New toolbar item **‹P** (bold, purple #6c5ce7 when lit, grey and disabled otherwise), between ✕ and ‹.
+- Lit only on an http(s) page that isn't on Picker's host and that Picker sent you to:
+  - **same tab** (a plain link): Picker is in the tab's back history → ‹P jumps back to the latest Picker page in it, however many external pages you've clicked through since;
+  - **new tab** (target=_blank, or Picker's Stash / TinEye `scraynative://newtab`): the tab's opener is a Picker tab → ‹P switches to that tab and leaves this one open.
+- `target=_blank` link tabs now remember the tab that opened them (`opener`), which is what makes the new-tab case work for ordinary links.
+- Refreshed with the rest of the chrome (URL, title, back-history and tab changes).
+
+**Checked:** nothing compiled — no Swift toolchain here. Reviewed by hand: `pickerReturn()` checks history first, then opener; the opener only counts while its tab is still on Picker's host.
+
+### picker 14.13 / native 14.19 — test: tag cloud Search in Stash works with nothing playing
+<!-- 2026-09-18T15:16Z -->
+
+**picker** — `staging - 14.13`: `randomiser.js`, `scray-stash-nav.js`, `VERSION`
+**native** — `stg-native - 14.19`: `assets/web/randomiser.js`, `assets/web/scray-stash-nav.js`, `assets/web/VERSION` (web only — no IPA build)
+
+Mac: Search in Stash from the tag cloud said "Nothing is playing…" — it shouldn't need a file, it's just bringing up the profile.
+
+- New `scrayStashNav.openProfile(kind, name)`. With something playing it goes through that file's Stash modal as before (cards scored against the file). With nothing playing it opens the navigator on its own in the same Stash card, straight onto the studio / performer page — just browsing, nothing to accept or score.
+- In that standalone card the root Back button reads "‹ Done" (not "Back to lookup"), and it and Close both close the card.
+- The tag cloud's Search in Stash calls it; the "nothing is playing" alert is gone.
+
+**Checked:** `node --check` on both copies; `scray-stash-nav.js` identical in picker and native; jsdom — openProfile('performer', …) with no video sends `stash_nav` op performer, renders the profile, Close removes the card.
+
+### picker 14.12 / native 14.18 — test: tag cloud Search in Stash, buttons moved under Clear / Close
+<!-- 2026-09-18T15:11Z -->
+
+**picker** — `staging - 14.12`: `randomiser.js`, `VERSION`
+**native** — `stg-native - 14.18`: `assets/web/randomiser.js`, `assets/web/VERSION` (web only — no IPA build)
+
+Mac: the Filter in / Search in buttons show in Native's tag filters but not Picker's; add a Search in Stash button to both; move the buttons below Clear / Close.
+
+- The cross-app buttons were already ported — they only appear where there is another app to hand to: Native's main view (→ Picker) and Picker opened inside Native's in-app browser (→ Native). Picker in a desktop browser has no other app, so it shows none. Unchanged.
+- **Search in Stash** (studios and performers): with exactly one selected (green), closes the cloud and opens the Stash modal for the playing file straight onto that studio's / performer's page. Dimmed until exactly one is selected; alerts if nothing is playing. Shows everywhere, including a desktop browser.
+- The purple button row now sits under the Clear / Close footer instead of under the narrow box.
+
+**Checked:** `node --check` on both copies; the tag cloud block is identical in picker and native.
+
 ### browse 14.6 / picker 14.11 / native 14.17 — test: studios nested under their networks in Stash nav
 <!-- 2026-09-18T14:58Z -->
 

@@ -1373,26 +1373,34 @@ async function showTagCloudModal(kind) {
    search.placeholder = 'Narrow this list\u2026';
    controls.appendChild(search);
 
-   // Filter / search in the other app (native 13.192 / picker 13.191), just
-   // under the box. Filter takes this class's selection - includes, excludes
-   // and a note cloud's keywords; Search (studios and performers) takes the
-   // one selected value and needs exactly one.
+   // Filter / search in the other app (native 13.192 / picker 13.191), and
+   // Search in Stash (picker 14.12 / native 14.18). Built here, placed under
+   // the Clear / Close footer (it used to sit under the box). Filter takes
+   // this class's selection - includes, excludes and a note cloud's keywords;
+   // the Search buttons (studios and performers) take the one selected value
+   // and need exactly one. The cross-app pair only exists where there is an
+   // other app to hand to (Native's main view, or Picker inside Native's
+   // in-app browser) - a plain desktop browser has neither.
    const xappTarget = typeof window.scrayCrossAppTarget === 'function' ? window.scrayCrossAppTarget() : null;
-   let xappFilterBtn = null, xappSearchBtn = null;
-   if (xappTarget) {
-       const xrow = document.createElement('div');
+   const searchable = kind === 'studio' || kind === 'performer';
+   const oneLabel = kind === 'studio' ? 'studio' : 'performer';
+   let xappFilterBtn = null, xappSearchBtn = null, stashSearchBtn = null, xrow = null;
+   if (xappTarget || searchable) {
+       xrow = document.createElement('div');
        xrow.className = 'scray-cloud-xapp';
-       xrow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px;';
-       const mkX = (label, fn) => {
-           const b = document.createElement('button');
-           b.type = 'button';
-           b.className = 'scray-cloud-toggle';
-           b.style.cssText = 'background:#6c5ce7;border-color:#6c5ce7;color:#fff;';
-           b.textContent = label;
-           b.addEventListener('click', fn);
-           xrow.appendChild(b);
-           return b;
-       };
+       xrow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0;width:100%;';
+   }
+   const mkX = (label, fn) => {
+       const b = document.createElement('button');
+       b.type = 'button';
+       b.className = 'scray-cloud-toggle';
+       b.style.cssText = 'background:#6c5ce7;border-color:#6c5ce7;color:#fff;';
+       b.textContent = label;
+       b.addEventListener('click', fn);
+       xrow.appendChild(b);
+       return b;
+   };
+   if (xappTarget) {
        xappFilterBtn = mkX('Filter in ' + xappTarget, () => {
            const exc = kind === 'tag'
                ? ((typeof $ === 'function' && $('#excludeTagSelect').val()) || [])
@@ -1406,19 +1414,36 @@ async function showTagCloudModal(kind) {
            if (kind === 'note') { filter.kw = kw; filter.kwAll = !!window.scrayNoteKeywordIntersect; }
            window.scrayCrossAppOpen({ filter });
        });
-       if (kind === 'studio' || kind === 'performer') {
+       if (searchable) {
            xappSearchBtn = mkX('Search in ' + xappTarget, () => {
                if (set.size !== 1) {
-                   alert('Search needs exactly one selected (green) ' + (kind === 'studio' ? 'studio' : 'performer') + '.');
+                   alert('Search needs exactly one selected (green) ' + oneLabel + '.');
                    return;
                }
                window.scrayCrossAppOpen({ search: [...set][0], quote: true });
            });
        }
-       controls.appendChild(xrow);
+   }
+   if (searchable) {
+       // Opens that studio's / performer's page in the Stash navigator - via
+       // the playing file's Stash modal if there is one.
+       stashSearchBtn = mkX('Search in Stash', () => {
+           if (set.size !== 1) {
+               alert('Search needs exactly one selected (green) ' + oneLabel + '.');
+               return;
+           }
+           // Nothing needs to be playing (picker 14.13 / native 14.19): with no
+           // file the navigator opens on its own, just browsing.
+           if (!window.scrayStashNav || typeof window.scrayStashNav.openProfile !== 'function') return;
+           const name = [...set][0];
+           close();
+           window.scrayStashNav.openProfile(kind, name);
+       });
    }
    const paintXapp = () => {
-       if (xappSearchBtn) xappSearchBtn.style.opacity = set.size === 1 ? '' : '.45';
+       const dim = set.size === 1 ? '' : '.45';
+       if (xappSearchBtn) xappSearchBtn.style.opacity = dim;
+       if (stashSearchBtn) stashSearchBtn.style.opacity = dim;
    };
    // NOTE cloud (picker 13.148 / stg-native 13.146): keywords are the way
    // in now, so the box narrows the Keyword chips, and the notes below
@@ -1818,6 +1843,7 @@ async function showTagCloudModal(kind) {
    footer.appendChild(closeBtn);
 
    content.appendChild(footer);
+   if (xrow) content.appendChild(xrow);
 
    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
    document.addEventListener('keydown', escHandler);

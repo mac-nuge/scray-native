@@ -191,6 +191,9 @@ final class ScrayBrowserViewController: UIViewController,
     private var forwardItem = UIBarButtonItem()
     private var tabsItem = UIBarButtonItem()
     private var downloadsItem = UIBarButtonItem()
+    /// ‹P (native 14.20) - back to Picker from an external page Picker sent
+    /// you to. See pickerReturn().
+    private var pickerItem = UIBarButtonItem()
     private let trayButton = ScrayTrayButton(frame: .zero)
     private let toastView = ScrayToastView(frame: .zero)
     private var toastBottom: NSLayoutConstraint!
@@ -384,9 +387,16 @@ final class ScrayBrowserViewController: UIViewController,
         func flex() -> UIBarButtonItem {
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         }
+        pickerItem = UIBarButtonItem(title: "\u{2039}P", style: .plain,
+                                     target: self, action: #selector(pickerTapped))
+        pickerItem.setTitleTextAttributes(
+            [.font: UIFont.systemFont(ofSize: 17, weight: .bold)], for: .normal)
+        pickerItem.setTitleTextAttributes(
+            [.font: UIFont.systemFont(ofSize: 17, weight: .bold)], for: .disabled)
+        pickerItem.isEnabled = false
         backItem.isEnabled = false
         forwardItem.isEnabled = false
-        toolbar.items = [closeItem, flex(), backItem, flex(), forwardItem, flex(), reloadItem,
+        toolbar.items = [closeItem, flex(), pickerItem, flex(), backItem, flex(), forwardItem, flex(), reloadItem,
                          flex(), tabsItem, flex(), downloadsItem]
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
@@ -847,6 +857,7 @@ final class ScrayBrowserViewController: UIViewController,
             },
             wv.observe(\.canGoBack, options: [.new]) { [weak self] w, _ in
                 self?.backItem.isEnabled = w.canGoBack
+                self?.refreshPickerItem()
             },
             wv.observe(\.canGoForward, options: [.new]) { [weak self] w, _ in
                 self?.forwardItem.isEnabled = w.canGoForward
@@ -858,6 +869,7 @@ final class ScrayBrowserViewController: UIViewController,
         tabsItem.title = "\(tabs.count) ⧉"
         backItem.isEnabled = currentWebView?.canGoBack ?? false
         forwardItem.isEnabled = currentWebView?.canGoForward ?? false
+        refreshPickerItem()
         // Deliberately above the isFirstResponder guard below: the button's
         // visibility has nothing to do with whether the address bar is being
         // edited, and hiding it mid-edit would be a nasty surprise.
@@ -950,6 +962,53 @@ final class ScrayBrowserViewController: UIViewController,
         ScrayNativeView.current?.refreshLocalFolder()
     }
     @objc private func homeTapped()    { openOrFocus(homeURL) }
+    // MARK: - ‹P, back to Picker (native 14.20)
+    //
+    // Lit only on an external page that Picker sent you to. Two ways that
+    // happens, and ‹P undoes whichever it was:
+    //   - the page opened in THIS tab from Picker (a plain link): Picker is in
+    //     the tab's back history, so ‹P jumps back to the latest Picker page
+    //     in it - however many external pages you've clicked through since;
+    //   - Picker opened it in a NEW tab (target=_blank, or scraynative://newtab
+    //     for its Stash / TinEye searches): the tab's opener is Picker's tab,
+    //     so ‹P switches to that tab and leaves this one open behind it.
+    private func isPickerURL(_ url: URL?) -> Bool {
+        guard let host = url?.host?.lowercased(), !host.isEmpty else { return false }
+        return host == (homeURL.host ?? "").lowercased()
+    }
+
+    private enum PickerReturn { case history(WKBackForwardListItem), tab(Int) }
+
+    private func pickerReturn() -> PickerReturn? {
+        guard let tab = currentTab else { return nil }
+        let here = tab.displayURL
+        let scheme = (here?.scheme ?? "").lowercased()
+        guard scheme == "http" || scheme == "https", !isPickerURL(here) else { return nil }
+        if let item = tab.webView.backForwardList.backList.last(where: { isPickerURL($0.url) }) {
+            return .history(item)
+        }
+        if let opener = tab.opener,
+           let idx = tabs.firstIndex(where: { $0.webView === opener }),
+           isPickerURL(tabs[idx].displayURL) {
+            return .tab(idx)
+        }
+        return nil
+    }
+
+    @objc private func pickerTapped() {
+        switch pickerReturn() {
+        case .history(let item)?: currentWebView?.go(to: item)
+        case .tab(let idx)?:      selectTab(idx)
+        case nil:                 break
+        }
+    }
+
+    private func refreshPickerItem() {
+        let on = pickerReturn() != nil
+        pickerItem.isEnabled = on
+        pickerItem.tintColor = on ? UIColor(red: 0.424, green: 0.361, blue: 0.906, alpha: 1) : nil  // #6c5ce7
+    }
+
     @objc private func backTapped()    { if currentWebView?.canGoBack == true { currentWebView?.goBack() } }
     @objc private func forwardTapped() { if currentWebView?.canGoForward == true { currentWebView?.goForward() } }
     @objc private func newTabTapped()  { addTab(url: homeURL, select: true); addressField.becomeFirstResponder() }
@@ -1265,6 +1324,9 @@ final class ScrayBrowserViewController: UIViewController,
         // An ordinary target="_blank" link — a new tab, like any browser.
         if navigationAction.navigationType == .linkActivated {
             let tab = addTab(url: nil, configuration: configuration, select: true)
+            // Remembered for ‹P (native 14.20): a link Picker opened in a new
+            // tab can take you back to Picker's tab.
+            tab.opener = webView
             return tab.webView
         }
 

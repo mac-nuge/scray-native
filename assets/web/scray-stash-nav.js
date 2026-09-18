@@ -381,7 +381,7 @@
             ? (e.data && e.data.studio ? e.data.studio.name : (e.name || 'Studio'))
             : (e.data && e.data.performer ? e.data.performer.name : (e.name || 'Performer'));
       }
-      backBtn.textContent = stack.length > 1 ? '‹ Back' : '‹ Back to lookup';
+      backBtn.textContent = stack.length > 1 ? '‹ Back' : (opts.rootBackLabel || '‹ Back to lookup');
 
       host.innerHTML = '<div class="ssn">' +
         (e.type === 'search' ? searchHtml(e) : e.type === 'studio' ? studioViewHtml(e) : performerHtml(e)) + '</div>';
@@ -1472,6 +1472,62 @@ body.fullscreen-active #ssnPvBar { display: none; }
     else tick();
   })();
 
-  window.scrayStashNav = { open, words, clean, preview, endPreview };
+  // ---- a profile with no file (picker 14.13 / native 14.19) ---------------
+  // The tag cloud's "Search in Stash" opens a studio's or performer's page. If
+  // something is playing it goes through the Stash modal for that file (cards
+  // scored against it, scenes acceptable); if nothing is, the navigator opens
+  // on its own in the same card, just browsing - nothing to accept or score.
+  function openProfile(kind, name) {
+    const start = kind === 'studio' ? { type: 'studio', name: String(name) }
+                                    : { type: 'performer', name: String(name) };
+    const playing = window.currentPlayingVideo;
+    if (playing && typeof window.showStashModal === 'function') {
+      window.showStashModal(playing, kind === 'studio' ? { studio: start.name } : { performer: start.name });
+      return;
+    }
+    document.getElementById('stashModal')?.remove();
+    const modal = document.createElement('div');
+    modal.className = 'basket-json-modal';
+    modal.id = 'stashModal';
+    modal.style.cssText = 'transform:none;padding:0;z-index:2147483647;';
+    modal.innerHTML =
+      '<div class="basket-json-modal-content" style="transform:none;max-width:640px;' +
+           'max-height:82vh;display:flex;flex-direction:column;overflow:hidden;">' +
+        '<h3 style="margin-top:0;flex:0 0 auto;">Stash</h3>' +
+        '<div class="ssn-solo-body" style="flex:1 1 auto;min-height:0;overflow-y:auto;' +
+             '-webkit-overflow-scrolling:touch;"></div>' +
+        '<div class="ssn-solo-footer" style="display:flex;gap:8px;margin-top:14px;flex:0 0 auto;"></div>' +
+      '</div>';
+    document.body.appendChild(modal);
+    const done = () => modal.remove();
+    // Same three ways out as the Stash modal's own opener.
+    const openExternal = (url) => {
+      if (window.SCRAY_IN_APP_BROWSER) {
+        window.location.href = 'scraynative://newtab?url=' + encodeURIComponent(url);
+        return;
+      }
+      if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
+        window.ScrayBridge.openBrowser(url).catch(err => console.error('[stash] openBrowser failed:', err));
+        return;
+      }
+      window.open(url, '_blank');
+    };
+    open({
+      host: modal.querySelector('.ssn-solo-body'),
+      actions: modal.querySelector('.ssn-solo-footer'),
+      heading: modal.querySelector('h3'),
+      video: {},
+      videoKey: '',
+      canAccept: false,
+      rootBackLabel: '‹ Done',
+      start,
+      openExternal,
+      onAccept: () => Promise.reject(new Error('No file to attach a scene to.')),
+      onClose: done,
+      onDone: done
+    });
+  }
+
+  window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile };
   window.scrayPerformerChoice = performerChoice;
 })();

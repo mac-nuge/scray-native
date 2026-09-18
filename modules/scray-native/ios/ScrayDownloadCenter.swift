@@ -416,6 +416,13 @@ final class ScrayDownloadsViewController: UITableViewController {
     /// Scope held open while iOS's player reads a file from a picked folder.
     private var scopedPlaybackURL: URL?
     private let emptyLabel = UILabel()
+    private let summaryLabel: UILabel = {
+        let l = UILabel()
+        l.font = .systemFont(ofSize: 13, weight: .semibold)
+        l.textColor = .secondaryLabel
+        l.textAlignment = .center
+        return l
+    }()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -472,6 +479,21 @@ final class ScrayDownloadsViewController: UITableViewController {
         title = total == 0
             ? "Downloads"
             : (active > 0 ? "Downloads (\(total) · \(active) active)" : "Downloads (\(total))")
+        // A summary line over the list (native 14.9), so the totals are there
+        // to read rather than squeezed into the title.
+        if total == 0 {
+            tableView.tableHeaderView = nil
+        } else {
+            let done = center.completedCount
+            let failed = center.records.filter { $0.state == .failed }.count
+            var bits = ["\(total) download\(total == 1 ? "" : "s")"]
+            if done > 0 { bits.append("\(done) done") }
+            if active > 0 { bits.append("\(active) active") }
+            if failed > 0 { bits.append("\(failed) failed") }
+            summaryLabel.text = bits.joined(separator: "  ·  ")
+            summaryLabel.frame = CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 34)
+            tableView.tableHeaderView = summaryLabel
+        }
         tableView.reloadData()
     }
 

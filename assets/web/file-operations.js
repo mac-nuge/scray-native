@@ -5025,6 +5025,9 @@ async function showStashModal(video, openOpts) {
 
     recheckBtn.addEventListener('click', () => load(true));
     const startPerformer = openOpts && openOpts.performer ? String(openOpts.performer) : '';
+    // openOpts.search (native 14.9 / picker 14.5): open straight onto a
+    // navigator search - Search on a TinEye result asks for this.
+    const startSearch = openOpts && openOpts.search ? String(openOpts.search).trim() : '';
 
     addBtn.addEventListener('click', async () => {
         const picked = [...modal.querySelectorAll('.stash-mk:checked')]
@@ -5087,10 +5090,31 @@ async function showStashModal(video, openOpts) {
     load(false).then(() => {
         if (startPerformer && document.body.contains(modal)) {
             openNav({ type: 'performer', name: startPerformer, sceneId: matchedStashId }, false);
+        } else if (startSearch && document.body.contains(modal)) {
+            openNav({ type: 'search', term: startSearch }, true);
         }
     });
 }
 window.showStashModal = showStashModal;
+
+/**
+ * Search on a TinEye result (native 14.9 / picker 14.5). ScrayBrowser hands
+ * the picked words here - to Picker's tab when Picker opened TinEye, else to
+ * Native's main view - and the Stash modal opens for the video that was
+ * playing when the frame was grabbed, straight onto a navigator search for
+ * them. From there a scene can be accepted onto the file as usual.
+ */
+window.scrayStashSearchFromBrowser = function (terms) {
+    const q = String(terms || '').trim();
+    if (!q) return false;
+    const video = window.currentPlayingVideo;
+    if (!video) {
+        alert('Nothing is playing, so there is no file to search Stash for.\n\nSearch: ' + q);
+        return false;
+    }
+    showStashModal(video, { search: q });
+    return true;
+};
 window.showRenameModal = showRenameModal;
 window.showDeleteModal = showDeleteModal;
 window.showBulkDeleteModal = showBulkDeleteModal;

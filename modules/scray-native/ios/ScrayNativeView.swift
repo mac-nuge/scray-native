@@ -49,6 +49,20 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
         }
     }
 
+    /// Words picked on a TinEye result (native 14.9): open the Stash modal on
+    /// a search for them. Called after the browser has gone.
+    func deliverStashSearch(_ q: String) {
+        let escaped = q
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: " ")
+        DispatchQueue.main.async {
+            self.webView.evaluateJavaScript(
+                "window.scrayStashSearchFromBrowser && window.scrayStashSearchFromBrowser('\(escaped)');"
+            )
+        }
+    }
+
     /// iOS says memory is short. The page drops what it can (13.180).
     func notifyMemoryWarning() {
         DispatchQueue.main.async {

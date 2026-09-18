@@ -4,6 +4,46 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.9 / picker 14.5 — test: Scray's own TinEye results view, download counts
+<!-- 2026-09-18T10:52Z -->
+
+**native** — `stg-native - 14.9`: new `modules/scray-native/ios/ScrayTinEye.swift`, `ScrayBrowser.swift`, `ScrayNativeView.swift`, `ScrayDownloadCenter.swift`, `assets/web/file-operations.js`, `assets/web/VERSION` (**Swift — needs an IPA build**)
+**picker** — `staging - 14.5`: `file-operations.js`, `VERSION`
+
+**1. TinEye results, Scray's way** (`ScrayTinEye.swift`, injected into tineye.com pages in the in-app browser only).
+- TinEye's own page is hard to read on the phone, so a script reads the results it has drawn and lays a page of our own over it: per match, **site · date**, the **URL** (still a link — opens in a new tab), the URL's path **split into words** the same way as the rename modal's word selector (tap to pick, separators greyed), the picked words shown underneath, and **Search** / **Copy**.
+- **Search** → `scraynative://stashsearch?q=…`: the browser hands the words to the Stash modal of whichever app opened the TinEye tab — Picker's tab if Picker asked (tabs opened by `scraynative://newtab` now remember their opener), otherwise Native's main view (browser dismissed first, like ⤴). The modal opens for the **video that's playing**, straight onto a **navigator search** for the words (`showStashModal(video, { search })`), where a scene can be accepted onto the file as usual.
+- **Copy** puts the picked words on the clipboard (toast to confirm).
+- **TinEye page** in the header hides the overlay; a **Scray view** pill brings it back. "Waiting for TinEye's results…" until they appear; after 15s with nothing matched it says so and points at the TinEye page.
+- **How results are found:** any link off tineye.com whose visible text is a piece of its own address with a "/" in it (the "videos/541147/mmf-vienna-black/" line); image links skipped; deduped by address. It re-reads as TinEye loads more. Reading the page rather than TinEye's JSON, because that isn't a public API — if TinEye changes its layout enough, the overlay finds nothing and the TinEye page is one tap away.
+- Picker in an ordinary desktop browser opens TinEye in a normal tab, where nothing can be injected, so it gets TinEye's page as before.
+
+**2. Download counts** (`ScrayDownloadCenter.swift`, `ScrayBrowser.swift`). The list's title count and the numbered rows have been there since 13.200; added now:
+- a **summary line** over the list — "12 downloads · 9 done · 2 active · 1 failed";
+- the **tray icon's badge** in the corner counts **everything in the list**, not only finished downloads, so it matches the title.
+
+**Checked:** `node --check` on the overlay script and both `file-operations.js`; jsdom run of the overlay against a mocked TinEye results page — two results picked up (image, tineye.com and social links ignored), site / date / URL right, "videos/541147/mmf-vienna-black" splits into videos / 541147 / mmf / vienna / black with the separators, picking vienna + black gives "vienna black" and enables the buttons, a truncated "…" link still matches. **Swift not compiled** — no toolchain here.
+
+**Worth watching:** whether TinEye's real page matches the link rule above — the first real search will tell.
+
+### native 14.8 — test: Favourites in the browser
+<!-- 2026-09-18T10:36Z -->
+
+**native** — `stg-native - 14.8`: `modules/scray-native/ios/ScrayBrowser.swift`, `assets/web/VERSION` (**Swift — needs an IPA build**)
+**picker / browse** — no change.
+
+Mac: bookmarks for the in-app browser, called Favourites with a bookmark icon. Added from the ⋯ menu; their own panel beside Tabs, reached by swiping; a favourite can be pinned, which puts it at the top of the Tabs panel.
+
+- **⋯ → Add to Favourites** (bookmark icon) on any web page; **Remove from Favourites** when the page already is one. Saved with the page's title and address in `scray.browser.favourites` (UserDefaults), in the order added.
+- **Favourites panel.** The tab sheet now has a **Tabs | Favourites** switch at the top (with counts). Swipe in from the **right edge** to get to Favourites, from the **left edge** to go back — edge swipes, because an ordinary swipe left on a row already opens its buttons. Rows show a bookmark icon; tap one to open it (switching to its tab if it already has one). Empty state explains how to add one.
+- **Pinning a favourite pins a tab.** Swipe left (or long-press) → **Pin**: the tab already on that page is pinned, or a new one is opened in the background and pinned, so it sits at the top of Tabs under 14.4's rules (safe from Select > All, reopens at the favourite's page after a restart). **Unpin** leaves the tab open as an ordinary tab. A favourite shows the orange pin whenever a pinned tab is on its address — one source of truth, so the two panels can't disagree.
+- **Delete** a favourite (swipe or long-press) also removes its pin; the tab stays open.
+- The sheet's code was restructured around the two panels (`ScrayTabListViewController` gains a mode); the Tabs panel behaves as in 14.4.
+
+**Checked:** read through by hand — **no Swift toolchain here, not compiled**.
+
+**Worth watching:** the edge swipes. If they're awkward in the sheet, a full swipe anywhere is possible but would mean moving the row buttons to the other side.
+
 ### picker 14.4 / native 14.7 — test: 🔍 hand-off only while the search pill is active
 <!-- 2026-09-18T10:13Z -->
 

@@ -404,6 +404,21 @@ flex: 1 1 auto;
 width: auto !important;
 }
 .floating-tag-search-wrap.is-focused .search-pill-glass { font-size: 1.4rem; }
+/* The N / P on 🔍 (picker 14.2 / native 14.5): tap the magnifier on an open
+   pill to search the other app. Only on an open pill - at rest the stub is
+   too small for it, and 🔍 there just opens the pill. Sized off the glass, so
+   it grows with it. */
+.search-pill-xapp {
+  font-size: 0.45em;
+  font-weight: 800;
+  vertical-align: super;
+  margin-left: 1px;
+  color: #6a1b4d;
+}
+/* Only while the pill is active (focused) - the only time a tap on 🔍 sends
+   the search (picker 14.4 / native 14.7). */
+.search-pill-xapp:empty,
+.floating-tag-search-wrap:not(.is-focused) .search-pill-xapp { display: none; }
 .floating-tag-search-wrap.is-focused .search-pill-x {
 font-size: 1.9rem;
 margin: -8px -4px -8px 8px;

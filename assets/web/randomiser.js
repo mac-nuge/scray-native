@@ -2205,6 +2205,12 @@ function sizeSearchPill(input) {
     if (!wrap) return;
     const text = input.value;
     const open = !!text || wrap.classList.contains('is-focused');
+    const xapp = wrap.querySelector('.search-pill-xapp');
+    if (xapp) {
+        const letter = searchPillXappLetter();
+        if (xapp.textContent !== letter) xapp.textContent = letter;
+        xapp.title = letter ? `Tap 🔍 to search in ${letter === 'N' ? 'Native' : 'Picker'}` : '';
+    }
     wrap.classList.toggle('is-idle', !open);
     wrap.classList.toggle('is-empty', !text);
     // Idle and empty: the CSS gives the stub its own width, so leave it be.
@@ -2220,6 +2226,26 @@ function sizeSearchPill(input) {
     input.style.width = Math.ceil(searchPillTextWidth(input, text) + caret) + 'px';
 }
 
+/** The other app's letter for the superscript: N from Picker, P from Native. */
+function searchPillXappLetter() {
+    const target = typeof window.scrayCrossAppTarget === 'function' ? window.scrayCrossAppTarget() : null;
+    return target === 'Native' ? 'N' : target === 'Picker' ? 'P' : '';
+}
+
+/**
+ * Hand the pill's term to the other app (picker 14.2 / native 14.5). Only
+ * while the pill is ACTIVE - being typed in - and only with a term. At rest
+ * in the corner, even holding a term, 🔍 just opens the pill as it always did
+ * (picker 14.4 / native 14.7). Returns true when it went.
+ */
+function searchPillCrossApp(wrap, input) {
+    if (!searchPillXappLetter()) return false;
+    const term = input.value.trim();
+    if (!wrap.classList.contains('is-focused') || !term) return false;
+    input.blur();
+    return !!(window.scrayCrossAppOpen && window.scrayCrossAppOpen({ search: term, quote: false }));
+}
+
 function buildSearchPill() {
     const wrap = document.createElement('span');
     wrap.className = 'floating-tag-search-wrap is-idle';
@@ -2231,6 +2257,14 @@ function buildSearchPill() {
     const glass = document.createElement('span');
     glass.className = 'search-pill-glass';
     glass.textContent = '🔍';
+    // Superscript N (in Picker) or P (in Native) on the magnifier: while the
+    // pill is open, tapping 🔍 sends the term to the other app (picker 14.2 /
+    // native 14.5). Filled in by sizeSearchPill, which runs on every change,
+    // because the bridge that says which app is on the other end can arrive
+    // after this is built. Empty - and so invisible - in an ordinary browser.
+    const xapp = document.createElement('sup');
+    xapp.className = 'search-pill-xapp';
+    glass.appendChild(xapp);
 
     const input = document.createElement('input');
     input.type = 'text';
@@ -2334,6 +2368,15 @@ function buildSearchPill() {
     // gets no focus of its own.
     pill.addEventListener('pointerdown', (e) => {
         if (e.target === clearX) return;
+        // 🔍 on an open pill with a term in it: search the other app instead
+        // (picker 14.2 / native 14.5). Decided here, on the way down, because
+        // by click time the tap has already blurred the input and the pill
+        // has gone back to rest.
+        if (e.target.closest && e.target.closest('.search-pill-glass') && searchPillCrossApp(wrap, input)) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
         if (document.activeElement !== input) input.focus();
     }, true);
 

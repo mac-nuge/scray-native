@@ -4,6 +4,46 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 14.4 / native 14.7 — test: 🔍 hand-off only while the search pill is active
+<!-- 2026-09-18T10:13Z -->
+
+**picker** — `staging - 14.4`: `randomiser.js`, `style.css`, `VERSION`
+**native** — `stg-native - 14.7`: `assets/web/randomiser.js`, `assets/web/style.css`, `assets/web/VERSION` (web only — no IPA build)
+
+Follow-up to picker 14.2 / native 14.5. Tapping 🔍 sent the term to the other app whenever the pill was "open" — focused **or holding a term** — so a pill resting in the corner with a search in it also jumped apps. Now it only does that while the pill is **active** (being typed in, `is-focused`). At rest, with or without a term, 🔍 just opens the pill as before. The N / P superscript follows the same rule: shown only while active.
+
+**Checked:** `node --check` on both; jsdom — a resting pill with "kate dalia" in it: 🔍 focuses it and sends nothing; a second tap, now active, sends it once.
+
+### picker 14.3 / native 14.6 — test: Add to search in the performer and studio modal
+<!-- 2026-09-18T10:07Z -->
+
+**picker** — `staging - 14.3`: `scray-stash-nav.js`, `ui.js`, `VERSION`
+**native** — `stg-native - 14.6`: `assets/web/scray-stash-nav.js`, `assets/web/ui.js`, `assets/web/VERSION` (web only — no IPA build)
+
+Mac: add "Add to search" to the performer modal, and the same for studios.
+
+- **Performer modal** (`performerChoice` in `scray-stash-nav.js`, byte-identical in both apps): now **Filter as a tag** / **+ Add to search** / **Search in Stash nav** / Cancel. Add to search uses `scrayAddSearchTerm` — appended to what's in the box, quoted when the name has a space, and a no-op if it's already there — so it matches the name anywhere in a file's text rather than only in the performer field.
+- **Studios get the modal too.** There wasn't one: a studio chip filtered straight away. It now opens the same modal (`ui.js` passes `kind`) with **Filter as a tag** (or Remove from filter) / **+ Add to search** / Cancel. No Stash nav — `showStashModal` can only open on a performer.
+
+**Checked:** `node --check` on both files in both apps; `scray-stash-nav.js` still identical between the two.
+
+**Worth watching:** a studio tap is now two taps to filter instead of one. If that's more friction than it's worth, the studio half is one line in `ui.js` to take back out.
+
+### picker 14.2 / native 14.5 — test: > and M> in Picker's MPB, 🔍 sends the search to the other app
+<!-- 2026-09-18T09:57Z -->
+
+**picker** — `staging - 14.2`: `style.css`, `randomiser.js`, `VERSION`
+**native** — `stg-native - 14.5`: `assets/web/randomiser.js`, `assets/web/style.css`, `assets/web/VERSION` (web only — no IPA build)
+
+**1. > and M> were missing from Picker's MPB** (`style.css`, Picker only). Confirmed: native 13.187 removed the two MPB-only hides (`body:not(.manual-rotate-landscape):not(.portrait-fullscreen) .plyr-play-next` and `... .plyr-basket-quick`) on Mac's request, and that CSS was never ported. Picker's `player.js` already attaches both buttons identically, so removing the same two rules is the whole fix; > still sits just before M>.
+
+**2. 🔍 on an open search pill searches the other app** (`randomiser.js`, `style.css`, both apps). While the pill is open (focused, or holding a term), tapping the magnifier sends the term to the other app with the existing cross-app hand-off (`scrayCrossAppOpen({ search })`, the same as the rename modal's N🔍/P🔍): Picker → Native, Native → Picker, where it replaces the search box. A small superscript on 🔍 says where it goes — **N** in Picker, **P** in Native.
+- Decided on pointerdown, before the tap blurs the input and the pill goes back to rest.
+- No term, or the pill at rest: 🔍 behaves as before (opens the pill). The superscript is hidden at rest — the stub has no room.
+- Picker in an ordinary browser has no way into the app, so there's no superscript and 🔍 is unchanged — same rule as the list rows' N button.
+
+**Checked:** `node --check` on both; jsdom run of the pill: superscript is P in Native / N in Picker / nothing with no target; a tap on 🔍 at rest sends nothing; with a term typed it sends `{ search: "ecg carlee" }` once; with no target nothing is sent.
+
 ### native 14.4 — test: pinned tabs in the browser
 <!-- 2026-09-18T09:29Z -->
 

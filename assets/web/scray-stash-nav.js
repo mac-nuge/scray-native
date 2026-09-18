@@ -1117,13 +1117,20 @@ body.fullscreen-active #ssnPvBar { display: none; }
   // The purple performer names used to filter on a tap. Now they ask: filter
   // by the name, or look the performer up in the Stash navigator - which opens
   // this file's Stash modal straight onto their profile.
-  function performerChoice(video, name) {
+  //
+  // picker 14.3 / native 14.6: "Add to search" as well - the name goes into
+  // the search box (quoted if it has a space, appended to what's there), which
+  // matches it anywhere in a file's text rather than only in that one field.
+  // Studios get the same modal now (they used to filter straight away), minus
+  // Stash nav, which only knows how to open on a performer.
+  function performerChoice(video, name, kind) {
+    kind = kind === 'studio' ? 'studio' : 'performer';
     document.getElementById('scrayPerfChoice')?.remove();
     const modal = document.createElement('div');
     modal.className = 'basket-json-modal';
     modal.id = 'scrayPerfChoice';
     modal.style.zIndex = '2147483647';
-    const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet('performer') : null;
+    const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet(kind) : null;
     const on = !!(set && set.has(String(name).trim().toLowerCase()));
     modal.innerHTML =
       '<div class="basket-json-modal-content" style="max-width:340px;">' +
@@ -1131,7 +1138,10 @@ body.fullscreen-active #ssnPvBar { display: none; }
         '<div style="display:flex;flex-direction:column;gap:8px;">' +
           '<button type="button" class="modal-btn modal-btn-primary" data-c="filter">' +
             (on ? '&#10005; Remove from filter' : '&#8853; Filter as a tag') + '</button>' +
-          '<button type="button" class="modal-btn modal-btn-secondary" data-c="nav">&#128269; Search in Stash nav</button>' +
+          '<button type="button" class="modal-btn modal-btn-secondary" data-c="search">&#43; Add to search</button>' +
+          (kind === 'performer'
+            ? '<button type="button" class="modal-btn modal-btn-secondary" data-c="nav">&#128269; Search in Stash nav</button>'
+            : '') +
           '<button type="button" class="modal-btn modal-btn-cancel" data-c="">Cancel</button>' +
         '</div>' +
       '</div>';
@@ -1143,9 +1153,11 @@ body.fullscreen-active #ssnPvBar { display: none; }
       e.stopPropagation();
       done();
       if (b.dataset.c === 'filter') {
-        if (on) window.scrayRemoveTagFilter?.('performer', name);
-        else if (typeof window.scrayAddTagFilter === 'function') window.scrayAddTagFilter('performer', name);
+        if (on) window.scrayRemoveTagFilter?.(kind, name);
+        else if (typeof window.scrayAddTagFilter === 'function') window.scrayAddTagFilter(kind, name);
         else if (typeof window.scrayAddSearchTerm === 'function') window.scrayAddSearchTerm(name);
+      } else if (b.dataset.c === 'search') {
+        if (typeof window.scrayAddSearchTerm === 'function') window.scrayAddSearchTerm(name);
       } else if (b.dataset.c === 'nav') {
         if (typeof window.showStashModal === 'function') window.showStashModal(video, { performer: name });
       }

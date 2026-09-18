@@ -20,6 +20,8 @@
 // picker 14.10 / native 14.16 (browse 14.5): a parent studio's view lists
 // the scenes of every studio under it, with a second dropdown to narrow to
 // some of them; a performer's studio dropdown offers the parent networks too.
+// picker 14.11 / native 14.17 (browse 14.6): in a performer's Studio dropdown
+// each studio sits under its parent network, as on stashdb.org.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -180,6 +182,7 @@
 #stashModal .ssn-studio-none { padding: 8px 6px; font-size: .8rem; opacity: .6; }
 #stashModal .ssn-studio-how { font-size: .72rem; opacity: .65; margin: 0 0 6px; }
 #stashModal .ssn .ssn-studio-opt.net { font-weight: 600; }
+#stashModal .ssn .ssn-studio-opt.child { padding-left: 24px; }
 /* picker 14.6 / native 14.10: studio names on cards open the studio view. */
 #stashModal .ssn .ssn-stlink { display: inline; padding: 0; margin: 0; border: none; border-radius: 0; background: none; color: #6c5ce7; text-decoration: underline; font: inherit; white-space: normal; vertical-align: baseline; }
 #stashModal .ssn-slogo { flex: 0 0 110px; width: 110px; height: 70px; border-radius: 6px; background: #fff; border: 1px solid #e6e6ec; display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -668,13 +671,26 @@
         const s = e.data && e.data.studio;
         if (!s || !(s.children && s.children.length)) return [];
         // The parent itself first - its own scenes - then the studios under it.
-        return [{ id: s.id, name: s.name + ' (itself)' }].concat(s.children.map(c => ({ id: c.id, name: c.name })));
+        return [{ id: s.id, name: '\u2302 ' + s.name + ' (itself)', net: true, group: s.id }]
+          .concat(s.children.map(c => ({ id: c.id, name: c.name, child: true, group: s.id })));
       }
       const list = studioOptions(e);
-      // Parent networks of this performer's studios lead the list; picking
-      // one means every studio under it (browse 14.5 expands it).
+      // Parent networks of this performer's studios; picking one means every
+      // studio under it (browse 14.5 expands it). Nested (picker 14.11): each
+      // network is followed by its own studios, indented, as on stashdb.org;
+      // studios with no network (or none known) come after, on their own.
       if (e.type === 'performer' && e.data && Array.isArray(e.data.networks) && e.data.networks.length) {
-        return e.data.networks.map(n => ({ id: 'net:' + n.id, name: '⌂ ' + n.name, count: n.count, net: true })).concat(list);
+        const out = [];
+        const placed = new Set();
+        e.data.networks.forEach(n => {
+          out.push({ id: 'net:' + n.id, name: '\u2302 ' + n.name, count: n.count, net: true, group: n.id });
+          list.filter(o => o.parent_id && o.parent_id === n.id).forEach(o => {
+            out.push(Object.assign({}, o, { child: true, group: n.id }));
+            placed.add(o.id);
+          });
+        });
+        list.forEach(o => { if (!placed.has(o.id)) out.push(o); });
+        return out;
       }
       return list;
     }
@@ -710,8 +726,11 @@
           '<div class="ssn-studio-list">' +
             '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-dd="' + dd + '" data-studio-pick="">All ' + many + '</button>' +
             // Picked ones first, so they're easy to find and untick.
-            opts.slice().sort((a, b) => (isOn(b.id) ? 1 : 0) - (isOn(a.id) ? 1 : 0)).map(o =>
-              '<button type="button" class="ssn-studio-opt' + (isOn(o.id) ? ' on' : '') + (o.net ? ' net' : '') + '" data-dd="' + dd + '" ' +
+            // A nested list keeps its order (a studio stays under its network);
+            // a flat one puts the picked ones first.
+            (opts.some(o => o.group) ? opts : opts.slice().sort((a, b) => (isOn(b.id) ? 1 : 0) - (isOn(a.id) ? 1 : 0))).map(o =>
+              '<button type="button" class="ssn-studio-opt' + (isOn(o.id) ? ' on' : '') + (o.net ? ' net' : '') + (o.child ? ' child' : '') + '" data-dd="' + dd + '" ' +
+              (o.group ? 'data-group="' + esc(o.group) + '" ' : '') +
               'data-studio-pick="' + esc(o.id) + '" data-studio-name="' + esc(o.name) + '">' +
               '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>').join('') +
             '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
@@ -740,10 +759,15 @@
         const q = box.value.trim().toLowerCase();
         e[K.term] = box.value;
         let shown = 0;
+        const hitGroups = new Set();
         wrap.querySelectorAll('.ssn-studio-opt[data-studio-name]').forEach(b => {
           const hit = !q || b.dataset.studioName.toLowerCase().includes(q);
           b.hidden = !hit;
-          if (hit) shown++;
+          if (hit) { shown++; if (b.dataset.group) hitGroups.add(b.dataset.group); }
+        });
+        // A studio that matches keeps its network's heading above it.
+        if (q) wrap.querySelectorAll('.ssn-studio-opt.net[data-group]').forEach(b => {
+          if (hitGroups.has(b.dataset.group)) b.hidden = false;
         });
         const all = wrap.querySelector('.ssn-studio-opt[data-studio-pick=""]');
         if (all) all.hidden = !!q;

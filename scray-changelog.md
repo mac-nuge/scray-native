@@ -4,6 +4,23 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 14.6 / picker 14.11 / native 14.17 — test: studios nested under their networks in Stash nav
+<!-- 2026-09-18T14:58Z -->
+
+**browse** — `staging-browse - 14.6`: `api.php`, `VERSION.txt` (**deploy first**)
+**picker** — `staging - 14.11`: `scray-stash-nav.js`, `VERSION`
+**native** — `stg-native - 14.17`: `assets/web/scray-stash-nav.js`, `assets/web/VERSION` (web only — no IPA build)
+
+Mac: show the networks in the dropdowns the way stashdb.org does, with the studios nested inside their parents.
+
+- `stash_nav` (performer) now sends each studio's `parent_id` with the studio list.
+- **Performer profile → Studio dropdown:** each ⌂ network is followed by its own studios, indented; studios with no network come after, on their own. Picking the network still means all of its studios; picking a studio under it means just that one.
+- The nested list keeps its order when things are ticked (a studio stays under its network) — only a flat list moves picked ones to the top.
+- **Search** keeps a network's heading visible when one of its studios matches, so a hit is never shown out of context.
+- **A network's own profile → Studio dropdown:** "⌂ Network (itself)" first, its studios indented beneath.
+
+**Checked:** `php -l`; `node --check`; jsdom — Karups ⌂ with Karups Older and Karups Hometown indented under it, LetsDoeIt ⌂ with its studio, Bikini Pleasure unnested at the end; searching "older" leaves "⌂ Karups" and "Karups Older".
+
 ### browse 14.5 / picker 14.10 / native 14.16 — test: parent studios as rows with levels, parents in Stash nav, Stash toggle stops scrolling
 <!-- 2026-09-18T13:30Z -->
 

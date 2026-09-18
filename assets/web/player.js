@@ -3472,8 +3472,11 @@ function scrayPlayerOverflowActions() {
 // the source to allow CORS: OneDrive's download links should; Native's own
 // scray-video:// loader sends Access-Control-Allow-Origin from native 13.179's
 // Swift, so phone copies need a new IPA build before they work.
-const SCRAY_TINEYE_MAX_W = 1920;        // ⚙️ frames wider than this are scaled down
-const SCRAY_TINEYE_JPEG_QUALITY = 0.9;  // ⚙️
+// picker 14.9 / native 14.15: 1280 / 0.82, down from 1920 / 0.9 - roughly a
+// third of the bytes to upload, and for TinEye to fetch back from api.php,
+// with no loss that matters to a reverse image search.
+const SCRAY_TINEYE_MAX_W = 1280;        // ⚙️ frames wider than this are scaled down
+const SCRAY_TINEYE_JPEG_QUALITY = 0.82; // ⚙️
 const SCRAY_TINEYE_COPY_TIMEOUT_MS = 20000;
 
 function scrayFrameToDataUrl(source, w, h) {
@@ -3590,9 +3593,15 @@ async function scrayTinEyeSearch() {
         } catch (e) { tab = null; }
     }
 
+    // How long each of our steps takes (picker 14.9 / native 14.15), so a
+    // slow search can be put down to the right step. In the console, and in
+    // the "opened" message.
+    const t0 = performance.now();
+    let tGrab = 0, tUp = 0;
     try {
         say('🔍 TinEye: grabbing the frame…');
         const image = await scrayGrabVideoFrame();
+        tGrab = performance.now() - t0;
         say('🔍 TinEye: uploading…');
 
         const api = new URL(window.SCRAY_SYNC.API_BASE);
@@ -3607,11 +3616,20 @@ async function scrayTinEyeSearch() {
         if (!res.ok || !json || !json.ok) {
             throw new Error((json && json.error) || `upload failed (HTTP ${res.status})`);
         }
-        const search = json.search || ('https://tineye.com/search?url=' + encodeURIComponent(json.url));
-        console.log('[tineye] frame', json.url, '->', search);
+        tUp = performance.now() - t0 - tGrab;
+        let search = json.search || ('https://tineye.com/search?url=' + encodeURIComponent(json.url));
+        // For Native's TinEye results view (native 14.15): the frame, to show
+        // at the top, and - from Picker in the in-app browser - a way back.
+        // In the #fragment, which TinEye's redirect keeps and never sees.
+        if (json.url) {
+            search += '#scray-frame=' + encodeURIComponent(json.url) +
+                      (window.SCRAY_IN_APP_BROWSER ? '&scray-from=picker' : '');
+        }
+        console.log('[tineye] frame', json.url, '->', search,
+                    `grab ${(tGrab / 1000).toFixed(1)}s, upload ${(tUp / 1000).toFixed(1)}s`);
         if (tab && !tab.closed) tab.location.href = search;
         else scrayOpenExternalUrl(search);
-        say('🔍 TinEye: opened');
+        say(`🔍 TinEye: opened (frame ${(tGrab / 1000).toFixed(1)}s · upload ${(tUp / 1000).toFixed(1)}s)`);
     } catch (err) {
         console.error('[tineye] failed:', err);
         if (tab && !tab.closed) { try { tab.close(); } catch (e) {} }

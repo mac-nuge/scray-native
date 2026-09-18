@@ -745,26 +745,31 @@ final class ScrayBrowserViewController: UIViewController,
         refreshChrome()
     }
 
-    // MARK: - Favourites (native 14.8)
+    // MARK: - Favourites (native 14.8, reworked 14.14)
     //
     // Bookmarks, called favourites, kept in UserDefaults. Added from the ⋯
-    // menu, listed in the Favourites panel beside Tabs. Pinning a favourite
-    // IS pinning a tab: it opens (or finds) a tab for that page and pins it,
-    // so it sits at the top of the Tabs panel with all of 14.4's rules - kept
-    // out of Select > All, reopens at the favourite's page. A favourite shows
-    // as pinned whenever a pinned tab is on its address, so there's one
-    // source of truth and the two can't disagree.
+    // menu, listed in the Favourites panel beside Tabs.
+    //
+    // Pinning a favourite (14.14) no longer turns it into a pinned tab. It
+    // stays a LINK: the same favourite, also shown at the top of the Tabs
+    // panel with a blue pin, always opening its own address however much you
+    // browse in the tab it opens. Orange pins are still pinned tabs (14.4) -
+    // live tabs that can wander. Unpinning just takes the link off Tabs.
 
-    private func loadFavourites() -> [(title: String, url: URL)] {
+    private func loadFavourites() -> [(title: String, url: URL, pinned: Bool)] {
         let raw = UserDefaults.standard.array(forKey: Self.favouritesKey) as? [[String: String]] ?? []
-        return raw.compactMap { d -> (title: String, url: URL)? in
+        return raw.compactMap { d -> (title: String, url: URL, pinned: Bool)? in
             guard let s = d["url"], let u = URL(string: s) else { return nil }
-            return (title: d["title"] ?? (u.host ?? s), url: u)
+            return (title: d["title"] ?? (u.host ?? s), url: u, pinned: d["pinned"] == "1")
         }
     }
 
-    private func saveFavourites(_ list: [(title: String, url: URL)]) {
-        let raw = list.map { ["title": $0.title, "url": $0.url.absoluteString] }
+    private func saveFavourites(_ list: [(title: String, url: URL, pinned: Bool)]) {
+        let raw: [[String: String]] = list.map { f in
+            var d = ["title": f.title, "url": f.url.absoluteString]
+            if f.pinned { d["pinned"] = "1" }
+            return d
+        }
         UserDefaults.standard.set(raw, forKey: Self.favouritesKey)
     }
 
@@ -787,67 +792,35 @@ final class ScrayBrowserViewController: UIViewController,
             return
         }
         let t = (currentTab?.displayTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        list.append((title: t.isEmpty ? (url.host ?? url.absoluteString) : t, url: url))
+        list.append((title: t.isEmpty ? (url.host ?? url.absoluteString) : t, url: url, pinned: false))
         saveFavourites(list)
         flash("Added to Favourites")
     }
 
-    /// The pinned tab standing for this favourite, if there is one.
-    private func favouritePinnedTabIndex(_ url: URL) -> Int? {
-        tabs.firstIndex { tab in
-            guard tab.pinned, let u = tab.pinnedURL ?? tab.displayURL else { return false }
-            return favKey(u) == favKey(url)
-        }
-    }
-
+    /// Open a favourite: the tab already on that exact page if there is one,
+    /// otherwise a new tab at it. Always the favourite's own address.
     private func openFavourite(_ index: Int) {
         let list = loadFavourites()
         guard list.indices.contains(index) else { return }
         let url = list[index].url
-        if let t = favouritePinnedTabIndex(url) { selectTab(t) } else { openOrFocus(url) }
+        if let t = tabs.firstIndex(where: { $0.displayURL.map { favKey($0) == favKey(url) } == true }) {
+            selectTab(t)
+        } else {
+            addTab(url: url, select: true)
+        }
     }
 
-    /// Pin: pin the tab already on that page, or open one (not switched to -
-    /// it loads when you first pick it) and pin that. Unpin: the tab stays
-    /// open, as an ordinary tab.
+    /// Pin / unpin: just the flag. No tab is made, moved or changed.
     private func toggleFavouritePin(_ index: Int) {
-        let list = loadFavourites()
+        var list = loadFavourites()
         guard list.indices.contains(index) else { return }
-        let url = list[index].url
-        if let t = favouritePinnedTabIndex(url) {
-            togglePin(t)
-            return
-        }
-        if let t = tabs.firstIndex(where: { tab in
-            !tab.pinned && tab.displayURL.map { favKey($0) == favKey(url) } == true
-        }) {
-            togglePin(t)
-            if let p = tabs.firstIndex(where: { $0.pinned && $0.pinnedURL.map { favKey($0) == favKey(url) } == true }) {
-                tabs[p].pinnedURL = url
-            }
-            persistTabs()
-            return
-        }
-        let tab = ScrayBrowserTab(webView: makeWebView(configuration: nil), pending: url)
-        tab.pinned = true
-        tab.pinnedURL = url
-        let onScreen = currentTab
-        let boundary = tabs.filter { $0.pinned }.count
-        tabs.insert(tab, at: boundary)
-        if let onScreen = onScreen, let i = tabs.firstIndex(where: { $0 === onScreen }) {
-            currentIndex = i
-        }
-        persistTabs()
-        refreshChrome()
+        list[index].pinned.toggle()
+        saveFavourites(list)
     }
 
-    /// Deleting a favourite also takes its pin away - a pinned tab with no
-    /// favourite behind it would be a pin you can only undo from Tabs. The
-    /// tab itself stays open.
     private func deleteFavourite(_ index: Int) {
         var list = loadFavourites()
         guard list.indices.contains(index) else { return }
-        if let t = favouritePinnedTabIndex(list[index].url) { togglePin(t) }
         list.remove(at: index)
         saveFavourites(list)
     }
@@ -1116,7 +1089,7 @@ final class ScrayBrowserViewController: UIViewController,
         list.favProvider = { [weak self] in
             guard let self = self else { return [] }
             return self.loadFavourites().map { f in
-                (f.title, self.compactAddress(f.url), self.favouritePinnedTabIndex(f.url) != nil)
+                (f.title, self.compactAddress(f.url), f.pinned)
             }
         }
         list.onOpenFavourite = { [weak self] idx in
@@ -1177,6 +1150,22 @@ final class ScrayBrowserViewController: UIViewController,
             // modal of whichever app opened the TinEye tab: Picker's tab when
             // Picker asked (switched to, modal opened there), otherwise
             // Native's main view (browser dismissed first, as for ⤴).
+            // scraynative://back — "‹ Picker" on the TinEye results view
+            // (native 14.15): back to the tab that opened this one. With no
+            // opener to hand (the browser was restarted since), the tab
+            // already on Picker, else Picker in a new tab. Either way the
+            // TinEye tab stays open behind it.
+            if (url.host ?? "").lowercased() == "back" {
+                let from = tabs.first(where: { $0.webView === webView })
+                if let opener = from?.opener,
+                   let idx = tabs.firstIndex(where: { $0.webView === opener }) {
+                    selectTab(idx)
+                } else {
+                    openOrFocus(homeURL)
+                }
+                return
+            }
+
             if (url.host ?? "").lowercased() == "stashsearch" {
                 let q = (query("q") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !q.isEmpty else { return }
@@ -2504,6 +2493,11 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
 // (from the right edge for Favourites, from the left edge back to Tabs).
 // Edge swipes rather than a swipe anywhere, because swiping left on a row is
 // already how you reach its Close / Pin / Delete buttons.
+//
+// native 14.14: pinned FAVOURITES sit at the top of the Tabs panel in a
+// section of their own, with a blue pin. They are links, not tabs: tapping
+// one opens the favourite's own address. Tabs are section 1, so a tab's row
+// is still its index into the browser's tab list.
 // ============================================================================
 
 final class ScrayTabListViewController: UITableViewController {
@@ -2530,6 +2524,9 @@ final class ScrayTabListViewController: UITableViewController {
     private var mode: Mode = .tabs
     private var items: [(String, String, Bool)] = []
     private var favs: [(String, String, Bool)] = []
+    /// The pinned favourites shown on the Tabs panel, with their index in `favs`.
+    private var pinnedFavs: [(index: Int, fav: (String, String, Bool))] = []
+    private let favSection = 0, tabSection = 1
     private let segment = UISegmentedControl(items: ["Tabs", "Favourites"])
     private let emptyFavs = UILabel()
 
@@ -2548,6 +2545,11 @@ final class ScrayTabListViewController: UITableViewController {
         mode = startMode
         segment.selectedSegmentIndex = mode.rawValue
         segment.addTarget(self, action: #selector(segmentChanged), for: .valueChanged)
+        // Smaller type, and each side only as wide as its words, so
+        // "Favourites (12)" fits beside the buttons (native 14.13).
+        segment.setTitleTextAttributes([.font: UIFont.systemFont(ofSize: 12, weight: .medium)], for: .normal)
+        segment.setTitleTextAttributes([.font: UIFont.systemFont(ofSize: 12, weight: .semibold)], for: .selected)
+        segment.apportionsSegmentWidthsByContent = true
 
         let fromRight = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(edgeSwipe(_:)))
         fromRight.edges = .right
@@ -2568,6 +2570,7 @@ final class ScrayTabListViewController: UITableViewController {
     private func reload() {
         items = provider?() ?? []
         favs = favProvider?() ?? []
+        pinnedFavs = favs.enumerated().filter { $0.element.2 }.map { (index: $0.offset, fav: $0.element) }
         tableView.reloadData()
         refreshChrome()
     }
@@ -2638,8 +2641,13 @@ final class ScrayTabListViewController: UITableViewController {
         navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done,
                                                            target: self, action: #selector(doneTapped))
         if mode == .tabs {
-            let select = UIBarButtonItem(title: "Select", style: .plain,
+            // A tick in a circle rather than the word (native 14.13), so the
+            // Tabs | Favourites switch has room. .label is white on the dark
+            // bar, the same as the other buttons' glyphs.
+            let select = UIBarButtonItem(image: UIImage(systemName: "checkmark.circle"), style: .plain,
                                          target: self, action: #selector(startPickingTapped))
+            select.tintColor = .label
+            select.accessibilityLabel = "Select"
             select.isEnabled = !selectableRows.isEmpty
             navigationItem.rightBarButtonItems = [
                 UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(newTapped)),
@@ -2678,7 +2686,7 @@ final class ScrayTabListViewController: UITableViewController {
             for ip in selected { tableView.deselectRow(at: ip, animated: false) }
         } else {
             for row in selectableRows {
-                tableView.selectRow(at: IndexPath(row: row, section: 0),
+                tableView.selectRow(at: IndexPath(row: row, section: tabSection),
                                     animated: false, scrollPosition: .none)
             }
         }
@@ -2686,7 +2694,8 @@ final class ScrayTabListViewController: UITableViewController {
     }
 
     @objc private func closeSelectedTapped() {
-        let rows = (tableView.indexPathsForSelectedRows ?? []).map { $0.row }.filter { !isPinned($0) }
+        let rows = (tableView.indexPathsForSelectedRows ?? [])
+            .filter { $0.section == tabSection }.map { $0.row }.filter { !isPinned($0) }
         guard !rows.isEmpty else { return }
         let closingEverything = rows.count == items.count
 
@@ -2705,13 +2714,32 @@ final class ScrayTabListViewController: UITableViewController {
 
     // MARK: rows
 
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        mode == .tabs ? items.count : favs.count
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        mode == .tabs ? 2 : 1
     }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        if mode == .favourites { return favs.count }
+        return section == favSection ? pinnedFavs.count : items.count
+    }
+
+    /// A pinned favourite's row on the Tabs panel.
+    private func isFavRow(_ ip: IndexPath) -> Bool { mode == .tabs && ip.section == favSection }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         // .subtitle needs a fresh cell rather than a dequeued .default one.
         let cell = UITableViewCell(style: .subtitle, reuseIdentifier: "tab")
+        if isFavRow(indexPath) {
+            // A link to the favourite, not a tab: blue pin, no checkmark.
+            let f = pinnedFavs[indexPath.row].fav
+            cell.textLabel?.text = f.0
+            cell.textLabel?.font = .systemFont(ofSize: 15, weight: .medium)
+            cell.detailTextLabel?.text = f.1
+            cell.detailTextLabel?.textColor = .secondaryLabel
+            cell.imageView?.image = UIImage(systemName: "pin.fill")
+            cell.imageView?.tintColor = .systemBlue
+            return cell
+        }
         let item = mode == .tabs ? items[indexPath.row] : favs[indexPath.row]
         cell.textLabel?.text = item.0
         cell.textLabel?.font = .systemFont(ofSize: 15, weight: .medium)
@@ -2731,7 +2759,7 @@ final class ScrayTabListViewController: UITableViewController {
             cell.imageView?.tintColor = .systemBlue
             if item.2 {
                 let pin = UIImageView(image: UIImage(systemName: "pin.fill"))
-                pin.tintColor = .systemOrange
+                pin.tintColor = .systemBlue
                 cell.accessoryView = pin
             }
         }
@@ -2742,6 +2770,7 @@ final class ScrayTabListViewController: UITableViewController {
         if picking { refreshChrome(); return }
         tableView.deselectRow(at: indexPath, animated: true)
         if mode == .favourites { onOpenFavourite?(indexPath.row); return }
+        if isFavRow(indexPath) { onOpenFavourite?(pinnedFavs[indexPath.row].index); return }
         onSelect?(indexPath.row)
     }
 
@@ -2754,11 +2783,13 @@ final class ScrayTabListViewController: UITableViewController {
     /// While picking, pinned rows get no tick box and can't be ticked. Out of
     /// picking, every row is editable so it can be swiped.
     override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
-        (mode == .tabs && picking) ? !isPinned(indexPath.row) : true
+        if isFavRow(indexPath) { return !picking }
+        return (mode == .tabs && picking) ? !isPinned(indexPath.row) : true
     }
 
     override func tableView(_ tableView: UITableView, willSelectRowAt indexPath: IndexPath) -> IndexPath? {
-        (mode == .tabs && picking && isPinned(indexPath.row)) ? nil : indexPath
+        if picking && isFavRow(indexPath) { return nil }
+        return (mode == .tabs && picking && isPinned(indexPath.row)) ? nil : indexPath
     }
 
     private func favPinned(_ row: Int) -> Bool { favs.indices.contains(row) && favs[row].2 }
@@ -2771,6 +2802,22 @@ final class ScrayTabListViewController: UITableViewController {
         guard !picking else { return nil }
         let row = indexPath.row
 
+        // A pinned favourite on Tabs: only Unpin, which takes the link off
+        // this panel. The favourite itself stays.
+        if isFavRow(indexPath) {
+            let favIndex = pinnedFavs[row].index
+            let unpin = UIContextualAction(style: .normal, title: "Unpin") { [weak self] _, _, done in
+                self?.onToggleFavouritePin?(favIndex)
+                self?.reload()
+                done(true)
+            }
+            unpin.backgroundColor = .systemBlue
+            unpin.image = UIImage(systemName: "pin.slash")
+            let config = UISwipeActionsConfiguration(actions: [unpin])
+            config.performsFirstActionWithFullSwipe = false
+            return config
+        }
+
         if mode == .favourites {
             let pinned = favPinned(row)
             let pin = UIContextualAction(style: .normal, title: pinned ? "Unpin" : "Pin") { [weak self] _, _, done in
@@ -2778,7 +2825,7 @@ final class ScrayTabListViewController: UITableViewController {
                 self?.reload()
                 done(true)
             }
-            pin.backgroundColor = .systemOrange
+            pin.backgroundColor = .systemBlue
             pin.image = UIImage(systemName: pinned ? "pin.slash" : "pin")
             let delete = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, done in
                 self?.onDeleteFavourite?(row)
@@ -2817,12 +2864,23 @@ final class ScrayTabListViewController: UITableViewController {
                             point: CGPoint) -> UIContextMenuConfiguration? {
         guard !picking else { return nil }
         let row = indexPath.row
+        if isFavRow(indexPath) {
+            let favIndex = pinnedFavs[row].index
+            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+                UIMenu(title: "", children: [
+                    UIAction(title: "Unpin from Tabs", image: UIImage(systemName: "pin.slash")) { [weak self] _ in
+                        self?.onToggleFavouritePin?(favIndex)
+                        self?.reload()
+                    }
+                ])
+            }
+        }
         let favMode = mode == .favourites
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             guard let self = self else { return nil }
             let pinned = favMode ? self.favPinned(row) : self.isPinned(row)
             var actions: [UIMenuElement] = [
-                UIAction(title: pinned ? "Unpin" : "Pin to Tabs",
+                UIAction(title: pinned ? (favMode ? "Unpin from Tabs" : "Unpin") : (favMode ? "Pin to Tabs" : "Pin"),
                          image: UIImage(systemName: pinned ? "pin.slash" : "pin")) { [weak self] _ in
                     if favMode { self?.onToggleFavouritePin?(row) } else { self?.onTogglePin?(row) }
                     self?.reload()
@@ -2848,7 +2906,7 @@ final class ScrayTabListViewController: UITableViewController {
     override func tableView(_ tableView: UITableView,
                             commit editingStyle: UITableViewCell.EditingStyle,
                             forRowAt indexPath: IndexPath) {
-        guard editingStyle == .delete else { return }
+        guard editingStyle == .delete, !isFavRow(indexPath) else { return }
         if mode == .favourites {
             onDeleteFavourite?(indexPath.row)
         } else {

@@ -27,6 +27,13 @@ import Foundation
 // nothing and the TinEye page is one tap away.
 //
 // Inside a shadow root, so TinEye's CSS can't reach it and ours can't leak.
+//
+// native 14.15: the frame that was searched sits at the top, each result
+// shows TinEye's thumbnail of the matching image (tap for the full image),
+// and "‹ Picker" goes back to the Picker tab that asked. The frame's address
+// and "from Picker" arrive in the URL's #fragment (player.js adds them) -
+// TinEye's redirect from /search?url= to /search/<id> drops the query but
+// keeps the fragment - and are kept in sessionStorage for the tab.
 // ============================================================================
 
 enum ScrayTinEye {
@@ -35,6 +42,15 @@ enum ScrayTinEye {
   if (window.__scrayTinEye) return;
   window.__scrayTinEye = true;
   if (!/(^|\.)tineye\.com$/i.test(location.hostname)) return;
+
+  function ssGet(k) { try { return window.sessionStorage.getItem(k) || ''; } catch (e) { return ''; } }
+  function ssSet(k, v) { try { window.sessionStorage.setItem(k, v); } catch (e) {} }
+  (function readHash() {
+    var h = location.hash || '';
+    var fm = h.match(/scray-frame=([^&]+)/);
+    if (fm) ssSet('scrayTE.frame', safeDecode(fm[1]));
+    if (/scray-from=picker/.test(h)) ssSet('scrayTE.from', 'picker');
+  })();
 
   var WAIT_HINT_MS = 15000;   // how long before "found nothing" is said
   var host = null, root = null, list = null, countEl = null, pill = null;
@@ -83,13 +99,30 @@ enum ScrayTinEye {
       if (seen[u.href]) continue;
       seen[u.href] = true;
 
-      var date = '', block = a.parentElement;
-      for (var d = 0; d < 6 && block; d++, block = block.parentElement) {
-        var m = (block.textContent || '').match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, \d{4}\b/);
-        if (m) { date = m[0]; break; }
+      // The result's own block: the nearest ancestor holding an image - that
+      // image is TinEye's thumbnail of the match. The date is read from the
+      // same block (or two levels up when there's no image), which keeps the
+      // text it searches small - reading textContent all the way up to the
+      // page on every link, every scan, was the slow part before (14.15).
+      var block = null, img = null;
+      for (var el = a.parentElement, lv = 0; el && lv < 6; el = el.parentElement, lv++) {
+        var im = el.querySelector('img');
+        if (im) { block = el; img = im; break; }
+      }
+      var scope = block || (a.parentElement && a.parentElement.parentElement) || a.parentElement;
+      var dm = scope ? (scope.textContent || '').match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, \d{4}\b/) : null;
+      var date = dm ? dm[0] : '';
+      var thumb = img ? (img.currentSrc || img.src || img.getAttribute('data-src') || '') : '';
+      var full = '';
+      if (block) {
+        var bl = block.querySelectorAll('a[href]');
+        for (var k = 0; k < bl.length; k++) {
+          if (/view\s*image/i.test(bl[k].textContent || '')) { full = bl[k].href; break; }
+        }
       }
       var path = safeDecode(u.pathname + u.search).replace(/^\/+|\/+$/g, '');
-      out.push({ href: u.href, site: u.hostname.replace(/^www\./i, ''), path: path, date: date });
+      out.push({ href: u.href, site: u.hostname.replace(/^www\./i, ''), path: path, date: date,
+                 thumb: thumb, full: full || thumb });
     }
     return out;
   }
@@ -101,6 +134,14 @@ enum ScrayTinEye {
     '.head{position:sticky;top:0;display:flex;align-items:center;gap:8px;padding:12px 14px;' +
       'padding-top:calc(12px + env(safe-area-inset-top,0px));background:#fff;border-bottom:1px solid #ddd;z-index:1}' +
     '.head h1{flex:1;margin:0;font-size:17px;font-weight:700}' +
+    '.head .back{background:#6c5ce7;color:#fff}' +
+    '.frame{padding:12px 12px 0}' +
+    '.frame .lbl{font-size:12px;color:#777;margin:0 0 6px}' +
+    '.frame img{display:block;width:100%;max-height:40vh;object-fit:contain;background:#000;border-radius:10px}' +
+    '.row{display:flex;gap:10px;align-items:flex-start}' +
+    '.thumb{flex:0 0 96px;width:96px;height:72px;border-radius:6px;background:#222;overflow:hidden;display:block}' +
+    '.thumb img{width:100%;height:100%;object-fit:cover;display:block}' +
+    '.main{flex:1;min-width:0}' +
     '.head button{border:none;border-radius:8px;padding:7px 11px;font-size:13px;background:#e4e4ea;color:#222}' +
     '.list{padding:10px 12px 40px}' +
     '.card{background:#fff;border-radius:12px;padding:12px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.08)}' +
@@ -136,8 +177,12 @@ enum ScrayTinEye {
     root.innerHTML =
       '<style>' + CSS + '</style>' +
       '<div class="wrap">' +
-        '<div class="head"><h1>TinEye <span class="count"></span></h1>' +
+        '<div class="head">' +
+          (ssGet('scrayTE.from') === 'picker' ? '<button type="button" class="back">\u2039 Picker</button>' : '') +
+          '<h1>TinEye <span class="count"></span></h1>' +
           '<button type="button" class="raw">TinEye page</button></div>' +
+        (ssGet('scrayTE.frame')
+          ? '<div class="frame"><div class="lbl">Your frame</div><img alt=""></div>' : '') +
         '<div class="list"></div>' +
       '</div>' +
       '<button type="button" class="pill" hidden>Scray view</button>' +
@@ -146,6 +191,16 @@ enum ScrayTinEye {
     countEl = root.querySelector('.count');
     pill = root.querySelector('.pill');
     root.querySelector('.raw').addEventListener('click', function () { show(false); });
+    var back = root.querySelector('.back');
+    // ScrayBrowser switches to the tab that opened this one (native 14.15).
+    if (back) back.addEventListener('click', function () { location.href = 'scraynative://back'; });
+    var fimg = root.querySelector('.frame img');
+    if (fimg) {
+      // The frame lives on api.php for an hour; after that, or if the page's
+      // rules refuse it, the block just goes.
+      fimg.addEventListener('error', function () { var f = root.querySelector('.frame'); if (f) f.remove(); });
+      fimg.src = ssGet('scrayTE.frame');
+    }
     pill.addEventListener('click', function () { show(true); });
   }
 
@@ -241,7 +296,22 @@ enum ScrayTinEye {
       if (t) copy(t);
     });
 
-    el.appendChild(top); el.appendChild(a); el.appendChild(box);
+    var main = document.createElement('div');
+    main.className = 'main';
+    main.appendChild(top); main.appendChild(a);
+    var row = document.createElement('div');
+    row.className = 'row';
+    if (r.thumb) {
+      // TinEye's thumbnail of the matching image; tap for the full one.
+      var th = document.createElement('a');
+      th.className = 'thumb'; th.href = r.full || r.thumb; th.target = '_blank'; th.rel = 'noopener';
+      var ti = document.createElement('img');
+      ti.src = r.thumb; ti.alt = ''; ti.loading = 'lazy';
+      th.appendChild(ti);
+      row.appendChild(th);
+    }
+    row.appendChild(main);
+    el.appendChild(row); el.appendChild(box);
     el.appendChild(pickedLine); el.appendChild(btns);
     paint();
     return el;
@@ -259,7 +329,7 @@ enum ScrayTinEye {
     // Redrawn only when what it would draw changes - picks survive in
     // `picked` either way, but a redraw on every mutation would fight taps.
     var state = results.length
-      ? results.map(function (r) { return r.href; }).join('\n')
+      ? results.map(function (r) { return r.href + '|' + r.thumb; }).join('\n')
       : (waitedOut ? '#none' : '#wait');
     if (state === lastKeys) return;
     lastKeys = state;
@@ -280,7 +350,7 @@ enum ScrayTinEye {
   var pending = 0;
   function soon() {
     if (pending) return;
-    pending = setTimeout(function () { pending = 0; render(); }, 300);
+    pending = setTimeout(function () { pending = 0; render(); }, 500);
   }
 
   function start() {

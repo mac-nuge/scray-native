@@ -4,6 +4,51 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.15 / picker 14.9 — test: TinEye view shows the frame and match thumbnails, ‹ Picker, faster
+<!-- 2026-09-18T13:05Z -->
+
+**native** — `stg-native - 14.15`: `modules/scray-native/ios/ScrayTinEye.swift`, `ScrayBrowser.swift`, `assets/web/player.js`, `assets/web/VERSION` (**Swift — needs an IPA build**)
+**picker** — `staging - 14.9`: `player.js`, `VERSION`
+
+Mac: show the searched screenshot at the top and the matching images beside the results; a "back to Picker" button when Picker asked; and why is it slower than TinEye itself?
+
+- **Your frame at the top** of the results view. player.js appends `#scray-frame=<frame url>` to the TinEye address — TinEye's redirect from `/search?url=` to `/search/<id>` drops the query but keeps the fragment — and the overlay keeps it in sessionStorage for the tab. If the frame has expired on api.php (an hour) or the page refuses it, the block simply isn't shown.
+- **Thumbnails.** Each result shows TinEye's thumbnail of the matching image on the left (the nearest image in that result's block); tap it for the full image (the block's "View image" link), new tab.
+- **‹ Picker** in the header when Picker in the in-app browser asked (`&scray-from=picker` in the fragment). It hops `scraynative://back`: ScrayBrowser switches to the tab that opened TinEye; if that's gone (browser restarted), the tab already on Picker, else Picker in a new tab. The TinEye tab stays open behind.
+- **Speed.** The waiting is mostly ours, before TinEye starts: (1) grabbing the frame — when the video is cross-origin (OneDrive streams; the canvas refuses it) a hidden copy of the video is loaded and seeked, which can take seconds; (2) uploading it to api.php; (3) TinEye fetching it back from api.php. Changes: the frame is now 1280 wide at JPEG 0.82 (was 1920 / 0.9) — about a third of the bytes up and back; and the overlay no longer reads the whole page's text for every result on every scan (dates are read from the result's own block), and rescans at most every 0.5s. The "opened" message now shows **frame Xs · upload Ys**, so a slow one can be pinned on the right step.
+
+**Checked:** `node --check` on both `player.js` and the overlay script; jsdom run of the overlay on a mocked results page with the fragment — ‹ Picker shown, frame src taken from the fragment, both results with the right thumbnail, full-image link and date. Swift not compiled.
+
+### native 14.14 — test: pinned favourites stay links, with a blue pin
+<!-- 2026-09-18T12:45Z -->
+
+**native** — `stg-native - 14.14`: `modules/scray-native/ios/ScrayBrowser.swift`, `assets/web/VERSION` (**Swift — needs an IPA build**)
+**picker / browse** — no change.
+
+Mac: a favourite pinned to Tabs should stay a link to the favourite — not become a pinned tab that changes as I browse in it. A blue pin to tell them apart.
+
+- **Pinning a favourite is just a flag now** (`pinned` in `scray.browser.favourites`). No tab is made, moved or pinned.
+- **Tabs panel:** pinned favourites get their own section at the top, above the tabs, each with a **blue pin**. Tap → opens the favourite's own address (the tab already on exactly that page, else a new tab), however far that tab has since wandered. Swipe or long-press → **Unpin** (takes it off Tabs; the favourite stays). They can't be ticked in Select and don't count as tabs.
+- **Favourites panel:** a pinned favourite shows a blue pin too; Pin to Tabs / Unpin from Tabs and Delete as before. Deleting one no longer touches any tab.
+- **Orange pins are unchanged** — pinned tabs (14.4), live tabs that can change as you browse.
+- Tabs are section 1 now, so a tab's row is still its index; Select / All / Close work on that section only.
+- Also carries 14.13 (tick icon for Select, smaller Tabs | Favourites text).
+- Favourites pinned under 14.8–14.13 were turned into orange pinned tabs at the time; they stay as they are — re-pin the favourite for the blue link, and unpin or close the old tab if it's no longer wanted.
+
+**Checked:** read through — **not compiled here**.
+
+### native 14.13 — test: tick icon for Select, smaller Tabs / Favourites switch
+<!-- 2026-09-18T12:43Z -->
+
+**native** — `stg-native - 14.13`: `modules/scray-native/ios/ScrayBrowser.swift`, `assets/web/VERSION` (**Swift — needs an IPA build**)
+**picker / browse** — no change.
+
+Mac: the tab sheet's header was cutting off "Favourites".
+- **Select** is now a tick in a circle (SF Symbol `checkmark.circle`, tinted `.label` — white on the dark bar), with "Select" kept as its accessibility label.
+- The **Tabs | Favourites** switch uses 12pt text (medium, semibold when selected) and sizes each side to its words (`apportionsSegmentWidthsByContent`), so "Favourites (n)" fits.
+
+**Checked:** read through — **not compiled here**.
+
 ### browse 14.4 / picker 14.8 / native 14.12 — test: studio parents from StashDB, network filter
 <!-- 2026-09-18T11:26Z -->
 

@@ -187,13 +187,16 @@ final class ScrayBrowserViewController: UIViewController,
     private let progressView = UIProgressView(progressViewStyle: .bar)
     private let webContainer = UIView()
     private let toolbar = UIToolbar()
-    private var backItem = UIBarButtonItem()
-    private var forwardItem = UIBarButtonItem()
-    private var tabsItem = UIBarButtonItem()
-    private var downloadsItem = UIBarButtonItem()
+    // Plain buttons rather than bar items (native 14.25): on iOS 26 every
+    // bar item separated by a space gets its own glass circle, which is what
+    // spread the row off both edges. As buttons in one stack they sit in a
+    // single pill at sizes we control.
+    private let backButton = UIButton(type: .system)
+    private let forwardButton = UIButton(type: .system)
+    private let tabsButton = UIButton(type: .system)
     /// ‹P (native 14.20) - back to Picker from an external page Picker sent
     /// you to. See pickerReturn().
-    private var pickerItem = UIBarButtonItem()
+    private let pickerButton = UIButton(type: .system)
     private let trayButton = ScrayTrayButton(frame: .zero)
     private let toastView = ScrayToastView(frame: .zero)
     private var toastBottom: NSLayoutConstraint!
@@ -368,16 +371,17 @@ final class ScrayBrowserViewController: UIViewController,
 
     // MARK: - Chrome
 
-    // ⚙️ BOTTOM TOOLBAR SIZING (13.187 / native 14.24). Seven controls -
-    // ✕ ‹P ‹ › ↻ tabs tray - were spaced with flexible gaps at full symbol
-    // size, which on a phone spread them wide and clipped the ones at each
-    // end. Smaller glyphs and one fixed gap keep the row inside the screen.
-    // Raise TOOLBAR_SYMBOL_POINTS for bigger icons, TOOLBAR_ITEM_GAP for more
-    // air between them.
+    // ⚙️ BOTTOM TOOLBAR SIZING (native 14.24, reworked 14.25). Seven
+    // controls - ✕ ‹P ‹ › ↻ tabs tray. ✕ stays on its own at the left; the
+    // other six are fixed-size buttons in one stack, so iOS 26 draws them as
+    // one pill instead of six spaced-out glass circles.
+    // TOOLBAR_BUTTON_WIDTH/HEIGHT = each button's tap box, TOOLBAR_ITEM_GAP =
+    // space between them, TOOLBAR_SYMBOL_POINTS / TITLE_POINTS = glyph size.
     private static let TOOLBAR_SYMBOL_POINTS: CGFloat = 15
     private static let TOOLBAR_TITLE_POINTS: CGFloat = 14
-    private static let TOOLBAR_ITEM_GAP: CGFloat = 8
-    private static let TOOLBAR_RELOAD_WIDTH: CGFloat = 30
+    private static let TOOLBAR_ITEM_GAP: CGFloat = 2
+    private static let TOOLBAR_BUTTON_WIDTH: CGFloat = 34
+    private static let TOOLBAR_BUTTON_HEIGHT: CGFloat = 34
     private static var toolbarSymbol: UIImage.Configuration {
         UIImage.SymbolConfiguration(pointSize: TOOLBAR_SYMBOL_POINTS, weight: .regular)
     }
@@ -386,7 +390,6 @@ final class ScrayBrowserViewController: UIViewController,
         reloadButton.setImage(UIImage(systemName: "arrow.clockwise",
                                       withConfiguration: Self.toolbarSymbol), for: .normal)
         reloadButton.addTarget(self, action: #selector(reloadTapped), for: .touchUpInside)
-        reloadButton.widthAnchor.constraint(equalToConstant: Self.TOOLBAR_RELOAD_WIDTH).isActive = true
 
         homeButton.setImage(UIImage(systemName: "house"), for: .normal)
         homeButton.addTarget(self, action: #selector(homeTapped), for: .touchUpInside)
@@ -439,47 +442,47 @@ final class ScrayBrowserViewController: UIViewController,
         // the header next to the address bar.
         let closeItem = UIBarButtonItem(image: UIImage(systemName: "xmark", withConfiguration: Self.toolbarSymbol),
                                         style: .plain, target: self, action: #selector(closeTapped))
-        backItem = UIBarButtonItem(image: UIImage(systemName: "chevron.left", withConfiguration: Self.toolbarSymbol),
-                                   style: .plain, target: self, action: #selector(backTapped))
-        forwardItem = UIBarButtonItem(image: UIImage(systemName: "chevron.right", withConfiguration: Self.toolbarSymbol),
-                                      style: .plain, target: self, action: #selector(forwardTapped))
-        // reloadButton stays a UIButton rather than becoming a plain bar item,
-        // because updateChrome() swaps its image to xmark while a page is
-        // loading - the same reason trayButton is a custom view.
-        let reloadItem = UIBarButtonItem(customView: reloadButton)
-        tabsItem = UIBarButtonItem(title: "1 ⧉", style: .plain, target: self, action: #selector(tabsTapped))
-        tabsItem.setTitleTextAttributes(
-            [.font: UIFont.systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .semibold)], for: .normal)
-        tabsItem.setTitleTextAttributes(
-            [.font: UIFont.systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .semibold)], for: .highlighted)
-        // A custom view rather than a plain item, because a bar button item
-        // has nowhere to hang a badge.
+        backButton.setImage(UIImage(systemName: "chevron.left", withConfiguration: Self.toolbarSymbol), for: .normal)
+        backButton.addTarget(self, action: #selector(backTapped), for: .touchUpInside)
+        forwardButton.setImage(UIImage(systemName: "chevron.right", withConfiguration: Self.toolbarSymbol), for: .normal)
+        forwardButton.addTarget(self, action: #selector(forwardTapped), for: .touchUpInside)
+        // reloadButton swaps its image to xmark while a page is loading
+        // (see the isLoading observer).
+        tabsButton.setTitle("1 ⧉", for: .normal)
+        tabsButton.titleLabel?.font = .systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .semibold)
+        // "12 ⧉" would otherwise truncate in a 34pt box - shrink instead.
+        tabsButton.titleLabel?.adjustsFontSizeToFitWidth = true
+        tabsButton.titleLabel?.minimumScaleFactor = 0.7
+        tabsButton.addTarget(self, action: #selector(tabsTapped), for: .touchUpInside)
+        // trayButton is its own class because it carries a badge.
         trayButton.addTarget(self, action: #selector(downloadsTapped), for: .touchUpInside)
-        downloadsItem = UIBarButtonItem(customView: trayButton)
+        pickerButton.setTitle("\u{2039}P", for: .normal)
+        pickerButton.titleLabel?.font = .systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .bold)
+        pickerButton.addTarget(self, action: #selector(pickerTapped), for: .touchUpInside)
+        pickerButton.isEnabled = false
+        backButton.isEnabled = false
+        forwardButton.isEnabled = false
+
+        let navButtons: [UIButton] = [pickerButton, backButton, forwardButton, reloadButton, tabsButton, trayButton]
+        for b in navButtons {
+            b.translatesAutoresizingMaskIntoConstraints = false
+            // trayButton pins its own size in ScrayDownloads; match it there.
+            if b === trayButton { continue }
+            b.widthAnchor.constraint(equalToConstant: Self.TOOLBAR_BUTTON_WIDTH).isActive = true
+            b.heightAnchor.constraint(equalToConstant: Self.TOOLBAR_BUTTON_HEIGHT).isActive = true
+        }
+        let navStack = UIStackView(arrangedSubviews: navButtons)
+        navStack.axis = .horizontal
+        navStack.alignment = .center
+        navStack.spacing = Self.TOOLBAR_ITEM_GAP
+        let navItem = UIBarButtonItem(customView: navStack)
+
         func flex() -> UIBarButtonItem {
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         }
-        // A measured gap rather than a flexible one: flexible spaces divide
-        // whatever is left, which on a narrow phone is what pushed the end
-        // items off the edge.
-        func gap() -> UIBarButtonItem {
-            let item = UIBarButtonItem(barButtonSystemItem: .fixedSpace, target: nil, action: nil)
-            item.width = Self.TOOLBAR_ITEM_GAP
-            return item
-        }
-        pickerItem = UIBarButtonItem(title: "\u{2039}P", style: .plain,
-                                     target: self, action: #selector(pickerTapped))
-        pickerItem.setTitleTextAttributes(
-            [.font: UIFont.systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .bold)], for: .normal)
-        pickerItem.setTitleTextAttributes(
-            [.font: UIFont.systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .bold)], for: .disabled)
-        pickerItem.isEnabled = false
-        backItem.isEnabled = false
-        forwardItem.isEnabled = false
-        // ✕ keeps the left edge under the thumb; the rest travel together on
-        // the right with fixed gaps, so nothing is pushed off either end.
-        toolbar.items = [closeItem, flex(), pickerItem, gap(), backItem, gap(), forwardItem, gap(), reloadItem,
-                         gap(), tabsItem, gap(), downloadsItem]
+        // ✕ keeps the left edge under the thumb; the rest travel together as
+        // one group on the right.
+        toolbar.items = [closeItem, flex(), navItem]
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         downloadBar.translatesAutoresizingMaskIntoConstraints = false
@@ -938,19 +941,22 @@ final class ScrayBrowserViewController: UIViewController,
                 self?.showChrome()      // a new page starts with its controls
             },
             wv.observe(\.canGoBack, options: [.new]) { [weak self] w, _ in
-                self?.backItem.isEnabled = w.canGoBack
+                self?.backButton.isEnabled = w.canGoBack
                 self?.refreshPickerItem()
             },
             wv.observe(\.canGoForward, options: [.new]) { [weak self] w, _ in
-                self?.forwardItem.isEnabled = w.canGoForward
+                self?.forwardButton.isEnabled = w.canGoForward
             }
         ]
     }
 
     private func refreshChrome() {
-        tabsItem.title = "\(tabs.count) ⧉"
-        backItem.isEnabled = currentWebView?.canGoBack ?? false
-        forwardItem.isEnabled = currentWebView?.canGoForward ?? false
+        UIView.performWithoutAnimation {
+            tabsButton.setTitle("\(tabs.count) ⧉", for: .normal)
+            tabsButton.layoutIfNeeded()
+        }
+        backButton.isEnabled = currentWebView?.canGoBack ?? false
+        forwardButton.isEnabled = currentWebView?.canGoForward ?? false
         refreshPickerItem()
         // Deliberately above the isFirstResponder guard below: the button's
         // visibility has nothing to do with whether the address bar is being
@@ -1087,8 +1093,8 @@ final class ScrayBrowserViewController: UIViewController,
 
     private func refreshPickerItem() {
         let on = pickerReturn() != nil
-        pickerItem.isEnabled = on
-        pickerItem.tintColor = on ? UIColor(red: 0.424, green: 0.361, blue: 0.906, alpha: 1) : nil  // #6c5ce7
+        pickerButton.isEnabled = on
+        pickerButton.tintColor = on ? UIColor(red: 0.424, green: 0.361, blue: 0.906, alpha: 1) : nil  // #6c5ce7
     }
 
     @objc private func backTapped()    { if currentWebView?.canGoBack == true { currentWebView?.goBack() } }

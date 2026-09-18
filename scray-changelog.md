@@ -4,6 +4,24 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.25 — test: browser toolbar buttons grouped into one compact pill
+<!-- 2026-09-18T17:40Z -->
+
+**native** — `stg-native - 14.25`: `modules/scray-native/ios/ScrayBrowser.swift`, `modules/scray-native/ios/ScrayDownloads.swift`, `assets/web/VERSION` (**needs a new IPA build**)
+
+Mac's screenshot after 14.24: each control still sat in its own big glass circle with wide gaps, and ✕ and the tray were clipped off the edges.
+
+**Cause:** on iOS 26 a toolbar draws a separate glass capsule for every bar item that a space separates, and 14.24's fixed gaps did exactly that - smaller glyphs didn't shrink the circles.
+
+**Changes** (`ScrayBrowser.buildChrome`):
+- ‹P, ‹, ›, ↻, tabs and tray are now plain `UIButton`s (`pickerButton`, `backButton`, `forwardButton`, `reloadButton`, `tabsButton`, `trayButton`) in one horizontal stack, wrapped as a single bar item - so they render as one pill.
+- Each button is a fixed 34×34pt box with a 2pt gap (`TOOLBAR_BUTTON_WIDTH`, `TOOLBAR_BUTTON_HEIGHT`, `TOOLBAR_ITEM_GAP`); tray button 36 → 34 wide to match. `TOOLBAR_RELOAD_WIDTH` removed.
+- ✕ stays a separate item at the left with a flexible space before the group.
+- Tab count label shrinks to fit rather than truncating at two digits.
+- `backItem`/`forwardItem`/`tabsItem`/`pickerItem`/`downloadsItem` renamed to the button equivalents in the enable/title/tint updates.
+
+**Not tested:** no Swift compiler here, so the IPA build is the first compile.
+
 ### native 14.24 — test: browser toolbar buttons smaller and closer together so none are cut off
 <!-- 2026-09-18T16:31Z -->
 

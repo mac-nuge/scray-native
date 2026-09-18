@@ -334,9 +334,9 @@ final class ScrayTrayButton: UIButton {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    // ⚙️ Sized to match the browser toolbar's other controls (native 14.24 -
+    // ⚙️ Sized to match the browser toolbar's other controls (native 14.24/14.25 -
     // was 44x40, which helped push the row past the screen edge).
-    static let buttonWidth: CGFloat = 36
+    static let buttonWidth: CGFloat = 34
     static let buttonHeight: CGFloat = 34
 
     private func build() {

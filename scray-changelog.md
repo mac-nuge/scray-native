@@ -4,6 +4,27 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.3 — test: ask about a name clash before downloading
+<!-- 2026-09-18T09:18Z -->
+
+**native** — `stg-native - 14.3`: `modules/scray-native/ios/ScrayBrowser.swift`, `ScrayFileClash.swift`, `ScrayDownloadFolder.swift`, `assets/web/VERSION` (**Swift — needs an IPA build**)
+**picker / browse** — no change.
+
+Mac: the Replace / Keep both prompt (native 13.199) only appeared once the whole file had downloaded — wasted if the file was already there. It now asks **before** anything is fetched.
+
+- **Checked up front, on every route.** `checkClash(filename:incomingSize:)` looks the name up in the download folder (new `ScrayDownloadFolder.existingFileSize(named:)`, read inside the folder's security scope so the size is right) at the point the transfer would start:
+  - a server download (the D button → `decideDestinationUsing`), before a destination is handed back;
+  - a page blob (`offer` phase), before the first chunk is copied;
+  - a basket checkout's `enqueueDownload`, before `startDownload`. The bridge call now answers after the prompt, so the checkout just waits on it.
+- **One prompt, not two.** For downloads you start by hand, a clash shows the clash card **instead of** the "Download …?" confirm (`confirmOrClash`) — Replace / Keep both / Cancel already is the confirmation. No clash → the usual confirm.
+- **The answer is carried to the end.** Replace/Keep both is stored against the temp file (`presetOverwrite`), and `deliver()` uses it without asking again. Only if the name wasn't there at the start but has appeared while downloading does `deliver()` still ask, as before.
+- **Several at once.** A checkout runs three files together, so clash prompts queue and show one after another; ticking "Do this for the rest of this run" answers the queued ones without showing them.
+- **Cancel** on a checkout file makes a cancelled download record, which the checkout reads as skipped (no retry) — nothing is fetched. The card shows "New: size unknown" when the server hasn't said how big the file is.
+
+**Checked:** read through the diff by hand — **no Swift toolchain here, so it hasn't been compiled**. If the IPA build fails, the build log line is what's needed.
+
+**Worth watching:** the D button's name comes from the server (`suggestedFilename`); if OneDrive ever names it differently from what's in the folder, no clash is found up front — `deliver()`'s old after-download check still catches it.
+
 ### native 14.2 — test: black launch screen in release app
 <!-- 2026-09-18T08:56Z -->
 

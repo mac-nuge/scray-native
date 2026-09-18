@@ -14,6 +14,19 @@ import UIKit
 
 enum ScrayClashChoice { case replace, keepBoth }
 
+/// What the pre-download check decided (native 14.3). `overwrite` is what
+/// ScrayDownloadFolder.save wants: nil when there was nothing to decide.
+enum ScrayClashOutcome {
+    case noClash, replace, keepBoth, cancel
+    var overwrite: Bool? {
+        switch self {
+        case .replace:  return true
+        case .keepBoth: return false
+        default:        return nil
+        }
+    }
+}
+
 final class ScrayFileClashPrompt: UIViewController {
 
     /// nil choice = cancelled. `remember` is the tick; false means ask again
@@ -58,6 +71,21 @@ final class ScrayFileClashPrompt: UIViewController {
         presenter.present(vc, animated: true)
     }
 
+    /// The prompt for a clash found BEFORE downloading (native 14.3): the
+    /// name is checked against the folder first, so nothing is fetched for a
+    /// file that's already there. Sizes are passed in - the new file doesn't
+    /// exist yet - and the caller presents it (presentSafely), so it never
+    /// silently fails to appear behind another sheet.
+    static func make(filename: String,
+                     existingBytes: Int64,
+                     incomingBytes: Int64,
+                     answer: @escaping Answer) -> UIViewController {
+        ScrayFileClashPrompt(filename: filename,
+                             existingBytes: existingBytes,
+                             incomingBytes: incomingBytes,
+                             answer: answer)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = UIColor.black.withAlphaComponent(0.45)
@@ -83,7 +111,10 @@ final class ScrayFileClashPrompt: UIViewController {
         let f = ByteCountFormatter()
         f.countStyle = .file
         let detail = UILabel()
-        detail.text = "There: \(f.string(fromByteCount: existingBytes))  ·  New: \(f.string(fromByteCount: incomingBytes))"
+        // The new file's size isn't always known before it starts (a server
+        // that doesn't send a length).
+        let newText = incomingBytes > 0 ? f.string(fromByteCount: incomingBytes) : "size unknown"
+        detail.text = "There: \(f.string(fromByteCount: existingBytes))  ·  New: \(newText)"
         detail.font = .systemFont(ofSize: 13)
         detail.textColor = .secondaryLabel
         detail.textAlignment = .center

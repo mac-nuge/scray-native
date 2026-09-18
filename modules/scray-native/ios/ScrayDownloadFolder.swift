@@ -65,6 +65,21 @@ final class ScrayDownloadFolder: NSObject, UIDocumentPickerDelegate {
         return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
     }
 
+    /// The size of the file already in the remembered folder under this name,
+    /// or nil when there isn't one (native 14.3). Read inside the folder's
+    /// security scope - outside it the size comes back as 0.
+    func existingFileSize(named name: String) -> Int64? {
+        guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else { return nil }
+        var stale = false
+        guard let folder = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale) else { return nil }
+        guard folder.startAccessingSecurityScopedResource() else { return nil }
+        defer { folder.stopAccessingSecurityScopedResource() }
+        let candidate = folder.appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: candidate.path) else { return nil }
+        let v = try? candidate.resourceValues(forKeys: [.fileSizeKey])
+        return Int64(v?.fileSize ?? 0)
+    }
+
     /// Copies into the remembered folder. Returns the saved URL, or nil if
     /// there is no folder or it's no longer reachable — the caller falls back
     /// to the export sheet rather than losing the file.

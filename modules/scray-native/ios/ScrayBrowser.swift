@@ -1447,30 +1447,49 @@ final class ScrayBrowserViewController: UIViewController,
                 return
             }
 
-            let job = ScrayDownloadJob(id: dlID, filename: dlName)
-            job.totalBytes = dlTotal
-            job.fileURL = dest
-            ScrayDownloadCenter.shared.begin(id: dlID, filename: dlName, total: dlTotal, source: source)
-            wholesaleJobIDs.insert(dlID)
-            jobs.append(job)
-            refreshDownloadBar()
-
-            dlHost.startDownload(using: URLRequest(url: source)) { [weak self] download in
+            // A name already in the folder is asked about BEFORE anything is
+            // fetched (native 14.3) - it used to be asked once the whole file
+            // had come down. The bridge call answers after the prompt, so a
+            // basket checkout simply waits on it.
+            checkClash(filename: dlName, incomingSize: dlTotal) { [weak self] outcome in
                 guard let self = self else { return }
-                download.delegate = self
-                let key = ObjectIdentifier(download)
-                job.httpKey = key
-                job.httpDownload = download
-                self.downloadDestinations[key] = dest
-                // begin() has already made the record and the destination is
-                // settled, so borrow the resume path's "already decided" slot:
-                // decideDestinationUsing would otherwise prompt and add a
-                // duplicate row for every single file.
-                self.resumeDestinations[key] = dest
-                job.progressObs = self.makeProgressObserver(for: job, download: download)
+                if case .cancel = outcome {
+                    // A cancelled record, so the checkout's poll sees
+                    // "cancelled" and sets the file aside (no retry).
+                    ScrayDownloadCenter.shared.begin(id: dlID, filename: dlName, total: dlTotal, source: source)
+                    ScrayDownloadCenter.shared.cancel(id: dlID)
+                    try? FileManager.default.removeItem(at: dest.deletingLastPathComponent())
+                    self.bridgeResolve(webView, id: id, result: ["started": false, "skipped": true, "id": dlID,
+                                                                 "reason": "Already in the folder"])
+                    return
+                }
+                if let overwrite = outcome.overwrite { self.presetOverwrite[dest.path] = overwrite }
+
+                let job = ScrayDownloadJob(id: dlID, filename: dlName)
+                job.totalBytes = dlTotal
+                job.fileURL = dest
+                ScrayDownloadCenter.shared.begin(id: dlID, filename: dlName, total: dlTotal, source: source)
+                self.wholesaleJobIDs.insert(dlID)
+                self.jobs.append(job)
                 self.refreshDownloadBar()
+
+                dlHost.startDownload(using: URLRequest(url: source)) { [weak self] download in
+                    guard let self = self else { return }
+                    download.delegate = self
+                    let key = ObjectIdentifier(download)
+                    job.httpKey = key
+                    job.httpDownload = download
+                    self.downloadDestinations[key] = dest
+                    // begin() has already made the record and the destination is
+                    // settled, so borrow the resume path's "already decided" slot:
+                    // decideDestinationUsing would otherwise prompt and add a
+                    // duplicate row for every single file.
+                    self.resumeDestinations[key] = dest
+                    job.progressObs = self.makeProgressObserver(for: job, download: download)
+                    self.refreshDownloadBar()
+                }
+                self.bridgeResolve(webView, id: id, result: ["started": true, "id": dlID])
             }
-            bridgeResolve(webView, id: id, result: ["started": true, "id": dlID])
 
         case "downloadStatus":
             let wanted = ((body["payload"] as? [String: Any])?["ids"] as? [String]).map(Set.init)
@@ -1598,7 +1617,7 @@ final class ScrayBrowserViewController: UIViewController,
             let name = sanitizedFilename(body["filename"] as? String)
             let size = (body["size"] as? NSNumber)?.int64Value ?? 0
             let webView = message.webView
-            confirmDownload(filename: name, size: size) { [weak self] proceed in
+            confirmOrClash(filename: name, size: size) { [weak self] proceed, overwrite in
                 guard let self = self else { return }
                 let escaped = id.replacingOccurrences(of: "'", with: "")
                 guard proceed else {
@@ -1612,6 +1631,7 @@ final class ScrayBrowserViewController: UIViewController,
                     self.showAlert(title: "Download failed", message: "Couldn't open a temporary file.")
                     return
                 }
+                if let overwrite = overwrite { self.presetOverwrite[url.path] = overwrite }
                 let job = ScrayDownloadJob(id: id, filename: name)
                 job.totalBytes = size
                 job.fileURL = url
@@ -1936,6 +1956,13 @@ final class ScrayBrowserViewController: UIViewController,
         // word (native 13.199). Ask - unless this run has already answered.
         DispatchQueue.main.async {
             let name = fileURL.lastPathComponent
+            // Already answered before the download started (native 14.3).
+            if let preset = self.presetOverwrite.removeValue(forKey: fileURL.path) {
+                copy(preset)
+                return
+            }
+            // Otherwise - the name wasn't there at the start - ask now, in
+            // case one has turned up in the folder while this was downloading.
             guard let existing = ScrayDownloadFolder.shared.existingFile(named: name) else {
                 copy(false)
                 return
@@ -1962,6 +1989,86 @@ final class ScrayBrowserViewController: UIViewController,
     /// was on (native 13.199). Cleared once the queue empties in
     /// deliverOnMain, so the next batch asks again.
     private var clashChoiceForRun: ScrayClashChoice?
+
+    /// Replace (true) / keep both (false), answered before the download
+    /// started, by temp file path (native 14.3). deliver() takes it from here
+    /// instead of asking again.
+    private var presetOverwrite: [String: Bool] = [:]
+
+    /// Clash prompts waiting their turn (native 14.3). A basket checkout
+    /// starts three at once, so two clashes can be found together; they're
+    /// shown one after another, and a "rest of this run" answer to the first
+    /// settles the others without showing them.
+    private var clashQueue: [(name: String, size: Int64, done: (ScrayClashOutcome) -> Void)] = []
+    private var clashShowing = false
+
+    /// Is `filename` already in the download folder - and if so, what to do?
+    /// Always answers on the main queue, exactly once.
+    fileprivate func checkClash(filename: String, incomingSize: Int64,
+                                completion: @escaping (ScrayClashOutcome) -> Void) {
+        DispatchQueue.main.async {
+            guard ScrayDownloadFolder.shared.hasFolder,
+                  ScrayDownloadFolder.shared.existingFileSize(named: filename) != nil else {
+                completion(.noClash)
+                return
+            }
+            if let remembered = self.clashChoiceForRun {
+                completion(remembered == .replace ? .replace : .keepBoth)
+                return
+            }
+            self.clashQueue.append((filename, incomingSize, completion))
+            self.showNextClash()
+        }
+    }
+
+    private func showNextClash() {
+        guard !clashShowing, !clashQueue.isEmpty else { return }
+        let next = clashQueue.removeFirst()
+        if let remembered = clashChoiceForRun {
+            next.done(remembered == .replace ? .replace : .keepBoth)
+            showNextClash()
+            return
+        }
+        // Gone from the folder while it waited its turn - nothing to ask.
+        guard let existingBytes = ScrayDownloadFolder.shared.existingFileSize(named: next.name) else {
+            next.done(.noClash)
+            showNextClash()
+            return
+        }
+        clashShowing = true
+        let prompt = ScrayFileClashPrompt.make(filename: next.name,
+                                               existingBytes: existingBytes,
+                                               incomingBytes: next.size) { [weak self] choice, remember in
+            guard let self = self else { return }
+            if let choice = choice, remember { self.clashChoiceForRun = choice }
+            switch choice {
+            case .replace?:  next.done(.replace)
+            case .keepBoth?: next.done(.keepBoth)
+            case nil:        next.done(.cancel)
+            }
+            self.clashShowing = false
+            self.showNextClash()
+        }
+        presentSafely(prompt)
+    }
+
+    /// The "Download this?" step for a download the user started by hand. A
+    /// name clash is asked INSTEAD of the plain confirm - Replace / Keep both
+    /// / Cancel already is the confirmation, and two prompts in a row would
+    /// be one too many. `overwrite` is nil when there was no clash.
+    fileprivate func confirmOrClash(filename: String, size: Int64,
+                                    completion: @escaping (_ proceed: Bool, _ overwrite: Bool?) -> Void) {
+        checkClash(filename: filename, incomingSize: size) { [weak self] outcome in
+            guard let self = self else { return }
+            switch outcome {
+            case .noClash:
+                self.confirmDownload(filename: filename, size: size) { completion($0, nil) }
+            case .replace:  completion(true, true)
+            case .keepBoth: completion(true, false)
+            case .cancel:   completion(false, nil)
+            }
+        }
+    }
 
     private func deliverOnMain(fileURL: URL, jobID: String?, saved: URL?) {
         DispatchQueue.main.async {
@@ -2104,12 +2211,13 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
         // lets the prompt sit in front of it. The transfer only starts once
         // this returns a destination — so everything after the tap is real
         // work, and the bar below shows it happening.
-        confirmDownload(filename: name, size: expected) { [weak self] proceed in
+        confirmOrClash(filename: name, size: expected) { [weak self] proceed, overwrite in
             guard let self = self, proceed,
                   let dest = self.makeTempDestination(filename: name) else {
                 completionHandler(nil)   // nil cancels the download
                 return
             }
+            if let overwrite = overwrite { self.presetOverwrite[dest.path] = overwrite }
             self.downloadDestinations[key] = dest
 
             let job = ScrayDownloadJob(id: UUID().uuidString, filename: name)

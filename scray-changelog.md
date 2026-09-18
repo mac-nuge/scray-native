@@ -4,7 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### picker 13.204 / native 13.202 — test: per-column tap actions in Settings
+### picker 13.205 / native 13.203 — test: # and studio taps default to nothing
+<!-- 2026-09-18T09:20Z -->
+
+**picker** — `staging - 13.205`: `render.js`, `VERSION`
+**native** — `stg-native - 13.203`: `assets/web/render.js`, `assets/web/VERSION` (web only — no IPA build)
+
+`SCRAY_TAP_DEFAULTS` now has **# → Nothing** and **Studio → Nothing** (were Open / close the row). Perf / File still play, Score / Size still open. Only the defaults moved: a device that has already saved Settings > Tap a column keeps what it saved — "Reset taps to defaults" picks up the new ones.
+
+### picker 13.204 / native 13.202 — stable: per-column tap actions in Settings
 <!-- 2026-09-18T09:05Z -->
 
 **picker** — `staging - 13.204`: `render.js`, `scray-bulk-select.js`, `VERSION`

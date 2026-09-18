@@ -1948,9 +1948,9 @@ window.scraySetSwipeConfig = scraySetSwipeConfig;
    TAP A COLUMN (picker 13.204 / native 13.202)
    What a tap on each column of a closed or open line does, in the lists with
    a size column (main, random). History and the basket keep their own rule.
-   Stored per device like the swipes. The defaults are the old fixed
-   behaviour: #, studio, score and size open the row; performers and file
-   play it (or stop it, if it's the video already playing).
+   Stored per device like the swipes. Defaults: # and studio do nothing;
+   score and size open the row; performers and file play it (or stop it,
+   if it's the video already playing).
 ========================================= */
 const SCRAY_TAP_COLUMNS = [
   { key: 'num',    cls: 'lc-num',    name: '#' },
@@ -1960,7 +1960,8 @@ const SCRAY_TAP_COLUMNS = [
   { key: 'score',  cls: 'lc-score',  name: 'Score' },
   { key: 'size',   cls: 'lc-size',   name: 'Size' }
 ];
-const SCRAY_TAP_DEFAULTS = { num: 'open', studio: 'open', perf: 'play', file: 'play', score: 'open', size: 'open' };
+// picker 13.205 / native 13.203: # and studio default to nothing (were open).
+const SCRAY_TAP_DEFAULTS = { num: 'none', studio: 'none', perf: 'play', file: 'play', score: 'open', size: 'open' };
 const SCRAY_TAP_STORE_KEY = 'scrayTapActions';
 
 /** Everything a column tap can do: the row's own behaviours, then every

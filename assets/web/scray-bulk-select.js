@@ -444,6 +444,13 @@
     videos: () => [...selected.values()],
     clear: clearSelection,
     setMode: setBulkMode,
+    // A column set to "Bulk select this line" (render.js, Tap a column):
+    // turns the mode on and takes that line.
+    selectRow: (li) => {
+      if (!li || !li._scrayVideo) return;
+      if (!bulkOn) setBulkMode(true);
+      if (!selected.has(idOf(li._scrayVideo))) setSelected(li, true);
+    },
     isOn: () => bulkOn
   };
 })();

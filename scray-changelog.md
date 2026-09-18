@@ -4,7 +4,21 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### picker 13.203 / native 13.201 — test: bulk mode button, bar B/Ref/bin, bin in menus
+### picker 13.204 / native 13.202 — test: per-column tap actions in Settings
+<!-- 2026-09-18T09:05Z -->
+
+**picker** — `staging - 13.204`: `render.js`, `scray-bulk-select.js`, `VERSION`
+**native** — `stg-native - 13.202`: `assets/web/render.js`, `assets/web/scray-bulk-select.js`, `assets/web/VERSION` (web only — no IPA build)
+
+**1. Settings > Tap a column.** One dropdown each for **#, Studio, Perf, File, Score, Size**, plus "Reset taps to defaults". Defaults are the existing behaviour (# / Studio / Score / Size open the row; Perf / File play, or stop if it's already playing), marked "(default)" in each list. Choices: Open / close the row, Play (stop if playing), Bulk select this line, Nothing, then every swipe button (Basket, Score, Stash, Rename, Bookmarks, Download, Move, Stats, Copy filename, Open in OneDrive, Refresh data, Refresh folder, F tally, Delete). Stored per device in `localStorage.scrayTapActions`, like the swipes. Applies to the lists with a size column (main, random); history and basket keep their own rule.
+
+**2. The whole column is tappable, text or not.** The column is now worked out from the tap's x position against the cells' boxes (`scrayTapColumnAt`) — a grid cell is always its column's full width, even empty — instead of from which text was hit. The 6px gap between columns goes to the nearer one. So an empty studio or score behaves like a full one.
+
+**3. Plumbing.** `scrayRunTapAction(li, key, e)` runs the chosen action: swipe-button choices go through the same button spec as the open row and swipes (`ensureListRowDetail`), so they do exactly what that button does; if the button isn't offered on that row it falls back to open/close. "Bulk select this line" uses a new `scrayBulkSelection.selectRow(li)`, which turns Bulk on and selects that line. While Bulk is on, taps still only select — the column settings don't apply.
+
+**Checked:** `node --check` on both; jsdom run of the tap code with laid-out cells — each column and a gap tap resolve correctly, defaults give open/open/play/play/open/open, a saved Studio → Basket / Size → Nothing is honoured, and a bad saved value falls back to the default.
+
+### picker 13.203 / native 13.201 — stable: bulk mode button, bar B/Ref/bin, bin in menus
 <!-- 2026-09-18T08:32Z -->
 
 **picker** — `staging - 13.203`: `scray-bulk-select.js`, `index.php`, `style.css`, `context-menu.js`, `VERSION`

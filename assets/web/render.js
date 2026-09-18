@@ -736,25 +736,16 @@ function scrayBuildListRow(video, index, cfg) {
   //             opens the row, or closes it
   // History and the basket have no size column, so they keep the old
   // behaviour: closed, the line opens the row; open, it plays (13.35).
+  //
+  // picker 13.204 / native 13.202: what each column does is a setting now
+  // (Settings > Tap a column - scrayTapConfig below); the list above is the
+  // default. The column is found from WHERE the tap lands across the line,
+  // not from which text it hit, so an empty studio or score cell is just as
+  // tappable as a full one.
   const tapBySize = want.includes('lc-size');
   line.addEventListener('click', (e) => {
     if (tapBySize) {
-      const t = e.target;
-      if (t.closest && t.closest('.lc-file, .lc-perf')) {
-        // The playing video's own filename or performers: Stop, the same full reset as the
-        // player's stop button (inlineVideoPlayer.stop = resetVideoInline).
-        const cur = window.currentPlayingVideo;
-        const curId = cur ? String(cur.oneDriveId ?? cur.idFromAPI ?? '') : '';
-        if (curId && curId === String(li.dataset.videoId) &&
-            window.inlineVideoPlayer && typeof window.inlineVideoPlayer.stop === 'function') {
-          window.inlineVideoPlayer.stop();
-          return;
-        }
-        if (!li._scrayPlaySpec) ensureListRowDetail(li);   // builds P's spec
-        if (li._scrayPlaySpec && li._scrayPlaySpec.onClick) li._scrayPlaySpec.onClick(e);
-        return;
-      }
-      toggleListRow(li);
+      scrayRunTapAction(li, scrayTapColumnAt(line, e), e);
       return;
     }
     if (li.classList.contains('lc-open') && li._scrayPlaySpec && li._scrayPlaySpec.onClick) {
@@ -1952,6 +1943,142 @@ function scraySetSwipeConfig(cfg) {
   if (typeof window.scrayCloseRowSwipe === 'function') window.scrayCloseRowSwipe();
 }
 window.scraySetSwipeConfig = scraySetSwipeConfig;
+
+/* =========================================
+   TAP A COLUMN (picker 13.204 / native 13.202)
+   What a tap on each column of a closed or open line does, in the lists with
+   a size column (main, random). History and the basket keep their own rule.
+   Stored per device like the swipes. The defaults are the old fixed
+   behaviour: #, studio, score and size open the row; performers and file
+   play it (or stop it, if it's the video already playing).
+========================================= */
+const SCRAY_TAP_COLUMNS = [
+  { key: 'num',    cls: 'lc-num',    name: '#' },
+  { key: 'studio', cls: 'lc-studio', name: 'Studio' },
+  { key: 'perf',   cls: 'lc-perf',   name: 'Perf' },
+  { key: 'file',   cls: 'lc-file',   name: 'File' },
+  { key: 'score',  cls: 'lc-score',  name: 'Score' },
+  { key: 'size',   cls: 'lc-size',   name: 'Size' }
+];
+const SCRAY_TAP_DEFAULTS = { num: 'open', studio: 'open', perf: 'play', file: 'play', score: 'open', size: 'open' };
+const SCRAY_TAP_STORE_KEY = 'scrayTapActions';
+
+/** Everything a column tap can do: the row's own behaviours, then every
+ *  button the swipes can offer (P is "play" here, so it's left out). */
+function scrayTapChoices() {
+  return [
+    { value: 'open', name: 'Open / close the row' },
+    { value: 'play', name: 'Play (stop if playing)' },
+    { value: 'bulk', name: 'Bulk select this line' },
+    { value: 'none', name: 'Nothing' }
+  ].concat(SCRAY_SWIPE_CHOICES.filter(c => c.label !== 'P')
+    .map(c => ({ value: c.label, name: c.name })));
+}
+window.scrayTapChoices = scrayTapChoices;
+
+function scrayTapConfig() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(SCRAY_TAP_STORE_KEY) || 'null'); } catch (e) { saved = null; }
+  const known = new Set(scrayTapChoices().map(c => c.value));
+  const out = {};
+  SCRAY_TAP_COLUMNS.forEach(c => {
+    const v = saved && saved[c.key];
+    out[c.key] = known.has(v) ? v : SCRAY_TAP_DEFAULTS[c.key];
+  });
+  return out;
+}
+window.scrayTapConfig = scrayTapConfig;
+
+function scraySetTapConfig(cfg) {
+  try {
+    if (cfg == null) localStorage.removeItem(SCRAY_TAP_STORE_KEY);
+    else localStorage.setItem(SCRAY_TAP_STORE_KEY, JSON.stringify(cfg));
+  } catch (e) {
+    throw new Error('Could not save the tap settings on this device');
+  }
+}
+window.scraySetTapConfig = scraySetTapConfig;
+
+/**
+ * Which column a tap on a line landed in, by its x position against the
+ * cells' boxes. A grid cell is always its column's full width, however little
+ * text is in it, so this works on an empty studio; the 6px gap between two
+ * columns goes to the nearer one. Returns a SCRAY_TAP_COLUMNS key, 'note'
+ * for the note column, or null.
+ */
+function scrayTapColumnAt(line, e) {
+  const t = e && e.target;
+  const byClass = (el) => {
+    if (!el || !el.classList) return null;
+    if (el.classList.contains('lc-note')) return 'note';
+    const col = SCRAY_TAP_COLUMNS.find(c => el.classList.contains(c.cls));
+    return col ? col.key : null;
+  };
+  const cells = Array.from(line.children).filter(el => el.classList && el.classList.contains('lc-cell'));
+  const x = e ? e.clientX : null;
+  // A keyboard "click" has no position - fall back to what it was on.
+  if (x == null || (x === 0 && e.detail === 0) || !cells.length) {
+    const hit = t && t.closest ? t.closest('.lc-cell') : null;
+    return byClass(hit);
+  }
+  let best = null, bestD = Infinity;
+  cells.forEach(el => {
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    const d = x < r.left ? r.left - x : x > r.right ? x - r.right : 0;
+    if (d < bestD) { bestD = d; best = el; }
+  });
+  return byClass(best);
+}
+window.scrayTapColumnAt = scrayTapColumnAt;
+
+/** Run what the settings say for a tap in column `key` of row `li`. */
+function scrayRunTapAction(li, key, e) {
+  const action = key && key !== 'note' ? scrayTapConfig()[key] : 'open';
+  switch (action) {
+    case 'none':
+      return;
+    case 'open':
+      toggleListRow(li);
+      return;
+    case 'bulk':
+      if (window.scrayBulkSelection && typeof window.scrayBulkSelection.selectRow === 'function') {
+        window.scrayBulkSelection.selectRow(li);
+      }
+      return;
+    case 'play': {
+      // The playing video's own line: Stop, the same full reset as the
+      // player's stop button (inlineVideoPlayer.stop = resetVideoInline).
+      const cur = window.currentPlayingVideo;
+      const curId = cur ? String(cur.oneDriveId ?? cur.idFromAPI ?? '') : '';
+      if (curId && curId === String(li.dataset.videoId) &&
+          window.inlineVideoPlayer && typeof window.inlineVideoPlayer.stop === 'function') {
+        window.inlineVideoPlayer.stop();
+        return;
+      }
+      if (!li._scrayPlaySpec) ensureListRowDetail(li);   // builds P's spec
+      if (li._scrayPlaySpec && li._scrayPlaySpec.onClick) li._scrayPlaySpec.onClick(e);
+      return;
+    }
+    default: {
+      // One of the row's own buttons, by label - the same spec the open row
+      // and the swipes use, so it does exactly what that button does.
+      const buttons = (typeof ensureListRowDetail === 'function' && ensureListRowDetail(li)) || [];
+      const spec = buttons.find(b => b && b.label === action);
+      if (!spec || spec.disabled || typeof spec.onClick !== 'function') {
+        toggleListRow(li);   // not offered on this row - do the harmless thing
+        return;
+      }
+      try {
+        const r = spec.onClick(e);
+        if (r && typeof r.catch === 'function') r.catch(err => console.error('[tap] action failed:', err));
+      } catch (err) {
+        console.error('[tap] action failed:', err);
+      }
+    }
+  }
+}
+window.scrayRunTapAction = scrayRunTapAction;
 const SCRAY_SWIPE_LISTS = '#taggedVideosContainer, #playlist';
 const SCRAY_SWIPE_BTN_W = 68;          // ⚙️ px per uncovered button
 const SCRAY_SWIPE_LOCK_PX = 12;        // ⚙️ sideways travel before the row follows the finger
@@ -2318,6 +2445,65 @@ document.addEventListener('DOMContentLoaded', () => {
       };
     },
     set: (value) => scraySetSwipeConfig(value)
+  });
+});
+
+/* Settings > Tap a column (picker 13.204 / native 13.202). */
+document.addEventListener('DOMContentLoaded', () => {
+  if (!window.scraySettings || typeof window.scraySettings.register !== 'function') return;
+
+  window.scraySettings.register({
+    id: 'tapActions',
+    label: 'Tap a column',
+    type: 'custom',
+    hint: 'What tapping each column of a line in the list does. The whole width of the column counts, even where it is empty.',
+    get: () => scrayTapConfig(),
+    build: () => {
+      const cfg = scrayTapConfig();
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-top:6px;padding:10px;border:1px solid #3a3a3a;border-radius:6px;';
+      const selectCss = 'width:100%;box-sizing:border-box;margin:0;padding:8px;background:#2a2a2a;'
+        + 'color:#fff;border:1px solid #555;border-radius:4px;font-size:0.85rem;';
+      const selects = {};
+      SCRAY_TAP_COLUMNS.forEach(col => {
+        const row = document.createElement('label');
+        row.style.cssText = 'display:grid;grid-template-columns:4.5rem 1fr;align-items:center;gap:8px;margin:0;font-size:0.8rem;font-weight:normal;';
+        const txt = document.createElement('span');
+        txt.textContent = col.name;
+        const sel = document.createElement('select');
+        sel.style.cssText = selectCss;
+        scrayTapChoices().forEach(c => {
+          const o = document.createElement('option');
+          o.value = c.value;
+          o.textContent = c.value === SCRAY_TAP_DEFAULTS[col.key] ? `${c.name} (default)` : c.name;
+          sel.appendChild(o);
+        });
+        sel.value = cfg[col.key];
+        row.append(txt, sel);
+        wrap.appendChild(row);
+        selects[col.key] = sel;
+      });
+
+      const reset = document.createElement('button');
+      reset.type = 'button';
+      reset.textContent = 'Reset taps to defaults';
+      reset.style.cssText = 'width:auto;align-self:flex-start;margin:6px 0 0;padding:6px 10px;background:#444;color:#fff;border:none;border-radius:4px;font-size:0.8rem;';
+      reset.addEventListener('click', () => {
+        SCRAY_TAP_COLUMNS.forEach(col => { selects[col.key].value = SCRAY_TAP_DEFAULTS[col.key]; });
+      });
+      wrap.appendChild(reset);
+
+      return {
+        el: wrap,
+        value: () => {
+          const out = {};
+          SCRAY_TAP_COLUMNS.forEach(col => { out[col.key] = selects[col.key].value; });
+          return out;
+        },
+        focus: () => {}
+      };
+    },
+    set: (value) => scraySetTapConfig(value)
   });
 });
 

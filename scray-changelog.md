@@ -4,6 +4,22 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.4 — test: pinned tabs in the browser
+<!-- 2026-09-18T09:29Z -->
+
+**native** — `stg-native - 14.4`: `modules/scray-native/ios/ScrayBrowser.swift`, `assets/web/VERSION` (**Swift — needs an IPA build**)
+**picker / browse** — no change.
+
+Mac: let me pin tabs in the in-app browser's tab list. Pinned tabs go to the top and act as bookmarks; Select > All leaves them alone, and the only way to get rid of one is to unpin it and then close it.
+
+- **Pin / Unpin** from the tab list: swipe a row left (**Close** + **Pin** on a normal tab, **Unpin** only on a pinned one), or long-press it for the same as a menu. Pinned rows show an orange pin.
+- **Order.** Pinning moves the tab to the end of the pinned block at the top; unpinning drops it to the top of the ordinary tabs just below. The tab you're on stays the tab you're on.
+- **Can't be closed while pinned.** No Close on the swipe or menu; in **Select** mode pinned rows get no tick box and can't be ticked, **All** ticks only the unpinned tabs (and the button reads None once they're all ticked); `closeTab` / `closeTabs` refuse pinned tabs outright, which also covers a page calling `window.close()` on itself. Closing every unpinned tab leaves the pinned ones open rather than dropping to a fresh home tab.
+- **Bookmark behaviour.** A pinned tab remembers the page it was pinned on (`pinnedURL`) and that's what's saved, so after the browser restarts it reopens there even if you'd browsed away from it. You can still browse in it meanwhile.
+- **Saving.** Pins are stored as a parallel `scray.browser.tabPins` list beside the existing `scray.browser.tabs`, so a tab list saved by an older build restores as all unpinned.
+
+**Checked:** read through by hand — **no Swift toolchain here, not compiled**.
+
 ### native 14.3 — test: ask about a name clash before downloading
 <!-- 2026-09-18T09:18Z -->
 

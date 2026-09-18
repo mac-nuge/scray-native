@@ -101,6 +101,14 @@ final class ScrayBrowserTab {
     /// selection rather than all at once when the browser opens.
     var pending: URL?
 
+    /// Pinned tabs (native 14.4) sit at the top of the list and act like
+    /// bookmarks: they survive Select > All > Close, can't be swiped closed,
+    /// and reopen at the page they were pinned on. Unpin first to close one.
+    var pinned = false
+    /// The page it was pinned on - what it reopens at after a restart, even
+    /// if it has been browsed away from since.
+    var pinnedURL: URL?
+
     init(webView: WKWebView, pending: URL? = nil) {
         self.webView = webView
         self.pending = pending
@@ -126,6 +134,9 @@ final class ScrayBrowserViewController: UIViewController,
 
     private static let tabsKey  = "scray.browser.tabs"
     private static let indexKey = "scray.browser.tabIndex"
+    /// One Bool per entry in tabsKey (native 14.4). Kept as a parallel list
+    /// so the tab list saved by older builds still reads as all unpinned.
+    private static let pinsKey  = "scray.browser.tabPins"
 
     var homeURL: URL
     var pendingURL: URL?
@@ -599,6 +610,9 @@ final class ScrayBrowserViewController: UIViewController,
 
     private func closeTab(_ index: Int) {
         guard tabs.indices.contains(index) else { return }
+        // A pinned tab only goes once it's been unpinned (native 14.4) - this
+        // also covers a page calling window.close() on itself.
+        guard !tabs[index].pinned else { return }
         let tab = tabs.remove(at: index)
         tab.webView.stopLoading()
         tab.webView.removeFromSuperview()
@@ -614,7 +628,8 @@ final class ScrayBrowserViewController: UIViewController,
     /// user saw it, so they are removed high-to-low — deleting low-first would
     /// shift everything after it and close the wrong rows.
     private func closeTabs(_ indices: [Int]) {
-        let valid = indices.filter { tabs.indices.contains($0) }
+        // Pinned tabs are exempt (native 14.4), whatever was ticked.
+        let valid = indices.filter { tabs.indices.contains($0) && !tabs[$0].pinned }
         guard !valid.isEmpty else { return }
 
         // If the tab currently on screen survives the cull, stay on it rather
@@ -665,20 +680,56 @@ final class ScrayBrowserViewController: UIViewController,
 
     private func restoreTabs() {
         let saved = UserDefaults.standard.stringArray(forKey: Self.tabsKey) ?? []
-        for s in saved {
+        let pins = UserDefaults.standard.array(forKey: Self.pinsKey) as? [Bool] ?? []
+        for (i, s) in saved.enumerated() {
             guard let u = URL(string: s), (u.scheme ?? "").hasPrefix("http") else { continue }
-            tabs.append(ScrayBrowserTab(webView: makeWebView(configuration: nil), pending: u))
+            let tab = ScrayBrowserTab(webView: makeWebView(configuration: nil), pending: u)
+            if i < pins.count, pins[i] {
+                tab.pinned = true
+                tab.pinnedURL = u
+            }
+            tabs.append(tab)
         }
+        // Pinned first, in case an older list ever saved them out of order.
+        tabs = tabs.filter { $0.pinned } + tabs.filter { !$0.pinned }
         guard !tabs.isEmpty else { return }
         let idx = UserDefaults.standard.integer(forKey: Self.indexKey)
         selectTab(min(max(idx, 0), tabs.count - 1))
     }
 
     private func persistTabs() {
-        let urls = tabs.compactMap { $0.displayURL?.absoluteString }
-            .filter { $0.hasPrefix("http") }
+        // A pinned tab is saved at the page it was pinned on, not wherever it
+        // has wandered to - that's the bookmark part (native 14.4).
+        var urls: [String] = []
+        var pins: [Bool] = []
+        for tab in tabs {
+            guard let s = (tab.pinned ? (tab.pinnedURL ?? tab.displayURL) : tab.displayURL)?.absoluteString,
+                  s.hasPrefix("http") else { continue }
+            urls.append(s)
+            pins.append(tab.pinned)
+        }
         UserDefaults.standard.set(urls, forKey: Self.tabsKey)
+        UserDefaults.standard.set(pins, forKey: Self.pinsKey)
         UserDefaults.standard.set(currentIndex, forKey: Self.indexKey)
+    }
+
+    /// Pin or unpin (native 14.4). Either way the tab moves to the boundary:
+    /// pinning puts it at the end of the pinned block, unpinning puts it at
+    /// the top of the ordinary tabs just below. The tab on screen stays on
+    /// screen - only its index changes.
+    private func togglePin(_ index: Int) {
+        guard tabs.indices.contains(index) else { return }
+        let onScreen = currentTab
+        let tab = tabs.remove(at: index)
+        tab.pinned.toggle()
+        tab.pinnedURL = tab.pinned ? tab.displayURL : nil
+        let boundary = tabs.filter { $0.pinned }.count
+        tabs.insert(tab, at: boundary)
+        if let onScreen = onScreen, let i = tabs.firstIndex(where: { $0 === onScreen }) {
+            currentIndex = i
+        }
+        persistTabs()
+        refreshChrome()
     }
 
     // MARK: - Chrome state
@@ -919,8 +970,9 @@ final class ScrayBrowserViewController: UIViewController,
     @objc private func tabsTapped() {
         let list = ScrayTabListViewController(style: .plain)
         list.provider = { [weak self] in
-            (self?.tabs ?? []).map { ($0.displayTitle, self?.compactAddress($0.displayURL) ?? "") }
+            (self?.tabs ?? []).map { ($0.displayTitle, self?.compactAddress($0.displayURL) ?? "", $0.pinned) }
         }
+        list.onTogglePin = { [weak self] idx in self?.togglePin(idx) }
         list.selectedIndex = { [weak self] in self?.currentIndex ?? 0 }
         list.onSelect = { [weak self] idx in
             self?.selectTab(idx)
@@ -2275,14 +2327,20 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
 
 final class ScrayTabListViewController: UITableViewController {
 
-    var provider: (() -> [(String, String)])?
+    /// (title, address, pinned). Pinned tabs come first (native 14.4).
+    var provider: (() -> [(String, String, Bool)])?
     var selectedIndex: (() -> Int)?
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
     var onCloseMany: (([Int]) -> Void)?
     var onNew: (() -> Void)?
+    var onTogglePin: ((Int) -> Void)?
 
-    private var items: [(String, String)] = []
+    private var items: [(String, String, Bool)] = []
+
+    private func isPinned(_ row: Int) -> Bool { items.indices.contains(row) && items[row].2 }
+    /// The rows Select can take - everything but the pinned ones.
+    private var selectableRows: [Int] { items.indices.filter { !items[$0].2 } }
 
     /// Multi-select mode: rows tick instead of switching tabs.
     private var picking = false
@@ -2309,7 +2367,7 @@ final class ScrayTabListViewController: UITableViewController {
 
             navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .cancel,
                                                                target: self, action: #selector(cancelPickingTapped))
-            let allOn = n > 0 && n == items.count
+            let allOn = n > 0 && n == selectableRows.count
             navigationItem.rightBarButtonItems = [
                 UIBarButtonItem(title: allOn ? "None" : "All", style: .plain,
                                 target: self, action: #selector(toggleAllTapped))
@@ -2328,7 +2386,7 @@ final class ScrayTabListViewController: UITableViewController {
                                                                target: self, action: #selector(doneTapped))
             let select = UIBarButtonItem(title: "Select", style: .plain,
                                          target: self, action: #selector(startPickingTapped))
-            select.isEnabled = !items.isEmpty
+            select.isEnabled = !selectableRows.isEmpty
             navigationItem.rightBarButtonItems = [
                 UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(newTapped)),
                 select
@@ -2358,10 +2416,11 @@ final class ScrayTabListViewController: UITableViewController {
 
     @objc private func toggleAllTapped() {
         let selected = tableView.indexPathsForSelectedRows ?? []
-        if selected.count == items.count {
+        // "All" means all the unpinned tabs (native 14.4).
+        if !selected.isEmpty && selected.count == selectableRows.count {
             for ip in selected { tableView.deselectRow(at: ip, animated: false) }
         } else {
-            for row in items.indices {
+            for row in selectableRows {
                 tableView.selectRow(at: IndexPath(row: row, section: 0),
                                     animated: false, scrollPosition: .none)
             }
@@ -2370,7 +2429,7 @@ final class ScrayTabListViewController: UITableViewController {
     }
 
     @objc private func closeSelectedTapped() {
-        let rows = (tableView.indexPathsForSelectedRows ?? []).map { $0.row }
+        let rows = (tableView.indexPathsForSelectedRows ?? []).map { $0.row }.filter { !isPinned($0) }
         guard !rows.isEmpty else { return }
         let closingEverything = rows.count == items.count
 
@@ -2400,7 +2459,76 @@ final class ScrayTabListViewController: UITableViewController {
         cell.detailTextLabel?.text = item.1
         cell.detailTextLabel?.textColor = .secondaryLabel
         cell.accessoryType = indexPath.row == (selectedIndex?() ?? -1) ? .checkmark : .none
+        if item.2 {
+            cell.imageView?.image = UIImage(systemName: "pin.fill")
+            cell.imageView?.tintColor = .systemOrange
+        }
         return cell
+    }
+
+    // MARK: pinning (native 14.4)
+
+    /// While picking, pinned rows get no tick box and can't be ticked. Out of
+    /// picking, every row is editable so it can be swiped.
+    override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
+        picking ? !isPinned(indexPath.row) : true
+    }
+
+    override func tableView(_ tableView: UITableView, willSelectRowAt indexPath: IndexPath) -> IndexPath? {
+        (picking && isPinned(indexPath.row)) ? nil : indexPath
+    }
+
+    /// Swipe left: Close and Pin on a normal tab; only Unpin on a pinned one -
+    /// a pinned tab has to be unpinned before it can be closed.
+    override func tableView(_ tableView: UITableView,
+                            trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard !picking else { return nil }
+        let row = indexPath.row
+        let pin = UIContextualAction(style: .normal, title: isPinned(row) ? "Unpin" : "Pin") { [weak self] _, _, done in
+            self?.onTogglePin?(row)
+            self?.reload()
+            done(true)
+        }
+        pin.backgroundColor = .systemOrange
+        pin.image = UIImage(systemName: isPinned(row) ? "pin.slash" : "pin")
+        if isPinned(row) {
+            let config = UISwipeActionsConfiguration(actions: [pin])
+            config.performsFirstActionWithFullSwipe = false
+            return config
+        }
+        let close = UIContextualAction(style: .destructive, title: "Close") { [weak self] _, _, done in
+            self?.onClose?(row)
+            self?.reload()
+            done(true)
+        }
+        return UISwipeActionsConfiguration(actions: [close, pin])
+    }
+
+    /// Long press: the same, for anyone who doesn't think to swipe.
+    override func tableView(_ tableView: UITableView,
+                            contextMenuConfigurationForRowAt indexPath: IndexPath,
+                            point: CGPoint) -> UIContextMenuConfiguration? {
+        guard !picking else { return nil }
+        let row = indexPath.row
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            guard let self = self else { return nil }
+            let pinned = self.isPinned(row)
+            var actions: [UIMenuElement] = [
+                UIAction(title: pinned ? "Unpin Tab" : "Pin Tab",
+                         image: UIImage(systemName: pinned ? "pin.slash" : "pin")) { [weak self] _ in
+                    self?.onTogglePin?(row)
+                    self?.reload()
+                }
+            ]
+            if !pinned {
+                actions.append(UIAction(title: "Close Tab", image: UIImage(systemName: "xmark"),
+                                        attributes: .destructive) { [weak self] _ in
+                    self?.onClose?(row)
+                    self?.reload()
+                })
+            }
+            return UIMenu(title: "", children: actions)
+        }
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -2416,7 +2544,7 @@ final class ScrayTabListViewController: UITableViewController {
     override func tableView(_ tableView: UITableView,
                             commit editingStyle: UITableViewCell.EditingStyle,
                             forRowAt indexPath: IndexPath) {
-        guard editingStyle == .delete else { return }
+        guard editingStyle == .delete, !isPinned(indexPath.row) else { return }
         onClose?(indexPath.row)
         reload()
     }

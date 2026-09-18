@@ -3484,7 +3484,7 @@ if (!persist) {
     setTimeout(() => {
         tooltip.classList.remove('show');
         setTimeout(() => tooltip.remove(), 300);
-    }, 1300);
+    }, 2600);   // doubled (picker 14.14 / native 14.22)
 }
 
 return tooltip;
@@ -3507,7 +3507,7 @@ tooltip.style.background = bgColor;
 * @param {HTMLElement} tooltip - Tooltip to close
 * @param {number} delay - Delay before starting fade-out (ms)
 */
-function closeBookmarkConfirmation(tooltip, delay = 1300) {
+function closeBookmarkConfirmation(tooltip, delay = 2600) {
 if (!tooltip) return;
 setTimeout(() => {
     tooltip.classList.remove('show');

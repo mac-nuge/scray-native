@@ -302,6 +302,15 @@ final class ScrayBrowserViewController: UIViewController,
                          injectionTime: .atDocumentStart,
                          forMainFrameOnly: true)
         )
+        // Password AutoFill on email-only sign-in boxes (native 14.21).
+        // iOS only offers saved logins above the keyboard when a field says
+        // it's a username; a bare type=email box gets the @ keyboard and no
+        // suggestions. See loginHintJS.
+        config.userContentController.addUserScript(
+            WKUserScript(source: Self.loginHintJS,
+                         injectionTime: .atDocumentEnd,
+                         forMainFrameOnly: false)
+        )
         // Scray's own view of TinEye's results (native 14.9). The script
         // checks the host itself and does nothing anywhere but tineye.com.
         config.userContentController.addUserScript(
@@ -312,6 +321,50 @@ final class ScrayBrowserViewController: UIViewController,
 
         webConfig = config
     }
+
+    /// Marks sign-in email boxes as usernames (native 14.21), so iOS puts the
+    /// saved logins (Passwords, 1Password) above the keyboard the way it does
+    /// in Safari. Only boxes that give no hint of their own - no autocomplete,
+    /// or "email" / "on" / "off" - and that look like an email or login field:
+    /// type=email, or a text box whose name, id or placeholder says email,
+    /// user or login. Anything already saying username, a password, a one-
+    /// time code etc. is left alone, as is any form asking for a NEW password
+    /// (sign-up), where offering an existing login would be wrong. Runs on
+    /// load, on every DOM change (sign-in forms are often drawn late), and on
+    /// focus as a last catch - iOS reads the hint when the keyboard opens.
+    static let loginHintJS = #"""
+    (function () {
+      if (window.__scrayLoginHint) return;
+      window.__scrayLoginHint = true;
+      var LOOSE = { '': 1, 'on': 1, 'off': 1, 'email': 1 };
+      var WORDS = /e-?mail|user|login|account|identifier/i;
+      function wants(el) {
+        if (!el || el.tagName !== 'INPUT') return false;
+        var ac = String(el.getAttribute('autocomplete') || '').trim().toLowerCase();
+        if (!LOOSE[ac]) return false;
+        var t = String(el.type || 'text').toLowerCase();
+        if (t !== 'email' && t !== 'text') return false;
+        if (t === 'text' && !WORDS.test((el.name || '') + ' ' + (el.id || '') + ' ' +
+            (el.getAttribute('placeholder') || '') + ' ' + (el.getAttribute('aria-label') || ''))) return false;
+        var scope = el.form || document;
+        if (scope.querySelector && scope.querySelector('input[autocomplete~="new-password"]')) return false;
+        return true;
+      }
+      function mark(el) { if (wants(el)) el.setAttribute('autocomplete', 'username'); }
+      function scan(root) {
+        var list = (root && root.querySelectorAll) ? root.querySelectorAll('input') : [];
+        for (var i = 0; i < list.length; i++) mark(list[i]);
+      }
+      scan(document);
+      document.addEventListener('focusin', function (e) { mark(e.target); }, true);
+      var queued = false;
+      new MutationObserver(function () {
+        if (queued) return;
+        queued = true;
+        setTimeout(function () { queued = false; scan(document); }, 150);
+      }).observe(document.documentElement, { childList: true, subtree: true });
+    })();
+    """#
 
     // MARK: - Chrome
 

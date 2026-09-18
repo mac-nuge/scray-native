@@ -4,6 +4,49 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 14.15 / native 14.23 — test: keyboard comes up when renaming a bookmark from the rail
+<!-- 2026-09-18T15:54Z -->
+
+**picker** — `staging - 14.15`: `player.js`, `file-operations.js`, `VERSION`
+**native** — `stg-native - 14.23`: `assets/web/player.js`, `assets/web/file-operations.js`, `assets/web/VERSION` (web only — no IPA build)
+
+Mac: tapping the bookmark on the ✎ rail opened the BM modal with the name box open, but no keyboard — make sure the box is active with the onscreen keyboard.
+
+- iOS only raises the keyboard for a focus made inside the tap itself; the modal draws its name box after the bookmarks sync, long after the tap, so its `focus()` was ignored.
+- `renameInModal` now focuses a hidden stand-in box (`#scrayKbProxy`, 16px so no zoom, fixed so nothing scrolls) inside the tap — keyboard up — then opens the modal. When the modal draws the name box it takes focus from the stand-in (iOS keeps the keyboard up across the hand-over), removes it and puts the caret at the end of the name.
+- The stand-in removes itself after 5 s regardless, so it's never left behind.
+
+**Checked:** `node --check` on both files in both apps. Not tried on a phone.
+
+### picker 14.14 / native 14.22 — test: rename a bookmark from the rail, typed text saves as a note, longer confirmation
+<!-- 2026-09-18T15:39Z -->
+
+**picker** — `staging - 14.14`: `player.js`, `file-operations.js`, `excel-sheets.js`, `VERSION`
+**native** — `stg-native - 14.22`: `assets/web/player.js`, `assets/web/file-operations.js`, `assets/web/excel-sheets.js`, `assets/web/VERSION` (web only — no IPA build)
+
+Mac: (1) in the marker ✎ editor (Adjust / Delete), tapping the bookmark itself should edit its name in the BM modal; (2) Add bookmark shouldn't force a pick from the note list — with nothing picked, save the typed text as a raw name (then mapped / split into keywords as usual); (3) keep the bookmark confirmation up twice as long.
+
+- **Rename from the rail:** in ✎ edit mode the bookmark's label is now a button (dotted underline). Tapping it leaves edit mode and opens the BM modal on the bookmarks page with that bookmark's name open for editing (with the usual note autocomplete). Save / Close as normal.
+- `showBookmarksModal(video, autoAdd, openOpts)` — new `openOpts.editTime` (seconds): finds the bookmark at that millisecond, opens its name editor, goes to page 2 when there's a playhead, and skips the auto-focus on the add box.
+- **Typed note saves:** Save and the timestamp button save the picked notes, or — with nothing picked — the text in the search box as a raw note (whitespace collapsed). The old "Tap a note to pick it, then Save" refusal is gone; the preview line now reads "Save saves: <text> — or tap notes to pick them".
+- **Twice as long:** bookmark confirmation 1.3 s → 2.6 s (`showBookmarkConfirmation`, `closeBookmarkConfirmation`, the rotated fullscreen one), and the Undo toast after a save / rail edit 1.95 s → 3.9 s.
+
+**Checked:** `node --check` on all three files in both apps.
+
+### native 14.21 — test: saved logins offered on email-only sign-in boxes
+<!-- 2026-09-18T15:29Z -->
+
+**native** — `stg-native - 14.21`: `modules/scray-native/ios/ScrayBrowser.swift`, `assets/web/VERSION` (**Swift — needs an IPA build**)
+
+Mac: in Native's browser, passwords show above the keyboard on normal fields but not on an email box (the @ keyboard) — e.g. an email-first sign-in page.
+
+- iOS only offers saved logins (Passwords / 1Password) when a field says it's a username. Safari guesses for bare `type=email` boxes; a WKWebView doesn't.
+- New `loginHintJS` user script (all frames, document end): marks sign-in boxes `autocomplete="username"` when they give no hint of their own (none, `email`, `on`, `off`) and look like a login field — `type=email`, or a text box whose name / id / placeholder / aria-label says email, user, login, account or identifier.
+- Left alone: anything already saying username, password, one-time code etc., and any form with a `new-password` box (sign-up).
+- Runs on load, on DOM changes (debounced 150 ms — sign-in forms are often drawn late) and on focus as a last catch.
+
+**Checked:** `node --check` on the script; Swift not compiled (no toolchain here).
+
 ### native 14.20 — test: ‹P button in the in-app browser, back to Picker
 <!-- 2026-09-18T15:20Z -->
 

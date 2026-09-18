@@ -5016,7 +5016,7 @@ function showRotatedPlayerConfirmation(message, bgColor = '#28a745', persist = f
         setTimeout(() => {
             tooltip.style.opacity = '0';
             setTimeout(() => tooltip.remove(), 300);
-        }, 1300);
+        }, 2600);   // doubled (picker 14.14 / native 14.22)
     }
 
     return tooltip;
@@ -5028,7 +5028,7 @@ function updateRotatedPlayerConfirmation(tooltip, message, bgColor) {
     tooltip.style.background = bgColor;
 }
 
-function closeRotatedPlayerConfirmation(tooltip, delay = 1300) {
+function closeRotatedPlayerConfirmation(tooltip, delay = 2600) {
     if (!tooltip) return;
     setTimeout(() => {
         tooltip.style.opacity = '0';
@@ -7059,7 +7059,12 @@ const editTarget = (rail, entry) => {
     if (!rail.isConnected) return;
     clearInterval(rail.__adjustTick);
     rail.replaceChildren();
-    rail.appendChild(railLabel(bmText(entry.bm)));
+    // Tapping the bookmark itself renames it (picker 14.14 / native 14.22):
+    // the BM modal opens on the bookmarks page with its name open to edit.
+    const nameBtn = makeRailButton(bmText(entry.bm), () => renameInModal(entry),
+        'flex-grow: 1; flex-shrink: 1; flex-basis: 0; overflow: hidden; text-overflow: ellipsis; font-weight: normal; text-decoration: underline dotted; text-underline-offset: 2px;');
+    nameBtn.title = 'Edit the name in the bookmarks window';
+    rail.appendChild(nameBtn);
     const adjust = makeRailButton('Adjust', () => adjustTo(entry), 'background: #007bff;');
     adjust.title = 'Move this bookmark to the playhead';
     // The label follows the playhead, so what Adjust will do is on the button.
@@ -7074,6 +7079,31 @@ const editTarget = (rail, entry) => {
     rail.appendChild(makeRailButton('Delete', () => confirmDelete(rail, entry), 'background: #dc3545;'));
     rail.appendChild(cancelBtn());
     rail.__place?.(RAIL_EDIT_WIDTH_PX);
+};
+
+const renameInModal = (entry) => {
+    const v = window.currentPlayingVideo;
+    if (!v || typeof window.showBookmarksModal !== 'function') return;
+    // iOS only raises the keyboard for a focus made inside the tap itself,
+    // and the modal's name box is drawn after the bookmarks have loaded -
+    // long after the tap. So a hidden stand-in box takes focus NOW (keyboard
+    // up), and the modal moves focus to the real box when it's drawn; iOS
+    // keeps the keyboard up across that hand-over (picker 14.15 / native 14.23).
+    document.getElementById('scrayKbProxy')?.remove();
+    const proxy = document.createElement('input');
+    proxy.type = 'text';
+    proxy.id = 'scrayKbProxy';
+    proxy.setAttribute('autocomplete', 'off');
+    proxy.setAttribute('aria-hidden', 'true');
+    // 16px or iOS zooms the page; fixed at the top so focusing it scrolls nothing.
+    proxy.style.cssText = 'position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; '
+        + 'font-size: 16px; border: 0; padding: 0; margin: 0; pointer-events: none; z-index: -1;';
+    document.body.appendChild(proxy);
+    try { proxy.focus({ preventScroll: true }); } catch (e) { proxy.focus(); }
+    // Never left behind: the modal removes it once its own box has focus.
+    setTimeout(() => proxy.remove(), 5000);
+    leaveEdit();
+    window.showBookmarksModal(v, false, { editTime: entry.bm.time });
 };
 
 const confirmDelete = (rail, entry) => {
@@ -7116,7 +7146,7 @@ const saveEdit = async (build, doneText) => {
         window.scrayUndoToast({
             html: doneText,
             className: 'bookmark-confirmation-tooltip',
-            ms: 1950,
+            ms: 3900,   // doubled (picker 14.14 / native 14.22)
             onUndo: async () => {
                 v.bookmarks = before.map(b => ({ ...b }));
                 await window.saveBookmarks(v, document.createElement('div'));

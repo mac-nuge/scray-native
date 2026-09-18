@@ -3069,7 +3069,10 @@ function scrayAttachNoteAutocomplete(input, getNotes, opts = {}) {
 }
 window.scrayAttachNoteAutocomplete = scrayAttachNoteAutocomplete;
 
-async function showBookmarksModal(video, autoAddTimestamp = false) {
+async function showBookmarksModal(video, autoAddTimestamp = false, openOpts = {}) {
+    // openOpts.editTime (picker 14.14 / native 14.22): open on the bookmarks
+    // page with that bookmark's name already open for editing - tapping the
+    // bookmark on the rail's ✎ editor asks for this.
     // Only ever one. The BM control, the now-playing BM button and the FLS
     // triple-tap zone can all fire in quick succession; without this they
     // stack overlays that each hold their own working copy.
@@ -3225,6 +3228,16 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
     let page = 0;
     let renderSeq = 0;          // which renderContent a deferred callback belongs to
     let pageSeq = 0;            // which page change a deferred callback belongs to
+    // Straight into editing one bookmark's name (openOpts.editTime).
+    if (openOpts && typeof openOpts.editTime === 'number') {
+        const ms = Math.round(openOpts.editTime * 1000);
+        const i = working.findIndex(b => Math.round(b.time * 1000) === ms);
+        if (i !== -1) {
+            editingIndex = i;
+            if (hasPlayhead) page = 1;
+            autoAddTimestamp = false;
+        }
+    }
     let picked = [];            // keywords chosen for the new bookmark, in tap order
     let newNote = '';           // survives re-renders
     let committed = false;      // guards against a double-fire closing twice
@@ -3261,7 +3274,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         try {
             await saveBookmarks(video, tip);
             // Saved: swap the tooltip for the same message with Undo, shown 50%
-            // longer (1.95s against 1.3s). Undo saves the old list back through
+            // longer (3.9s against 2.6s). Undo saves the old list back through
             // saveBookmarks, which diffs against the server, so a bookmark this
             // save added is tombstoned and one it deleted comes back.
             if (typeof window.scrayUndoToast === 'function') {
@@ -3271,7 +3284,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
                 window.scrayUndoToast({
                     html,
                     className: 'bookmark-confirmation-tooltip',
-                    ms: 1950,
+                    ms: 3900,   // doubled (picker 14.14 / native 14.22)
                     onUndo: async () => {
                         video.bookmarks = before.map(b => ({ ...b }));
                         // A detached tooltip soaks up saveBookmarks' own
@@ -3545,6 +3558,12 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             .sort((a, b) => (popOf(b[0]) - popOf(a[0])) || (a[1] - b[1]))
             .map(x => x[0])
             .join(' ');
+        // What Save / the timestamp button save (picker 14.14 / native 14.22):
+        // the picked notes, or - with nothing picked - whatever is typed in the
+        // box, as a raw note. It is then mapped and split into keywords like
+        // any other note (manage-data's rules).
+        const typedNote = () => String(newNoteEl ? newNoteEl.value : newNote).trim().replace(/\s+/g, ' ');
+        const noteToSave = () => builtNote() || typedNote();
 
         // What the rail is showing, by position - the pills carry an index.
         let resultItems = [];
@@ -3625,8 +3644,11 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             if (previewEl) {
                 const note = builtNote();
                 previewEl.style.color = '#666';
+                const typed = typedNote();
                 previewEl.innerHTML = note
                     ? `Note: <b style="color: #333;">${esc(note)}</b>`
+                    : typed
+                    ? `Save saves: <b style="color: #333;">${esc(typed)}</b> - or tap notes to pick them`
                     : (terms.length ? 'Tap the notes this bookmark belongs under' : 'Tap a note to save it, or Add note to pick several');
             }
             if (clearEl) clearEl.style.display = q ? 'block' : 'none';
@@ -3953,7 +3975,7 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         modal.querySelector('#newBmTimeBtn')?.addEventListener('click', (e) => {
             e.stopPropagation();
             flushOpenEdit(false);
-            commitAndClose({ time: newTime, note: builtNote() });
+            commitAndClose({ time: newTime, note: noteToSave() });
         });
 
         modal.querySelector('#swapBmBtn')?.addEventListener('click', (e) => {
@@ -4080,6 +4102,15 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
             // modal. applyKeyboardInset() does our own version below, scoped
             // to #bmScroll, once the keyboard has finished opening.
             editEl.focus({ preventScroll: true });
+            // The rail's rename left a stand-in box holding the keyboard up
+            // (player.js renameInModal); focus has now moved here, so it goes.
+            // Put the caret at the end of the name.
+            const kbProxy = document.getElementById('scrayKbProxy');
+            if (kbProxy) {
+                kbProxy.remove();
+                const end = editEl.value.length;
+                try { editEl.setSelectionRange(end, end); } catch (_) {}
+            }
             // Attached before the Enter handler below so it is registered
             // first and can stopImmediatePropagation on the keystroke that
             // picks a suggestion, instead of that keystroke saving the row.
@@ -4095,16 +4126,9 @@ async function showBookmarksModal(video, autoAddTimestamp = false) {
         modal.querySelector('#saveBookmarksBtn').addEventListener('click', (e) => {
             e.stopPropagation();
             flushOpenEdit(false);
-            const note = hasPlayhead ? builtNote() : '';
-            // Typed but nothing picked: the words are a search, not a note, so
-            // say so rather than silently saving without them.
-            if (!note && (newNoteEl?.value || '').trim()) {
-                if (previewEl) {
-                    previewEl.style.color = '#dc3545';
-                    previewEl.textContent = 'Tap a note to pick it, then Save';
-                }
-                return;
-            }
+            // Typed but nothing picked: the typed text is saved as the note
+            // (picker 14.14 / native 14.22) - it used to be refused.
+            const note = hasPlayhead ? noteToSave() : '';
             commitAndClose(note ? { time: newTime, note } : null);
         });
 

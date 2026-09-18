@@ -4,6 +4,22 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 14.3 / picker 14.7 / native 14.11 — test: multi-pick profile filters in Stash nav
+<!-- 2026-09-18T11:11Z -->
+
+**browse** — `staging-browse - 14.3`: `api.php`, `VERSION.txt` (**deploy first**)
+**picker** — `staging - 14.7`: `scray-stash-nav.js`, `VERSION`
+**native** — `stg-native - 14.11`: `assets/web/scray-stash-nav.js`, `assets/web/VERSION` (web only — no IPA build)
+
+Mac: let the profile dropdowns pick several — studios additive, performers intersect.
+
+- **Performer profile → Studio dropdown:** tick several; scenes from **any** of them ("Pick several to see scenes from any of them"). Sent as `studio_ids[]`; `api.php` asks StashDB with `studios: INCLUDES [ids]`.
+- **Studio profile → Performer dropdown:** tick several; only scenes with **all** of them together ("Pick several to see scenes they're all in together"). Sent as `performer_ids[]`; `INCLUDES_ALL` when there's more than one. The picked performers are highlighted on each card.
+- The list **stays open** between ticks; picked entries sit at the top with a ✓, and a tap unticks. **All …** or the ✕ clears the lot and closes it. The button reads e.g. "Studios: X-Art, Other" / "Performers: Tracy + Candice" (first two, then +N).
+- `api.php` still reads the single `studio_id` / `performer_id` for older app builds. Caps: 50 studios, 20 performers.
+
+**Checked:** `node --check`; `php -l`; jsdom — ticking two performers on a studio sends `performer_ids: [p1, p2]` and keeps the list open with both ticked first; unticking one sends `[p2]`; ✕ clears; ticking two studios on a performer sends `studio_ids: [st1, st2]`.
+
 ### browse 14.2 / picker 14.6 / native 14.10 — test: studio view in Stash nav
 <!-- 2026-09-18T11:03Z -->
 

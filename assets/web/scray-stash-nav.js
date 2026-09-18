@@ -14,6 +14,9 @@
 // picker 14.6 / native 14.10 (browse 14.2): a studio view - profile, scenes
 // newest first, a performer filter - opened from a studio name on any card,
 // or from a studio chip's "Search in Stash nav".
+// picker 14.7 / native 14.11 (browse 14.3): the profile dropdowns pick
+// several - studios add together (any of them), performers intersect (all of
+// them in the same scene).
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -172,6 +175,7 @@
 #stashModal .ssn .ssn-studio-opt[hidden], #stashModal .ssn-studio-none[hidden] { display: none; }
 #stashModal .ssn .ssn-studio-opt small { opacity: .6; flex: 0 0 auto; }
 #stashModal .ssn-studio-none { padding: 8px 6px; font-size: .8rem; opacity: .6; }
+#stashModal .ssn-studio-how { font-size: .72rem; opacity: .65; margin: 0 0 6px; }
 /* picker 14.6 / native 14.10: studio names on cards open the studio view. */
 #stashModal .ssn .ssn-stlink { display: inline; padding: 0; margin: 0; border: none; border-radius: 0; background: none; color: #6c5ce7; text-decoration: underline; font: inherit; white-space: normal; vertical-align: baseline; }
 #stashModal .ssn-slogo { flex: 0 0 110px; width: 110px; height: 70px; border-radius: 6px; background: #fff; border: 1px solid #e6e6ec; display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -283,10 +287,11 @@
           if (entry.id) body.id = entry.id;
           body.name = entry.name || '';
           if (entry.sceneId) body.scene_id = entry.sceneId;
-          // The dropdown's pick is a PERFORMER on a studio view. The state
-          // keeps the studio-filter names (e.studio, e.studios, ...) because
+          // The dropdown's picks are PERFORMERS on a studio view - all of
+          // them in the same scene (picker 14.7 / native 14.11). The state
+          // keeps the studio-filter names (e.picks, e.studios, ...) because
           // the dropdown is the same one, listing the other kind.
-          if (entry.studio && entry.studio.id) body.performer_id = entry.studio.id;
+          if (entry.picks && entry.picks.length) body.performer_ids = entry.picks.map(x => x.id);
           body.page = more ? (entry.data.page || 1) + 1 : 1;
         } else {
           body.op = 'performer';
@@ -294,7 +299,8 @@
           body.name = entry.name || '';
           if (entry.sceneId) body.scene_id = entry.sceneId;
           // Studio filter on the scene list (13.187 / browse 13.72).
-          if (entry.studio && entry.studio.id) body.studio_id = entry.studio.id;
+          // Any of the picked studios (picker 14.7 / native 14.11).
+          if (entry.picks && entry.picks.length) body.studio_ids = entry.picks.map(x => x.id);
           body.page = more ? (entry.data.page || 1) + 1 : 1;
         }
         res = await api('stash_nav', { method: 'POST', body });
@@ -543,7 +549,7 @@
         const fact = (label, v) => v ? '<div class="ssn-fact"><span>' + label + '</span><b>' + esc(v) + '</b></div>' : '';
         const facts = fact('Network', s.parent ? s.parent.name : '') +
                       fact('Sub-studios', s.children && s.children.length ? String(s.children.length) : '') +
-                      fact('Scenes on StashDB', d.count != null && !e.studio ? String(d.count) : '') +
+                      fact('Scenes on StashDB', d.count != null && !(e.picks && e.picks.length) ? String(d.count) : '') +
                       fact('Performers', s.performer_count != null ? String(s.performer_count) : '');
         const link = (st) => '<button type="button" class="ssn-stlink" data-stid="' + esc(st.id) + '" data-stname="' +
           esc(st.name) + '">' + esc(st.name) + '</button>';
@@ -584,8 +590,9 @@
       const label = d ? ('Scenes' + (d.count != null ? ' &middot; ' + d.count : '') +
                          (e.sort === 'order' ? ' &middot; newest first' : '')) : '';
       const list = d && !n && !e.busy
-        ? (d.note ? '' : '<div class="ssn-empty">No scenes listed for this studio' + (e.studio ? ' with ' + esc(e.studio.name) : '') + '.</div>')
-        : sortedScenes(e).map(x => cardHtml(x.s, x.i, e.studio ? e.studio.id : null, s ? s.id : null)).join('');
+        ? (d.note ? '' : '<div class="ssn-empty">No scenes listed for this studio' +
+            (e.picks && e.picks.length ? ' with ' + esc(e.picks.map(x => x.name).join(' + ')) + ' together' : '') + '.</div>')
+        : sortedScenes(e).map(x => cardHtml(x.s, x.i, (e.picks || []).map(x => x.id), s ? s.id : null)).join('');
       const more = d && d.count != null && n < d.count && d.lastCount >= (d.per_page || 25)
         ? '<button type="button" class="ssn-loadmore" data-more' + (e.busy ? ' disabled' : '') + '>' +
             (e.busy ? 'Loading&hellip;' : 'Load more (' + n + ' of ' + d.count + ')') + '</button>'
@@ -631,27 +638,39 @@
       const one = e.type === 'studio' ? 'Performer' : 'Studio';
       const many = e.type === 'studio' ? 'performers' : 'studios';
       const opts = studioOptions(e);
-      if (!opts.length && !e.studio) return '';
-      const cur = e.studio;
+      const picks = e.picks || [];
+      if (!opts.length && !picks.length) return '';
+      const isOn = (id) => picks.some(x => x.id === id);
+      // Several can be picked (picker 14.7 / native 14.11); the list stays
+      // open between taps. Studios add together, performers intersect.
+      const how = e.type === 'studio'
+        ? 'Pick several to see scenes they&rsquo;re all in together'
+        : 'Pick several to see scenes from any of them';
+      const label = !picks.length ? 'All ' + many
+        : picks.length <= 2 ? picks.map(x => x.name).join(e.type === 'studio' ? ' + ' : ', ')
+        : picks.slice(0, 2).map(x => x.name).join(e.type === 'studio' ? ' + ' : ', ') + ' +' + (picks.length - 2);
       let pop = '';
       if (e.studioOpen) {
         pop = '<div class="ssn-studio-pop">' +
+          '<div class="ssn-studio-how">' + how + '</div>' +
           '<input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
             'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + '&hellip;" value="' + esc(e.studioTerm || '') + '">' +
           '<div class="ssn-studio-list">' +
-            '<button type="button" class="ssn-studio-opt' + (!cur ? ' on' : '') + '" data-studio-pick="">All ' + many + '</button>' +
-            opts.map(o => '<button type="button" class="ssn-studio-opt' + (cur && cur.id === o.id ? ' on' : '') + '" ' +
+            '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-studio-pick="">All ' + many + '</button>' +
+            // Picked ones first, so they're easy to find and untick.
+            opts.slice().sort((a, b) => (isOn(b.id) ? 1 : 0) - (isOn(a.id) ? 1 : 0)).map(o =>
+              '<button type="button" class="ssn-studio-opt' + (isOn(o.id) ? ' on' : '') + '" ' +
               'data-studio-pick="' + esc(o.id) + '" data-studio-name="' + esc(o.name) + '">' +
-              '<span>' + esc(o.name) + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>').join('') +
+              '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>').join('') +
             '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
           '</div>' +
         '</div>';
       }
       return '<div class="ssn-studio">' +
         '<div class="ssn-studio-row">' +
-          '<button type="button" class="ssn-studio-btn' + (cur ? ' on' : '') + '" data-studio-toggle>' +
-            one + ': ' + esc(cur ? cur.name : 'All ' + many) + ' ' + (e.studioOpen ? '&#9652;' : '&#9662;') + '</button>' +
-          (cur ? '<button type="button" data-studio-pick="" title="Show all ' + many + '">&#10005;</button>' : '') +
+          '<button type="button" class="ssn-studio-btn' + (picks.length ? ' on' : '') + '" data-studio-toggle>' +
+            (picks.length > 1 ? one + 's' : one) + ': ' + esc(label) + ' ' + (e.studioOpen ? '&#9652;' : '&#9662;') + '</button>' +
+          (picks.length ? '<button type="button" data-studio-pick="" title="Show all ' + many + '">&#10005;</button>' : '') +
         '</div>' + pop +
       '</div>';
     }
@@ -763,7 +782,7 @@
       const sub = [studioBit].concat([c.release_date, c.code].filter(Boolean).map(esc)).join(' &middot; ');
 
       const cast = (c.cast || []).map(p =>
-        '<button type="button" class="ssn-perf' + (herePid && p.id === herePid ? ' here' : '') + '" ' +
+        '<button type="button" class="ssn-perf' + (p.id && [].concat(herePid || []).includes(p.id) ? ' here' : '') + '" ' +
           'data-pid="' + esc(p.id || '') + '" data-pname="' + esc(p.name) + '" data-sid="' + esc(c.stash_id) + '">' +
           esc(p.name) + (p.as ? ' <small>as ' + esc(p.as) + '</small>' : '') +
           (p.gender_short && p.gender_short !== '?' ? ' <small>' + esc(p.gender_short) + '</small>' : '') +
@@ -992,11 +1011,19 @@
         const e = top();
         if (!e || (e.type !== 'performer' && e.type !== 'studio')) return;
         const id = btn.dataset.studioPick;
-        const next = id ? { id, name: btn.dataset.studioName || '' } : null;
-        e.studioOpen = false;
-        e.studioTerm = '';
-        if ((next && e.studio && e.studio.id === next.id) || (!next && !e.studio)) { paint(false, true); return; }
-        e.studio = next;
+        const picks = e.picks || [];
+        if (!id) {
+          // "All" or the x: clear the lot and close the list.
+          e.studioOpen = false;
+          e.studioTerm = '';
+          if (!picks.length) { paint(false, true); return; }
+          e.picks = [];
+        } else {
+          // A tick toggles; the list stays open for the next one.
+          e.picks = picks.some(x => x.id === id)
+            ? picks.filter(x => x.id !== id)
+            : picks.concat([{ id, name: btn.dataset.studioName || '' }]);
+        }
         e.sort = 'order';
         load(e, false, true);
         return;

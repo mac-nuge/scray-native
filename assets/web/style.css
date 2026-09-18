@@ -8074,12 +8074,29 @@ body.landscape-fullscreen .plyr__controls .plyr-more {
 
 /* =========================================
 BULK SELECT (picker 13.201 / native 13.199) - scray-bulk-select.js
-Tap a row's number or studio to select, or drag down them. touch-action is
-load-bearing: without it the list scrolls instead of selecting.
 Main list only (picker 13.202 / native 13.200).
+picker 13.203 / native 13.201: a mode, switched by the yellow Bulk button in
+the sort row. While on, a tap anywhere on a line selects it and a short hold
+then drag selects a run. The number/studio no longer select on their own.
 ========================================= */
-#taggedVideosContainer li.lc-row :is(.lc-num, .lc-studio) {
-  touch-action: none;
+.sort-btn.sort-btn-bulk {
+  flex: 0.75;
+  background: #f5c518;
+  color: #000;
+  font-weight: bold;
+}
+.sort-btn.sort-btn-bulk:hover { background: #d9ab00; }
+.sort-btn.sort-btn-bulk.active {
+  background: #ffd84a;
+  box-shadow: inset 0 0 0 2px #000;
+}
+
+/* No text selection or iOS callout while the finger is picking lines. */
+body.scray-bulk-mode #taggedVideosContainer li.lc-row {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  cursor: pointer;
 }
 
 #taggedVideosContainer li.lc-row.lc-bulk-selected > .lc-line {
@@ -8136,6 +8153,9 @@ Main list only (picker 13.202 / native 13.200).
 #bulkActionBar .bulk-refresh { background: #17a2b8; }
 #bulkActionBar .bulk-delete  { background: #f44336; }
 #bulkActionBar .bulk-clear   { background: #333; }
+#bulkActionBar .bulk-all     { background: #f5c518; color: #000; }
+#bulkActionBar .bulk-delete  { display: inline-flex; align-items: center; justify-content: center; }
+#bulkActionBar .bulk-btn:disabled { opacity: 0.45; cursor: default; }
 #bulkActionBar .bulk-btn:active { transform: scale(0.97); }
 
 /* The player owns the screen in fullscreen - the corner buttons go, so does

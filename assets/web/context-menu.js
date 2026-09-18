@@ -3,6 +3,13 @@
 
 let activeContextMenu = null;
 
+/** What a menu button shows for its label. "X" (delete) is drawn as a bin
+ *  (picker 13.203 / native 13.201); every other label shows as itself. */
+function scrayButtonFace(label) {
+   return label === 'X' ? '\u{1F5D1}\uFE0F' : label;
+}
+window.scrayButtonFace = scrayButtonFace;
+
 /**
 * Create and show a context menu with actions
 * @param {Array} actions - Array of { label, onClick, color? } objects
@@ -27,7 +34,9 @@ function showContextMenu(actions, event) {
    actions.forEach(action => {
        const item = document.createElement('div');
        item.className = 'context-menu-item';
-       item.textContent = action.label;
+       // X means delete throughout - shown as a bin, but the label stays "X"
+       // because other code finds the delete button by it.
+       item.textContent = scrayButtonFace(action.label);
        
        if (action.color) {
            item.style.color = action.color;
@@ -226,7 +235,7 @@ function createCompactButtonGroup(buttons, visibleCount = 2, video = null) {
    
 visibleButtons.forEach(btn => {
       const element = document.createElement('button');
-      element.textContent = btn.label;
+      element.textContent = scrayButtonFace(btn.label);
       element.className = 'compact-btn';
 
       // BM has to be findable after the fact - its colour tracks a value

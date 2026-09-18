@@ -617,6 +617,9 @@
  <div class="sort-buttons-container">
 <!-- One sort with the list's column headings: each tap adds a key, reverses
      it, or takes it out. Clear empties the lot. See scrayListSort in randomiser.js. -->
+<!-- Bulk select on/off (picker 13.203 / native 13.201) - scray-bulk-select.js.
+     No data-list-sort, so the sort wiring leaves it alone. -->
+<button type="button" id="bulkModeBtn" class="sort-btn sort-btn-bulk" aria-pressed="false" title="Bulk select - tap lines to select, hold and drag for a run">Bulk</button>
 <button class="sort-btn sort-btn-clear" data-list-sort="clear" title="Clear the sort - headings and buttons">Clear</button>
 <button class="sort-btn" data-list-sort="views" title="Sort by view count">Views</button>
 <button class="sort-btn" data-list-sort="watched" title="Sort by time watched">Watched</button>

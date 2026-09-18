@@ -4,6 +4,25 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 13.203 / native 13.201 — test: bulk mode button, bar B/Ref/bin, bin in menus
+<!-- 2026-09-18T08:32Z -->
+
+**picker** — `staging - 13.203`: `scray-bulk-select.js`, `index.php`, `style.css`, `context-menu.js`, `VERSION`
+**native** — `stg-native - 13.201`: `assets/web/scray-bulk-select.js`, `assets/web/index.html`, `assets/web/style.css`, `assets/web/context-menu.js`, `assets/web/VERSION` (web only — no IPA build)
+
+**1. Bulk select is now a mode.** Tapping the number or studio no longer selects anything. A yellow **Bulk** button (`#bulkModeBtn`, a touch narrower than the others at `flex: 0.75`) sits left of Clear in the sort row. It has no `data-list-sort`, so the sort wiring ignores it.
+- On: the floating bar shows (even with nothing picked yet), and a tap **anywhere** on a line selects/deselects it. While on, a line does nothing else — no open, no play, no swipe tray, no long-press menu (all swallowed on the capture phase).
+- Drag: on a phone, **hold still for ~0.2s then drag** to select a run; moving straight away still scrolls the list. Dragging near the top/bottom edge auto-scrolls. A mouse drags straight away.
+- Off (Bulk again, or ✕ on the bar) deselects everything. The sort row's **Clear** also deselects, but leaves bulk mode on.
+
+**2. Bar:** count · **Select all** · **B** · **Ref** · 🗑 (bin icon) · ✕. Select all takes every file in the current list (`paginationState.allVideos`, all pages, not just what's drawn) and turns into **Select none** once everything is picked. B / Ref / bin are greyed out with nothing selected.
+
+**3. Delete shows as a bin in the context menus.** `context-menu.js` gets `scrayButtonFace(label)`, used for both the visible compact buttons and the overflow menu items. The label itself stays `"X"`, because the S/B placement code and the swipe settings find the delete button by it.
+
+**Checked:** `node --check`; jsdom run — row click opens with mode off; mode on shows the bar; a tap selects and the row doesn't open; Select all takes all 4 (including one not drawn) and flips to Select none; Clear empties but keeps the mode; Bulk off empties and hides the bar.
+
+**Worth watching:** the hold-before-drag on iOS — if 0.2s feels sluggish or scroll still wins, `HOLD_MS` / `SLOP_PX` at the top of `scray-bulk-select.js` are the knobs.
+
 ### picker 13.202 / native 13.200 — test: bulk select fixes, numbered download list
 <!-- 2026-09-17T22:20Z -->
 

@@ -4,6 +4,28 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 14.5 / picker 14.10 / native 14.16 — test: parent studios as rows with levels, parents in Stash nav, Stash toggle stops scrolling
+<!-- 2026-09-18T13:30Z -->
+
+**browse** — `staging-browse - 14.5`: `api.php`, `manage-data.html`, `VERSION.txt` (**deploy first**)
+**picker** — `staging - 14.10`: `randomiser.js`, `scray-stash-nav.js`, `scray-config.js`, `VERSION`
+**native** — `stg-native - 14.16`: `assets/web/randomiser.js`, `assets/web/scray-stash-nav.js`, `assets/web/scray-config.js`, `assets/web/VERSION` (web only — no IPA build)
+
+**1. Picker scrolled when the Stash toggle was tapped** (`randomiser.js`, Picker). Arming the toggle kicks off a refresh of the matched set and then filters again; that second pass didn't set `skipSearchScroll`, so it scrolled to the list. Native fixed exactly this in 13.187; now ported.
+
+**2. manage-data STUDIOS sheet: parents as their own rows, with a Level column.**
+- Every name filed as a studio's **Parent** (by hand or via Fill parents from StashDB) now also appears as a row of its own, **Level = PARENT**, with its own mapped name and region. Studios are **Level = STUDIO**. A name that is both is two rows. A parent's VIDEOS is the total of its studios; hover the level for how many studios it's the parent of. A parent no studio names any more shows as an orphan.
+- Parent rows save as a new name-map kind, **`network`** (region only; their Parent cell is disabled). Keyed `net:<name>` in the sheet so the two rows of a name never collide.
+- **LEVEL** is sortable, and a **Level** chip row (Studio / Parent) replaces the **Parent** chip row, which was a chip per parent and filled the screen.
+- The suggested filename (Clean renames) prints a parent's **mapped** name when it has one. The apps' network pill does too (`scray-config.js` now loads the `network` names).
+
+**3. Parents in Stash nav** (`scray-stash-nav.js`, both apps; `api.php` `stash_nav`).
+- **Performer profile → Studio dropdown** now lists the **parent networks** of her studios first (⌂, with scene counts). Picking one means every studio under it — sent as `network_ids`, expanded by `api.php` into the network plus its child studios, and added to any studios picked.
+- **A parent studio's own profile** now lists the scenes of **every studio under it** (plus its own), not just those filed directly under it — the fact reads "Scenes in network". A second dropdown, **Studio: All studios in this network**, narrows to one or several of them (additive), alongside the Performer dropdown. Cards show each scene's own studio as a link.
+- Studio profiles already show their parent (Network fact and "Part of" link, 14.2).
+
+**Checked:** `php -l`; `node --check` on manage-data's script and all changed app JS; jsdom run of the navigator — a network's view shows both dropdowns, the sub-studio list is "(itself)" + its children, picking one sends `sub_studio_ids`; a performer's dropdown leads with ⌂ networks, picking a network and a studio sends `network_ids` + `studio_ids` and both stay ticked across the reload. manage-data's new rows and the StashDB calls haven't been run against live data.
+
 ### native 14.15 / picker 14.9 — test: TinEye view shows the frame and match thumbnails, ‹ Picker, faster
 <!-- 2026-09-18T13:05Z -->
 

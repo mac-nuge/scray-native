@@ -17,6 +17,9 @@
 // picker 14.7 / native 14.11 (browse 14.3): the profile dropdowns pick
 // several - studios add together (any of them), performers intersect (all of
 // them in the same scene).
+// picker 14.10 / native 14.16 (browse 14.5): a parent studio's view lists
+// the scenes of every studio under it, with a second dropdown to narrow to
+// some of them; a performer's studio dropdown offers the parent networks too.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -176,6 +179,7 @@
 #stashModal .ssn .ssn-studio-opt small { opacity: .6; flex: 0 0 auto; }
 #stashModal .ssn-studio-none { padding: 8px 6px; font-size: .8rem; opacity: .6; }
 #stashModal .ssn-studio-how { font-size: .72rem; opacity: .65; margin: 0 0 6px; }
+#stashModal .ssn .ssn-studio-opt.net { font-weight: 600; }
 /* picker 14.6 / native 14.10: studio names on cards open the studio view. */
 #stashModal .ssn .ssn-stlink { display: inline; padding: 0; margin: 0; border: none; border-radius: 0; background: none; color: #6c5ce7; text-decoration: underline; font: inherit; white-space: normal; vertical-align: baseline; }
 #stashModal .ssn-slogo { flex: 0 0 110px; width: 110px; height: 70px; border-radius: 6px; background: #fff; border: 1px solid #e6e6ec; display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -292,6 +296,8 @@
           // keeps the studio-filter names (e.picks, e.studios, ...) because
           // the dropdown is the same one, listing the other kind.
           if (entry.picks && entry.picks.length) body.performer_ids = entry.picks.map(x => x.id);
+          // The sub-studios picked on a parent studio's view (picker 14.10).
+          if (entry.subPicks && entry.subPicks.length) body.sub_studio_ids = entry.subPicks.map(x => x.id);
           body.page = more ? (entry.data.page || 1) + 1 : 1;
         } else {
           body.op = 'performer';
@@ -300,7 +306,13 @@
           if (entry.sceneId) body.scene_id = entry.sceneId;
           // Studio filter on the scene list (13.187 / browse 13.72).
           // Any of the picked studios (picker 14.7 / native 14.11).
-          if (entry.picks && entry.picks.length) body.studio_ids = entry.picks.map(x => x.id);
+          if (entry.picks && entry.picks.length) {
+            // "net:<id>" is a parent network: sent apart, expanded server-side.
+            const st = entry.picks.filter(x => !String(x.id).startsWith('net:')).map(x => x.id);
+            const nets = entry.picks.filter(x => String(x.id).startsWith('net:')).map(x => String(x.id).slice(4));
+            if (st.length) body.studio_ids = st;
+            if (nets.length) body.network_ids = nets;
+          }
           body.page = more ? (entry.data.page || 1) + 1 : 1;
         }
         res = await api('stash_nav', { method: 'POST', body });
@@ -324,6 +336,11 @@
         // The performer's studios, from the unfiltered first load. Kept across
         // a studio change so the list doesn't shrink to the one picked.
         if (entry.type === 'performer' && Array.isArray(res.studios) && !entry.studios) entry.studios = res.studios;
+        // Networks come with the unfiltered first page only; keep them.
+        if (entry.type === 'performer') {
+          if (Array.isArray(res.networks)) entry.networks = res.networks;
+          if (entry.networks && entry.data) entry.data.networks = entry.networks;
+        }
         if (entry.type === 'studio' && Array.isArray(res.performers) && !entry.studios) entry.studios = res.performers;
         if (entry.type === 'studio' && res.studio) {
           entry.id = res.studio.id;
@@ -349,8 +366,10 @@
       const box = host.querySelector('input.ssn-term');
       if (box && e.type === 'search' && keepScroll) e.term = box.value;
       const hadFocus = box && document.activeElement === box;
-      const studioBox = host.querySelector('input.ssn-studio-find');
-      const studioHadFocus = studioBox && document.activeElement === studioBox;
+      // Which dropdown's search box had the keyboard, so the repaint gives it back.
+      const ae = document.activeElement;
+      const focusDd = (ae && ae.matches && ae.matches('input.ssn-studio-find') && host.contains(ae))
+        ? ((ae.closest('.ssn-studio') || {}).dataset || {}).dd || 'main' : '';
 
       if (heading) {
         heading.textContent = e.type === 'search'
@@ -372,9 +391,11 @@
         const nb = host.querySelector('input.ssn-term');
         if (nb) { nb.focus(); nb.setSelectionRange(nb.value.length, nb.value.length); }
       }
-      if (studioHadFocus || e.studioFocus) {
+      const wantDd = focusDd || (e.studioFocus ? 'main' : e.subFocus ? 'sub' : '');
+      if (wantDd) {
         e.studioFocus = false;
-        const sb = host.querySelector('input.ssn-studio-find');
+        e.subFocus = false;
+        const sb = host.querySelector('.ssn-studio[data-dd="' + wantDd + '"] input.ssn-studio-find');
         if (sb) { try { sb.focus({ preventScroll: true }); } catch (_) { sb.focus(); } }
       }
       paintStudioList();
@@ -549,7 +570,8 @@
         const fact = (label, v) => v ? '<div class="ssn-fact"><span>' + label + '</span><b>' + esc(v) + '</b></div>' : '';
         const facts = fact('Network', s.parent ? s.parent.name : '') +
                       fact('Sub-studios', s.children && s.children.length ? String(s.children.length) : '') +
-                      fact('Scenes on StashDB', d.count != null && !(e.picks && e.picks.length) ? String(d.count) : '') +
+                      fact(s.children && s.children.length ? 'Scenes in network' : 'Scenes on StashDB',
+                           d.count != null && !(e.picks && e.picks.length) && !(e.subPicks && e.subPicks.length) ? String(d.count) : '') +
                       fact('Performers', s.performer_count != null ? String(s.performer_count) : '');
         const link = (st) => '<button type="button" class="ssn-stlink" data-stid="' + esc(st.id) + '" data-stname="' +
           esc(st.name) + '">' + esc(st.name) + '</button>';
@@ -597,7 +619,7 @@
         ? '<button type="button" class="ssn-loadmore" data-more' + (e.busy ? ' disabled' : '') + '>' +
             (e.busy ? 'Loading&hellip;' : 'Load more (' + n + ' of ' + d.count + ')') + '</button>'
         : '';
-      return prof + studioHtml(e) +
+      return prof + studioHtml(e, 'sub') + studioHtml(e, 'main') +
         '<div class="ssn-state"><span class="ssn-h">' + label + '</span>' + sortHtml(e, 'Newest') + '</div>' +
         errHtml(e.error) + errHtml(d && d.note) +
         list + more;
@@ -632,45 +654,75 @@
       return [...seen.values()].sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
     }
 
-    function studioHtml(e) {
+    // Two dropdowns share this (picker 14.10 / native 14.16): 'main' - studios
+    // on a performer (and their parent networks, marked ⌂), performers on a
+    // studio - and 'sub', the sub-studios on a parent studio's view. Each keeps
+    // its own state on the entry.
+    const DD = {
+      main: { picks: 'picks',    open: 'studioOpen', term: 'studioTerm', focus: 'studioFocus' },
+      sub:  { picks: 'subPicks', open: 'subOpen',    term: 'subTerm',    focus: 'subFocus' }
+    };
+
+    function ddOptions(e, dd) {
+      if (dd === 'sub') {
+        const s = e.data && e.data.studio;
+        if (!s || !(s.children && s.children.length)) return [];
+        // The parent itself first - its own scenes - then the studios under it.
+        return [{ id: s.id, name: s.name + ' (itself)' }].concat(s.children.map(c => ({ id: c.id, name: c.name })));
+      }
+      const list = studioOptions(e);
+      // Parent networks of this performer's studios lead the list; picking
+      // one means every studio under it (browse 14.5 expands it).
+      if (e.type === 'performer' && e.data && Array.isArray(e.data.networks) && e.data.networks.length) {
+        return e.data.networks.map(n => ({ id: 'net:' + n.id, name: '⌂ ' + n.name, count: n.count, net: true })).concat(list);
+      }
+      return list;
+    }
+
+    function studioHtml(e, dd) {
+      dd = dd || 'main';
+      const K = DD[dd];
       if (!e.data || !(e.data.performer || e.data.studio)) return '';
-      // What the dropdown lists: studios on a performer, performers on a studio.
-      const one = e.type === 'studio' ? 'Performer' : 'Studio';
-      const many = e.type === 'studio' ? 'performers' : 'studios';
-      const opts = studioOptions(e);
-      const picks = e.picks || [];
+      // What the dropdown lists: studios on a performer, performers on a
+      // studio, sub-studios on a parent studio.
+      const one = dd === 'sub' ? 'Studio' : e.type === 'studio' ? 'Performer' : 'Studio';
+      const many = dd === 'sub' ? 'studios in this network' : e.type === 'studio' ? 'performers' : 'studios';
+      const opts = ddOptions(e, dd);
+      const picks = e[K.picks] || [];
       if (!opts.length && !picks.length) return '';
       const isOn = (id) => picks.some(x => x.id === id);
+      const joinWith = (dd === 'main' && e.type === 'studio') ? ' + ' : ', ';
       // Several can be picked (picker 14.7 / native 14.11); the list stays
       // open between taps. Studios add together, performers intersect.
-      const how = e.type === 'studio'
+      const how = (dd === 'main' && e.type === 'studio')
         ? 'Pick several to see scenes they&rsquo;re all in together'
         : 'Pick several to see scenes from any of them';
+      const plain = (n) => String(n).replace(/^⌂ /, '⌂');
       const label = !picks.length ? 'All ' + many
-        : picks.length <= 2 ? picks.map(x => x.name).join(e.type === 'studio' ? ' + ' : ', ')
-        : picks.slice(0, 2).map(x => x.name).join(e.type === 'studio' ? ' + ' : ', ') + ' +' + (picks.length - 2);
+        : picks.length <= 2 ? picks.map(x => plain(x.name)).join(joinWith)
+        : picks.slice(0, 2).map(x => plain(x.name)).join(joinWith) + ' +' + (picks.length - 2);
       let pop = '';
-      if (e.studioOpen) {
+      if (e[K.open]) {
         pop = '<div class="ssn-studio-pop">' +
           '<div class="ssn-studio-how">' + how + '</div>' +
           '<input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
-            'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + '&hellip;" value="' + esc(e.studioTerm || '') + '">' +
+            'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + '&hellip;" value="' + esc(e[K.term] || '') + '">' +
           '<div class="ssn-studio-list">' +
-            '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-studio-pick="">All ' + many + '</button>' +
+            '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-dd="' + dd + '" data-studio-pick="">All ' + many + '</button>' +
             // Picked ones first, so they're easy to find and untick.
             opts.slice().sort((a, b) => (isOn(b.id) ? 1 : 0) - (isOn(a.id) ? 1 : 0)).map(o =>
-              '<button type="button" class="ssn-studio-opt' + (isOn(o.id) ? ' on' : '') + '" ' +
+              '<button type="button" class="ssn-studio-opt' + (isOn(o.id) ? ' on' : '') + (o.net ? ' net' : '') + '" data-dd="' + dd + '" ' +
               'data-studio-pick="' + esc(o.id) + '" data-studio-name="' + esc(o.name) + '">' +
               '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>').join('') +
             '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
           '</div>' +
         '</div>';
       }
-      return '<div class="ssn-studio">' +
+      return '<div class="ssn-studio" data-dd="' + dd + '">' +
         '<div class="ssn-studio-row">' +
-          '<button type="button" class="ssn-studio-btn' + (picks.length ? ' on' : '') + '" data-studio-toggle>' +
-            (picks.length > 1 ? one + 's' : one) + ': ' + esc(label) + ' ' + (e.studioOpen ? '&#9652;' : '&#9662;') + '</button>' +
-          (picks.length ? '<button type="button" data-studio-pick="" title="Show all ' + many + '">&#10005;</button>' : '') +
+          '<button type="button" class="ssn-studio-btn' + (picks.length ? ' on' : '') + '" data-dd="' + dd + '" data-studio-toggle>' +
+            (picks.length > 1 ? one + 's' : one) + ': ' + esc(label) + ' ' + (e[K.open] ? '&#9652;' : '&#9662;') + '</button>' +
+          (picks.length ? '<button type="button" data-dd="' + dd + '" data-studio-pick="" title="Show all ' + many + '">&#10005;</button>' : '') +
         '</div>' + pop +
       '</div>';
     }
@@ -679,20 +731,25 @@
     // close the keyboard).
     function paintStudioList() {
       const e = top();
-      const box = host.querySelector('input.ssn-studio-find');
-      if (!e || !box) return;
-      const q = box.value.trim().toLowerCase();
-      e.studioTerm = box.value;
-      let shown = 0;
-      host.querySelectorAll('.ssn-studio-opt[data-studio-name]').forEach(b => {
-        const hit = !q || b.dataset.studioName.toLowerCase().includes(q);
-        b.hidden = !hit;
-        if (hit) shown++;
+      if (!e) return;
+      // Each open dropdown narrows by its own box.
+      host.querySelectorAll('.ssn-studio[data-dd]').forEach(wrap => {
+        const box = wrap.querySelector('input.ssn-studio-find');
+        if (!box) return;
+        const K = DD[wrap.dataset.dd] || DD.main;
+        const q = box.value.trim().toLowerCase();
+        e[K.term] = box.value;
+        let shown = 0;
+        wrap.querySelectorAll('.ssn-studio-opt[data-studio-name]').forEach(b => {
+          const hit = !q || b.dataset.studioName.toLowerCase().includes(q);
+          b.hidden = !hit;
+          if (hit) shown++;
+        });
+        const all = wrap.querySelector('.ssn-studio-opt[data-studio-pick=""]');
+        if (all) all.hidden = !!q;
+        const none = wrap.querySelector('.ssn-studio-none');
+        if (none) none.hidden = shown > 0 || !q;
       });
-      const all = host.querySelector('.ssn-studio-opt[data-studio-pick=""]');
-      if (all) all.hidden = !!q;
-      const none = host.querySelector('.ssn-studio-none');
-      if (none) none.hidden = shown > 0 || !q;
     }
 
     // Google for one scene (13.165 / 13.164): the title as an exact phrase,
@@ -1002,25 +1059,27 @@
       if (btn.hasAttribute('data-studio-toggle')) {
         const e = top();
         if (!e) return;
-        e.studioOpen = !e.studioOpen;
-        e.studioFocus = e.studioOpen;
+        const K = DD[btn.dataset.dd] || DD.main;
+        e[K.open] = !e[K.open];
+        e[K.focus] = e[K.open];
         paint(false, true);
         return;
       }
       if (btn.dataset.studioPick !== undefined) {
         const e = top();
         if (!e || (e.type !== 'performer' && e.type !== 'studio')) return;
+        const K = DD[btn.dataset.dd] || DD.main;
         const id = btn.dataset.studioPick;
-        const picks = e.picks || [];
+        const picks = e[K.picks] || [];
         if (!id) {
           // "All" or the x: clear the lot and close the list.
-          e.studioOpen = false;
-          e.studioTerm = '';
+          e[K.open] = false;
+          e[K.term] = '';
           if (!picks.length) { paint(false, true); return; }
-          e.picks = [];
+          e[K.picks] = [];
         } else {
           // A tick toggles; the list stays open for the next one.
-          e.picks = picks.some(x => x.id === id)
+          e[K.picks] = picks.some(x => x.id === id)
             ? picks.filter(x => x.id !== id)
             : picks.concat([{ id, name: btn.dataset.studioName || '' }]);
         }

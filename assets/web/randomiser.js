@@ -2503,7 +2503,8 @@ window.SCRAY_FACET_CLASSES.forEach(kind => {
        Array.from(window.scrayStudioParentFilter).forEach(val => {
            const np = document.createElement("span");
            np.className = "floating-tag-pill " + meta.pill + " floating-tag-network";
-           np.textContent = "\u2302 " + val;
+           // The parent's mapped name from manage-data, when it has one.
+           np.textContent = "\u2302 " + (window.scrayMapName ? window.scrayMapName('network', val) : val);
            np.title = "Network - every studio under " + val + ". Click to remove";
            np.addEventListener("click", () => {
                window.scrayStudioParentFilter.delete(val);

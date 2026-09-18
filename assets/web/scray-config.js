@@ -506,11 +506,14 @@ window.scrayNameMap = (function () {
   function adopt(payload) {
     const p = payload || {};
     dict  = { studio: (p.maps      && p.maps.studio)      || {}, note: (p.maps      && p.maps.note)      || {},
-              censor: (p.maps      && p.maps.censor)      || {} };
+              censor: (p.maps      && p.maps.censor)      || {},
+              // Parent studios' own names (browse 14.5).
+              network: (p.maps     && p.maps.network)     || {} };
     attrs = { studio: (p.attrs     && p.attrs.studio)     || {}, note: (p.attrs     && p.attrs.note)     || {},
               censor: (p.attrs     && p.attrs.censor)     || {},
               // Parent notes (browse 13.64): one row per keyword, see scrayKeywordTree.
-              keyword: (p.attrs    && p.attrs.keyword)    || {} };
+              keyword: (p.attrs    && p.attrs.keyword)    || {},
+              network: (p.attrs    && p.attrs.network)    || {} };
     defs  = { studio: (p.attr_defs && p.attr_defs.studio) || [], note: (p.attr_defs && p.attr_defs.note) || [],
               censor: (p.attr_defs && p.attr_defs.censor) || [] };
     notePatterns = Array.isArray(p.note_patterns) ? p.note_patterns.filter(s => typeof s === "string") : [];

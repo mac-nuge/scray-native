@@ -5028,6 +5028,9 @@ async function showStashModal(video, openOpts) {
     // openOpts.search (native 14.9 / picker 14.5): open straight onto a
     // navigator search - Search on a TinEye result asks for this.
     const startSearch = openOpts && openOpts.search ? String(openOpts.search).trim() : '';
+    // openOpts.studio (picker 14.6 / native 14.10): open onto that studio's
+    // view - a studio chip's "Search in Stash nav" asks for this.
+    const startStudio = openOpts && openOpts.studio ? String(openOpts.studio).trim() : '';
 
     addBtn.addEventListener('click', async () => {
         const picked = [...modal.querySelectorAll('.stash-mk:checked')]
@@ -5090,6 +5093,8 @@ async function showStashModal(video, openOpts) {
     load(false).then(() => {
         if (startPerformer && document.body.contains(modal)) {
             openNav({ type: 'performer', name: startPerformer, sceneId: matchedStashId }, false);
+        } else if (startStudio && document.body.contains(modal)) {
+            openNav({ type: 'studio', name: startStudio, sceneId: matchedStashId }, false);
         } else if (startSearch && document.body.contains(modal)) {
             openNav({ type: 'search', term: startSearch }, true);
         }

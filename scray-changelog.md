@@ -4,6 +4,34 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 14.2 / picker 14.6 / native 14.10 — test: studio view in Stash nav
+<!-- 2026-09-18T11:03Z -->
+
+**browse** — `staging-browse - 14.2`: `api.php`, `VERSION.txt` (**deploy first** — the apps' studio view needs it)
+**picker** — `staging - 14.6`: `scray-stash-nav.js`, `file-operations.js`, `VERSION`
+**native** — `stg-native - 14.10`: `assets/web/scray-stash-nav.js`, `assets/web/file-operations.js`, `assets/web/VERSION` (web only — no IPA build)
+
+Mac: the performer profile browser in Stash nav, but for studios — opened from a studio chip's menu and from the studio name on any scene card, with a performer filter in place of the studio one.
+
+**1. `stash_nav` op `studio`** (`api.php`). Body `{ op: 'studio', id? | name (+ scene_id?), performer_id?, page? }`.
+- Name → id: the scene it came from (its studio, if the name matches), then `findStudio(name)`, then `searchStudio`.
+- Profile: name, aliases, website links, network (parent), sub-studios, logo, stashdb.org link — as a fallback list of selections, like the performer profile.
+- Scenes: `queryScenes` with the studio, newest first, 25 a page, scored against the file and with In library links like every other list. `performer_id` narrows it to one performer.
+- Performers for the filter: `queryPerformers({ studio_id })` (first page, up to 100) plus its count for the profile; `null` if StashDB won't answer, and the app falls back to the casts it has loaded.
+- `php -l` clean.
+
+**2. Studio view** (`scray-stash-nav.js`, identical in both apps).
+- Profile: logo (not blurred — it's a wordmark), name + Google, aliases, website links, facts (Network, Sub-studios, Scenes on StashDB, Performers), **Part of** / **Sub-studios** as links to their own views, **Filter by this studio** (or Remove from filter), stashdb.org.
+- Scenes newest first with the usual cards, Best match / Newest, Load more.
+- **Performer filter**: the profile's studio dropdown, reused — on a studio view it reads "Performer: All performers", searches performers, and re-asks StashDB for that performer's scenes at the studio.
+- **Studio names on cards are links** now (search results, performer profiles, studio views) — except on that studio's own view.
+
+**3. Getting there.** A studio chip's menu (picker 14.3 / native 14.6) gains **Search in Stash nav**, which opens the Stash modal onto the studio (`showStashModal(video, { studio })`, using the matched scene to pin down the right studio).
+
+**Checked:** `node --check` on all four JS files; `php -l` on `api.php`; jsdom run of the navigator with a mocked `stash_nav` — a studio start sends `op: studio` with the name and scene id; heading, Part of / Sub-studios links, facts and "Performer: All performers" render; the dropdown lists performers and picking one re-asks with `performer_id`; a website link opens externally; tapping a performer opens their profile, whose card's studio name then opens that studio.
+
+**Worth watching:** a network (e.g. a parent studio) lists only scenes filed directly under it, not its sub-studios' — the sub-studio links are the way in. And `queryPerformers`' studio filter is the one part of StashDB's schema I couldn't confirm from here; if the dropdown only ever shows performers from loaded scenes, that's the fallback kicking in.
+
 ### native 14.9 / picker 14.5 — test: Scray's own TinEye results view, download counts
 <!-- 2026-09-18T10:52Z -->
 

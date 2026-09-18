@@ -11,6 +11,9 @@
 // Picker as a preview, the way ▶ previews this modal's own file.
 // native 13.191 / picker 13.190: the studio search lifts itself clear of the
 // keyboard, and In library shows on this modal's own file too.
+// picker 14.6 / native 14.10 (browse 14.2): a studio view - profile, scenes
+// newest first, a performer filter - opened from a studio name on any card,
+// or from a studio chip's "Search in Stash nav".
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -28,7 +31,8 @@
 //
 // Usage: const ctl = window.scrayStashNav.open({
 //            host, actions, heading, video, videoKey, canAccept,
-//            start: { type: 'search', term } | { type: 'performer', id?, name, sceneId? },
+//            start: { type: 'search', term } | { type: 'performer', id?, name, sceneId? }
+//                   | { type: 'studio', id?, name, sceneId? },
 //            openExternal(url), onAccept(stashId) -> Promise, onClose(),
 //            onDone(result) });   // result: { accepted: stashId, response } or null
 (function () {
@@ -168,6 +172,14 @@
 #stashModal .ssn .ssn-studio-opt[hidden], #stashModal .ssn-studio-none[hidden] { display: none; }
 #stashModal .ssn .ssn-studio-opt small { opacity: .6; flex: 0 0 auto; }
 #stashModal .ssn-studio-none { padding: 8px 6px; font-size: .8rem; opacity: .6; }
+/* picker 14.6 / native 14.10: studio names on cards open the studio view. */
+#stashModal .ssn .ssn-stlink { display: inline; padding: 0; margin: 0; border: none; border-radius: 0; background: none; color: #6c5ce7; text-decoration: underline; font: inherit; white-space: normal; vertical-align: baseline; }
+#stashModal .ssn-slogo { flex: 0 0 110px; width: 110px; height: 70px; border-radius: 6px; background: #fff; border: 1px solid #e6e6ec; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+#stashModal .ssn-slogo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+#stashModal .ssn-slinks { font-size: .78rem; margin-top: 4px; overflow-wrap: anywhere; }
+#stashModal .ssn-slinks a { color: #6c5ce7; }
+#stashModal .ssn-kin { font-size: .8rem; margin: 0 0 10px; line-height: 1.6; }
+#stashModal .ssn-kin b { font-weight: 600; opacity: .7; }
 `;
     document.head.appendChild(css);
   }
@@ -266,6 +278,16 @@
         if (entry.type === 'search') {
           body.op = 'search';
           body.term = entry.term;
+        } else if (entry.type === 'studio') {
+          body.op = 'studio';
+          if (entry.id) body.id = entry.id;
+          body.name = entry.name || '';
+          if (entry.sceneId) body.scene_id = entry.sceneId;
+          // The dropdown's pick is a PERFORMER on a studio view. The state
+          // keeps the studio-filter names (e.studio, e.studios, ...) because
+          // the dropdown is the same one, listing the other kind.
+          if (entry.studio && entry.studio.id) body.performer_id = entry.studio.id;
+          body.page = more ? (entry.data.page || 1) + 1 : 1;
         } else {
           body.op = 'performer';
           if (entry.id) body.id = entry.id;
@@ -296,6 +318,11 @@
         // The performer's studios, from the unfiltered first load. Kept across
         // a studio change so the list doesn't shrink to the one picked.
         if (entry.type === 'performer' && Array.isArray(res.studios) && !entry.studios) entry.studios = res.studios;
+        if (entry.type === 'studio' && Array.isArray(res.performers) && !entry.studios) entry.studios = res.performers;
+        if (entry.type === 'studio' && res.studio) {
+          entry.id = res.studio.id;
+          entry.name = res.studio.name || entry.name;
+        }
         if (entry.type === 'performer' && res.performer) {
           entry.id = res.performer.id;
           entry.name = res.performer.name || entry.name;
@@ -322,11 +349,14 @@
       if (heading) {
         heading.textContent = e.type === 'search'
           ? 'Stash search'
-          : (e.data && e.data.performer ? e.data.performer.name : (e.name || 'Performer'));
+          : e.type === 'studio'
+            ? (e.data && e.data.studio ? e.data.studio.name : (e.name || 'Studio'))
+            : (e.data && e.data.performer ? e.data.performer.name : (e.name || 'Performer'));
       }
       backBtn.textContent = stack.length > 1 ? '‹ Back' : '‹ Back to lookup';
 
-      host.innerHTML = '<div class="ssn">' + (e.type === 'search' ? searchHtml(e) : performerHtml(e)) + '</div>';
+      host.innerHTML = '<div class="ssn">' +
+        (e.type === 'search' ? searchHtml(e) : e.type === 'studio' ? studioViewHtml(e) : performerHtml(e)) + '</div>';
 
       if (restore) host.scrollTop = e.scroll || 0;
       else if (keepScroll) host.scrollTop = scrollWas;
@@ -500,7 +530,75 @@
         list + more;
     }
 
+    // ---- studio view (picker 14.6 / native 14.10) --------------------------
+    // The performer view's twin: the studio's logo, name, aliases and links,
+    // its network and sub-studios (each one tappable), then its scenes newest
+    // first with the same cards, and a performer filter in place of the
+    // studio one.
+    function studioViewHtml(e) {
+      const d = e.data;
+      const s = d && d.studio;
+      let prof = '';
+      if (s) {
+        const fact = (label, v) => v ? '<div class="ssn-fact"><span>' + label + '</span><b>' + esc(v) + '</b></div>' : '';
+        const facts = fact('Network', s.parent ? s.parent.name : '') +
+                      fact('Sub-studios', s.children && s.children.length ? String(s.children.length) : '') +
+                      fact('Scenes on StashDB', d.count != null && !e.studio ? String(d.count) : '') +
+                      fact('Performers', s.performer_count != null ? String(s.performer_count) : '');
+        const link = (st) => '<button type="button" class="ssn-stlink" data-stid="' + esc(st.id) + '" data-stname="' +
+          esc(st.name) + '">' + esc(st.name) + '</button>';
+        const kin =
+          (s.parent ? '<div><b>Part of</b> ' + link(s.parent) + '</div>' : '') +
+          (s.children && s.children.length ? '<div><b>Sub-studios</b> ' + s.children.map(link).join(', ') + '</div>' : '');
+        const sites = (s.urls || []).map(u => {
+          let label = u.site || '';
+          try { label = label || new URL(u.url).hostname.replace(/^www\./, ''); } catch (_) { label = label || u.url; }
+          return '<a href="#" data-exturl="' + esc(u.url) + '">' + esc(label) + ' &#8599;</a>';
+        }).join(' &middot; ');
+        prof =
+          '<div class="ssn-btnrow ssn-topbar">' + unblurBtn() + '</div>' +
+          '<div class="ssn-prof">' +
+            (s.image ? '<div class="ssn-slogo"><img src="' + esc(s.image) + '" alt="" loading="lazy"></div>' : '') +
+            '<div class="ssn-pmain">' +
+              '<div class="ssn-pname">' + esc(s.name) +
+                '<button type="button" class="ssn-google" title="Search Google for this studio" data-ext="' +
+                  esc('https://www.google.com/search?q=' + encodeURIComponent('"' + s.name + '"')) + '">Google &#8599;</button></div>' +
+              (s.aliases && s.aliases.length ? '<div class="ssn-alias">Also known as ' + esc(s.aliases.join(', ')) + '</div>' : '') +
+              (sites ? '<div class="ssn-slinks">' + sites + '</div>' : '') +
+            '</div>' +
+          '</div>' +
+          (facts ? '<div class="ssn-facts">' + facts + '</div>' : '') +
+          (kin ? '<div class="ssn-kin">' + kin + '</div>' : '') +
+          '<div class="ssn-btnrow">' +
+            (typeof window.scrayAddTagFilter === 'function'
+              ? '<button type="button" class="ssn-filter" data-filter>&#8853; Filter by this studio</button>' : '') +
+            '<button type="button" class="ssn-ext" data-ext="' + esc(s.stash_url) + '">stashdb.org &#8599;</button>' +
+          '</div>';
+      } else if (e.busy) {
+        return '<div class="ssn-state">Looking up ' + esc(e.name || 'studio') + '&hellip;</div>';
+      } else if (e.error) {
+        return '<div class="ssn-state"><span class="ssn-err">' + esc(e.error) + '</span></div>';
+      }
+
+      const n = d ? d.scenes.length : 0;
+      const label = d ? ('Scenes' + (d.count != null ? ' &middot; ' + d.count : '') +
+                         (e.sort === 'order' ? ' &middot; newest first' : '')) : '';
+      const list = d && !n && !e.busy
+        ? (d.note ? '' : '<div class="ssn-empty">No scenes listed for this studio' + (e.studio ? ' with ' + esc(e.studio.name) : '') + '.</div>')
+        : sortedScenes(e).map(x => cardHtml(x.s, x.i, e.studio ? e.studio.id : null, s ? s.id : null)).join('');
+      const more = d && d.count != null && n < d.count && d.lastCount >= (d.per_page || 25)
+        ? '<button type="button" class="ssn-loadmore" data-more' + (e.busy ? ' disabled' : '') + '>' +
+            (e.busy ? 'Loading&hellip;' : 'Load more (' + n + ' of ' + d.count + ')') + '</button>'
+        : '';
+      return prof + studioHtml(e) +
+        '<div class="ssn-state"><span class="ssn-h">' + label + '</span>' + sortHtml(e, 'Newest') + '</div>' +
+        errHtml(e.error) + errHtml(d && d.note) +
+        list + more;
+    }
+
     // ---- studio filter on a profile (13.187) ------------------------------
+    // picker 14.6 / native 14.10: the same dropdown on a STUDIO view lists
+    // performers instead, and filters the studio's scenes to one of them.
     // A searchable dropdown of the studios this performer has worked for.
     // The list comes from StashDB via api.php (browse 13.72); if that isn't
     // available it falls back to the studios on the scenes loaded so far.
@@ -509,6 +607,15 @@
     function studioOptions(e) {
       if (Array.isArray(e.studios) && e.studios.length) return e.studios;
       const seen = new Map();
+      if (e.type === 'studio') {
+        ((e.data && e.data.scenes) || []).forEach(s => (s.cast || []).forEach(p => {
+          if (!p.id || !p.name) return;
+          const o = seen.get(p.id) || { id: p.id, name: p.name, count: 0 };
+          o.count++;
+          seen.set(p.id, o);
+        }));
+        return [...seen.values()].sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
+      }
       ((e.data && e.data.scenes) || []).forEach(s => {
         if (!s.studio_id || !s.studio) return;
         const o = seen.get(s.studio_id) || { id: s.studio_id, name: s.studio, count: 0 };
@@ -519,7 +626,10 @@
     }
 
     function studioHtml(e) {
-      if (!e.data || !e.data.performer) return '';
+      if (!e.data || !(e.data.performer || e.data.studio)) return '';
+      // What the dropdown lists: studios on a performer, performers on a studio.
+      const one = e.type === 'studio' ? 'Performer' : 'Studio';
+      const many = e.type === 'studio' ? 'performers' : 'studios';
       const opts = studioOptions(e);
       if (!opts.length && !e.studio) return '';
       const cur = e.studio;
@@ -527,21 +637,21 @@
       if (e.studioOpen) {
         pop = '<div class="ssn-studio-pop">' +
           '<input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
-            'autocorrect="off" autocapitalize="off" placeholder="Search studios&hellip;" value="' + esc(e.studioTerm || '') + '">' +
+            'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + '&hellip;" value="' + esc(e.studioTerm || '') + '">' +
           '<div class="ssn-studio-list">' +
-            '<button type="button" class="ssn-studio-opt' + (!cur ? ' on' : '') + '" data-studio-pick="">All studios</button>' +
+            '<button type="button" class="ssn-studio-opt' + (!cur ? ' on' : '') + '" data-studio-pick="">All ' + many + '</button>' +
             opts.map(o => '<button type="button" class="ssn-studio-opt' + (cur && cur.id === o.id ? ' on' : '') + '" ' +
               'data-studio-pick="' + esc(o.id) + '" data-studio-name="' + esc(o.name) + '">' +
               '<span>' + esc(o.name) + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>').join('') +
-            '<div class="ssn-studio-none" hidden>No studio matches</div>' +
+            '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
           '</div>' +
         '</div>';
       }
       return '<div class="ssn-studio">' +
         '<div class="ssn-studio-row">' +
           '<button type="button" class="ssn-studio-btn' + (cur ? ' on' : '') + '" data-studio-toggle>' +
-            'Studio: ' + esc(cur ? cur.name : 'All studios') + ' ' + (e.studioOpen ? '&#9652;' : '&#9662;') + '</button>' +
-          (cur ? '<button type="button" data-studio-pick="" title="Show all studios">&#10005;</button>' : '') +
+            one + ': ' + esc(cur ? cur.name : 'All ' + many) + ' ' + (e.studioOpen ? '&#9652;' : '&#9662;') + '</button>' +
+          (cur ? '<button type="button" data-studio-pick="" title="Show all ' + many + '">&#10005;</button>' : '') +
         '</div>' + pop +
       '</div>';
     }
@@ -630,7 +740,7 @@
       preview(match, host.closest('.basket-json-modal') || null);
     }
 
-    function cardHtml(c, i, herePid) {
+    function cardHtml(c, i, herePid, hereSid) {
       const fileSec = Number(c.file_duration_sec) || 0;
       const sceneSec = Number(c.stash_duration_sec) || 0;
       let durClass = '', durNote = sceneSec ? 'no file length' : 'no scene runtime';
@@ -643,7 +753,14 @@
       const scored = c.confidence !== null && c.confidence !== undefined;
       const conf = Number(c.confidence) || 0;
       const confClass = conf >= 70 ? 'good' : (conf >= 40 ? 'mid' : '');
-      const sub = [c.studio || 'no studio', c.release_date, c.code].filter(Boolean).map(esc).join(' &middot; ');
+      // The studio opens its own view (picker 14.6 / native 14.10) - unless
+      // this IS that studio's view.
+      const studioBit = !c.studio ? 'no studio'
+        : (hereSid && c.studio_id === hereSid)
+          ? esc(c.studio)
+          : '<button type="button" class="ssn-stlink" data-stid="' + esc(c.studio_id || '') + '" data-stname="' +
+              esc(c.studio) + '" data-sid="' + esc(c.stash_id) + '">' + esc(c.studio) + '</button>';
+      const sub = [studioBit].concat([c.release_date, c.code].filter(Boolean).map(esc)).join(' &middot; ');
 
       const cast = (c.cast || []).map(p =>
         '<button type="button" class="ssn-perf' + (herePid && p.id === herePid ? ' here' : '') + '" ' +
@@ -703,11 +820,13 @@
     function paintFilter() {
       const b = host.querySelector('[data-filter]');
       const e = top();
-      if (!b || !e || !e.data || !e.data.performer) return;
-      const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet('performer') : null;
-      const on = !!(set && set.has(String(e.data.performer.name).trim().toLowerCase()));
+      const kind = e && e.type === 'studio' ? 'studio' : 'performer';
+      const who = e && e.data && (kind === 'studio' ? e.data.studio : e.data.performer);
+      if (!b || !who) return;
+      const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet(kind) : null;
+      const on = !!(set && set.has(String(who.name).trim().toLowerCase()));
       b.classList.toggle('on', on);
-      b.innerHTML = on ? '&#10005; Remove from filter' : '&#8853; Filter by this performer';
+      b.innerHTML = on ? '&#10005; Remove from filter' : '&#8853; Filter by this ' + kind;
     }
 
     // ---- actions ---------------------------------------------------------
@@ -822,6 +941,8 @@
     function onClick(ev) {
       if (finished) return;
       const t = ev.target;
+      const extA = t.closest && t.closest('a[data-exturl]');
+      if (extA && host.contains(extA)) { ev.preventDefault(); openExternal(extA.dataset.exturl); return; }
       const cover = t.closest('.ssn-cover[data-cover]');
       if (cover && host.contains(cover)) { tapCover(cover); return; }
       const btn = t.closest('button');
@@ -869,7 +990,7 @@
       }
       if (btn.dataset.studioPick !== undefined) {
         const e = top();
-        if (!e || e.type !== 'performer') return;
+        if (!e || (e.type !== 'performer' && e.type !== 'studio')) return;
         const id = btn.dataset.studioPick;
         const next = id ? { id, name: btn.dataset.studioName || '' } : null;
         e.studioOpen = false;
@@ -891,12 +1012,21 @@
       if (btn.hasAttribute('data-more')) { const e = top(); if (e && !e.busy) load(e, true); return; }
       if (btn.hasAttribute('data-filter')) {
         const e = top();
-        const name = e && e.data && e.data.performer && e.data.performer.name;
+        const kind = e && e.type === 'studio' ? 'studio' : 'performer';
+        const who = e && e.data && (kind === 'studio' ? e.data.studio : e.data.performer);
+        const name = who && who.name;
         if (!name) return;
-        const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet('performer') : null;
-        if (set && set.has(String(name).trim().toLowerCase())) window.scrayRemoveTagFilter?.('performer', name);
-        else window.scrayAddTagFilter?.('performer', name);
+        const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet(kind) : null;
+        if (set && set.has(String(name).trim().toLowerCase())) window.scrayRemoveTagFilter?.(kind, name);
+        else window.scrayAddTagFilter?.(kind, name);
         paintFilter();
+        return;
+      }
+      if (btn.classList.contains('ssn-stlink')) {
+        const e = top();
+        const stid = btn.dataset.stid || '';
+        if (e && e.type === 'studio' && stid && e.id === stid) return;
+        push({ type: 'studio', id: stid, name: btn.dataset.stname || '', sceneId: btn.dataset.sid || '' });
         return;
       }
       if (btn.classList.contains('ssn-perf')) {
@@ -927,7 +1057,9 @@
     const start = opts.start || { type: 'search', term: words(video.filename || '') };
     push(start.type === 'performer'
       ? { type: 'performer', id: start.id || '', name: start.name || '', sceneId: start.sceneId || '' }
-      : { type: 'search', term: String(start.term || '').trim() || words(video.filename || '') });
+      : start.type === 'studio'
+        ? { type: 'studio', id: start.id || '', name: start.name || '', sceneId: start.sceneId || '' }
+        : { type: 'search', term: String(start.term || '').trim() || words(video.filename || '') });
 
     return {
       close: () => finish(null),
@@ -1121,8 +1253,8 @@ body.fullscreen-active #ssnPvBar { display: none; }
   // picker 14.3 / native 14.6: "Add to search" as well - the name goes into
   // the search box (quoted if it has a space, appended to what's there), which
   // matches it anywhere in a file's text rather than only in that one field.
-  // Studios get the same modal now (they used to filter straight away), minus
-  // Stash nav, which only knows how to open on a performer.
+  // Studios get the same modal now (they used to filter straight away).
+  // picker 14.6 / native 14.10: and Stash nav too, onto the studio view.
   function performerChoice(video, name, kind) {
     kind = kind === 'studio' ? 'studio' : 'performer';
     document.getElementById('scrayPerfChoice')?.remove();
@@ -1139,9 +1271,7 @@ body.fullscreen-active #ssnPvBar { display: none; }
           '<button type="button" class="modal-btn modal-btn-primary" data-c="filter">' +
             (on ? '&#10005; Remove from filter' : '&#8853; Filter as a tag') + '</button>' +
           '<button type="button" class="modal-btn modal-btn-secondary" data-c="search">&#43; Add to search</button>' +
-          (kind === 'performer'
-            ? '<button type="button" class="modal-btn modal-btn-secondary" data-c="nav">&#128269; Search in Stash nav</button>'
-            : '') +
+          '<button type="button" class="modal-btn modal-btn-secondary" data-c="nav">&#128269; Search in Stash nav</button>' +
           '<button type="button" class="modal-btn modal-btn-cancel" data-c="">Cancel</button>' +
         '</div>' +
       '</div>';
@@ -1159,7 +1289,9 @@ body.fullscreen-active #ssnPvBar { display: none; }
       } else if (b.dataset.c === 'search') {
         if (typeof window.scrayAddSearchTerm === 'function') window.scrayAddSearchTerm(name);
       } else if (b.dataset.c === 'nav') {
-        if (typeof window.showStashModal === 'function') window.showStashModal(video, { performer: name });
+        if (typeof window.showStashModal === 'function') {
+          window.showStashModal(video, kind === 'studio' ? { studio: name } : { performer: name });
+        }
       }
     });
     document.body.appendChild(modal);

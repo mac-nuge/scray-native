@@ -4,7 +4,22 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### native 14.25 — test: browser toolbar buttons grouped into one compact pill
+### native 14.26 — test: browser strip gets + new tab and ⋯ menu, ‹P always active
+<!-- 2026-09-18T17:55Z -->
+
+**native** — `stg-native - 14.26`: `modules/scray-native/ios/ScrayBrowser.swift`, `assets/web/VERSION` (**needs a new IPA build**)
+
+Mac liked the 14.25 pill (marked stable) and, with room to spare, asked for three changes to the in-app browser's bottom strip:
+
+- **+ new tab** (`newTabButton`, SF Symbol `plus`) between ↻ and the tab count. Calls the existing `newTabTapped` - opens a tab on home and focuses the address bar, same as "New Tab" in the ⋯ menu (which stays there too).
+- **⋯ more menu moved down** from the header (beside ⌂) to the end of the strip after the tray, at the strip's 15pt glyph size and 34pt box. Its action sheet still anchors to it. The collapse animation no longer hides it separately - the whole toolbar fades out anyway, and hiding it would have shifted the pill.
+- **‹P always enabled and purple.** Still returns to the Picker page in this tab's history, or the Picker tab that opened this one, as before. With neither, it now acts as Picker home (`openOrFocus(homeURL)`, same as ⌂). `refreshPickerItem()` is now an empty hook so its callers didn't need touching.
+
+Strip is now ✕ + eight 34pt buttons with 2pt gaps (~286pt for the pill). Fits standard phones; on a 375pt-wide phone it's close to the edge - drop `TOOLBAR_BUTTON_WIDTH` to 32 if it clips.
+
+**Not tested:** no Swift compiler here, so the IPA build is the first compile.
+
+### native 14.25 — stable: browser toolbar buttons grouped into one compact pill
 <!-- 2026-09-18T17:40Z -->
 
 **native** — `stg-native - 14.25`: `modules/scray-native/ios/ScrayBrowser.swift`, `modules/scray-native/ios/ScrayDownloads.swift`, `assets/web/VERSION` (**needs a new IPA build**)

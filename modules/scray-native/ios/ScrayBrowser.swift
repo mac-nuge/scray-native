@@ -197,6 +197,8 @@ final class ScrayBrowserViewController: UIViewController,
     /// ‹P (native 14.20) - back to Picker from an external page Picker sent
     /// you to. See pickerReturn().
     private let pickerButton = UIButton(type: .system)
+    private let newTabButton = UIButton(type: .system)
+    private static let pickerPurple = UIColor(red: 0.424, green: 0.361, blue: 0.906, alpha: 1)  // #6c5ce7
     private let trayButton = ScrayTrayButton(frame: .zero)
     private let toastView = ScrayToastView(frame: .zero)
     private var toastBottom: NSLayoutConstraint!
@@ -371,10 +373,10 @@ final class ScrayBrowserViewController: UIViewController,
 
     // MARK: - Chrome
 
-    // ⚙️ BOTTOM TOOLBAR SIZING (native 14.24, reworked 14.25). Seven
-    // controls - ✕ ‹P ‹ › ↻ tabs tray. ✕ stays on its own at the left; the
-    // other six are fixed-size buttons in one stack, so iOS 26 draws them as
-    // one pill instead of six spaced-out glass circles.
+    // ⚙️ BOTTOM TOOLBAR SIZING (native 14.24, reworked 14.25, 14.26). Nine
+    // controls - ✕ ‹P ‹ › ↻ + tabs tray ⋯. ✕ stays on its own at the left;
+    // the other eight are fixed-size buttons in one stack, so iOS 26 draws
+    // them as one pill instead of separate spaced-out glass circles.
     // TOOLBAR_BUTTON_WIDTH/HEIGHT = each button's tap box, TOOLBAR_ITEM_GAP =
     // space between them, TOOLBAR_SYMBOL_POINTS / TITLE_POINTS = glyph size.
     private static let TOOLBAR_SYMBOL_POINTS: CGFloat = 15
@@ -395,9 +397,11 @@ final class ScrayBrowserViewController: UIViewController,
         homeButton.addTarget(self, action: #selector(homeTapped), for: .touchUpInside)
         homeButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
 
-        moreButton.setImage(UIImage(systemName: "ellipsis.circle"), for: .normal)
+        // ⋯ lives in the bottom strip after the tray (native 14.26); sized
+        // with the other strip buttons below.
+        moreButton.setImage(UIImage(systemName: "ellipsis.circle", withConfiguration: Self.toolbarSymbol),
+                            for: .normal)
         moreButton.addTarget(self, action: #selector(moreTapped), for: .touchUpInside)
-        moreButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
 
         // Hidden everywhere except stashdb.org, so it reads as "this page is
         // the one Scray is waiting for" rather than as general chrome.
@@ -422,7 +426,7 @@ final class ScrayBrowserViewController: UIViewController,
         addressHeight = addressField.heightAnchor.constraint(equalToConstant: 34)
         addressHeight.isActive = true
 
-        let header = UIStackView(arrangedSubviews: [addressField, stashButton, homeButton, moreButton])
+        let header = UIStackView(arrangedSubviews: [addressField, stashButton, homeButton])
         headerStack = header
         header.axis = .horizontal
         header.alignment = .center
@@ -459,11 +463,17 @@ final class ScrayBrowserViewController: UIViewController,
         pickerButton.setTitle("\u{2039}P", for: .normal)
         pickerButton.titleLabel?.font = .systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .bold)
         pickerButton.addTarget(self, action: #selector(pickerTapped), for: .touchUpInside)
-        pickerButton.isEnabled = false
+        // ‹P is always live (native 14.26): back to the Picker page you came
+        // from if there is one, otherwise straight to Picker home.
+        pickerButton.tintColor = Self.pickerPurple
+        // + opens a new tab (same as "New Tab" in the ⋯ menu).
+        newTabButton.setImage(UIImage(systemName: "plus", withConfiguration: Self.toolbarSymbol), for: .normal)
+        newTabButton.addTarget(self, action: #selector(newTabTapped), for: .touchUpInside)
         backButton.isEnabled = false
         forwardButton.isEnabled = false
 
-        let navButtons: [UIButton] = [pickerButton, backButton, forwardButton, reloadButton, tabsButton, trayButton]
+        let navButtons: [UIButton] = [pickerButton, backButton, forwardButton, reloadButton,
+                                        newTabButton, tabsButton, trayButton, moreButton]
         for b in navButtons {
             b.translatesAutoresizingMaskIntoConstraints = false
             // trayButton pins its own size in ScrayDownloads; match it there.
@@ -650,7 +660,6 @@ final class ScrayBrowserViewController: UIViewController,
             // isHidden inside a stack view animates the width away, which is
             // what makes the strip go full width rather than leaving gaps.
             self.homeButton.isHidden  = collapsed
-            self.moreButton.isHidden  = collapsed
             self.stashButton.isHidden = collapsed || !self.stashEligible
             self.toolbar.alpha = collapsed ? 0 : 1
             self.view.layoutIfNeeded()
@@ -1087,15 +1096,13 @@ final class ScrayBrowserViewController: UIViewController,
         switch pickerReturn() {
         case .history(let item)?: currentWebView?.go(to: item)
         case .tab(let idx)?:      selectTab(idx)
-        case nil:                 break
+        case nil:                 openOrFocus(homeURL)   // no Picker trail - act as Picker home
         }
     }
 
-    private func refreshPickerItem() {
-        let on = pickerReturn() != nil
-        pickerButton.isEnabled = on
-        pickerButton.tintColor = on ? UIColor(red: 0.424, green: 0.361, blue: 0.906, alpha: 1) : nil  // #6c5ce7
-    }
+    /// ‹P is always enabled and purple now (native 14.26) - kept as a hook
+    /// for the callers that used to toggle it.
+    private func refreshPickerItem() {}
 
     @objc private func backTapped()    { if currentWebView?.canGoBack == true { currentWebView?.goBack() } }
     @objc private func forwardTapped() { if currentWebView?.canGoForward == true { currentWebView?.goForward() } }

@@ -634,6 +634,25 @@ window.SCRAY_FACET_CLASSES.forEach(k => {
 window.scrayNoteKeywordFilter = window.scrayNoteKeywordFilter || new Set();
 window.scrayNoteKeywordIntersect = !!window.scrayNoteKeywordIntersect;
 
+/* ---------------------------------------------------------------------------
+   Network filter (picker 14.8 / native 14.12, browse 14.4).
+
+   A studio's Parent (manage-data, now fillable from StashDB) is its network.
+   Picking a Parent chip in the STU cloud used to only narrow the cloud; now it
+   is a real filter: every file from any studio under a picked network. It
+   joins the studio class - additive with picked studios, like any other term
+   - and shows as its own pill.
+--------------------------------------------------------------------------- */
+window.scrayStudioParentFilter = window.scrayStudioParentFilter || new Set();
+
+/** A studio's network (its Parent), lower-cased, or ''. */
+function scrayStudioParentOf(studio) {
+   const nm = window.scrayNameMap;
+   const a = (nm && typeof nm.attrsFor === 'function' && studio) ? nm.attrsFor('studio', studio) : null;
+   return String((a && a.parent) || '').trim().toLowerCase();
+}
+window.scrayStudioParentOf = scrayStudioParentOf;
+
 /** Does a note (raw or mapped) satisfy the picked keywords? True when none are picked. */
 function scrayNoteKeywordsPass(note) {
    const picks = window.scrayNoteKeywordFilter;
@@ -820,6 +839,7 @@ window.scrayClearAllFilters = function (ev) {
    });
    window.scrayTagIntersect = false;
    if (window.scrayNoteKeywordFilter) window.scrayNoteKeywordFilter.clear();
+   if (window.scrayStudioParentFilter) window.scrayStudioParentFilter.clear();
    window.scrayNoteKeywordIntersect = false;
 
    // Cleared through jQuery so each select's own change handler runs and the
@@ -1009,7 +1029,8 @@ function scrayTotalFilterTerms() {
    return ['tag'].concat(window.SCRAY_FACET_CLASSES || []).reduce((n, k) => {
        const s = scrayFacetSet(k);
        return n + (s ? s.size : 0);
-   }, 0) + ((window.scrayNoteKeywordFilter && window.scrayNoteKeywordFilter.size) || 0);
+   }, 0) + ((window.scrayNoteKeywordFilter && window.scrayNoteKeywordFilter.size) || 0)
+     + ((window.scrayStudioParentFilter && window.scrayStudioParentFilter.size) || 0);
 }
 window.scrayTotalFilterTerms = scrayTotalFilterTerms;
 
@@ -1444,6 +1465,13 @@ async function showTagCloudModal(kind) {
    let term   = '';
    // The picked keywords live in the real filter, not the cloud's own narrowing.
    const keywordPicks = () => window.scrayNoteKeywordFilter;
+   // A studio's Parent row IS the network filter (picker 14.8 / native 14.12):
+   // its picks live in scrayStudioParentFilter and filter the videos, not just
+   // the cloud. Every other attribute row still only narrows the cloud.
+   const isNetworkDef = (def) => kind === 'studio' && def && def.key === 'parent';
+   const attrPickSet = (def) => isNetworkDef(def)
+       ? window.scrayStudioParentFilter
+       : scrayCloudAttrPickSet(kind, def.key);
    const isKeywordsDef = (def) => kind === 'note' && def.key === 'keywords';
 
    const close = () => {
@@ -1541,7 +1569,7 @@ async function showTagCloudModal(kind) {
            // a row with a single "everything is unset" chip in it.
            if (tally.size <= 1 && tally.has(SCRAY_CLOUD_UNSET)) return;
 
-           const picked = isKeywordsDef(def) ? keywordPicks() : scrayCloudAttrPickSet(kind, def.key);
+           const picked = isKeywordsDef(def) ? keywordPicks() : attrPickSet(def);
            // The search box narrows the keyword chips. A picked one stays, so
            // the way to undo it is never hidden behind clearing the box.
            if (searchesKeywords && def.key === 'keywords' && term) {
@@ -1578,7 +1606,7 @@ async function showTagCloudModal(kind) {
            // Picking a keyword changes the real filter (videos, pills), so it
            // re-runs it; the other rows only narrow what the cloud shows.
            const afterPick = () => {
-               if (isKeywordsDef(def)) scrayRefreshFilters();
+               if (isKeywordsDef(def) || isNetworkDef(def)) scrayRefreshFilters();
                renderAttrRows();
                renderGrid();
            };
@@ -1649,7 +1677,7 @@ async function showTagCloudModal(kind) {
                    set.has(n) || scrayIsExcluded(kind, n) || scrayNoteKeywordsPass(n));
                return;
            }
-           const picked = scrayCloudAttrPickSet(kind, def.key);
+           const picked = attrPickSet(def);
            if (!picked.size) return;
            names = names.filter(n =>
                set.has(n) || scrayIsExcluded(kind, n) ||
@@ -2469,6 +2497,21 @@ window.SCRAY_FACET_CLASSES.forEach(kind => {
    const set  = (window.scrayFacetFilters || {})[kind];
    const meta = (window.SCRAY_FACET_META  || {})[kind];
    if (!set || !meta) return;
+   // Networks (picker 14.8 / native 14.12) lead the studio pills, in the
+   // studio colour with a roof in front so they read as "everything under".
+   if (kind === 'studio' && window.scrayStudioParentFilter && window.scrayStudioParentFilter.size) {
+       Array.from(window.scrayStudioParentFilter).forEach(val => {
+           const np = document.createElement("span");
+           np.className = "floating-tag-pill " + meta.pill + " floating-tag-network";
+           np.textContent = "\u2302 " + val;
+           np.title = "Network - every studio under " + val + ". Click to remove";
+           np.addEventListener("click", () => {
+               window.scrayStudioParentFilter.delete(val);
+               scrayRefreshFilters();
+           });
+           container.appendChild(np);
+       });
+   }
    // Keywords go in front of the mapped notes they lead to, in their own
    // darker purple, with their any/all switch once there are two to combine.
    if (kind === 'note' && window.scrayNoteKeywordFilter && window.scrayNoteKeywordFilter.size) {
@@ -3220,7 +3263,13 @@ const facetPicks = window.SCRAY_FACET_CLASSES
    .map(kind => [kind, Array.from((window.scrayFacetFilters || {})[kind] || [])])
    .filter(pair => pair[1].length > 0 && !(keywordsOn && pair[0] === 'note'));
 
-if (includeAll.length > 0 || facetPicks.length > 0) {
+// Networks (picker 14.8 / native 14.12): a file counts when its studio's
+// Parent is one of them. Part of the studio class, so additive with the rest.
+const networkPicks = window.scrayStudioParentFilter && window.scrayStudioParentFilter.size
+   ? Array.from(window.scrayStudioParentFilter).map(v => String(v).trim().toLowerCase())
+   : [];
+
+if (includeAll.length > 0 || facetPicks.length > 0 || networkPicks.length > 0) {
    const intersect = !!window.scrayTagIntersect;
    videos = videos.filter(rec => {
        const tags    = Array.isArray(rec.tags) ? rec.tags : [];
@@ -3230,6 +3279,12 @@ if (includeAll.length > 0 || facetPicks.length > 0) {
        // splits three comma-separated strings on every call, and this runs
        // over the whole catalogue on every keystroke.
        let facetHits = 0, facetTotal = 0;
+       if (networkPicks.length) {
+           const np = window.scrayStashNames ? window.scrayStashNames.parts(rec) : null;
+           facetTotal += networkPicks.length;
+           const par = np && np.studio ? scrayStudioParentOf(np.studio) : '';
+           if (par && networkPicks.includes(par)) facetHits++;
+       }
        if (facetPicks.length) {
            const p = window.scrayStashNames ? window.scrayStashNames.parts(rec) : null;
            facetPicks.forEach(pair => {
@@ -3619,6 +3674,7 @@ if (window.scrayFacetFilters) {
 }
 window.scrayTagIntersect = false;
 if (window.scrayNoteKeywordFilter) window.scrayNoteKeywordFilter.clear();
+if (window.scrayStudioParentFilter) window.scrayStudioParentFilter.clear();
 window.scrayNoteKeywordIntersect = false;
 
 // Reset all filters – clear level-based include dropdowns

@@ -4,7 +4,30 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### browse 14.3 / picker 14.7 / native 14.11 — test: multi-pick profile filters in Stash nav
+### browse 14.4 / picker 14.8 / native 14.12 — test: studio parents from StashDB, network filter
+<!-- 2026-09-18T11:26Z -->
+
+**browse** — `staging-browse - 14.4`: `api.php`, `manage-data.html`, `VERSION.txt`
+**picker** — `staging - 14.8`: `randomiser.js`, `VERSION`
+**native** — `stg-native - 14.12`: `assets/web/randomiser.js`, `assets/web/VERSION` (web only — no IPA build)
+
+Mac: some studios are "part of" a bigger one on StashDB — can the API pull that in? Chosen: fill the studio **Parent** attribute from it, and a **network filter** in the apps.
+
+**1. Fill parents from StashDB** (`manage-data.html`, STUDIOS sheet; `api.php` `studio_parents_lookup`).
+- New button **Fill parents from StashDB** (studios sheet only). It sends every studio whose Parent is blank, 25 at a time, to `studio_parents_lookup`, which asks StashDB `findStudio(name)` for each (one aliased GraphQL request per chunk) and returns its parent's name.
+- Answers land in the sheet as **ordinary unsaved edits** — review, then **Save**. A Parent you've filed is never sent, so never overwritten; one typed while it runs is left alone too.
+- A parent that is itself in the dictionary comes back under its **mapped** name, so it reads like the rest of the sheet.
+- The status line reports filled / no parent on StashDB / not found. Console only (device tier refused), and nothing is written server-side.
+
+**2. Network filter** (`randomiser.js`, both apps).
+- The STU cloud already had a **Parent** chip row, which only narrowed the cloud. Picking a Parent chip is now a **real filter**: every file from any studio under that network (`scrayStudioParentFilter`, `scrayStudioParentOf`). It still narrows the cloud to those studios as before.
+- Part of the studio class — additive with picked studios and everything else, and counted by intersect like any other term.
+- Shows as a studio-coloured pill with a ⌂ in front ("⌂ big network"); tap to remove. Clear all clears it, and it counts towards the filter total.
+- Works off the Parent attribute, so hand-filed parents count the same as StashDB-filled ones. The apps pick up saved dictionary changes within 10 minutes or on next launch.
+
+**Checked:** `php -l` on `api.php`; `node --check` on manage-data's script and both `randomiser.js`. The StashDB call and the filter itself haven't been run against live data from here.
+
+### browse 14.3 / picker 14.7 / native 14.11 — stable: multi-pick profile filters in Stash nav
 <!-- 2026-09-18T11:11Z -->
 
 **browse** — `staging-browse - 14.3`: `api.php`, `VERSION.txt` (**deploy first**)

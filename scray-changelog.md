@@ -4,8 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### picker 13.205 / native 13.203 — test: # and studio taps default to nothing
-<!-- 2026-09-18T09:20Z -->
+### browse 14.1 / picker 14.1 / native 14.1 — stable: new version
+<!-- 2026-09-18T08:53Z -->
+
+**browse** — `staging-browse - 14.1`: `VERSION.txt`
+**picker** — `staging - 14.1`: `VERSION`
+**native** — `stg-native - 14.1`: `assets/web/VERSION`
+
+All three apps moved to 14.1 together — a version marker only, no code changes. Picker 14.1 is picker 13.205 and native 14.1 is native 13.203 (bulk mode, per-column tap settings, # and studio taps default to nothing), all stable; browse is unchanged from 14.0.
+
+### picker 13.205 / native 13.203 — stable: # and studio taps default to nothing
+<!-- 2026-09-18T08:48Z -->
 
 **picker** — `staging - 13.205`: `render.js`, `VERSION`
 **native** — `stg-native - 13.203`: `assets/web/render.js`, `assets/web/VERSION` (web only — no IPA build)
@@ -13,7 +22,7 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 `SCRAY_TAP_DEFAULTS` now has **# → Nothing** and **Studio → Nothing** (were Open / close the row). Perf / File still play, Score / Size still open. Only the defaults moved: a device that has already saved Settings > Tap a column keeps what it saved — "Reset taps to defaults" picks up the new ones.
 
 ### picker 13.204 / native 13.202 — stable: per-column tap actions in Settings
-<!-- 2026-09-18T09:05Z -->
+<!-- 2026-09-18T08:40Z -->
 
 **picker** — `staging - 13.204`: `render.js`, `scray-bulk-select.js`, `VERSION`
 **native** — `stg-native - 13.202`: `assets/web/render.js`, `assets/web/scray-bulk-select.js`, `assets/web/VERSION` (web only — no IPA build)

@@ -368,10 +368,25 @@ final class ScrayBrowserViewController: UIViewController,
 
     // MARK: - Chrome
 
+    // ⚙️ BOTTOM TOOLBAR SIZING (13.187 / native 14.24). Seven controls -
+    // ✕ ‹P ‹ › ↻ tabs tray - were spaced with flexible gaps at full symbol
+    // size, which on a phone spread them wide and clipped the ones at each
+    // end. Smaller glyphs and one fixed gap keep the row inside the screen.
+    // Raise TOOLBAR_SYMBOL_POINTS for bigger icons, TOOLBAR_ITEM_GAP for more
+    // air between them.
+    private static let TOOLBAR_SYMBOL_POINTS: CGFloat = 15
+    private static let TOOLBAR_TITLE_POINTS: CGFloat = 14
+    private static let TOOLBAR_ITEM_GAP: CGFloat = 8
+    private static let TOOLBAR_RELOAD_WIDTH: CGFloat = 30
+    private static var toolbarSymbol: UIImage.Configuration {
+        UIImage.SymbolConfiguration(pointSize: TOOLBAR_SYMBOL_POINTS, weight: .regular)
+    }
+
     private func buildChrome() {
-        reloadButton.setImage(UIImage(systemName: "arrow.clockwise"), for: .normal)
+        reloadButton.setImage(UIImage(systemName: "arrow.clockwise",
+                                      withConfiguration: Self.toolbarSymbol), for: .normal)
         reloadButton.addTarget(self, action: #selector(reloadTapped), for: .touchUpInside)
-        reloadButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        reloadButton.widthAnchor.constraint(equalToConstant: Self.TOOLBAR_RELOAD_WIDTH).isActive = true
 
         homeButton.setImage(UIImage(systemName: "house"), for: .normal)
         homeButton.addTarget(self, action: #selector(homeTapped), for: .touchUpInside)
@@ -422,17 +437,21 @@ final class ScrayBrowserViewController: UIViewController,
 
         // ✕ sits bottom-left where the thumb already is, rather than up in
         // the header next to the address bar.
-        let closeItem = UIBarButtonItem(image: UIImage(systemName: "xmark"),
+        let closeItem = UIBarButtonItem(image: UIImage(systemName: "xmark", withConfiguration: Self.toolbarSymbol),
                                         style: .plain, target: self, action: #selector(closeTapped))
-        backItem = UIBarButtonItem(image: UIImage(systemName: "chevron.left"),
+        backItem = UIBarButtonItem(image: UIImage(systemName: "chevron.left", withConfiguration: Self.toolbarSymbol),
                                    style: .plain, target: self, action: #selector(backTapped))
-        forwardItem = UIBarButtonItem(image: UIImage(systemName: "chevron.right"),
+        forwardItem = UIBarButtonItem(image: UIImage(systemName: "chevron.right", withConfiguration: Self.toolbarSymbol),
                                       style: .plain, target: self, action: #selector(forwardTapped))
         // reloadButton stays a UIButton rather than becoming a plain bar item,
         // because updateChrome() swaps its image to xmark while a page is
         // loading - the same reason trayButton is a custom view.
         let reloadItem = UIBarButtonItem(customView: reloadButton)
         tabsItem = UIBarButtonItem(title: "1 ⧉", style: .plain, target: self, action: #selector(tabsTapped))
+        tabsItem.setTitleTextAttributes(
+            [.font: UIFont.systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .semibold)], for: .normal)
+        tabsItem.setTitleTextAttributes(
+            [.font: UIFont.systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .semibold)], for: .highlighted)
         // A custom view rather than a plain item, because a bar button item
         // has nowhere to hang a badge.
         trayButton.addTarget(self, action: #selector(downloadsTapped), for: .touchUpInside)
@@ -440,17 +459,27 @@ final class ScrayBrowserViewController: UIViewController,
         func flex() -> UIBarButtonItem {
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         }
+        // A measured gap rather than a flexible one: flexible spaces divide
+        // whatever is left, which on a narrow phone is what pushed the end
+        // items off the edge.
+        func gap() -> UIBarButtonItem {
+            let item = UIBarButtonItem(barButtonSystemItem: .fixedSpace, target: nil, action: nil)
+            item.width = Self.TOOLBAR_ITEM_GAP
+            return item
+        }
         pickerItem = UIBarButtonItem(title: "\u{2039}P", style: .plain,
                                      target: self, action: #selector(pickerTapped))
         pickerItem.setTitleTextAttributes(
-            [.font: UIFont.systemFont(ofSize: 17, weight: .bold)], for: .normal)
+            [.font: UIFont.systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .bold)], for: .normal)
         pickerItem.setTitleTextAttributes(
-            [.font: UIFont.systemFont(ofSize: 17, weight: .bold)], for: .disabled)
+            [.font: UIFont.systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .bold)], for: .disabled)
         pickerItem.isEnabled = false
         backItem.isEnabled = false
         forwardItem.isEnabled = false
-        toolbar.items = [closeItem, flex(), pickerItem, flex(), backItem, flex(), forwardItem, flex(), reloadItem,
-                         flex(), tabsItem, flex(), downloadsItem]
+        // ✕ keeps the left edge under the thumb; the rest travel together on
+        // the right with fixed gaps, so nothing is pushed off either end.
+        toolbar.items = [closeItem, flex(), pickerItem, gap(), backItem, gap(), forwardItem, gap(), reloadItem,
+                         gap(), tabsItem, gap(), downloadsItem]
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         downloadBar.translatesAutoresizingMaskIntoConstraints = false
@@ -900,7 +929,7 @@ final class ScrayBrowserViewController: UIViewController,
                 guard let self = self else { return }
                 self.progressView.isHidden = !w.isLoading
                 let symbol = w.isLoading ? "xmark" : "arrow.clockwise"
-                self.reloadButton.setImage(UIImage(systemName: symbol), for: .normal)
+                self.reloadButton.setImage(UIImage(systemName: symbol, withConfiguration: Self.toolbarSymbol), for: .normal)
             },
             wv.observe(\.title, options: [.new]) { [weak self] _, _ in self?.refreshChrome() },
             wv.observe(\.url, options: [.new]) { [weak self] _, _ in

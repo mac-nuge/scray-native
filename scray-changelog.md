@@ -4,6 +4,23 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.24 — test: browser toolbar buttons smaller and closer together so none are cut off
+<!-- 2026-09-18T16:31Z -->
+
+**native** — `stg-native - 14.24`: `modules/scray-native/ios/ScrayBrowser.swift`, `modules/scray-native/ios/ScrayDownloads.swift`, `assets/web/VERSION` (**needs a new IPA build**)
+
+Mac's screenshot: the in-app browser's bottom row (✕ ‹P ‹ › ↻ tabs tray) was spread wide with big gaps, and the controls at each end were clipped.
+
+**Cause:** every item was separated by a flexible space, which divides whatever room is left rather than keeping a set gap, and the glyphs and titles were at full size. Seven full-size controls plus six flexible gaps is wider than a phone, so the ends fell off the edge.
+
+**Changes** (`ScrayBrowser.buildChrome`, with the numbers as named constants at the top - `TOOLBAR_SYMBOL_POINTS`, `TOOLBAR_TITLE_POINTS`, `TOOLBAR_ITEM_GAP`, `TOOLBAR_RELOAD_WIDTH`):
+- **Glyphs** (✕, ‹, ›, ↻, tray) carry a 15pt symbol configuration instead of the system default. The reload image is re-set with the same configuration when it swaps to ✕ mid-load, so it doesn't jump back to full size.
+- **Titles** ‹P and the tab count drop from 17pt to 14pt.
+- **Gaps:** one flexible space stays between ✕ and ‹P, so ✕ keeps the left edge under the thumb. Everything after it is separated by a fixed 8pt gap, so the group travels together and can't be pushed off either end.
+- **Reload button** 36 → 30pt wide; the **tray button** (`ScrayDownloads.ScrayTrayButton`) 44×40 → 36×34, now named constants there too, with the same 15pt symbol.
+
+**Not tested:** there's no Swift compiler in this environment, so the IPA build is the first compile. Nothing outside the browser chrome is touched.
+
 ### picker 14.15 / native 14.23 — test: keyboard comes up when renaming a bookmark from the rail
 <!-- 2026-09-18T15:54Z -->
 

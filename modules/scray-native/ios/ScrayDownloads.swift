@@ -334,8 +334,15 @@ final class ScrayTrayButton: UIButton {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    // ⚙️ Sized to match the browser toolbar's other controls (native 14.24 -
+    // was 44x40, which helped push the row past the screen edge).
+    static let buttonWidth: CGFloat = 36
+    static let buttonHeight: CGFloat = 34
+
     private func build() {
-        setImage(UIImage(systemName: "tray.and.arrow.down"), for: .normal)
+        setImage(UIImage(systemName: "tray.and.arrow.down",
+                         withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .regular)),
+                 for: .normal)
 
         badge.font = .systemFont(ofSize: 11, weight: .bold)
         badge.textColor = .white
@@ -348,8 +355,8 @@ final class ScrayTrayButton: UIButton {
         addSubview(badge)
 
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 44),
-            heightAnchor.constraint(equalToConstant: 40),
+            widthAnchor.constraint(equalToConstant: Self.buttonWidth),
+            heightAnchor.constraint(equalToConstant: Self.buttonHeight),
             badge.heightAnchor.constraint(equalToConstant: 16),
             badge.widthAnchor.constraint(greaterThanOrEqualToConstant: 16),
             badge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 2),

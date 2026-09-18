@@ -11,6 +11,15 @@ const IS_DEV_VARIANT = process.env.APP_VARIANT === 'development';
 
 const buildNumber = String(process.env.IPA_BUILD_NUMBER || '1');
 
+// ⚙️ Release launch screen: black in light and dark mode, and a transparent
+// image - expo-splash-screen wants one, so this is a blank 16x16 PNG.
+const RELEASE_SPLASH = ['expo-splash-screen', {
+  backgroundColor: '#000000',
+  image: './assets/images/splash-blank.png',
+  imageWidth: 1,
+  dark: { backgroundColor: '#000000', image: './assets/images/splash-blank.png' },
+}];
+
 module.exports = ({ config }) => {
   return {
     ...config,
@@ -20,9 +29,21 @@ module.exports = ({ config }) => {
     // (exp+scray-native://), or scanning Metro's QR code opens it instead of
     // Scray Picker (Dev). Listing expo-dev-client here stops the automatic
     // copy of the plugin from running with its default settings.
+    //
+    // The release app's launch screen is plain black - no blue, no Expo logo
+    // (native 14.2). The dev app keeps app.json's blue splash, which also
+    // makes the two easy to tell apart at launch. Swapped in place so the
+    // plugin still runs once, in the same position.
     plugins: IS_DEV_VARIANT
       ? config.plugins
-      : [...(config.plugins || []), ['expo-dev-client', { addGeneratedScheme: false }]],
+      : [
+          ...(config.plugins || []).map(p =>
+            (Array.isArray(p) ? p[0] : p) === 'expo-splash-screen' ? RELEASE_SPLASH : p),
+          ['expo-dev-client', { addGeneratedScheme: false }],
+        ],
+    // Root view colour behind the web view while it loads - black too, so
+    // there's no flash between the splash and the page.
+    ...(IS_DEV_VARIANT ? {} : { backgroundColor: '#000000' }),
     ios: {
       ...config.ios,
       ...(IS_DEV_VARIANT ? {} : { icon: './assets/images/icon-release-iplayer.png' }),

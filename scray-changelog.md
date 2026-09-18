@@ -4,6 +4,20 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.2 — test: black launch screen in release app
+<!-- 2026-09-18T08:56Z -->
+
+**native** — `stg-native - 14.2`: `app.config.js`, `src/components/animated-icon.tsx`, new `assets/images/splash-blank.png`, `assets/web/VERSION` (**native config — needs a release IPA build**)
+
+BBW iPlayer opened on the Expo template's blue splash (`#208AEF` with the Expo logo), in two stages: iOS's launch screen from `expo-splash-screen` in app.json, then the JS `AnimatedSplashOverlay` fading out with the same blue and logo.
+
+- **Launch screen (release only).** `app.config.js` swaps the `expo-splash-screen` plugin entry for `RELEASE_SPLASH`: `#000000` in light and dark mode, with a transparent 16×16 `splash-blank.png` as the image (the plugin wants one). The root view `backgroundColor` is black too, so there's no flash before the web view paints. The dev app keeps the blue, which also tells the two apart at launch.
+- **Fade overlay (both apps).** `animated-icon.tsx`'s overlay is now black with no logo. In the dev app that means blue launch screen, then a brief black fade.
+
+**Checked:** resolved the config for both variants with node — production gets the black splash entry once, in the same plugin position, plus `backgroundColor: #000000`; development is unchanged.
+
+**Worth watching:** iOS caches launch screens hard. If the first run after installing the new IPA still shows blue, delete the app and reinstall it (or restart the phone).
+
 ### browse 14.1 / picker 14.1 / native 14.1 — stable: new version
 <!-- 2026-09-18T08:53Z -->
 

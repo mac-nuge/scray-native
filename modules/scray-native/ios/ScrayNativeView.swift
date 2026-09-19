@@ -284,6 +284,8 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
             } else if let d = payload as? [String: Any] {
                 browserURL = (d["url"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 if let h = d["home"] as? String, !h.isEmpty { browserHome = h }
+                // Where the browser syncs favourites, history and logins (native 14.29).
+                ScrayBrowserSync.shared.configure(api: d["api"] as? String, key: d["key"] as? String)
             }
             ScrayBrowser.shared.present(url: browserURL, home: browserHome)
             resolve(id: id, result: ["success": true])

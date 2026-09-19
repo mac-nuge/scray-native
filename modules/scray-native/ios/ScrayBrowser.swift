@@ -875,6 +875,7 @@ final class ScrayBrowserViewController: UIViewController,
             return d
         }
         UserDefaults.standard.set(raw, forKey: Self.favouritesKey)
+        ScrayBrowserSync.shared.pushFavourites(raw)   // native 14.29
     }
 
     /// Addresses compared without a trailing slash, so /x and /x/ are one page.
@@ -1039,6 +1040,16 @@ final class ScrayBrowserViewController: UIViewController,
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         ScrayRunMonitor.shared.browserWillShow()
+        // Synced favourites and logins (native 14.29, ScrayBrowserSync.swift).
+        // Saved straight to UserDefaults, not saveFavourites: that would push
+        // the server's own list straight back to it.
+        ScrayBrowserSync.shared.pullFavourites(
+            local: { UserDefaults.standard.array(forKey: Self.favouritesKey) as? [[String: String]] ?? [] },
+            adopt: { UserDefaults.standard.set($0, forKey: Self.favouritesKey) })
+        ScrayBrowserSync.shared.restoreAfterReinstallIfNeeded { [weak self] msg in
+            self?.flash(msg)
+            self?.currentWebView?.reload()
+        }
         // A checkout page parked in the window while the browser was closed
         // has just been taken back out of it (see ScrayRunMonitor). Put the
         // tab on screen back in its container. A no-op on every other
@@ -1052,6 +1063,10 @@ final class ScrayBrowserViewController: UIViewController,
         super.viewDidDisappear(animated)
         // Keeps a running basket checkout alive and on the screen as a ring.
         if isBeingDismissed { ScrayRunMonitor.shared.browserDidHide() }
+        if isBeingDismissed {
+            ScrayBrowserSync.shared.flushHistory()
+            ScrayBrowserSync.shared.backupLogins(force: false, completion: nil)
+        }
         // This also fires when a document picker or share sheet goes up over
         // the browser, which is not the browser going away.
         guard isBeingDismissed, libraryNeedsRefresh else { return }
@@ -1207,6 +1222,13 @@ final class ScrayBrowserViewController: UIViewController,
             sheet.addAction(fav)
         }
 
+        let history = UIAlertAction(title: "History", style: .default) { [weak self] _ in self?.historyTapped() }
+        history.setValue(UIImage(systemName: "clock"), forKey: "image")
+        sheet.addAction(history)
+        let logins = UIAlertAction(title: "Logins Backup…", style: .default) { [weak self] _ in self?.loginsTapped() }
+        logins.setValue(UIImage(systemName: "key"), forKey: "image")
+        sheet.addAction(logins)
+
         sheet.addAction(UIAlertAction(title: "Open in Safari", style: .default) { [weak self] _ in
             self?.safariTapped()
         })
@@ -1232,6 +1254,100 @@ final class ScrayBrowserViewController: UIViewController,
 
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         presentSafely(sheet)
+    }
+
+    // MARK: - History and logins backup (native 14.29) - see ScrayBrowserSync.swift
+
+    private func historyTapped() {
+        let list = ScrayHistoryViewController(style: .plain)
+        // The tab already on that exact page, else a new tab - as favourites do.
+        list.onOpen = { [weak self] url in
+            guard let self = self else { return }
+            if let t = self.tabs.firstIndex(where: { $0.displayURL.map { self.favKey($0) == self.favKey(url) } == true }) {
+                self.selectTab(t)
+            } else {
+                self.addTab(url: url, select: true)
+            }
+        }
+        present(UINavigationController(rootViewController: list), animated: true)
+    }
+
+    private func loginsTapped() {
+        let sync = ScrayBrowserSync.shared
+        guard sync.passphrase != nil else { askLoginsPassphrase(); return }
+        let when = sync.lastBackup.map { DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .short) }
+            ?? "not yet from this phone"
+        let sheet = UIAlertController(title: "Logins Backup",
+                                      message: "This browser's cookies, encrypted with your passphrase before they leave the phone. Backed up automatically when you close the browser. Last backup: \(when).",
+                                      preferredStyle: .actionSheet)
+        sheet.popoverPresentationController?.sourceView = moreButton
+        sheet.popoverPresentationController?.sourceRect = moreButton.bounds
+        sheet.addAction(UIAlertAction(title: "Back Up Now", style: .default) { [weak self] _ in
+            self?.flash("Backing up logins…")
+            sync.backupLogins(force: true) { self?.flash($0) }
+        })
+        sheet.addAction(UIAlertAction(title: "Restore From Server", style: .default) { [weak self] _ in
+            self?.restoreLogins(backUpIfNone: false)
+        })
+        sheet.addAction(UIAlertAction(title: "Forget Passphrase on This Phone", style: .destructive) { [weak self] _ in
+            sync.setPassphrase(nil)
+            self?.flash("Passphrase forgotten - logins won't back up")
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSafely(sheet)
+    }
+
+    /// Restore also proves the passphrase: it's the only thing that can open
+    /// the server's copy.
+    private func restoreLogins(backUpIfNone: Bool) {
+        flash("Restoring logins…")
+        ScrayBrowserSync.shared.restoreLogins { [weak self] r in
+            guard let self = self else { return }
+            switch r {
+            case .restored(let n):
+                self.flash("Restored \(n) cookies")
+                self.currentWebView?.reload()
+            case .nothingSaved:
+                if backUpIfNone { ScrayBrowserSync.shared.backupLogins(force: true) { self.flash($0) } }
+                else { self.flash("Nothing backed up on the server yet") }
+            case .failed(let m):
+                self.showAlert(title: "Couldn't restore logins", message: m)
+            case .wrongPassphrase:
+                let a = UIAlertController(title: "Wrong passphrase",
+                                          message: "That passphrase doesn't open the logins already backed up on the server.",
+                                          preferredStyle: .alert)
+                a.addAction(UIAlertAction(title: "Try Another", style: .cancel) { _ in
+                    ScrayBrowserSync.shared.setPassphrase(nil)
+                    self.askLoginsPassphrase()
+                })
+                a.addAction(UIAlertAction(title: "Replace Server Copy With This Phone's", style: .destructive) { _ in
+                    ScrayBrowserSync.shared.backupLogins(force: true) { self.flash($0) }
+                })
+                self.presentSafely(a)
+            }
+        }
+    }
+
+    private func askLoginsPassphrase() {
+        let a = UIAlertController(title: "Logins passphrase",
+                                  message: "Encrypts your logins before they go to the server. Use the same one on every device. It can't be recovered if you forget it.",
+                                  preferredStyle: .alert)
+        a.addTextField { $0.placeholder = "Passphrase"; $0.isSecureTextEntry = true }
+        a.addTextField { $0.placeholder = "Same again"; $0.isSecureTextEntry = true }
+        a.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        a.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak a] _ in
+            let p1 = a?.textFields?[0].text ?? "", p2 = a?.textFields?[1].text ?? ""
+            guard p1.count >= 8, p1 == p2 else {
+                self?.showAlert(title: "Passphrase not saved",
+                                message: p1 == p2 ? "Use at least 8 characters." : "The two didn't match.")
+                return
+            }
+            ScrayBrowserSync.shared.setPassphrase(p1)
+            // Logins already on the server: bring them in. None yet: this
+            // phone's become the first backup.
+            self?.restoreLogins(backUpIfNone: true)
+        })
+        presentSafely(a)
     }
 
     @objc private func tabsTapped() {
@@ -1382,6 +1498,7 @@ final class ScrayBrowserViewController: UIViewController,
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         refreshChrome()
         persistTabs()
+        if let url = webView.url { ScrayBrowserSync.shared.recordVisit(url: url, title: webView.title) }
     }
 
     func webView(_ webView: WKWebView,

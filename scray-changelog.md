@@ -4,6 +4,30 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 14.34 / native 14.29 — test: in-app browser syncs favourites, history and logins
+<!-- 2026-09-19T12:30Z -->
+
+**browse** — `staging-browse - 14.34`: `api.php`, `browser.html` (new), `browse.html`, `VERSION.txt` · **native** — `stg-native - 14.29`: `modules/scray-native/ios/ScrayBrowserSync.swift` (new), `modules/scray-native/ios/ScrayBrowser.swift`, `modules/scray-native/ios/ScrayNativeView.swift`, `assets/web/scray-bridge.js`, `assets/web/VERSION` (**needs a new IPA build**)
+
+Mac asked for the Native browser to keep him logged in, and for its favourites and history to be kept on the server so they're shared. He gets logged out after a reinstall, wants to see the same data on the desktop, chose encrypted cookie sync with a passphrase, and asked for 90 days of history. No passwords, since he uses a password manager.
+
+**Why logins were lost:** the browser already uses WebKit's on-disk store (`WKWebsiteDataStore.default()`), so cookies survive closing it. A reinstall wipes the app's storage, and dev and production builds each have their own. The fix is a backup on the server that a new install restores from.
+
+- **Logins (cookies), encrypted on the phone.** ⋯ → **Logins Backup…** asks for a passphrase once (8+ characters, kept in the Keychain). All live cookies are sealed with AES-GCM using a key from PBKDF2-SHA256 (200k rounds, random salt) and sent as a blob (`browser_vault_set`). The device key is in the IPA and treated as public, so plain cookies on the server would have been anyone's logins. The server stores the blob as `app_state 'browser_vault'` and can't read it.
+  - Backed up automatically when the browser closes or the app goes to the background, at most every 10 minutes. There's also **Back Up Now**, **Restore From Server** and **Forget Passphrase on This Phone**.
+  - Setting the passphrase restores the server's copy if there is one, which also checks the passphrase. If it's wrong, you can try another or replace the server copy. If there's no copy yet, this phone's becomes the first backup.
+  - After a reinstall, if the Keychain still has the passphrase, logins are restored automatically once when the browser first opens. If not, set the same passphrase again and they come back.
+  - Restore adds cookies and replaces ones with the same name, domain and path; it doesn't wipe the rest. The backup is last-write-wins, so the newest backup from any device is the one that's kept.
+  - **Not covered:** sites that keep their login in localStorage rather than a cookie (MSAL does). Google and Microsoft may also challenge or end a session that turns up on a second device.
+- **Favourites** now sync. The whole list is last-write-wins (`browser_favs_get/_set`, `app_state 'browser_favourites'`). It's pulled every time the browser opens and pushed on every change. An offline change stays marked unsent and is pushed on the next open. The first sync on a device merges the server's list with the phone's, so existing favourites aren't lost.
+- **History.** Every page that finishes loading is queued on the phone and sent in batches (`browser_history_add`, new `browser_history` table). The same page within a minute counts as one visit. The server prunes visits older than 90 days on every insert.
+  - ⋯ → **History** opens a searchable list of every device's visits, newest first. Swipe to delete a visit; **Clear** deletes all history. Offline, it falls back to this phone's last 1,000 visits.
+- **Desktop:** new `browser.html` in browse, linked as 🧭 Browser from the DB console. It shows favourites, searchable history grouped by day (delete one visit or clear all), and when logins were last backed up.
+- **How Swift reaches the server:** `openBrowser` now passes `api` and `key` from `SCRAY_SYNC`, and the browser keeps them for later openings.
+- None of the new actions are in `SCRAY_PRIVILEGED`, because the phone only holds the device key. This means favourites and history (not logins) can be read by anyone who has the device key.
+
+**Tested:** `php -l` passes. The seven new actions were run against an in-memory SQLite database: invalid URLs dropped, multi-word search with `%` in it, 90-day pruning, delete, and vault shape checks. `node --check` passes on the JS. **Swift not compiled** (no Xcode here), so the IPA build is the first compile.
+
 ### native 14.28 — test: upload folder search moved to the account list, searches every account
 <!-- 2026-09-19T10:10Z -->
 

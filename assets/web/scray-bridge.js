@@ -47,7 +47,10 @@ window.ScrayBridge = {
   // ✅ In-app browser. Pass nothing to resume where it was left.
   openBrowser: (url) => callNative('openBrowser', {
     url: url || null,
-    home: (typeof window.scrayPickerUrl === 'function' ? window.scrayPickerUrl() : null)
+    home: (typeof window.scrayPickerUrl === 'function' ? window.scrayPickerUrl() : null),
+    // Where the browser syncs favourites, history and logins (native 14.29).
+    api: (window.SCRAY_SYNC && window.SCRAY_SYNC.API_BASE) || null,
+    key: (window.SCRAY_SYNC && window.SCRAY_SYNC.API_KEY) || null
   })
 };
 

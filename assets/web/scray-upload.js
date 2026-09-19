@@ -551,6 +551,22 @@
       if (!S.targets) {
         body += `<div class="up-loading">Loading accounts…</div>`;
       } else {
+        // Folder search (native 14.28), as in data-explorer's Move but across
+        // every account at once: each account's catalogued folders
+        // (upload_targets' `folders`), all words matching, own-name matches first.
+        const terms = S.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        body += `<div class="up-tools"><input type="search" class="up-find" placeholder="Find a folder in any OneDrive…" value="${esc(S.q)}"></div>`;
+        if (terms.length) {
+          const own = p => terms.every(t => p.split("/").pop().toLowerCase().includes(t)) ? 0 : 1;
+          const hits = S.targets.flatMap(a => (a.folders || []).map(path => ({ account: a.account_id, path })))
+            .filter(h => terms.every(t => h.path.toLowerCase().includes(t)))
+            .sort((a, b) => own(a.path) - own(b.path) || a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: "base" }))
+            .slice(0, 200);
+          body += `<ul class="up-folders">${hits.map(h => `
+            <li><button data-act="found" data-account="${esc(h.account)}" data-path="${esc(h.path)}"><span class="up-folder">📁 ${esc(h.path)}</span>
+            <span class="up-count">${esc(shortAcct(h.account))}</span><span class="up-go">›</span></button></li>`).join("")
+            || `<li class="up-empty">No folder matches that.</li>`}</ul>`;
+        } else {
         if (last && S.targets.some(a => a.account_id === last.account && a.stacks.some(s => last.path === s.path || last.path.startsWith(s.path + "/")))) {
           body += `<button class="up-last" data-act="use-last">Last used: <b>${esc(shortAcct(last.account))}</b> › ${esc(last.path)}</button>`;
         }
@@ -560,6 +576,7 @@
             <span class="up-count">${a.stacks.length ? `(${a.stacks.length} folder${a.stacks.length === 1 ? "" : "s"})` : "no catalogued folders"}</span>
             ${spaceHtml(a.account_id, size, picked.length)}
           </button></li>`).join("") || `<li class="up-empty">No OneDrive accounts are connected on the server.</li>`}</ul>`;
+        }
       }
       buttons = `<button class="modal-btn modal-btn-secondary" data-act="to-files">Back</button>`;
     }
@@ -570,23 +587,11 @@
       const trail = [`<button class="up-crumb" data-act="crumb" data-path="">${esc(shortAcct(S.account))}</button>`]
         .concat(segs.map((s, i) => `<button class="up-crumb" data-act="crumb" data-path="${esc("/" + segs.slice(0, i + 1).join("/"))}">${esc(s)}</button>`))
         .join(`<span class="up-sep">›</span>`);
-      // Folder search (native 14.27), as in data-explorer's Move: every folder
-      // the catalogue knows in this account (upload_targets' `folders`) plus
-      // the one open now, all words matching, own-name matches first.
-      const terms = S.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-      const list = terms.length
-        ? [...new Set([...(acct.folders || []), ...(S.folders || []).map(f => f.path)])]
-            .filter(p => terms.every(t => p.toLowerCase().includes(t)))
-            .map(p => ({ name: p, path: p, extra: "", own: terms.every(t => p.split("/").pop().toLowerCase().includes(t)) ? 0 : 1 }))
-            .sort((a, b) => a.own - b.own || a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: "base" }))
-            .slice(0, 200)
-        : S.path === null
+      const list = S.path === null
         ? acct.stacks.map(s => ({ name: s.name, path: s.path, extra: `${s.files} file${s.files === 1 ? "" : "s"}` }))
         : (S.folders || []).map(f => ({ name: f.name, path: f.path, extra: "" }));
-      body += `<div class="up-tools"><input type="search" class="up-find" placeholder="Find a folder in this OneDrive…" value="${esc(S.q)}"></div>`;
       body += `<div class="up-trail">${trail}</div>`;
-      if (terms.length && !list.length) body += `<ul class="up-folders"><li class="up-empty">No folder matches that.</li></ul>`;
-      else if (!terms.length && S.path !== null && S.loading) body += `<div class="up-loading">Loading folders…</div>`;
+      if (S.path !== null && S.loading) body += `<div class="up-loading">Loading folders…</div>`;
       else body += `<ul class="up-folders">${list.map(f => `
           <li><button data-act="open" data-path="${esc(f.path)}"><span class="up-folder">📁 ${esc(f.name)}</span>
           <span class="up-count">${esc(f.extra)}</span><span class="up-go">›</span></button></li>`).join("")
@@ -663,6 +668,7 @@
         S.account = last.account; S.step = "folder"; openFolder(last.path); break;
       }
       case "account": S.account = b.dataset.account; S.step = "folder"; openFolder(null); break;
+      case "found": S.account = b.dataset.account; S.step = "folder"; openFolder(b.dataset.path); break;
       case "open": openFolder(b.dataset.path); break;
       case "crumb": openFolder(b.dataset.path || null); break;
       case "start": {
@@ -687,7 +693,7 @@
 
   function onSheetInput(e) {
     if (!S || !e.target.classList.contains("up-find")) return;
-    if (S.step === "folder") S.q = e.target.value; else S.filter = e.target.value;
+    if (S.step === "account") S.q = e.target.value; else S.filter = e.target.value;
     S.refocus = true;
     renderSheet();
   }

@@ -4,6 +4,18 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.28 — test: upload folder search moved to the account list, searches every account
+<!-- 2026-09-19T10:10Z -->
+
+**native** — `stg-native - 14.28`: `assets/web/scray-upload.js`, `assets/web/VERSION` (web only, no IPA build)
+
+After 14.27, Mac pointed out the search only covered the account he'd already picked. He wanted the box on the account list, searching every account at once.
+
+- **Moved to the ACCOUNT step.** One box, "Find a folder in any OneDrive…", above Last used and the account list. While there's text in it, those two are replaced by matches from every account's `folders` (from browse 14.33's `upload_targets`, so no server change). Each result shows the full path with the account's short name on the right. Same matching as before: every word must match, own-name matches first, capped at 200.
+- **Tapping a result** picks that account and opens that folder in the FOLDER step, ready for Upload here. The search clears, so Back shows the plain account list.
+- **Removed from the FOLDER step.** That step is back to plain browsing, as it was before 14.27.
+- Checked with a jsdom run: a search across two mocked accounts listed matches from both, and tapping one opened the right account and path.
+
 ### browse 14.33 / native 14.27 — test: folder search in the upload sheet
 <!-- 2026-09-19T08:29Z -->
 

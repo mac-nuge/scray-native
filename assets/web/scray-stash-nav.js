@@ -22,6 +22,13 @@
 // some of them; a performer's studio dropdown offers the parent networks too.
 // picker 14.11 / native 14.17 (browse 14.6): in a performer's Studio dropdown
 // each studio sits under its parent network, as on stashdb.org.
+// picker 14.19 / native 14.31 (browse 14.36): one box at the top of every
+// view that finds studios AND performers (stash_nav op 'find'), and a Stash
+// button under the console that opens the navigator on its own, starting on
+// just that box.
+// picker 14.21-14.23 / native 14.33-14.35: the find list is one mixed list,
+// coloured by kind: your catalogue's names first with Picker / Native counts
+// (counted server-side), then StashDB on request.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -89,6 +96,24 @@
 #stashModal .ssn button:disabled { opacity: .5; cursor: default; }
 #stashModal .ssn-refine { position: sticky; top: 0; z-index: 2; background: #fff; padding: 0 0 8px; border-bottom: 1px solid rgba(128,128,128,.2); margin-bottom: 8px; }
 #stashModal .ssn input.ssn-term { display: block; width: 100%; box-sizing: border-box; margin: 0 0 6px; padding: 7px 9px; font-size: 14px; border: 1px solid #ccc; border-radius: 6px; background: #fff; color: inherit; -webkit-appearance: none; appearance: none; }
+#stashModal .ssn-finder { position: relative; margin: 0 0 10px; }
+#stashModal .ssn input.ssn-find-box { display: block; width: 100%; box-sizing: border-box; margin: 0; padding: 8px 10px; font-size: 15px; border: 1px solid #ccc; border-radius: 8px; background: #fff; color: inherit; -webkit-appearance: none; appearance: none; }
+#stashModal .ssn input.ssn-find-box:focus { outline: none; border-color: #8b7cf0; box-shadow: 0 0 0 2px rgba(139,124,240,.25); }
+#stashModal .ssn-find-list { margin-top: 4px; background: #fff; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 6px 16px rgba(0,0,0,.12); max-height: 55vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+#stashModal .ssn-find-list:empty { display: none; }
+#stashModal .ssn-find-head { padding: 5px 10px; font-size: .68rem; letter-spacing: .07em; text-transform: uppercase; color: #777; background: #f6f6f8; border-bottom: 1px solid #eee; }
+#stashModal .ssn .ssn-find-opt { display: flex; width: 100%; justify-content: space-between; align-items: baseline; gap: 8px; border: none; border-bottom: 1px solid #f0f0f0; border-radius: 0; background: transparent; padding: 9px 10px; font-size: .88rem; text-align: left; white-space: normal; }
+#stashModal .ssn .ssn-find-opt.first { background: #f7f7f9; }
+#stashModal .ssn .ssn-find-opt.is-performer { border-left: 4px solid #d63384; }
+#stashModal .ssn .ssn-find-opt.is-studio { border-left: 4px solid #0b7fd7; }
+#stashModal .ssn-find-opt .k { font-size: .72rem; color: #888; flex: 0 0 auto; }
+#stashModal .ssn-find-opt .cnt { display: block; margin-top: 2px; font-size: .72rem; font-weight: 600; color: #1e7e34; }
+#stashModal .ssn-find-opt .kind { flex: 0 0 auto; font-size: .68rem; font-weight: 600; padding: 2px 7px; border-radius: 10px; }
+#stashModal .ssn-find-opt.is-performer .kind { background: #fde8f1; color: #b0226a; }
+#stashModal .ssn-find-opt.is-studio .kind { background: #e3f1fd; color: #0a66b0; }
+#stashModal .ssn .ssn-find-global { display: block; width: 100%; border: none; border-top: 1px dashed #ccc; border-radius: 0; background: #fafafa; color: #5b4bc4; padding: 10px; font-size: .84rem; text-align: center; }
+#stashModal .ssn-find-note { padding: 9px 10px; font-size: .82rem; color: #777; }
+#stashModal .ssn-home { padding: 14px 4px; color: #888; font-size: .85rem; }
 #stashModal .ssn input.ssn-term:focus { outline: none; border-color: #8b7cf0; box-shadow: 0 0 0 2px rgba(139,124,240,.25); }
 #stashModal .ssn-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 #stashModal .ssn-ptags { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 7px; }
@@ -217,6 +242,15 @@
       (revealAll ? '&#128584; Blur all' : '&#128065; Unblur all') + '</button>';
     const headingWas = heading ? heading.textContent : '';
 
+    // The studio + performer box (picker 14.19 / native 14.31). Kept out here
+    // because every repaint rebuilds the box: the words and results survive.
+    // picker 14.23 / native 14.35: your catalogue first (stash_nav op 'local',
+    // counted on the server so both apps agree), StashDB only when asked.
+    let findTerm = '', findSeq = 0, findTimer = null;
+    let findLocal = null;    // { term, results: [{kind, name, mapped, all, phone, key}] }
+    let findGlobal = null;   // op 'find''s answer, after "Search StashDB"
+    let findBusy = '', findErr = '';   // findBusy: 'local' | 'global' | ''
+
     // The footer's own buttons are hidden, not removed, so they come back
     // exactly as they were - the editor does the same.
     const defaults = [...actions.children];
@@ -237,6 +271,8 @@
       if (finished) return;
       finished = true;
       loadSeq++;
+      findSeq++;
+      clearTimeout(findTimer);
       host.removeEventListener('click', onClick);
       host.removeEventListener('keydown', onKey);
       host.removeEventListener('input', onInput);
@@ -271,7 +307,116 @@
       }
       stack.push(Object.assign({ data: null, busy: false, error: '', scroll: 0 }, entry));
       paint(false);
-      load(top(), false);
+      if (entry.type !== 'home') load(top(), false);
+    }
+
+    // ---- the studio + performer box -----------------------------------------
+    const finderHtml = () => '<div class="ssn-finder">' +
+      '<input class="ssn-find-box" type="search" enterkeyhint="go" spellcheck="false" autocomplete="off" ' +
+             'autocorrect="off" autocapitalize="off" placeholder="Find a studio or performer&hellip;" ' +
+             'value="' + esc(findTerm) + '">' +
+      '<div class="ssn-find-list"></div></div>';
+
+    /**
+     * One list, studios and performers mixed (picker 14.21 / native 14.33).
+     * Your catalogue's own names first, in the server's order - best name
+     * match, then most files - each with its Picker / Native counts. Then,
+     * once asked for, StashDB's answer, minus the names already listed.
+     */
+    const findHits = () => {
+      const hits = [];
+      const seen = new Set();
+      (findLocal ? findLocal.results : []).forEach(x => {
+        seen.add(x.kind + '|' + String(x.name).toLowerCase());
+        hits.push({ kind: x.kind, name: x.name, key: x.key, n: x,
+                    sub: x.mapped ? '\u201c' + x.mapped + '\u201d' : '' });
+      });
+      if (findGlobal) {
+        const q = findTerm.trim().toLowerCase();
+        const rank = (name) => {
+          const n = String(name || '').toLowerCase();
+          return n === q ? 0 : n.startsWith(q) ? 1 : (' ' + n).includes(' ' + q) ? 2 : 3;
+        };
+        (findGlobal.performers || []).map((x, i) => ({ kind: 'performer', x, i, sub: x.disambiguation || '' }))
+          .concat((findGlobal.studios || []).map((x, i) => ({ kind: 'studio', x, i, sub: x.parent ? 'in ' + x.parent : '' })))
+          .map(h => Object.assign(h, { r: rank(h.x.name) }))
+          .sort((a, b) => a.r - b.r || a.i - b.i || (a.kind === 'performer' ? -1 : 1))
+          .forEach(h => {
+            if (seen.has(h.kind + '|' + String(h.x.name).toLowerCase())) return;
+            hits.push({ kind: h.kind, name: h.x.name, id: h.x.id, sub: h.sub, global: true });
+          });
+      }
+      return hits;
+    };
+
+    const optHtml = (h, i) =>
+      '<button type="button" class="ssn-find-opt is-' + h.kind + (i === 0 ? ' first' : '') + '" data-findi="' + i + '">' +
+        '<span>' + esc(h.name) + (h.sub ? ' <span class="k">' + esc(h.sub) + '</span>' : '') +
+          (h.n ? '<span class="cnt">Picker ' + h.n.all + ' &middot; Native ' + h.n.phone + '</span>' : '') + '</span>' +
+        '<span class="kind">' + (h.kind === 'studio' ? 'Studio' : 'Performer') + '</span></button>';
+
+    function paintFind() {
+      const list = host.querySelector('.ssn-find-list');
+      if (!list) return;
+      const q = findTerm.trim();
+      if (q.length < 2) { list.innerHTML = ''; return; }
+      const hits = findHits();
+      const nLocal = hits.filter(h => !h.global).length;
+      let html = '';
+      // The last answer stays up while the next one is on its way, so the
+      // list never blinks to "nothing" between keystrokes.
+      if (nLocal) html += hits.slice(0, nLocal).map(optHtml).join('');
+      else if (findLocal && findBusy !== 'local') html += '<div class="ssn-find-note">Nothing in your library matches that.</div>';
+      else if (findBusy === 'local') html += '<div class="ssn-find-note">Searching your library&hellip;</div>';
+      if (findErr) html += '<div class="ssn-find-note ssn-err">' + esc(findErr) + '</div>';
+      if (findGlobal) {
+        html += '<div class="ssn-find-head">From StashDB</div>';
+        html += hits.length > nLocal
+          ? hits.slice(nLocal).map((h, k) => optHtml(h, nLocal + k)).join('')
+          : '<div class="ssn-find-note">Nothing more on StashDB.</div>';
+      } else {
+        html += '<button type="button" class="ssn-find-global" data-findglobal' + (findBusy === 'global' ? ' disabled' : '') + '>' +
+          (findBusy === 'global' ? 'Searching StashDB&hellip;' : '&#128269; Search StashDB for \u201c' + esc(q) + '\u201d') + '</button>';
+      }
+      list.innerHTML = html;
+    }
+
+    function runFind() {
+      const q = findTerm.trim();
+      const seq = ++findSeq;
+      findGlobal = null;
+      if (q.length < 2) { findLocal = null; findErr = ''; findBusy = ''; paintFind(); return; }
+      findBusy = 'local'; findErr = '';
+      paintFind();
+      api('stash_nav', { method: 'POST', body: { op: 'local', term: q } })
+        .then(r => { if (seq === findSeq && !finished) { findLocal = { term: q, results: r.results || [] }; } })
+        .catch(err => { if (seq === findSeq && !finished) { findLocal = null; findErr = err.message || String(err); } })
+        .finally(() => { if (seq === findSeq && !finished) { findBusy = ''; paintFind(); } });
+    }
+
+    /** The box's "Search StashDB": everything, not just your catalogue. */
+    function runGlobal() {
+      const q = findTerm.trim();
+      if (q.length < 2 || findBusy === 'global') return;
+      const seq = ++findSeq;
+      findBusy = 'global'; findErr = '';
+      paintFind();
+      api('stash_nav', { method: 'POST', body: { op: 'find', term: q } })
+        .then(r => { if (seq === findSeq && !finished) findGlobal = r; })
+        .catch(err => { if (seq === findSeq && !finished) findErr = 'StashDB: ' + (err.message || String(err)); })
+        .finally(() => { if (seq === findSeq && !finished) { findBusy = ''; paintFind(); } });
+    }
+
+    function pickFind(i) {
+      const h = findHits()[i];
+      if (!h) return;
+      findTerm = ''; findLocal = null; findGlobal = null; findErr = ''; findBusy = ''; findSeq++;
+      clearTimeout(findTimer);
+      const box = host.querySelector('input.ssn-find-box');
+      if (box) box.blur();
+      // A catalogue name opens off one of its own files' scenes (from_key),
+      // exactly as Open in Stash does; a StashDB result by its id.
+      push(h.global ? { type: h.kind, id: h.id, name: h.name } : { type: h.kind, name: h.name, fromKey: h.key || '' });
     }
 
     // ---- loading ---------------------------------------------------------
@@ -375,9 +520,12 @@
       const ae = document.activeElement;
       const focusDd = (ae && ae.matches && ae.matches('input.ssn-studio-find') && host.contains(ae))
         ? ((ae.closest('.ssn-studio') || {}).dataset || {}).dd || 'main' : '';
+      const findFocus = !!(ae && ae.matches && ae.matches('input.ssn-find-box') && host.contains(ae));
 
       if (heading) {
-        heading.textContent = e.type === 'search'
+        heading.textContent = e.type === 'home'
+          ? 'Stash'
+          : e.type === 'search'
           ? 'Stash search'
           : e.type === 'studio'
             ? (e.data && e.data.studio ? e.data.studio.name : (e.name || 'Studio'))
@@ -385,8 +533,17 @@
       }
       backBtn.textContent = stack.length > 1 ? '‹ Back' : (opts.rootBackLabel || '‹ Back to lookup');
 
-      host.innerHTML = '<div class="ssn">' +
-        (e.type === 'search' ? searchHtml(e) : e.type === 'studio' ? studioViewHtml(e) : performerHtml(e)) + '</div>';
+      host.innerHTML = '<div class="ssn">' + finderHtml() +
+        (e.type === 'home'
+          ? '<div class="ssn-home">Type a studio&rsquo;s or performer&rsquo;s name, then pick one to open their page.</div>'
+          : e.type === 'search' ? searchHtml(e) : e.type === 'studio' ? studioViewHtml(e) : performerHtml(e)) + '</div>';
+      paintFind();
+      // Started from the Stash button: the box is all there is, so it has the keyboard.
+      const fb = host.querySelector('input.ssn-find-box');
+      if (fb && (findFocus || (e.type === 'home' && !restore && !keepScroll))) {
+        try { fb.focus({ preventScroll: true }); } catch (_) { fb.focus(); }
+        fb.setSelectionRange(fb.value.length, fb.value.length);
+      }
 
       if (restore) host.scrollTop = e.scroll || 0;
       else if (keepScroll) host.scrollTop = scrollWas;
@@ -1037,6 +1194,13 @@
       setTimeout(liftStudioBox, 350);
     }
     function onInput(ev) {
+      if (ev.target.closest && ev.target.closest('input.ssn-find-box')) {
+        findTerm = ev.target.value;
+        clearTimeout(findTimer);
+        if (findTerm.trim().length < 2) runFind();
+        else findTimer = setTimeout(runFind, 300);
+        return;
+      }
       if (ev.target.closest && ev.target.closest('input.ssn-term')) paintPtags();
       if (ev.target.closest && ev.target.closest('input.ssn-studio-find')) paintStudioList();
     }
@@ -1047,6 +1211,10 @@
       if (extA && host.contains(extA)) { ev.preventDefault(); openExternal(extA.dataset.exturl); return; }
       const cover = t.closest('.ssn-cover[data-cover]');
       if (cover && host.contains(cover)) { tapCover(cover); return; }
+      const fo = t.closest('.ssn-find-opt[data-findi]');
+      if (fo && host.contains(fo)) { pickFind(+fo.dataset.findi); return; }
+      const fg = t.closest('[data-findglobal]');
+      if (fg && host.contains(fg)) { runGlobal(); return; }
       const btn = t.closest('button');
       if (!btn || !host.contains(btn)) return;
       const box = host.querySelector('input.ssn-term');
@@ -1150,6 +1318,16 @@
       }
     }
     function onKey(ev) {
+      const fbox = ev.target.closest && ev.target.closest('input.ssn-find-box');
+      if (fbox) {
+        ev.stopPropagation();        // not the player's single-key shortcuts
+        if (ev.key === 'Enter') { ev.preventDefault(); if (findHits().length) pickFind(0); else if (findLocal) runGlobal(); else { clearTimeout(findTimer); runFind(); } }
+        else if (ev.key === 'Escape' && fbox.value) {
+          ev.preventDefault();
+          fbox.value = ''; findTerm = ''; runFind();
+        }
+        return;
+      }
       const sbox = ev.target.closest && ev.target.closest('input.ssn-studio-find');
       if (sbox) {
         ev.stopPropagation();        // not the player's single-key shortcuts
@@ -1167,7 +1345,7 @@
     }
 
     const start = opts.start || { type: 'search', term: words(video.filename || '') };
-    push(start.type === 'performer'
+    push(start.type === 'home' ? { type: 'home' } : start.type === 'performer'
       ? { type: 'performer', id: start.id || '', name: start.name || '', sceneId: start.sceneId || '', fromKey: start.fromKey || '' }
       : start.type === 'studio'
         ? { type: 'studio', id: start.id || '', name: start.name || '', sceneId: start.sceneId || '', fromKey: start.fromKey || '' }
@@ -1490,6 +1668,12 @@ body.fullscreen-active #ssnPvBar { display: none; }
                                                        : { performer: start.name, fromKey: start.fromKey });
       return;
     }
+    openSolo(start);
+  }
+
+  // The navigator in a card of its own, no file behind it - just browsing.
+  // openProfile with nothing playing, and the Stash button (openHome).
+  function openSolo(start) {
     document.getElementById('stashModal')?.remove();
     const modal = document.createElement('div');
     modal.className = 'basket-json-modal';
@@ -1504,7 +1688,32 @@ body.fullscreen-active #ssnPvBar { display: none; }
         '<div class="ssn-solo-footer" style="display:flex;gap:8px;margin-top:14px;flex:0 0 auto;"></div>' +
       '</div>';
     document.body.appendChild(modal);
-    const done = () => modal.remove();
+
+    // Clear of the keyboard (picker 14.20 / native 14.32). WKWebView doesn't
+    // shrink the page for the keyboard, so a centred card sat behind it with
+    // the results and Done under the keys. The card is pinned near the top
+    // instead and its height follows the visible strip (visualViewport), so
+    // its own body scrolls and the footer stays just above the keyboard.
+    const card = modal.firstElementChild;
+    modal.style.alignItems = 'flex-start';
+    modal.style.paddingTop = 'calc(env(safe-area-inset-top, 0px) + 12px)';
+    const vv = window.visualViewport;
+    const fit = () => {
+      if (!modal.isConnected) return;
+      const top = card.getBoundingClientRect().top;
+      const visBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+      // ⚙️ 8px clear above the keys; never taller than the old 82vh.
+      card.style.maxHeight = Math.max(160, Math.min(window.innerHeight * 0.82, visBottom - top - 8)) + 'px';
+    };
+    const refit = () => { fit(); setTimeout(fit, 350); };   // again once the keyboard has settled
+    if (vv) { vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit); }
+    modal.addEventListener('focusin', refit);
+    modal.addEventListener('focusout', refit);
+    fit();
+    const done = () => {
+      if (vv) { vv.removeEventListener('resize', fit); vv.removeEventListener('scroll', fit); }
+      modal.remove();
+    };
     // Same three ways out as the Stash modal's own opener.
     const openExternal = (url) => {
       if (window.SCRAY_IN_APP_BROWSER) {
@@ -1533,6 +1742,17 @@ body.fullscreen-active #ssnPvBar { display: none; }
     });
   }
 
-  window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile };
+  /** The Stash button under the console (picker 14.19 / native 14.31). */
+  function openHome() { openSolo({ type: 'home' }); }
+
+  // Delegated, so the button can sit in either app's markup with no wiring there.
+  document.addEventListener('click', (ev) => {
+    const b = ev.target && ev.target.closest && ev.target.closest('#openStashNavBtn');
+    if (!b) return;
+    ev.preventDefault();
+    openHome();
+  });
+
+  window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile, openHome };
   window.scrayPerformerChoice = performerChoice;
 })();

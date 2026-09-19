@@ -4,6 +4,95 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 14.37 / picker 14.23 / native 14.35 — test: Stash nav's find box searches your library first, StashDB on request, with server-side counts
+<!-- 2026-09-19T15:30Z -->
+
+**browse** — `staging-browse - 14.37`: `api.php`, `VERSION.txt` · **picker** — `staging - 14.23`: `scray-stash-nav.js`, `VERSION` · **native** — `stg-native - 14.35`: `assets/web/scray-stash-nav.js`, `assets/web/VERSION` (web only, no IPA build)
+
+Mac's screenshots of 14.34 showed three problems:
+- Amateur Allure read "Picker 21 · Native 21" in Native but "Picker 266 · Native 10" in Picker.
+- Performers he has files of had no counts, while performers he has none of did.
+- Searching was slow and flickery ("no results", then results).
+
+His answer: search the library first, and add a "search globally" option at the bottom.
+
+**Why the counts were wrong (14.34 counted in each app):**
+- Each app counted over its own `getAllVideos()`. In Native that list doesn't hold the whole catalogue's Stash names, so both of its numbers were really "on this phone" (21), while Picker's Native number came from the offline flag (10). The two apps were counting different things.
+- A count was matched to a StashDB result **by name only**. A namesake (a StashDB performer who happens to share a name with someone in the catalogue) picked up that person's files, and a performer credited under another spelling got nothing.
+
+**Fix: the library search is the list.** The new `stash_nav` op `local` answers the box first. No StashDB call, one SQL pass on the server:
+  - It goes over every live matched file, using the same effective data the lists use: an override's studio and cast win over StashDB's.
+  - It collects each studio and performer name with **all** (live files carrying it = Picker) and **phone** (those with `videos.offline = 1`, which Native reports).
+  - It keeps the names containing every typed word; a studio's mapped name matches too, and is shown in quotes beside it.
+  - Order: exact name, then names starting with the words, then a word starting with them, then the rest; within that, most files first. Up to 40.
+  - Every result names one of its files (a real StashDB scene preferred), so picking it opens the profile through `from_key`, as Open in Stash does.
+  - Both apps now show the same numbers because the server counts. Since the counts belong to the names in the list, a namesake can't borrow them.
+- **Search StashDB for "…"** sits at the bottom of the list, and Enter runs it when the library has nothing. It runs 14.36's `find` and adds a "From StashDB" section below, minus names already listed. Those open by id and carry no counts.
+- **No flicker.** The last answer stays on screen until the next one lands. "Searching your library…" only shows before the first answer, and "Nothing in your library matches that" only once one has come back empty.
+
+**Worth knowing:** Native's count is the phone's "offline" flag as the server holds it, not a live look at the phone. Native had counted 21 local Amateur Allure files where the flag says 10. If the new numbers look low on the phone, that flag is the thing to look at next.
+
+**Tested:** `php -l` passes and `node --check` passes. The `local` op was run on a small SQLite database: deleted files left out, override cast and studio winning, mapped-name match, a manual match counted but a real scene preferred for the key, offline counted. A jsdom run with a mocked API: library results with counts, then "From StashDB" without the duplicate, and a library pick opening `op: studio, from_key`.
+
+### picker 14.22 / native 14.34 — test: Stash nav's find list puts your library first, with Picker and Native counts
+<!-- 2026-09-19T15:00Z -->
+
+**picker** — `staging - 14.22`: `scray-stash-nav.js`, `VERSION` · **native** — `stg-native - 14.34`: `assets/web/scray-stash-nav.js`, `assets/web/VERSION` (web only, no IPA build)
+
+Mac asked (on top of 14.21's mixed list) for studios and performers that are already in Picker to be favoured, and for each result to show how many videos it has in Picker and in Native.
+
+- **Counts.** Worked out once per navigator, the first time the box searches, by going over `getAllVideos()` with the same `scrayFacetValues` the STU / PERF clouds count with.
+  - A StashDB studio name goes through `scrayMapName` and is lower-cased, so a mapped studio ("Brazzers" → "BZ") still finds its files. Performers are just lower-cased.
+  - **Picker** = every catalogue file carrying it. **Native** = those on the phone (`isLocalVideo` in Native, the `offline` flag via `scrayIsOffline` in Picker).
+  - Shown in green under the name, e.g. "Picker 12 · Native 3", only when there's at least one.
+- **Order.** Results with any files in the library come first, then 14.21's name-match rank, then StashDB's order.
+- The list repaints when the counts land, since the first search can come back before the library has been counted.
+
+**Tested:** `node --check` passes. A jsdom run with a mocked library ("br" → Brandi Love Picker 2 · Native 1, Brazzers via its mapped name Picker 2 · Native 0, then Bree Olson and Brazzers Exxtra with no counts). Not tried on the phone here.
+
+### picker 14.21 / native 14.33 — test: Stash nav's find list mixes studios and performers, coloured by kind
+<!-- 2026-09-19T14:45Z -->
+
+**picker** — `staging - 14.21`: `scray-stash-nav.js`, `VERSION` · **native** — `stg-native - 14.33`: `assets/web/scray-stash-nav.js`, `assets/web/VERSION` (web only, no IPA build)
+
+Mac asked for the find box's results to be one mixed list rather than a Performers section then a Studios section, with the two kinds in different colours.
+
+- **One list, best name match first.** The rank is: exact name, then names starting with what was typed, then a word in the name starting with it, then anything else StashDB matched. Ties keep StashDB's own order within each kind and alternate the two kinds, so neither swamps the other. Enter still takes the top row.
+- **Colours.** Performers have a pink left edge and a pink "Performer" pill. Studios have a blue edge and a blue "Studio" pill. The section headings are gone. Disambiguation and "in <network>" still show in grey beside the name.
+
+**Tested:** `node --check` passes. Not tried on the phone here.
+
+### picker 14.20 / native 14.32 — test: Stash nav's own card stays clear of the keyboard
+<!-- 2026-09-19T14:30Z -->
+
+**picker** — `staging - 14.20`: `scray-stash-nav.js`, `VERSION` · **native** — `stg-native - 14.32`: `assets/web/scray-stash-nav.js`, `assets/web/VERSION` (web only, no IPA build)
+
+Mac's screenshot of 14.31: the Stash button's card sat centred, and the keyboard (which the box calls up straight away) covered the bottom of it, including the results and Done.
+
+**Cause:** WKWebView doesn't shrink the page for the on-screen keyboard, so a centred modal stays centred behind the keys. The file's own Stash modal already handles this (`applyKeyboardInset` in `file-operations.js`), but the solo card, opened by the Stash button or by Open in Stash with nothing playing, never did.
+
+**Fix (`openSolo`):** the card is pinned near the top (safe area + 12px) instead of centred. Its max-height follows the visible strip, taken from `visualViewport` (bottom of the visible area − the card's top − 8px, never more than the old 82vh, never less than 160px). This is refit on visualViewport resize and scroll, and on focus in and out (again after 350ms once the keyboard has settled). The body scrolls inside the card and the footer stays just above the keys. The listeners go when the card closes.
+
+**Tested:** `node --check` passes. Not tried on the phone here.
+
+### browse 14.36 / picker 14.19 / native 14.31 — test: Stash button opens Stash nav on its own, with one box that finds studios and performers
+<!-- 2026-09-19T14:10Z -->
+
+**browse** — `staging-browse - 14.36`: `api.php`, `VERSION.txt` · **picker** — `staging - 14.19`: `scray-stash-nav.js`, `index.php`, `style.css`, `VERSION` · **native** — `stg-native - 14.31`: `assets/web/scray-stash-nav.js`, `assets/web/index.html`, `assets/web/VERSION` (web only, no IPA build)
+
+Mac asked for Stash nav as a module in its own right: a **Stash** button beside Picker in the row under the console, and one search box at the top that finds studios and performers together. Opened from the button, the navigator starts on just that box. Otherwise the navigator is unchanged. He chose to have the button in both apps.
+
+- **One box, both kinds.** "Find a studio or performer…" sits at the top of every navigator view, whether opened from a file's Stash modal, from Open in Stash or from the button. After 300ms of typing (2+ letters) it calls the new `stash_nav` op `find`, which runs StashDB's `searchPerformer` and `searchStudio` (8 each, richest selection first with fallbacks) and returns both lists.
+  - The list shows performers (with their disambiguation) then studios (with their parent network). Tapping one opens its profile **by id**, so there's no name lookup. Enter takes the first result and Esc clears the box.
+  - The typed words and results are kept outside the repaint, so they survive a load landing.
+  - The list sits in the page flow rather than floating, so the navigator's scrolling card can't clip it.
+- **Stash button.** Native: Folder · Refresh · Picker · **Stash**. Picker: OneDrive · Refresh · **Stash** · Remove all (Stash gets the same equal share as OneDrive and Refresh on mobile).
+  - The click is picked up inside `scray-stash-nav.js` itself, so the file stays identical in both apps.
+  - It calls `scrayStashNav.openHome()`, which opens the solo card that Open in Stash uses when nothing is playing (now `openSolo(start)`), starting on a new `home` view. That view is just the box, focused so the keyboard is up, plus a one-line hint. `home` loads nothing.
+  - Back on the home view (labelled ‹ Done) closes the card. Back from a profile returns to the home view.
+
+**Tested:** `php -l` passes and `node --check` passes. A jsdom run with a mocked API: the button opened a "Stash" card on the home view with the box focused, typing listed a performer and a studio, Enter opened the performer by id (`op: performer, id: p1`) with the box cleared, Back returned to home, and Done closed it. Not run against StashDB here.
+
 ### browse 14.35 / picker 14.17 / native 14.30 — test: full studio names in Stash, tag cloud's Open in Stash goes straight to the profile
 <!-- 2026-09-19T13:10Z -->
 

@@ -4,6 +4,27 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 14.38 / picker 14.24 / native 14.36 — test: In library filter on every Stash profile, plus Indexxx and Eporner links
+<!-- 2026-09-19T16:00Z -->
+
+**browse** — `staging-browse - 14.38`: `api.php`, `VERSION.txt` · **picker** — `staging - 14.24`: `scray-stash-nav.js`, `VERSION` · **native** — `stg-native - 14.36`: `assets/web/scray-stash-nav.js`, `assets/web/VERSION` (web only, no IPA build)
+
+Mac asked for an "In library" filter at the top of each Stash profile, like the In library button on scene cards, showing only the scenes he has. Switching it on should also add that studio or performer to the app's tag filter. Separately, he asked for an Indexxx link and an Eporner search link at the top of every profile.
+
+- **In library** is a green toggle at the start of a studio's or performer's top bar.
+  - **Server:** `stash_nav` `studio` / `performer` take `in_library: 1`. Instead of StashDB's paged list (25 at a time, most of it not yours), it returns every scene of your files for that profile at once, newest first.
+  - **Candidates:** found locally by name. For a performer, `stash_performers.name` or `as_name` matching the profile's name or any alias. For a studio, `stash_scenes.studio` matching its name, an alias or one of its sub-studios. Live files only.
+  - **Confirmation:** each candidate is fetched from StashDB by id (40 scenes per request, richest selection with fallbacks) and kept only if the scene really has this performer's id / this studio's id (or one under it). A namesake's scene never gets in. The profile's own filters still apply: a performer's Studio pick, a studio's performer and sub-studio picks.
+  - **Display:** the heading reads "In your library · N", with no Load more. The studio's "Scenes on StashDB" fact is hidden while it's on, since that count would be yours.
+  - **Tag filter:** switching it on adds the studio / performer to the app's STU / PERF filter, unless it's already there. Switching it off removes it again, but only if the toggle was what added it.
+- **Mapped studio names in the filter.** Both In library and the existing "Filter by this studio" button now use the studio's **mapped** name, which is what the STU cloud holds. Before, the full StashDB name was added, which the list never matched for a mapped studio.
+- **Indexxx and Eporner** buttons sit in the same top bar on performers and studios.
+  - Indexxx is its search (`indexxx.com/search/?query=<name>`). It's left out when the studio's own StashDB links already include an indexxx page.
+  - Eporner is its search page for the name as a slug (`eporner.com/search/<name-with-dashes>/`, accents dropped).
+  - Both open the way the other external links do.
+
+**Tested:** `php -l` passes. The candidate and confirm step was run on a small SQLite database with a mocked StashDB: two files credited to "Jane", only the one whose scene has the right performer id kept, and likewise by studio id. `node --check` passes. A jsdom run: the top bar showed In library, Eporner and Unblur (no Indexxx, since the studio already links one). Switching on sent `in_library: 1`, showed "In your library · 1" and added "aa" (the mapped name) to the studio filter. Switching off removed it and went back to the full list.
+
 ### browse 14.37 / picker 14.23 / native 14.35 — test: Stash nav's find box searches your library first, StashDB on request, with server-side counts
 <!-- 2026-09-19T15:30Z -->
 

@@ -29,6 +29,8 @@
 // picker 14.21-14.23 / native 14.33-14.35: the find list is one mixed list,
 // coloured by kind: your catalogue's names first with Picker / Native counts
 // (counted server-side), then StashDB on request.
+// picker 14.24 / native 14.36 (browse 14.38): In library on every profile,
+// plus Indexxx and Eporner links.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -125,6 +127,8 @@
 #stashModal .ssn .ssn-google.ssn-google-card { margin-left: 0; padding: 6px 12px; font-size: .8rem; }
 #stashModal .ssn .ssn-lib { background: #28a745; border-color: #28a745; color: #fff; }
 #stashModal .ssn-topbar { justify-content: flex-end; margin: 0 0 8px; }
+#stashModal .ssn .ssn-libf { border-color: #28a745; color: #1e7e34; background: #fff; font-weight: 600; }
+#stashModal .ssn .ssn-libf.on { background: #28a745; color: #fff; }
 #stashModal .ssn .ssn-google { padding: 1px 7px; margin-left: 6px; font-size: .7rem; font-weight: 400; vertical-align: middle; background: transparent; color: #1a73e8; border-color: rgba(26,115,232,.4); }
 #stashModal .ssn-btns button[data-go] { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
 #stashModal .ssn-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: .78rem; opacity: .8; margin: 0 0 8px; }
@@ -440,6 +444,7 @@
           body.name = entry.name || '';
           if (entry.sceneId) body.scene_id = entry.sceneId;
           if (entry.fromKey) body.from_key = entry.fromKey;
+          if (entry.libOnly) body.in_library = 1;
           // The dropdown's picks are PERFORMERS on a studio view - all of
           // them in the same scene (picker 14.7 / native 14.11). The state
           // keeps the studio-filter names (e.picks, e.studios, ...) because
@@ -454,6 +459,7 @@
           body.name = entry.name || '';
           if (entry.sceneId) body.scene_id = entry.sceneId;
           if (entry.fromKey) body.from_key = entry.fromKey;
+          if (entry.libOnly) body.in_library = 1;
           // Studio filter on the scene list (13.187 / browse 13.72).
           // Any of the picked studios (picker 14.7 / native 14.11).
           if (entry.picks && entry.picks.length) {
@@ -676,7 +682,7 @@
                       fact('Career', p.career) +
                       fact('Scenes on StashDB', p.scene_count != null ? String(p.scene_count) : '');
         prof =
-          '<div class="ssn-btnrow ssn-topbar">' + unblurBtn() + '</div>' +
+          '<div class="ssn-btnrow ssn-topbar">' + libBtn(e) + extLinks(p.name, []) + unblurBtn() + '</div>' +
           '<div class="ssn-prof">' +
             (p.image
               ? '<div class="ssn-cover ssn-pimg' + (revealAll ? ' shown' : '') + '" data-cover><img src="' + esc(p.image) + '" alt="" loading="lazy">' +
@@ -704,10 +710,11 @@
       }
 
       const n = d ? d.scenes.length : 0;
-      const label = d ? ('Scenes' + (d.count != null ? ' &middot; ' + d.count : '') +
+      const label = d ? ((e.libOnly ? 'In your library' : 'Scenes') + (d.count != null ? ' &middot; ' + d.count : '') +
                          (e.sort === 'order' ? ' &middot; newest first' : '')) : '';
       const list = d && !n && !e.busy
-        ? (d.note ? '' : '<div class="ssn-empty">No scenes listed for this performer.</div>')
+        ? (d.note ? '' : '<div class="ssn-empty">' + (e.libOnly ? 'None of your files are scenes of this performer' +
+            (e.picks && e.picks.length ? ' at that studio' : '') + '.' : 'No scenes listed for this performer.') + '</div>')
         : sortedScenes(e).map(x => cardHtml(x.s, x.i, p ? p.id : null)).join('');
       const more = d && d.count != null && n < d.count && d.lastCount >= (d.per_page || 25)
         ? '<button type="button" class="ssn-loadmore" data-more' + (e.busy ? ' disabled' : '') + '>' +
@@ -733,7 +740,7 @@
         const facts = fact('Network', s.parent ? s.parent.name : '') +
                       fact('Sub-studios', s.children && s.children.length ? String(s.children.length) : '') +
                       fact(s.children && s.children.length ? 'Scenes in network' : 'Scenes on StashDB',
-                           d.count != null && !(e.picks && e.picks.length) && !(e.subPicks && e.subPicks.length) ? String(d.count) : '') +
+                           d.count != null && !e.libOnly && !(e.picks && e.picks.length) && !(e.subPicks && e.subPicks.length) ? String(d.count) : '') +
                       fact('Performers', s.performer_count != null ? String(s.performer_count) : '');
         const link = (st) => '<button type="button" class="ssn-stlink" data-stid="' + esc(st.id) + '" data-stname="' +
           esc(st.name) + '">' + esc(st.name) + '</button>';
@@ -746,7 +753,7 @@
           return '<a href="#" data-exturl="' + esc(u.url) + '">' + esc(label) + ' &#8599;</a>';
         }).join(' &middot; ');
         prof =
-          '<div class="ssn-btnrow ssn-topbar">' + unblurBtn() + '</div>' +
+          '<div class="ssn-btnrow ssn-topbar">' + libBtn(e) + extLinks(s.name, s.urls) + unblurBtn() + '</div>' +
           '<div class="ssn-prof">' +
             (s.image ? '<div class="ssn-slogo"><img src="' + esc(s.image) + '" alt="" loading="lazy"></div>' : '') +
             '<div class="ssn-pmain">' +
@@ -771,10 +778,10 @@
       }
 
       const n = d ? d.scenes.length : 0;
-      const label = d ? ('Scenes' + (d.count != null ? ' &middot; ' + d.count : '') +
+      const label = d ? ((e.libOnly ? 'In your library' : 'Scenes') + (d.count != null ? ' &middot; ' + d.count : '') +
                          (e.sort === 'order' ? ' &middot; newest first' : '')) : '';
       const list = d && !n && !e.busy
-        ? (d.note ? '' : '<div class="ssn-empty">No scenes listed for this studio' +
+        ? (d.note ? '' : '<div class="ssn-empty">' + (e.libOnly ? 'None of your files are' : 'No') + ' scenes listed for this studio' +
             (e.picks && e.picks.length ? ' with ' + esc(e.picks.map(x => x.name).join(' + ')) + ' together' : '') + '.</div>')
         : sortedScenes(e).map(x => cardHtml(x.s, x.i, (e.picks || []).map(x => x.id), s ? s.id : null)).join('');
       const more = d && d.count != null && n < d.count && d.lastCount >= (d.per_page || 25)
@@ -1075,6 +1082,50 @@
       '</div>';
     }
 
+    // ---- In library, Indexxx, Eporner (picker 14.24 / native 14.36) ------
+    // A profile's top bar. In library swaps StashDB's paged scene list for
+    // the scenes of your own files (browse 14.38's in_library) and puts this
+    // studio / performer in the app's tag filter, taking it back out when
+    // switched off if it was the one that added it.
+    const libBtn = (e) => '<button type="button" class="ssn-libf' + (e.libOnly ? ' on' : '') + '" data-libonly ' +
+      'title="Only the scenes you have">' + (e.libOnly ? '&#10003; In library' : '&#128218; In library') + '</button>';
+    function extLinks(name, urls) {
+      if (!name) return '';
+      const hasIndexxx = (urls || []).some(u => /indexxx\./i.test(u.url || ''));
+      const slug = String(name).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      return (hasIndexxx ? '' : '<button type="button" class="ssn-ext ssn-extsm" data-ext="' +
+                esc('https://www.indexxx.com/search/?query=' + encodeURIComponent(name)) + '">Indexxx &#8599;</button>') +
+             (slug ? '<button type="button" class="ssn-ext ssn-extsm" data-ext="' +
+                esc('https://www.eporner.com/search/' + slug + '/') + '">Eporner &#8599;</button>' : '');
+    }
+    /** The value the app's STU / PERF filter holds: studios by their mapped name, lower-cased. */
+    function facetName(kind, name) {
+      const raw = String(name || '').trim();
+      const v = kind === 'studio' && typeof window.scrayMapName === 'function' ? (window.scrayMapName('studio', raw) || raw) : raw;
+      return String(v).trim().toLowerCase();
+    }
+    function toggleLibOnly() {
+      const e = top();
+      if (!e || (e.type !== 'studio' && e.type !== 'performer') || !e.data) return;
+      const kind = e.type;
+      const who = kind === 'studio' ? e.data.studio : e.data.performer;
+      e.libOnly = !e.libOnly;
+      const val = who ? facetName(kind, who.name) : '';
+      const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet(kind) : null;
+      if (val && e.libOnly) {
+        if (!(set && set.has(val)) && typeof window.scrayAddTagFilter === 'function') {
+          window.scrayAddTagFilter(kind, val);
+          e.libAddedFilter = val;
+        }
+      } else if (val && e.libAddedFilter === val) {
+        window.scrayRemoveTagFilter?.(kind, val);
+        e.libAddedFilter = '';
+      }
+      e.sort = e.libOnly ? 'order' : e.sort;
+      load(e, false, true);
+    }
+
     // The filter button paints from the live filter, like the modal's chips.
     function paintFilter() {
       const b = host.querySelector('[data-filter]');
@@ -1083,7 +1134,7 @@
       const who = e && e.data && (kind === 'studio' ? e.data.studio : e.data.performer);
       if (!b || !who) return;
       const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet(kind) : null;
-      const on = !!(set && set.has(String(who.name).trim().toLowerCase()));
+      const on = !!(set && set.has(facetName(kind, who.name)));
       b.classList.toggle('on', on);
       b.innerHTML = on ? '&#10005; Remove from filter' : '&#8853; Filter by this ' + kind;
     }
@@ -1290,15 +1341,17 @@
       if (btn.dataset.lib !== undefined) { openLibrary(+btn.dataset.lib); return; }
       if (btn.dataset.accept !== undefined) { accept(btn); return; }
       if (btn.hasAttribute('data-more')) { const e = top(); if (e && !e.busy) load(e, true); return; }
+      if (btn.hasAttribute('data-libonly')) { if (!(top() || {}).busy) toggleLibOnly(); return; }
       if (btn.hasAttribute('data-filter')) {
         const e = top();
         const kind = e && e.type === 'studio' ? 'studio' : 'performer';
         const who = e && e.data && (kind === 'studio' ? e.data.studio : e.data.performer);
         const name = who && who.name;
         if (!name) return;
+        const val = facetName(kind, name);
         const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet(kind) : null;
-        if (set && set.has(String(name).trim().toLowerCase())) window.scrayRemoveTagFilter?.(kind, name);
-        else window.scrayAddTagFilter?.(kind, name);
+        if (set && set.has(val)) window.scrayRemoveTagFilter?.(kind, val);
+        else window.scrayAddTagFilter?.(kind, val);
         paintFilter();
         return;
       }

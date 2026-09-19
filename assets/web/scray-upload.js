@@ -433,7 +433,7 @@
 
   async function openSheet(video) {
     closeSheet();
-    S = { step: "files", ticked: new Set(), files: [], filter: "", targets: null, account: null, path: null,
+    S = { step: "files", ticked: new Set(), files: [], filter: "", q: "", targets: null, account: null, path: null,
           folders: null, loading: false, error: null, needsBuild: false, quota: {} };
     const start = localId(video);
     if (start) S.ticked.add(start);
@@ -570,11 +570,23 @@
       const trail = [`<button class="up-crumb" data-act="crumb" data-path="">${esc(shortAcct(S.account))}</button>`]
         .concat(segs.map((s, i) => `<button class="up-crumb" data-act="crumb" data-path="${esc("/" + segs.slice(0, i + 1).join("/"))}">${esc(s)}</button>`))
         .join(`<span class="up-sep">›</span>`);
-      const list = S.path === null
+      // Folder search (native 14.27), as in data-explorer's Move: every folder
+      // the catalogue knows in this account (upload_targets' `folders`) plus
+      // the one open now, all words matching, own-name matches first.
+      const terms = S.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const list = terms.length
+        ? [...new Set([...(acct.folders || []), ...(S.folders || []).map(f => f.path)])]
+            .filter(p => terms.every(t => p.toLowerCase().includes(t)))
+            .map(p => ({ name: p, path: p, extra: "", own: terms.every(t => p.split("/").pop().toLowerCase().includes(t)) ? 0 : 1 }))
+            .sort((a, b) => a.own - b.own || a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: "base" }))
+            .slice(0, 200)
+        : S.path === null
         ? acct.stacks.map(s => ({ name: s.name, path: s.path, extra: `${s.files} file${s.files === 1 ? "" : "s"}` }))
         : (S.folders || []).map(f => ({ name: f.name, path: f.path, extra: "" }));
+      body += `<div class="up-tools"><input type="search" class="up-find" placeholder="Find a folder in this OneDrive…" value="${esc(S.q)}"></div>`;
       body += `<div class="up-trail">${trail}</div>`;
-      if (S.path !== null && S.loading) body += `<div class="up-loading">Loading folders…</div>`;
+      if (terms.length && !list.length) body += `<ul class="up-folders"><li class="up-empty">No folder matches that.</li></ul>`;
+      else if (!terms.length && S.path !== null && S.loading) body += `<div class="up-loading">Loading folders…</div>`;
       else body += `<ul class="up-folders">${list.map(f => `
           <li><button data-act="open" data-path="${esc(f.path)}"><span class="up-folder">📁 ${esc(f.name)}</span>
           <span class="up-count">${esc(f.extra)}</span><span class="up-go">›</span></button></li>`).join("")
@@ -590,7 +602,7 @@
       <div class="up-steps">${crumbs}</div>
       ${body}
       <div class="basket-json-modal-buttons up-buttons">${buttons}</div>`;
-    if (S.step === "files" && S.refocus) {
+    if (S.refocus) {
       const inp = box.querySelector(".up-find");
       inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
       S.refocus = false;
@@ -612,7 +624,7 @@
   }
 
   async function openFolder(path) {
-    S.path = path; S.folders = null; S.error = null;
+    S.path = path; S.folders = null; S.error = null; S.q = "";
     if (path === null) { renderSheet(); return; }
     S.loading = true; renderSheet();
     const want = path;
@@ -675,7 +687,8 @@
 
   function onSheetInput(e) {
     if (!S || !e.target.classList.contains("up-find")) return;
-    S.filter = e.target.value; S.refocus = true;
+    if (S.step === "folder") S.q = e.target.value; else S.filter = e.target.value;
+    S.refocus = true;
     renderSheet();
   }
 

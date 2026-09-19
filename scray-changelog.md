@@ -4,6 +4,21 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 14.33 / native 14.27 — test: folder search in the upload sheet
+<!-- 2026-09-19T08:29Z -->
+
+**browse** — `staging-browse - 14.33`: `api.php`, `VERSION.txt` · **native** — `stg-native - 14.27`: `assets/web/scray-upload.js`, `assets/web/VERSION` (web only, no IPA build)
+
+Mac asked for a search box in the Upload to OneDrive sheet's folder step, like the one in data-explorer's Move dialog, so a deep folder is one search away instead of a tap per level.
+
+- **Same approach as Move:** search runs client-side over every folder the catalogue knows in that account (parents included), plus the folder open now; every typed word must match, and folders whose own name matches sort above ones matched further up the path. Capped at 200 results.
+- **Where the list comes from:** `upload_targets` already reads every catalogued path per account to build the stacks, so `scrayUploadStacks` now optionally collects each path prefix on the way and `upload_targets` returns it as `folders` per account. No new action, no extra query, and every path it returns is inside a stack so `upload_folders` / `upload_session` accept it.
+- **Behaviour:** tapping a result opens that folder (clearing the search), then Upload here as before. The box reuses the files step's `.up-find` style, so no CSS.
+- **Needs browse deployed first** - with the old `api.php` there's no `folders` list and the search only finds folders in the one currently open.
+- Picker has no upload sheet, so this is browse + native only.
+
+**Not tested:** `php -l` isn't available on this machine - lint `api.php` before deploying.
+
 ### native 14.26 — test: browser strip gets + new tab and ⋯ menu, ‹P always active
 <!-- 2026-09-18T17:55Z -->
 

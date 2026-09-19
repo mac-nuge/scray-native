@@ -4,6 +4,21 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.37 — test: OneDrive upload pill shows over the in-app browser too
+<!-- 2026-09-19T16:20Z -->
+
+**native** — `stg-native - 14.37`: `modules/scray-native/ios/ScrayBrowser.swift`, `modules/scray-native/ios/ScrayNativeView.swift`, `assets/web/scray-upload.js`, `assets/web/scray-bridge.js`, `assets/web/VERSION` (**needs a new IPA build**)
+
+Mac asked for the minimised OneDrive upload widget to show over Picker and the in-app browser as well, not only over Native.
+
+**Why it didn't:** the upload queue and its panel are part of Native's own page (`scray-upload.js`). The in-app browser is a full-screen native view on top of that page, so the panel was underneath it, however it was drawn. The uploads themselves carry on (Swift sends the bytes, and Native's page keeps polling), there was just nothing to see.
+
+- **Web → Swift:** `renderPanel` now starts with `reportBadge()`, which works out the minimised pill's label and whether anything is still going up. It sends that as `uploadBadge({ label, active })` whenever it changes. The label is the whole batch's %, plus "· N files" when more than one is left. `renderPanel` already runs on every upload poll, even with the panel hidden, so the badge keeps up. An older IPA rejects the action and it's ignored.
+- **Swift:** `ScrayBrowser.setUploadBadge` stores it and redraws a blue capsule, "⬆ 45% · 3 files", top-left just under the address bar. That mirrors the orange download pill top-right, so the two never overlap. It shows while anything is uploading and goes when the queue is done. It's also checked every time the browser appears.
+- **Tap:** the browser closes and Native's upload panel opens full (`scrayUploadQueue.show()`).
+
+**Tested:** `node --check` passes on both JS files. **Swift not compiled** (no Xcode here), so the IPA build is the first compile.
+
 ### browse 14.38 / picker 14.24 / native 14.36 — test: In library filter on every Stash profile, plus Indexxx and Eporner links
 <!-- 2026-09-19T16:00Z -->
 

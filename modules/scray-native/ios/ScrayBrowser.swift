@@ -32,6 +32,17 @@ final class ScrayBrowser: NSObject {
 
     private var controller: ScrayBrowserViewController?
 
+    /// OneDrive uploads (native 14.37): the queue lives in Native's web layer,
+    /// which this browser covers, so the web layer reports a one-line state
+    /// (uploadBadge) and the browser shows it as a pill of its own.
+    fileprivate(set) var uploadBadge: (label: String, active: Bool) = ("", false)
+    func setUploadBadge(label: String, active: Bool) {
+        DispatchQueue.main.async {
+            self.uploadBadge = (label, active)
+            self.controller?.refreshUploadPill()
+        }
+    }
+
     /// `url` is where to go; nil resumes wherever the browser was left.
     /// `home` is what the house button goes to.
     func present(url: String?, home: String) {
@@ -215,6 +226,9 @@ final class ScrayBrowserViewController: UIViewController,
     private var jobs: [ScrayDownloadJob] = []
     private let downloadBar = ScrayDownloadBar()
     private let downloadPill = ScrayDownloadPill()
+    /// Uploads to OneDrive still going (native 14.37). Top-left, mirroring the
+    /// download pill; a tap goes back to Native with the upload panel open.
+    private let uploadPill = UIButton(type: .system)
     /// Bar folded down to the pill. Cleared once the queue empties, so a
     /// minimise only ever applies to the downloads it was tapped for.
     private var downloadBarMinimised = false
@@ -519,6 +533,27 @@ final class ScrayBrowserViewController: UIViewController,
         view.addSubview(webContainer)
         view.addSubview(downloadBar)
         view.addSubview(downloadPill)
+
+        var upCfg = UIButton.Configuration.filled()
+        upCfg.baseBackgroundColor = UIColor(red: 0.11, green: 0.45, blue: 0.91, alpha: 0.95)
+        upCfg.baseForegroundColor = .white
+        upCfg.cornerStyle = .capsule
+        upCfg.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
+        upCfg.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { a in
+            var a = a
+            a.font = .systemFont(ofSize: 13, weight: .semibold)
+            return a
+        }
+        uploadPill.configuration = upCfg
+        uploadPill.translatesAutoresizingMaskIntoConstraints = false
+        uploadPill.isHidden = true
+        uploadPill.accessibilityLabel = "OneDrive uploads"
+        uploadPill.layer.shadowColor = UIColor.black.cgColor
+        uploadPill.layer.shadowOpacity = 0.18
+        uploadPill.layer.shadowRadius = 4
+        uploadPill.layer.shadowOffset = CGSize(width: 0, height: 1)
+        uploadPill.addTarget(self, action: #selector(uploadPillTapped), for: .touchUpInside)
+        view.addSubview(uploadPill)
         view.addSubview(toolbar)
 
         toastView.translatesAutoresizingMaskIntoConstraints = false
@@ -560,6 +595,9 @@ final class ScrayBrowserViewController: UIViewController,
             // toast at bottom-right.
             downloadPill.topAnchor.constraint(equalTo: progressView.bottomAnchor, constant: 10),
             downloadPill.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
+
+            uploadPill.topAnchor.constraint(equalTo: progressView.bottomAnchor, constant: 10),
+            uploadPill.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
 
             toastBottom,
             toastView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
@@ -1031,6 +1069,20 @@ final class ScrayBrowserViewController: UIViewController,
 
     @objc private func closeTapped()   { dismiss(animated: true) }
 
+    // MARK: - Upload pill (native 14.37)
+
+    fileprivate func refreshUploadPill() {
+        guard isViewLoaded else { return }
+        let badge = ScrayBrowser.shared.uploadBadge
+        uploadPill.isHidden = !badge.active
+        uploadPill.configuration?.title = "⬆ " + (badge.label.isEmpty ? "Uploading" : badge.label)
+        if badge.active { view.bringSubviewToFront(uploadPill) }
+    }
+
+    @objc private func uploadPillTapped() {
+        dismiss(animated: true) { ScrayNativeView.current?.showUploads() }
+    }
+
     /// Set when a download actually lands somewhere. The rescan waits for
     /// dismissal rather than firing per file: the main list is behind this
     /// modal so nothing is visible until then, and scanLocalLibrary is a full
@@ -1040,6 +1092,7 @@ final class ScrayBrowserViewController: UIViewController,
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         ScrayRunMonitor.shared.browserWillShow()
+        refreshUploadPill()
         // Synced favourites and logins (native 14.29, ScrayBrowserSync.swift).
         // Saved straight to UserDefaults, not saveFavourites: that would push
         // the server's own list straight back to it.

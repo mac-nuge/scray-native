@@ -337,7 +337,31 @@
     renderPanel();
   }
 
+  // The in-app browser's upload pill (native 14.37). The browser covers this
+  // page, panel and all, so Swift draws its own pill from this one line:
+  // the minimised pill's label, and whether anything is still going up. Sent
+  // only when it changes. An older IPA doesn't know the action; that's fine.
+  let lastBadge = "";
+  function reportBadge() {
+    const items = Q.items;
+    const current = items.find(i => ACTIVE.has(i.state));
+    const pending = items.filter(i => i.state === "waiting" || ACTIVE.has(i.state));
+    const batch = items.filter(i => i.state !== "cancelled" && i.state !== "failed");
+    const bTotal = batch.reduce((a, i) => a + i.size, 0);
+    const bSent = batch.reduce((a, i) => a + (i.state === "done" ? i.size : (i === current ? i.sent : 0)), 0);
+    const active = pending.length > 0;
+    const label = !active ? "" : `${pct(bSent, bTotal)}%` + (pending.length > 1 ? ` · ${pending.length} files` : "");
+    const key = (active ? "1" : "0") + label;
+    if (key === lastBadge) return;
+    lastBadge = key;
+    try {
+      const b = bridge();
+      if (typeof b.uploadBadge === "function") b.uploadBadge({ label, active }).catch(() => {});
+    } catch { /* no bridge */ }
+  }
+
   function renderPanel() {
+    reportBadge();
     if (!panel || panel.hidden) return;
     const items = Q.items;
     const current = items.find(i => i.state === "uploading" || i.state === "starting" || i.state === "finishing");

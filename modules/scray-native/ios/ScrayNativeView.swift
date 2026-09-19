@@ -33,6 +33,16 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
         }
     }
 
+    /// Open the upload panel. The in-app browser's upload pill calls this once
+    /// it has dismissed itself (native 14.37).
+    func showUploads() {
+        DispatchQueue.main.async {
+            self.webView.evaluateJavaScript(
+                "window.scrayUploadQueue && window.scrayUploadQueue.show();"
+            )
+        }
+    }
+
     /// Play a catalogue key. Called by ScrayBrowser after it dismisses itself,
     /// so the player is already on screen by the time this lands.
     /// Hand a StashDB scene URL to an open stash modal. Called by ScrayBrowser
@@ -332,6 +342,12 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
                 return
             }
             ScrayUploads.shared.cancel(id: uploadId)
+            resolve(id: id, result: ["success": true])
+        case "uploadBadge":
+            // The upload queue's state for the in-app browser's pill (native 14.37).
+            let d = payload as? [String: Any] ?? [:]
+            ScrayBrowser.shared.setUploadBadge(label: d["label"] as? String ?? "",
+                                               active: d["active"] as? Bool ?? false)
             resolve(id: id, result: ["success": true])
         case "uploadForget":
             if let uploadId = (payload as? [String: Any])?["id"] as? String {

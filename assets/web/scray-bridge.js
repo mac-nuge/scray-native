@@ -44,6 +44,9 @@ window.ScrayBridge = {
   uploadStatus: (ids) => callNative('uploadStatus', { ids: ids || null }),
   uploadCancel: (id) => callNative('uploadCancel', { id }),
   uploadForget: (id) => callNative('uploadForget', { id }),
+  // The queue's one-line state for the in-app browser's upload pill (native
+  // 14.37): { label, active }. Rejects with "Unknown action" on an older IPA.
+  uploadBadge: (badge) => callNative('uploadBadge', badge),
   // ✅ In-app browser. Pass nothing to resume where it was left.
   openBrowser: (url) => callNative('openBrowser', {
     url: url || null,

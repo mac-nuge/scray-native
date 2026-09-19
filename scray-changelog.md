@@ -4,6 +4,23 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 14.35 / picker 14.17 / native 14.30 — test: full studio names in Stash, tag cloud's Open in Stash goes straight to the profile
+<!-- 2026-09-19T13:10Z -->
+
+**browse** — `staging-browse - 14.35`: `api.php`, `VERSION.txt` · **picker** — `staging - 14.17`: `randomiser.js`, `scray-stash-nav.js`, `file-operations.js`, `VERSION` · **native** — `stg-native - 14.30`: `assets/web/randomiser.js`, `assets/web/scray-stash-nav.js`, `assets/web/file-operations.js`, `assets/web/VERSION` (web only, no IPA build)
+
+Mac realised mapped studio names are only there to keep the video lists compact. They stay in the lists and the tag filters, but the Stash modal and Stash nav should always show the full name. He also asked for the STU and PERF clouds' "Search in Stash" to go straight to that studio's or performer's profile rather than running a search, and to be renamed "Open in Stash".
+
+- **Full name in the Stash modal.** The Studio row no longer goes through `scrayMapName`. Stash nav already shows StashDB's own names once a profile loads. The lists (`scrayStashNames`) and the cloud values are unchanged, so both still use mapped names.
+- **Why it searched:** a cloud value is the mapped, lower-cased studio name (for example "bz"), and the catalogue stores names, not StashDB ids. `stash_nav` could only check the name against the playing file's scene (usually a different studio), then `findStudio(name)`, then `searchStudio`. A mapped name never matches, so it landed on a search result, sometimes the wrong studio.
+- **Open in Stash:** the button now finds a catalogue file carrying the selected value (the same `scrayFacetValues` the counts use) and sends its key as `from_key`, through `openProfile` → the Stash modal / navigator start → `stash_nav`. The server reads that file's matched scene (`scrayStashNavFromScene`) and:
+  - **studio:** takes the scene's studio id as is, with no name check. It's exactly where that value came from, mapped or not.
+  - **performer:** checks the playing file's scene first (as before), then the `from_key` scene, matching name, "as" credit or alias.
+  - Falls back to the old name lookup only if no file with a matched scene is found.
+- The single-selection alert now says "Open needs…". The Stash modal's own studio and performer chips were already exact (they pass the scene), so they're unchanged.
+
+**Tested:** `php -l` passes, and `node --check` passes on all three JS files in both picker and native. Not run against StashDB here.
+
 ### browse 14.34 / native 14.29 — test: in-app browser syncs favourites, history and logins
 <!-- 2026-09-19T12:30Z -->
 

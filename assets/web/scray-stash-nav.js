@@ -294,6 +294,7 @@
           if (entry.id) body.id = entry.id;
           body.name = entry.name || '';
           if (entry.sceneId) body.scene_id = entry.sceneId;
+          if (entry.fromKey) body.from_key = entry.fromKey;
           // The dropdown's picks are PERFORMERS on a studio view - all of
           // them in the same scene (picker 14.7 / native 14.11). The state
           // keeps the studio-filter names (e.picks, e.studios, ...) because
@@ -307,6 +308,7 @@
           if (entry.id) body.id = entry.id;
           body.name = entry.name || '';
           if (entry.sceneId) body.scene_id = entry.sceneId;
+          if (entry.fromKey) body.from_key = entry.fromKey;
           // Studio filter on the scene list (13.187 / browse 13.72).
           // Any of the picked studios (picker 14.7 / native 14.11).
           if (entry.picks && entry.picks.length) {
@@ -1166,9 +1168,9 @@
 
     const start = opts.start || { type: 'search', term: words(video.filename || '') };
     push(start.type === 'performer'
-      ? { type: 'performer', id: start.id || '', name: start.name || '', sceneId: start.sceneId || '' }
+      ? { type: 'performer', id: start.id || '', name: start.name || '', sceneId: start.sceneId || '', fromKey: start.fromKey || '' }
       : start.type === 'studio'
-        ? { type: 'studio', id: start.id || '', name: start.name || '', sceneId: start.sceneId || '' }
+        ? { type: 'studio', id: start.id || '', name: start.name || '', sceneId: start.sceneId || '', fromKey: start.fromKey || '' }
         : { type: 'search', term: String(start.term || '').trim() || words(video.filename || '') });
 
     return {
@@ -1473,16 +1475,19 @@ body.fullscreen-active #ssnPvBar { display: none; }
   })();
 
   // ---- a profile with no file (picker 14.13 / native 14.19) ---------------
-  // The tag cloud's "Search in Stash" opens a studio's or performer's page. If
+  // The tag cloud's "Open in Stash" opens a studio's or performer's page. If
   // something is playing it goes through the Stash modal for that file (cards
   // scored against it, scenes acceptable); if nothing is, the navigator opens
   // on its own in the same card, just browsing - nothing to accept or score.
-  function openProfile(kind, name) {
-    const start = kind === 'studio' ? { type: 'studio', name: String(name) }
-                                    : { type: 'performer', name: String(name) };
+  // fromKey (picker 14.17 / native 14.30): a catalogue file carrying this
+  // studio / performer - the server reads the id off its matched scene.
+  function openProfile(kind, name, fromKey) {
+    const start = kind === 'studio' ? { type: 'studio', name: String(name), fromKey: fromKey || '' }
+                                    : { type: 'performer', name: String(name), fromKey: fromKey || '' };
     const playing = window.currentPlayingVideo;
     if (playing && typeof window.showStashModal === 'function') {
-      window.showStashModal(playing, kind === 'studio' ? { studio: start.name } : { performer: start.name });
+      window.showStashModal(playing, kind === 'studio' ? { studio: start.name, fromKey: start.fromKey }
+                                                       : { performer: start.name, fromKey: start.fromKey });
       return;
     }
     document.getElementById('stashModal')?.remove();

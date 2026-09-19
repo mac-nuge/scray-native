@@ -4805,7 +4805,9 @@ async function showStashModal(video, openOpts) {
                 esc(sc.title || '(untitled scene)') + '</div>' +
             editRow +
             ovLine +
-            row('Studio', window.scrayMapName ? window.scrayMapName('studio', sc.studio) : sc.studio) +
+            // The full name here (picker 14.17 / native 14.30): mapped studio
+            // names are for the lists and the tag filters only.
+            row('Studio', sc.studio) +
             row('Released', (sc.release_date || '').slice(0, 10)) +
             durLine +
             row('Code', sc.code) +
@@ -5055,6 +5057,9 @@ async function showStashModal(video, openOpts) {
     // openOpts.studio (picker 14.6 / native 14.10): open onto that studio's
     // view - a studio chip's "Search in Stash nav" asks for this.
     const startStudio = openOpts && openOpts.studio ? String(openOpts.studio).trim() : '';
+    // openOpts.fromKey (picker 14.17 / native 14.30): the tag cloud's Open in
+    // Stash - a file that has this studio / performer, whose scene gives its id.
+    const startFromKey = openOpts && openOpts.fromKey ? String(openOpts.fromKey) : '';
 
     addBtn.addEventListener('click', async () => {
         const picked = [...modal.querySelectorAll('.stash-mk:checked')]
@@ -5116,9 +5121,9 @@ async function showStashModal(video, openOpts) {
 
     load(false).then(() => {
         if (startPerformer && document.body.contains(modal)) {
-            openNav({ type: 'performer', name: startPerformer, sceneId: matchedStashId }, false);
+            openNav({ type: 'performer', name: startPerformer, sceneId: matchedStashId, fromKey: startFromKey }, false);
         } else if (startStudio && document.body.contains(modal)) {
-            openNav({ type: 'studio', name: startStudio, sceneId: matchedStashId }, false);
+            openNav({ type: 'studio', name: startStudio, sceneId: matchedStashId, fromKey: startFromKey }, false);
         } else if (startSearch && document.body.contains(modal)) {
             openNav({ type: 'search', term: startSearch }, true);
         }

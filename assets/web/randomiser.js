@@ -1426,10 +1426,14 @@ async function showTagCloudModal(kind) {
    }
    if (searchable) {
        // Opens that studio's / performer's page in the Stash navigator - via
-       // the playing file's Stash modal if there is one.
-       stashSearchBtn = mkX('Search in Stash', () => {
+       // the playing file's Stash modal if there is one. "Open", not "Search"
+       // (picker 14.17 / native 14.30): every value here came off a matched
+       // scene, so one of those files is sent along and the server takes the
+       // studio / performer straight from that scene rather than searching
+       // StashDB for the (possibly mapped) name.
+       stashSearchBtn = mkX('Open in Stash', async () => {
            if (set.size !== 1) {
-               alert('Search needs exactly one selected (green) ' + oneLabel + '.');
+               alert('Open needs exactly one selected (green) ' + oneLabel + '.');
                return;
            }
            // Nothing needs to be playing (picker 14.13 / native 14.19): with no
@@ -1437,7 +1441,13 @@ async function showTagCloudModal(kind) {
            if (!window.scrayStashNav || typeof window.scrayStashNav.openProfile !== 'function') return;
            const name = [...set][0];
            close();
-           window.scrayStashNav.openProfile(kind, name);
+           let fromKey = '';
+           try {
+               const all = await getAllVideos();
+               const hit = all.find(v => scrayFacetValues(v, kind).includes(name));
+               if (hit && window.scrayStashNames) fromKey = window.scrayStashNames.keyFor(hit);
+           } catch { /* no file to go by - the server falls back to the name */ }
+           window.scrayStashNav.openProfile(kind, name, fromKey);
        });
    }
    const paintXapp = () => {

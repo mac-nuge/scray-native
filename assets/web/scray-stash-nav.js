@@ -122,6 +122,7 @@
 #stashModal .ssn-ptags:empty { display: none; }
 #stashModal .ssn .ssn-ptag { padding: 2px 9px; border-radius: 12px; border: 1px solid #b9d4f5; background: #eaf3ff; color: #0b5ed7; font-size: .76rem; }
 #stashModal .ssn .ssn-ptag.on { background: #28a745; border-color: #28a745; color: #fff; }
+#stashModal .ssn .ssn-ptag.ssn-ptag-studio:not(.on) { border-color: #cbbef5; background: #f3efff; color: #5b3fd1; }
 #stashModal .ssn .ssn-play { padding: 6px 11px; }
 #stashModal .ssn .ssn-unblur { margin-left: auto; }
 #stashModal .ssn .ssn-google.ssn-google-card { margin-left: 0; padding: 6px 12px; font-size: .8rem; }
@@ -604,6 +605,7 @@
     // The file's own tags - folder tags and [bracket] tags - as pills under the
     // words box. A tap puts the tag into the box, or takes it back out; it
     // doesn't search, so several can be picked before pressing Search.
+    let studioStart = Infinity;
     const pathTags = (() => {
       const seen = new Set(), out = [];
       [].concat(video.tags || [], video.bracketTags || []).forEach(t => {
@@ -613,10 +615,16 @@
         seen.add(k);
         out.push(v);
       });
-      return out;
+      // Studio names the folder tags stand for (picker 14.28 / native 14.41),
+      // from studioSuggestions below.
+      const extra = studioSuggestions(out);
+      studioStart = out.length;
+      return out.concat(extra);
     })();
     const ptagsHtml = () => '<div class="ssn-ptags">' +
-      pathTags.map((t, i) => '<button type="button" class="ssn-ptag" data-ptag="' + i + '">' + esc(t) + '</button>').join('') +
+      pathTags.map((t, i) => '<button type="button" class="ssn-ptag' + (i >= studioStart ? ' ssn-ptag-studio' : '') +
+        '" data-ptag="' + i + '"' + (i >= studioStart ? ' title="Studio name mapped in manage-data"' : '') +
+        '>' + esc(t) + '</button>').join('') +
       '</div>';
     const reEsc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const tagRe = (t) => new RegExp('(^|\\s)' + reEsc(t) + '(?=\\s|$)', 'i');
@@ -1806,6 +1814,45 @@ body.fullscreen-active #ssnPvBar { display: none; }
     openHome();
   });
 
-  window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile, openHome };
+  /**
+   * Studio names a file's folder tags stand for (picker 14.28 / native 14.41).
+   *
+   * A folder is often named after a studio's short name in manage-data ("aa"
+   * for Amateur Allure), which StashDB has never heard of. Either direction
+   * counts: a tag matching a mapped name suggests the studio it was mapped
+   * from, and one matching a studio suggests its mapped name. The dictionary
+   * only carries the raw names folded to lowercase, so those are title-cased;
+   * StashDB's search ignores case. Nothing already in `tags` comes back.
+   * Shared with the lookup panel's not-found pills (file-operations.js).
+   */
+  function studioSuggestions(tags) {
+    const nm = window.scrayNameMap;
+    const studios = (nm && nm.dump && nm.dump().studio) || {};
+    const fold = nm && nm.key ? nm.key : (x => String(x ?? '').normalize('NFC').trim().toLowerCase());
+    const titled = (x) => x.replace(/(^|[\s\-])(\S)/g, (m, a, c) => a + c.toUpperCase());
+    const seen = new Set((tags || []).map(fold));
+    const extra = [];
+    // Folder tags are hyphenated ("amateur-allure"), names are not, so each
+    // is compared with its hyphens as spaces too.
+    const alt = k => k.replace(/-/g, ' ');
+    (tags || []).forEach(t => {
+      const k = fold(t);
+      if (!k) return;
+      Object.keys(studios).forEach(rk => {
+        const mapped = String(studios[rk] || '');
+        const mk = fold(mapped);
+        let hit = '';
+        if (mapped && (mk === k || mk === alt(k)) && rk !== k && rk !== alt(k)) hit = titled(rk);
+        else if ((rk === k || rk === alt(k)) && mapped && mk !== k && mk !== alt(k)) hit = mapped;
+        const hk = fold(hit);
+        if (!hit || seen.has(hk)) return;
+        seen.add(hk);
+        extra.push(hit);
+      });
+    });
+    return extra;
+  }
+
+  window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile, openHome, studioSuggestions };
   window.scrayPerformerChoice = performerChoice;
 })();

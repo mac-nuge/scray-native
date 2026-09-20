@@ -4,6 +4,112 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.43 — test: faster uploads - three files at once, 25 MiB pieces
+<!-- 2026-09-20T15:09Z -->
+
+**native** — `stg-native - 14.43`: `assets/web/scray-upload.js`, `modules/scray-native/ios/ScrayUploads.swift`, `assets/web/VERSION` (**the piece size needs a new IPA build**; the parallel files don't)
+
+Mac found uploads from the app much slower than OneDrive's own web upload on desktop, with the app visibly going up in 10 MB steps. (The same day, OneDrive's UK/EU upload servers were slow for everyone. Switching the VPN from London to New York fixed that part.)
+
+**Why it's slow:** one file goes up as a strict sequence of pieces, because Graph upload sessions require them in order. Each piece waits for OneDrive's 202 before the next is sent. So a single file spends part of its time idle between pieces and rarely fills a fast line, and the longer the route (a VPN), the bigger that idle share. The queue also sent only one file at a time.
+
+**Change:**
+- **Parallel files (`scray-upload.js`, ⚙️ `PARALLEL = 3`):** separate files are separate upload sessions, so up to three go at once.
+  - `pump()` now claims items synchronously (sets them to `starting` before the async start) and keeps up to `PARALLEL` running. `Q.running` is gone, replaced by an `active` count.
+  - `recover()` holds the pump with `Q.recovering` while it reattaches every in-flight job after a reload. There can be several of those now.
+  - The panel shows a block per active file. The batch line shows the combined speed and "N of M done, K going up".
+- **Bigger pieces (`ScrayUploads.swift`):** 10 MiB → 25 MiB (80 × 320 KiB), so there are fewer pauses per file. Graph allows up to 60 MiB. This stays lower because each piece is held in memory and three files can be in flight.
+
+**Tested:** `node --check` passes. Swift not compiled here.
+
+### browse 14.41 / picker 14.29 / native 14.42 — test: mapped studio suggested wherever folder tags are (rename, lookup, data-explorer)
+<!-- 2026-09-20T14:46Z -->
+
+**browse** — `staging-browse - 14.41`: `scray-rename-extras.js`, `VERSION.txt` · **picker** — `staging - 14.29`: `scray-stash-nav.js`, `file-operations.js`, `VERSION` · **native** — `stg-native - 14.42`: `assets/web/scray-stash-nav.js`, `assets/web/file-operations.js`, `assets/web/VERSION`
+
+Follow-up to picker 14.28 / native 14.41. Mac found the Stash lookup's not-found panel still showed only "2ngm / classics / aa" and asked for the mapped studio anywhere folder tags are suggested, data-explorer's rename included.
+
+**Change:**
+- **Shared helper:** the lookup is now `scrayStashNav.studioSuggestions(tags)`, shared by every app surface. It also compares with hyphens read as spaces, because folder tags are hyphenated ("amateur-allure") and studio names aren't.
+- **Apps:** the Stash lookup's not-found pills and the rename modal's tag pills (`file-operations.js`) add the mapped studio after the folder tags, in violet (`#6c4fd8`). They keep that colour after a tap.
+- **Browse:** `scray-rename-extras.js` covers the Rename dialog on both data-explorer and bulk-stash. It already fetched `name_map_get` for the censor list, so the studio map now comes with it. The pills re-render when that lands. The same rule is copied there because browse doesn't load the apps' scripts. The violet `.rnTag.studio` style is injected once per page.
+
+**Tested:** `node --check` passes on all changed JS. The helper was run with mappings amateur allure→aa and evil angel→EA: `aa` → Amateur Allure, `evil-angel` → EA.
+
+### picker 14.28 / native 14.41 — test: Stash search suggests the studio a folder name maps to
+<!-- 2026-09-20T14:40Z -->
+
+**picker** — `staging - 14.28`: `scray-stash-nav.js`, `VERSION` · **native** — `stg-native - 14.41`: `assets/web/scray-stash-nav.js`, `assets/web/VERSION`
+
+The Stash search panel offers the file's folder tags as pills ("2ngm", "classics", "aa"). "aa" is Mac's short name for Amateur Allure in manage-data's studio mappings, and StashDB doesn't know it. He asked for the mapped studio to be suggested as well.
+
+**Change:** after the folder and bracket tags, `pathTags` adds studio pills from `scrayNameMap`'s studio dictionary, in either direction. A tag that matches a *mapped* name suggests the raw studio it was mapped from ("aa" → "Amateur Allure"). A tag that matches a raw studio suggests its mapped name. The dictionary only carries raw names folded to lowercase (`raw_key`), so those are title-cased for the pill; StashDB's search ignores case. The new pills are violet rather than blue, with a "Studio name mapped in manage-data" tooltip, and tapping one adds it to or removes it from the box like any other pill.
+
+**Tested:** `node --check` passes; the two copies are byte-identical.
+
+### picker 14.27 / native 14.40 — test: incremental re-fetch (+new / −deleted) and free space in the upload folder search
+<!-- 2026-09-20T14:21Z -->
+
+**picker** — `staging - 14.27`: `auth.js`, `onedrive.js`, `style.css`, `VERSION` · **native** — `stg-native - 14.40`: `assets/web/scray-upload.js`, `assets/web/style.css`, `assets/web/VERSION`
+
+Mac asked for three things: free space next to the account on the upload sheet's folder-search rows (native), a way to fetch just the new files instead of a full OneDrive refresh, and a −# count for deleted files on the yellow pill (picker).
+
+**Free space on folder-search hits (native):** each row now shows the account and, under it, "324 GB free", or "12 GB free · too small" in red when the ticked files won't fit. It uses the `upload_quota` results the account list already fetches (13.54). The in-place updater now updates every element for that account, not just the first, because the search shows one account on many rows.
+
+**Deleted files on the pill (picker):** 13.194's delta check was already counting files deleted in OneDrive (`gone`), but it only showed them in the tooltip. Now:
+- The button turns yellow for either direction.
+- A "−2" shows in light red after the "(+3)". It's `::before` on `data-gone-videos`, so the `btn.textContent` rewrites can't wipe it. The button becomes inline-flex only while it's set, so flex `order` can place it last.
+- The tooltip lists the deleted files' names.
+- The delta reader is split out as `scrayDeltaCollect`. A file that shows up in two folders' deltas (moved between selected folders) now counts as live, not as one removed plus one added.
+
+**Incremental re-fetch (picker):** `scrayIncrementalRefetch(acc)`, run by tapping the yellow pill (it used to do a full fetch) or by the new **⚡ Incremental Re-fetch** button in the Refresh modal.
+- It follows the same cursors. For each new video it fetches the full item, because the delta leaves out `parentReference.path`. It turns that into the record a full scan writes, using `scrayGraphItemToVideo`, now shared with `fetchAllVideosRecursive` so the two can't drift apart. Then it saves locally and pushes to the catalogue.
+- Deleted files come off IndexedDB in one transaction and are sent to `instance_forget` (per file, rather than 14.25's sweep).
+- The cursors only move forward once all of that has landed, so a failure part way through leaves them where they were.
+- Any selected folder without a usable cursor (never set up, 410, Business drive) makes it fall back to the full fetch, which sets the cursors up again.
+- **Not handled:** renames and moves inside the selected folders. The apps' own renames already carry the history across, and re-keying rows behind them is how history gets stranded. A deleted *folder* may come back as the folder alone, without its files, so those files aren't counted. A full fetch still picks up both.
+
+**Tested:** `node --check` passes on `auth.js`, `onedrive.js` and `scray-upload.js`. Not yet run against Graph.
+
+### browse 14.40 / picker 14.26 / native 14.39 — test: Unmatch on the Stash modal, withdrawing the fingerprint from StashDB
+<!-- 2026-09-20T09:52Z -->
+
+**browse** — `staging-browse - 14.40`: `api.php`, `VERSION.txt` · **picker** — `staging - 14.26`: `file-operations.js`, `scray-stash-edit.js`, `VERSION` · **native** — `stg-native - 14.39`: `assets/web/file-operations.js`, `assets/web/scray-stash-edit.js`, `assets/web/VERSION`
+
+Mac had pasted the wrong StashDB scene for `lily_winters_720.mp4` in the player's Stash modal, which submitted the file's oshash to StashDB against that scene. He asked how to undo it and where the unmatch option was. "Remove these details" in Correct details did nothing.
+
+**Why Remove did nothing:** a scene attached by pasting its URL (`stash_submit`) is stored with `match_method = 'manual'`, even though it's a real StashDB id. `scrayStashEditRows` flagged rows as hand-entered by the *method*, so the editor opened in manual mode and offered "Remove these details". That calls `stash_edit_manual_delete`, which only accepts `manual:` ids, so it was refused. Saving corrections on those rows was refused the same way, by `stash_edit_manual_save`. The only unmatch was `stash_unmatch`, and that was on the console pages (bulk-stash, stash-manual, data-explorer) only.
+
+**Fix:**
+- **Hand-entered now means a `manual:` id**, not the method. A pasted StashDB scene opens as a real match: Correct details saves as a correction, and it can be unmatched. The stash-manual list scopes (`manual`, `all`, include matched) use the same test.
+- **New `stash_edit_unmatch`:** a one-file, device-key-allowed alias of `stash_unmatch` for the apps. By default it's a full undo:
+  - It detaches the scene, drops any corrections and the unpromoted imported timestamps (as before), and records the pairing as rejected.
+  - **`drop_timestamps`:** it also soft-deletes the timestamps that attaching copied into your real bookmarks. It only removes ones still exactly as imported (same time, source `stash`, note unchanged), then bumps seq so the clients pick up the change.
+  - **`retract`:** if the pairing was ours (attached by hand or a review accept, or a candidate with `submitted_at`), it sends `submitFingerprint` with `vote: REMOVE` (retried as `unmatch: true` on older stash-box). This runs after the local commit, so a StashDB failure never blocks the local unmatch. A match that came only from other people's fingerprints has nothing of ours to withdraw, and the note says so.
+  - `stash_unmatch` on the console accepts the same two flags but leaves both off by default.
+- **`stash_submit` clears a rejection** of the exact scene you're attaching, so re-attaching a scene you unmatched earlier isn't undone by the next bulk run.
+- **`stash_scene`** says "You unmatched this file…" instead of "StashDB did not recognise it" for a file in the `rejected` state.
+- **Apps:** the lookup panel has a red **✕ Unmatch** next to Correct details on every real match. It takes two taps (no `confirm()`, because of FLS and iOS). The Correct details editor also has **Unmatch this scene**, whether or not there are corrections. Both use the shared `scrayStashEdit.unmatch()`, which refreshes names, the S button and (when bookmarks went) that video's bookmarks. The panel then reloads to the not-found view with a note of what happened at StashDB, ready for the right scene to be pasted.
+
+**Kept:** the pairing is still recorded as rejected. If other people also submitted that hash to the wrong scene, Re-check says "still points at a scene you unmatched" instead of silently re-attaching it. Pasting any scene, including that one, overrules it.
+
+**Tested:** `php -l` passes; `node --check` passes on all four JS files. The StashDB `vote: REMOVE` call hasn't been tried against the live server yet.
+
+### native 14.38 — test: browser favourites upload on the first sync
+<!-- 2026-09-19T17:45Z -->
+
+**native** — `stg-native - 14.38`: `modules/scray-native/ios/ScrayBrowserSync.swift`, `assets/web/VERSION` (**needs a new IPA build**)
+
+Mac found his in-app browser favourites weren't in the dev app, and weren't on browser.html either, so the regular app had never uploaded them.
+
+**Cause:** a bug in 14.29's `pullFavourites`. It returned early with `guard rev != seen`. On a device that had never synced (`seen` 0), against a server whose list had never been written (`rev` 0), the two were equal. So it returned before the first-sync branch that merges and uploads. Only adding or removing a favourite (`saveFavourites` → `pushFavourites`) would have uploaded the list. Opening the browser never did.
+
+**Fix:** the guard is now `seen == 0 || rev != seen`: a device that has never synced always runs the first-sync merge. That merge skips the upload when there's nothing on either side, so an empty phone doesn't write an empty list.
+
+**Until the new IPA is on the phone:** in the regular app, add or remove any favourite (or add one and remove it again). That uploads the whole list straight away. Then open the dev app's browser (from the Picker button), close it and open it again: the dev app has never synced and the server now has a list, so it merges it in.
+
+**Not tested:** Swift not compiled here.
+
 ### native 14.37 — test: OneDrive upload pill shows over the in-app browser too
 <!-- 2026-09-19T16:20Z -->
 

@@ -122,7 +122,11 @@ final class ScrayBrowserSync {
             guard let self = self, case .success(let j) = r else { return }
             let rev = j["rev"] as? Int ?? 0
             let seen = self.d.integer(forKey: Self.favRevKey)
-            guard rev != seen, !self.d.bool(forKey: Self.favDirtyKey) else { return }
+            // seen == 0 is "never synced here", whatever the server's rev. Until
+            // native 14.38 this guard read rev != seen alone, so a device's
+            // first sync against a server list that had never been written
+            // (rev 0 == seen 0) returned here and never uploaded anything.
+            guard seen == 0 || rev != seen, !self.d.bool(forKey: Self.favDirtyKey) else { return }
             let server: [[String: String]] = (j["favourites"] as? [[String: Any]] ?? []).compactMap { f -> [String: String]? in
                 guard let u = f["url"] as? String else { return nil }
                 var o = ["title": (f["title"] as? String) ?? u, "url": u]
@@ -136,7 +140,7 @@ final class ScrayBrowserSync {
                 let known = Set(server.compactMap { $0["url"] })
                 let merged = server + mine.filter { !known.contains($0["url"] ?? "") }
                 adopt(merged)
-                if merged.count != server.count || rev == 0 { self.pushFavourites(merged) }
+                if !merged.isEmpty && (merged.count != server.count || rev == 0) { self.pushFavourites(merged) }
                 else { self.d.set(rev, forKey: Self.favRevKey) }
                 return
             }

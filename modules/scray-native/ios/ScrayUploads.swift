@@ -111,10 +111,12 @@ final class ScrayUploads: NSObject, URLSessionDataDelegate {
 
     static let shared = ScrayUploads()
 
-    /// ⚙️ 10 MiB a piece: 32 × 320 KiB. Big enough that the per-request cost
-    /// disappears, small enough that a dropped connection only repeats a few
-    /// seconds of work.
-    private static let pieceSize: Int64 = 320 * 1024 * 32
+    /// ⚙️ 25 MiB a piece: 80 × 320 KiB (native 14.43; was 10 MiB). Each piece
+    /// waits for OneDrive's answer before the next goes, and that pause was a
+    /// real share of the time on a fast line, so fewer, bigger pieces. Graph's
+    /// ceiling is 60 MiB; this stays well under it because the piece is held in
+    /// memory, and up to three files (the page's PARALLEL) go at once.
+    private static let pieceSize: Int64 = 320 * 1024 * 80
 
     /// ⚙️ Tries per stall before giving up. Each waits longer (2, 4, 8… s, capped
     /// at 30) and the count resets whenever a piece gets through.

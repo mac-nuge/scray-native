@@ -350,10 +350,16 @@
             '</div>' +
             '<div class="sse-said" data-said="duration_sec" hidden></div>' +
           '</div>' +
-          ((m === 'correct' && (row.override_fields || []).length) || m === 'manual'
+          // Every real match can be unmatched from here (14.40), not only the
+          // ones carrying corrections - a wrong scene is exactly the case with
+          // nothing yet corrected.
+          (m === 'correct' || m === 'manual'
             ? '<div class="sse-danger">' +
                 (m === 'correct'
-                  ? '<button type="button" class="sse-small" data-revert>Revert all to StashDB</button>'
+                  ? ((row.override_fields || []).length
+                      ? '<button type="button" class="sse-small" data-revert>Revert all to StashDB</button>'
+                      : '') +
+                    '<button type="button" class="sse-small" data-unmatch>Unmatch this scene</button>'
                   : '<button type="button" class="sse-small" data-remove>Remove these details</button>') +
               '</div>'
             : '') +
@@ -369,6 +375,7 @@
       });
       armDanger(host.querySelector('[data-revert]'), 'Tap again to revert', revertAll);
       armDanger(host.querySelector('[data-remove]'), 'Tap again to remove', removeManual);
+      armDanger(host.querySelector('[data-unmatch]'), 'Tap again to unmatch', unmatchScene);
       FIELDS.forEach(paintSaid);
       paintDur();
     }
@@ -814,11 +821,57 @@
       }
     }
 
+    async function unmatchScene(btn) {
+      setBusy(true, 'Unmatching…');
+      try {
+        const res = await unmatch(key, video);
+        // Truthy like any save, so the lookup panel reloads; the summary rides
+        // along so it can say what happened at StashDB.
+        finish({ unmatched: true, summary: res.summary });
+      } catch (err) {
+        setBusy(false);
+        if (btn) { btn.classList.remove('sse-armed'); btn.textContent = 'Unmatch this scene'; }
+        setErr('Could not unmatch: ' + err.message);
+      }
+    }
+
     return {
       close: () => finish(false),
       get busy() { return busy; }
     };
   }
 
-  window.scrayStashEdit = { open, _rank: rank, _parseDur: parseDur, _vocab: VOCAB };
+  // ---- unmatch (14.40) -------------------------------------------------------
+  // Detach a real StashDB match as though it had never been made: the scene,
+  // its imported timestamps (the untouched ones), any corrections, and - if
+  // this account submitted the fingerprint - the submission at StashDB too.
+  // The file comes back unmatched, ready to be matched again. Shared by the
+  // editor's button and the lookup panel's, so both undo exactly the same.
+  // Resolves to the server's reply, with a readable `summary`.
+  async function unmatch(videoKey, video) {
+    const res = await api('stash_edit_unmatch', { method: 'POST', body: { video_keys: [videoKey] } });
+    if (!res.unmatched) {
+      const why = (res.details && res.details[0] && res.details[0].why) || 'nothing was unmatched';
+      throw new Error(why);
+    }
+    vocabAt = 0;
+    try { if (window.scrayStashNames) await window.scrayStashNames.refresh(true); } catch (e) { /* lists catch up later */ }
+    try {
+      if (typeof window.scrayLoadStashState === 'function') await window.scrayLoadStashState(true);
+    } catch (e) { /* the S button catches up on the next poll */ }
+    // Bookmarks come off on the server; pull so the list and the markers on
+    // the progress bar lose them now rather than on the next sync.
+    if (res.timestamps_removed && video && typeof window.scrayBmSync === 'function') {
+      try { await window.scrayBmSync(video); } catch (e) { /* next sync */ }
+    }
+    const bits = ['Unmatched.'];
+    if (res.retracted) bits.push('Your fingerprint was withdrawn from StashDB.');
+    if (res.timestamps_removed) bits.push(res.timestamps_removed + ' imported timestamp' +
+                                          (res.timestamps_removed === 1 ? '' : 's') + ' removed.');
+    (res.notes || []).forEach(n => bits.push(n));
+    res.summary = bits.join(' ');
+    return res;
+  }
+
+  window.scrayStashEdit = { open, unmatch, _rank: rank, _parseDur: parseDur, _vocab: VOCAB };
 })();

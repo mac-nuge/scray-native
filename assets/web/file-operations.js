@@ -170,18 +170,28 @@ let selectedWords = new Set();
 function renderRenameTags() {
 renameTagsContainer.innerHTML = '';
 
-const tags = video.tags || [];
+const folderTags = video.tags || [];
+// Plus the studio each folder name maps to in manage-data (picker 14.29 /
+// native 14.42) - "aa" also offers "Amateur Allure". Violet, not blue.
+const studioTags = (window.scrayStashNav && window.scrayStashNav.studioSuggestions)
+    ? window.scrayStashNav.studioSuggestions(folderTags) : [];
+const tags = folderTags.concat(studioTags);
 
 if (tags.length === 0) {
     renameTagsContainer.innerHTML = '<span style="color: #999; font-size: 0.8rem; font-style: italic;">No tags available</span>';
     return;
 }
 
-tags.forEach(tag => {
+tags.forEach((tag, ti) => {
+    const isStudio = ti >= folderTags.length;
+    const pillBg = isStudio ? '#6c4fd8' : '#007bff';
     const tagPill = document.createElement('span');
     tagPill.className = 'rename-tag-pill';
     tagPill.textContent = tag;
-    tagPill.title = `Click to insert "${tag}" at cursor`;
+    tagPill.title = isStudio
+        ? `Studio name mapped in manage-data - click to insert "${tag}" at cursor`
+        : `Click to insert "${tag}" at cursor`;
+    if (isStudio) tagPill.style.background = pillBg;
     
     tagPill.addEventListener('click', () => {
         // Get cursor position in input
@@ -205,7 +215,7 @@ tags.forEach(tag => {
         // Visual feedback on tag
         tagPill.style.background = '#28a745';
         setTimeout(() => {
-            tagPill.style.background = '#007bff';
+            tagPill.style.background = pillBg;
         }, 200);
     });
     
@@ -4356,6 +4366,7 @@ async function showStashModal(video, openOpts) {
                 defaults.forEach(b => { b.style.display = b.dataset.sseDisplay || ''; });
                 heading.textContent = 'Stash lookup';
                 if (saved) {
+                    if (saved.summary) flashNote = saved.summary;
                     load(false).then(() => { if (wasUnmatched && matchedNow) offerRename(); });
                     return;
                 }
@@ -4618,17 +4629,24 @@ async function showStashModal(video, openOpts) {
                 wordBox.appendChild(span);
             });
 
-            const vidTags = video.tags || [];
+            // Folder tags, then the studio each maps to in manage-data
+            // (picker 14.29 / native 14.42), violet.
+            const folderTagList = video.tags || [];
+            const studioTagList = (window.scrayStashNav && window.scrayStashNav.studioSuggestions)
+                ? window.scrayStashNav.studioSuggestions(folderTagList) : [];
+            const vidTags = folderTagList.concat(studioTagList);
             if (!vidTags.length) {
                 tagBox.innerHTML = '<span style="color:#999;font-size:.75rem;font-style:italic;">' +
                                    'No tags on this file</span>';
             }
-            vidTags.forEach(tag => {
+            vidTags.forEach((tag, ti) => {
+                const idleBg = ti >= folderTagList.length ? '#6c4fd8' : '';
                 const pill = document.createElement('span');
                 pill.className = 'rename-tag-pill';
                 pill.textContent = tag;
+                if (idleBg) { pill.style.background = idleBg; pill.title = 'Studio name mapped in manage-data'; }
                 pill.addEventListener('click', () => {
-                    if (pickedTags.has(tag)) { pickedTags.delete(tag); pill.style.background = ''; }
+                    if (pickedTags.has(tag)) { pickedTags.delete(tag); pill.style.background = idleBg; }
                     else { pickedTags.add(tag); pill.style.background = '#28a745'; }
                     rebuildTerm();
                 });
@@ -4783,7 +4801,17 @@ async function showStashModal(video, openOpts) {
               '<button id="stashManualBtn" class="modal-btn modal-btn-secondary" ' +
                       'style="flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;">' +
                 (isManual ? '&#9998; Edit details' : '&#9998; Correct details') + '</button>' +
-              (isManual ? '<span style="font-size:.78rem;opacity:.65;">Entered by hand</span>' : '') +
+              (isManual ? '<span style="font-size:.78rem;opacity:.65;">Entered by hand</span>' :
+                // Wrong scene? (14.40) Undoes the match outright - scene,
+                // imported timestamps, corrections and, where it was ours, the
+                // fingerprint at StashDB - and lands back on the not-found
+                // panel so the right one can be matched.
+                '<button id="stashUnmatchBtn" class="modal-btn modal-btn-secondary" ' +
+                        'title="Not this scene: detach it and withdraw your fingerprint from StashDB" ' +
+                        'style="flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;' +
+                        'background:transparent;color:#dc3545;border:1px solid #dc3545;">' +
+                  '&#10005; Unmatch</button>') +
+              '<span id="stashUnmatchMsg" style="font-size:.78rem;color:#dc3545;"></span>' +
             '</div>';
 
         const meta = sc ? (
@@ -4875,6 +4903,48 @@ async function showStashModal(video, openOpts) {
             '<div>' + list + '</div>';
 
         modal.querySelector('#stashManualBtn')?.addEventListener('click', openEditor);
+
+        // Two taps rather than confirm(): a native dialog in FLS lands
+        // unrotated behind the player, and on iOS it can wedge the web view.
+        const unBtn = modal.querySelector('#stashUnmatchBtn');
+        if (unBtn) {
+            let armT = null;
+            const idle = unBtn.innerHTML;
+            const disarm = () => {
+                unBtn.innerHTML = idle;
+                unBtn.style.background = 'transparent';
+                unBtn.style.color = '#dc3545';
+            };
+            unBtn.addEventListener('click', async () => {
+                if (unBtn.disabled) return;
+                if (!armT) {
+                    unBtn.textContent = 'Tap again to unmatch';
+                    unBtn.style.background = '#dc3545';
+                    unBtn.style.color = '#fff';
+                    armT = setTimeout(() => { armT = null; disarm(); }, 3000);
+                    return;
+                }
+                clearTimeout(armT); armT = null;
+                const msg = modal.querySelector('#stashUnmatchMsg');
+                if (!window.scrayStashEdit || !window.scrayStashEdit.unmatch) {
+                    disarm();
+                    if (msg) msg.textContent = 'scray-stash-edit.js is not loaded';
+                    return;
+                }
+                unBtn.disabled = true;
+                unBtn.textContent = 'Unmatching…';
+                try {
+                    const res = await window.scrayStashEdit.unmatch(
+                        video.videoKey || window.scrayVideoKey(video.filename), video);
+                    flashNote = res.summary || 'Unmatched.';
+                    await load(false);
+                } catch (err) {
+                    unBtn.disabled = false;
+                    disarm();
+                    if (msg) msg.textContent = 'Could not unmatch: ' + err.message;
+                }
+            });
+        }
 
         modal.querySelector('#stashAll')?.addEventListener('click', (e) => {
             e.preventDefault();

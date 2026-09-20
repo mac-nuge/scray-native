@@ -33,6 +33,11 @@
   const QUEUE_KEY = "scray_upload_queue_v1";
   const LAST_KEY  = "scray_upload_last_dest_v1";
   const POLL_MS   = 1000;
+  // ⚙️ Files sent at once (native 14.43). One file goes up as a strict
+  // sequence of pieces, each waiting for OneDrive's answer before the next, so
+  // a single file rarely fills a fast line - worse over a long route like a
+  // VPN. Separate files are separate upload sessions and can overlap freely.
+  const PARALLEL  = 3;
 
   // ---------------------------------------------------------------- helpers
   const esc = s => String(s ?? "").replace(/[&<>"']/g, m =>
@@ -77,7 +82,7 @@
   // One entry per file: { uid, rel, filename, size, account, folder, state,
   // sent, bps, error, note, videoKey, facts, meta, bookmarks }.
   // state: waiting → starting → uploading → finishing → done | failed | cancelled
-  const Q = { items: load(QUEUE_KEY, []), running: false, minimized: false, showList: false };
+  const Q = { items: load(QUEUE_KEY, []), active: 0, recovering: false, minimized: false, showList: false };
 
   const ACTIVE = new Set(["starting", "uploading", "finishing"]);
   const persist = () => save(QUEUE_KEY, Q.items.map(it => ({ ...it, bps: 0 })));
@@ -108,20 +113,25 @@
     return added;
   }
 
-  /** Start the next waiting file if nothing is going up. */
-  async function pump() {
-    if (Q.running) return;
-    const next = Q.items.find(i => i.state === "waiting");
-    if (!next) { renderPanel(); return; }
-    Q.running = true;
-    try {
-      await runOne(next);
-    } finally {
-      Q.running = false;
-      persist();
-      renderPanel();
+  /** Start waiting files until PARALLEL are going up (native 14.43). */
+  function pump() {
+    if (Q.recovering) return;
+    let started = false;
+    while (Q.active < PARALLEL) {
+      const next = Q.items.find(i => i.state === "waiting");
+      if (!next) break;
+      // Claimed synchronously, so the next turn of this loop can't pick it too.
+      next.state = "starting";
+      Q.active++;
+      started = true;
+      runOne(next).finally(() => {
+        Q.active--;
+        persist();
+        renderPanel();
+        pump();
+      });
     }
-    pump();
+    if (!started) renderPanel();
   }
 
   async function runOne(it) {
@@ -298,26 +308,31 @@
     showPanel(true);
     let jobs = [];
     try { jobs = ((await bridge().uploadStatus(stuck.map(i => i.uid))) || {}).jobs || []; } catch { /* old build */ }
+    // Held off pump() until the lot are sorted, then picked up together -
+    // with several files in flight there can be several to pick up.
+    Q.recovering = true;
+    const resumed = [];
     for (const it of stuck) {
       const job = jobs.find(j => j.id === it.uid);
       if (it.state === "finishing" && it.itemId) {
-        Q.running = true;
         try { await finishOne(it, { id: it.itemId }); } catch (err) { it.state = "failed"; it.error = friendlyError(err); }
-        Q.running = false;
       } else if (job && (job.state === "uploading" || job.state === "finished")) {
-        Q.running = true;
         it.state = "uploading";
-        try {
-          const done = await waitForJob(it);
-          if (done) await finishOne(it, done.item);
-        } catch (err) { it.state = "failed"; it.error = friendlyError(err); }
-        Q.running = false;
+        Q.active++;
+        resumed.push((async () => {
+          try {
+            const done = await waitForJob(it);
+            if (done) await finishOne(it, done.item);
+          } catch (err) { it.state = "failed"; it.error = friendlyError(err); }
+          finally { Q.active--; persist(); renderPanel(); pump(); }
+        })());
       } else {
         it.state = "failed";
         it.error = "Interrupted when the app closed — retry to send it again";
       }
       persist();
     }
+    Q.recovering = false;
     renderPanel();
     pump();
   }
@@ -364,7 +379,9 @@
     reportBadge();
     if (!panel || panel.hidden) return;
     const items = Q.items;
-    const current = items.find(i => i.state === "uploading" || i.state === "starting" || i.state === "finishing");
+    // Up to PARALLEL at once (native 14.43).
+    const actives = items.filter(i => i.state === "uploading" || i.state === "starting" || i.state === "finishing");
+    const current = actives[0];
     const pending = items.filter(i => i.state === "waiting" || ACTIVE.has(i.state));
     const done = items.filter(i => i.state === "done");
     const failed = items.filter(i => i.state === "failed");
@@ -373,9 +390,9 @@
     // session, so the bar doesn't jump back when a file lands.
     const batch = items.filter(i => i.state !== "cancelled" && i.state !== "failed");
     const bTotal = batch.reduce((a, i) => a + i.size, 0);
-    const bSent  = batch.reduce((a, i) => a + (i.state === "done" ? i.size : (i === current ? i.sent : 0)), 0);
-    const bps = current ? current.bps : 0;
-    const left = pending.reduce((a, i) => a + i.size - (i === current ? i.sent : 0), 0);
+    const bSent  = batch.reduce((a, i) => a + (i.state === "done" ? i.size : (actives.includes(i) ? i.sent : 0)), 0);
+    const bps = actives.reduce((a, i) => a + (i.bps || 0), 0);
+    const left = pending.reduce((a, i) => a + i.size - (actives.includes(i) ? i.sent : 0), 0);
     const overallEta = bps > 0 ? fmtEta(left / bps) : "";
 
     panel.classList.toggle("is-min", Q.minimized);
@@ -387,25 +404,28 @@
 
     let head;
     if (current) {
-      const p = pct(current.sent, current.size);
-      const eta = current.bps > 0 ? fmtEta((current.size - current.sent) / current.bps) : "";
-      const status = current.state === "starting" ? "asking OneDrive for an upload link…"
-        : current.state === "finishing" ? "adding to the catalogue…"
-        : [`${p}%`, `${fmtBytes(current.sent)} of ${fmtBytes(current.size)}`, fmtSpeed(current.bps), eta && `${eta} left`]
-            .filter(Boolean).join(" · ");
-      head = `
+      const one = (c) => {
+        const p = pct(c.sent, c.size);
+        const eta = c.bps > 0 ? fmtEta((c.size - c.sent) / c.bps) : "";
+        const status = c.state === "starting" ? "asking OneDrive for an upload link…"
+          : c.state === "finishing" ? "adding to the catalogue…"
+          : [`${p}%`, `${fmtBytes(c.sent)} of ${fmtBytes(c.size)}`, fmtSpeed(c.bps), eta && `${eta} left`]
+              .filter(Boolean).join(" · ");
+        return `
         <div class="up-now">
-          <div class="up-name" title="${esc(current.filename)}">${esc(current.filename)}</div>
-          <div class="up-dest">${esc(shortAcct(current.account))} › ${esc(current.folder)}</div>
-          <div class="up-bar"><i style="width:${current.state === "finishing" ? 100 : p}%"></i></div>
+          <div class="up-name" title="${esc(c.filename)}">${esc(c.filename)}</div>
+          <div class="up-dest">${esc(shortAcct(c.account))} › ${esc(c.folder)}</div>
+          <div class="up-bar"><i style="width:${c.state === "finishing" ? 100 : p}%"></i></div>
           <div class="up-stat">${esc(status)}</div>
-          ${current.note ? `<div class="up-note">${esc(current.note)}</div>` : ""}
-          ${current.state !== "finishing" ? `<button class="up-link" data-act="cancel" data-uid="${esc(current.uid)}">Cancel this file</button>` : ""}
-        </div>
+          ${c.note ? `<div class="up-note">${esc(c.note)}</div>` : ""}
+          ${c.state !== "finishing" ? `<button class="up-link" data-act="cancel" data-uid="${esc(c.uid)}">Cancel this file</button>` : ""}
+        </div>`;
+      };
+      head = actives.map(one).join("") + `
         ${batch.length > 1 ? `
         <div class="up-batch">
           <div class="up-bar thin"><i style="width:${pct(bSent, bTotal)}%"></i></div>
-          <div class="up-stat">All: file ${done.length + 1} of ${batch.length} · ${fmtBytes(bSent)} of ${fmtBytes(bTotal)}${overallEta ? ` · ${overallEta} left` : ""}</div>
+          <div class="up-stat">All: ${done.length} of ${batch.length} done${actives.length > 1 ? `, ${actives.length} going up` : ""} · ${fmtBytes(bSent)} of ${fmtBytes(bTotal)}${bps > 0 ? ` · ${fmtSpeed(bps)}` : ""}${overallEta ? ` · ${overallEta} left` : ""}</div>
         </div>` : ""}`;
     } else if (pending.length) {
       head = `<div class="up-now"><div class="up-stat">Starting the next file…</div></div>`;
@@ -512,6 +532,20 @@
     const l = spaceLine(id, size, count);
     return `<span class="up-space ${l.cls}" data-space="${esc(id)}" title="${esc(l.title)}">${esc(l.text)}</span>`;
   };
+  // Short form for the folder-search rows (native 14.40): "324 GB free", or
+  // "12 GB free · too small" in red. The long line is on the account list.
+  function spaceShort(id, size) {
+    const q = S.quota[id];
+    if (!q) return { cls: "", text: "" };
+    if (q.loading) return { cls: "is-wait", text: "…" };
+    if (q.error || !Number.isFinite(q.remaining)) return { cls: "is-wait", text: "space ?" };
+    if (q.remaining < size) return { cls: "is-short", text: `${fmtBytes(q.remaining)} free · too small` };
+    return { cls: q.state && q.state !== "normal" ? "is-low" : "", text: `${fmtBytes(q.remaining)} free` };
+  }
+  const spaceShortHtml = (id, size) => {
+    const l = spaceShort(id, size);
+    return `<span class="up-space up-space-short ${l.cls}" data-space="${esc(id)}" data-short="1">${esc(l.text)}</span>`;
+  };
 
   function loadQuotas() {
     const mine = S;
@@ -525,11 +559,20 @@
         .finally(() => {
           // In place, not a redraw: a redraw landing mid-tap would swallow the tap.
           if (S !== mine || S.step !== "account") return;
-          const el = [...S.modal.querySelectorAll("[data-space]")].find(x => x.dataset.space === id);
-          if (!el) return;
+          // Every one: the folder search shows the same account on many rows.
+          const els = [...S.modal.querySelectorAll("[data-space]")].filter(x => x.dataset.space === id);
+          if (!els.length) return;
           const picked = tickedFiles();
-          const l = spaceLine(id, picked.reduce((n, v) => n + (Number(v.sizeBytes) || 0), 0), picked.length);
-          el.className = `up-space ${l.cls}`; el.textContent = l.text; el.title = l.title;
+          const size = picked.reduce((n, v) => n + (Number(v.sizeBytes) || 0), 0);
+          els.forEach(el => {
+            if (el.dataset.short) {
+              const l = spaceShort(id, size);
+              el.className = `up-space up-space-short ${l.cls}`; el.textContent = l.text;
+            } else {
+              const l = spaceLine(id, size, picked.length);
+              el.className = `up-space ${l.cls}`; el.textContent = l.text; el.title = l.title;
+            }
+          });
         });
     });
   }
@@ -588,7 +631,7 @@
             .slice(0, 200);
           body += `<ul class="up-folders">${hits.map(h => `
             <li><button data-act="found" data-account="${esc(h.account)}" data-path="${esc(h.path)}"><span class="up-folder">📁 ${esc(h.path)}</span>
-            <span class="up-count">${esc(shortAcct(h.account))}</span><span class="up-go">›</span></button></li>`).join("")
+            <span class="up-hitacct"><span class="up-count">${esc(shortAcct(h.account))}</span>${spaceShortHtml(h.account, size)}</span><span class="up-go">›</span></button></li>`).join("")
             || `<li class="up-empty">No folder matches that.</li>`}</ul>`;
         } else {
         if (last && S.targets.some(a => a.account_id === last.account && a.stacks.some(s => last.path === s.path || last.path.startsWith(s.path + "/")))) {

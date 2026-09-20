@@ -49,12 +49,51 @@ final class ScrayRunMonitor: NSObject {
     private var lastBeat: CFTimeInterval = 0
     private weak var runWebView: WKWebView?
 
+    /// ⚙️ Keep the screen on the whole time the app is in front (native
+    /// 14.48), not only while something is transferring. Set false to go back
+    /// to the transfers-only behaviour.
+    static var keepScreenOnWhileActive = true
+
     private var ticker: Timer?
+    /// A transfer wants the screen on.
     private var holdingScreenAwake = false
+    /// The app is in front. Tracked from the notifications rather than read
+    /// from applicationState, which still says .active inside willResignActive.
+    private var appIsActive = true
+    private var lifecycleWired = false
     private var ring: ScrayRunRing?
     private var parkingSpot: UIView?
 
     private override init() { super.init() }
+
+    // MARK: - Screen
+
+    /// Start holding the screen on for as long as the app is in front.
+    /// Called once, from the module's OnCreate. Safe to call again.
+    func keepAwakeWhileActive() {
+        guard !lifecycleWired else { return }
+        lifecycleWired = true
+        let nc = NotificationCenter.default
+        nc.addObserver(self, selector: #selector(appDidBecomeActive),
+                       name: UIApplication.didBecomeActiveNotification, object: nil)
+        nc.addObserver(self, selector: #selector(appWillResignActive),
+                       name: UIApplication.willResignActiveNotification, object: nil)
+        appIsActive = UIApplication.shared.applicationState == .active
+        applyIdleTimer()
+    }
+
+    @objc private func appDidBecomeActive() {
+        appIsActive = true
+        applyIdleTimer()
+    }
+
+    /// Going away - a call, the app switcher, the lock button. The hold is
+    /// dropped unless a transfer still wants it, which is the state the app
+    /// was in before any of this.
+    @objc private func appWillResignActive() {
+        appIsActive = false
+        applyIdleTimer()
+    }
 
     var runIsLive: Bool {
         progress != nil && CACurrentMediaTime() - lastBeat < Self.heartbeatTimeout
@@ -114,7 +153,17 @@ final class ScrayRunMonitor: NSObject {
     private func setScreenAwake(_ on: Bool) {
         guard on != holdingScreenAwake else { return }
         holdingScreenAwake = on
-        UIApplication.shared.isIdleTimerDisabled = on
+        applyIdleTimer()
+    }
+
+    /// The one place the idle timer is written. Two reasons to hold it: a
+    /// transfer is running, or the app is in front and 14.48's setting is on.
+    /// Main thread only, like everything else here.
+    private func applyIdleTimer() {
+        let want = holdingScreenAwake || (Self.keepScreenOnWhileActive && appIsActive)
+        if UIApplication.shared.isIdleTimerDisabled != want {
+            UIApplication.shared.isIdleTimerDisabled = want
+        }
     }
 
     private func startTicker() {

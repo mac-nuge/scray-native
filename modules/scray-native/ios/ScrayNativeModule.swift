@@ -5,6 +5,14 @@ public class ScrayNativeModule: Module {
   public func definition() -> ModuleDefinition {
     Name("ScrayNative")
 
+    // The screen stays on while the app is in front (native 14.48). Wired
+    // here because it must be running whether or not anything is transferring
+    // - ScrayRunMonitor used to be woken only by a run, a download or an
+    // upload.
+    OnCreate {
+        DispatchQueue.main.async { ScrayRunMonitor.shared.keepAwakeWhileActive() }
+    }
+
     View(ScrayNativeView.self) {
         Prop("source") { (view: ScrayNativeView, path: String) in
             if path.hasPrefix("http") {

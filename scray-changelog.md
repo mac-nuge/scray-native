@@ -4,6 +4,23 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.48 — test: screen stays on while the app is in front
+<!-- 2026-09-20T16:15Z -->
+
+**native** — `stg-native - 14.48`: `modules/scray-native/ios/ScrayRunMonitor.swift`, `modules/scray-native/ios/ScrayNativeModule.swift`, `assets/web/VERSION` (**needs a new IPA build**)
+
+Mac asked for the phone not to sleep while the app is open.
+
+The idle timer was already being held, but only while something was transferring - a basket run, a download or an upload (13.47). Everything else - reading a list, watching the modal, picking files to upload - let the phone lock on its own.
+
+**Change:** `ScrayRunMonitor` now holds the screen on for as long as the app is the frontmost app, and lets go when it isn't. It listens for `didBecomeActive` / `willResignActive` and keeps its own `appIsActive` rather than reading `applicationState`, which still reports `.active` inside `willResignActive`. Both reasons to hold - a transfer, or the app being in front - go through one `applyIdleTimer()`, so a transfer that is still running when the app goes away keeps its own hold exactly as before.
+
+It is wired from the module's `OnCreate`, because the monitor used to be woken only by a run starting. ⚙️ `ScrayRunMonitor.keepScreenOnWhileActive` turns it off again.
+
+**Watch for:** the phone won't lock by itself while Scray is open, so it will sit lit on a table until you lock it or switch away. Say if it should be only while the player is up instead.
+
+**Tested:** Swift not compiled here.
+
 ### native 14.47 — test: menu item reads Upload OneDrive
 <!-- 2026-09-20T16:12Z -->
 

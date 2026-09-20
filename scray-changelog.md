@@ -4,6 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.47 — test: menu item reads Upload OneDrive
+<!-- 2026-09-20T16:12Z -->
+
+**native** — `stg-native - 14.47`: `assets/web/context-menu.js`, `assets/web/randomiser.js`, `assets/web/scray-upload.js`, `assets/web/VERSION`
+
+Mac asked for the per-video menu's "Upload to OneDrive…" to read **Upload OneDrive**.
+
+Renamed in `context-menu.js`, along with the already-there check that reads the label back (it compares by label, so the old string would have let a second copy of the item in). The two comments naming the old label follow it. The sheet's own heading still reads "Upload to OneDrive" - it is a title, not a menu item; say if that should change too.
+
+**Tested:** `node --check` passes.
+
 ### native 14.46 — test: typed-delete prompt reads as a sentence again
 <!-- 2026-09-20T15:51Z -->
 

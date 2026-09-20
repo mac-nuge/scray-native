@@ -3491,7 +3491,7 @@ if (bookmarkFilterState !== "any" && typeof window.scrayHasBookmarks === "functi
 }
 
 // ✅ Native (13.50): only the files on this phone that still need uploading -
-// the ones "Upload to OneDrive…" offers: not in the catalogue, or (13.52) in
+// the ones "Upload OneDrive" offers: not in the catalogue, or (13.52) in
 // it with no OneDrive copy. Strictly false, so a row the sync hasn't judged
 // yet isn't counted.
 if (document.getElementById("uncataloguedToggleBtn")?.dataset.active === "1") {

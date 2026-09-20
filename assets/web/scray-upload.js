@@ -2,7 +2,7 @@
 // Native only (13.47): upload files that are on the phone but not in the
 // catalogue to OneDrive, from the ⋯ / long-press menu.
 //
-//   Menu → "Upload to OneDrive…" → a sheet:
+//   Menu → "Upload OneDrive" → a sheet:
 //     1. FILES    the file you opened it from, ticked, plus every other
 //                 not-in-catalogue file on the phone to tick as well;
 //     2. ACCOUNT  every OneDrive account connected on the server, with the

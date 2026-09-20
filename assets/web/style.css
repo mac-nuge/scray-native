@@ -6142,13 +6142,23 @@ box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 .scray-delete-everywhere[hidden] { display: none; }
 .scray-delete-everywhere label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  /* A sentence, not a row of items (native 14.46). This was a flex row for
+     the old checkbox, and with the checkbox gone each phrase of the typed
+     prompt - the words, the bold "delete", the rest - became its own flex
+     item and they were spread across the line. */
+  display: block;
   margin: 0;
   font-size: 0.9rem;
   font-weight: 600;
+  line-height: 1.35;
   cursor: pointer;
+}
+.scray-delete-everywhere label b {
+  /* The word to type, so it reads as the thing being quoted. */
+  font-weight: 800;
+  background: #ffe9e9;
+  border-radius: 4px;
+  padding: 0 4px;
 }
 /* The global mobile `input { width: 100% }` rule would stretch the box. */
 .scray-delete-everywhere input[type="checkbox"] {
@@ -6156,6 +6166,21 @@ box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   margin: 0;
   padding: 0;
   flex: 0 0 auto;
+}
+.scray-delete-everywhere-word {
+  width: 100%;
+  margin: 6px 0 2px;
+  padding: 7px 9px;
+  border: 1px solid #dc3545;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  letter-spacing: .04em;
+}
+.scray-delete-everywhere-word.is-armed {
+  background: #ffe9e9;
+  border-color: #b02a37;
+  color: #b02a37;
+  font-weight: 700;
 }
 .scray-delete-everywhere-note {
   display: block;
@@ -8170,6 +8195,7 @@ body.scray-bulk-mode #taggedVideosContainer li.lc-row {
 #bulkActionBar .bulk-basket  { background: #e91e63; }
 #bulkActionBar .bulk-refresh { background: #17a2b8; }
 #bulkActionBar .bulk-delete  { background: #f44336; }
+#bulkActionBar .bulk-stash   { background: #6c5ce7; }
 #bulkActionBar .bulk-clear   { background: #333; }
 #bulkActionBar .bulk-all     { background: #f5c518; color: #000; }
 #bulkActionBar .bulk-delete  { display: inline-flex; align-items: center; justify-content: center; }

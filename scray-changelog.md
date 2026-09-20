@@ -4,6 +4,58 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.46 — test: typed-delete prompt reads as a sentence again
+<!-- 2026-09-20T15:51Z -->
+
+**native** — `stg-native - 14.46`: `assets/web/style.css`, `assets/web/VERSION`
+
+14.44's typed confirmation worked, but its prompt came out spread across the line: "Also delete from OneDrive? Type … **delete** … to allow it."
+
+**Cause:** `.scray-delete-everywhere label` was `display: flex` with a gap, written for the checkbox sitting beside its text. With the checkbox gone, each run of text and the `<b>` became separate flex items, spaced apart by the gap and stretched by the row.
+
+**Fix:** that label is `display: block` now, so the prompt flows as one sentence, and the `<b>` carries a pale red highlight so the word to type still stands out. CSS only; the delete behaviour is untouched.
+
+**Tested:** by eye against the screenshot of the broken layout. Not seen rendered.
+
+### native 14.45 — test: upload piece size follows what OneDrive accepts, and is shown
+<!-- 2026-09-20T15:43Z -->
+
+**native** — `stg-native - 14.45`: `modules/scray-native/ios/ScrayUploads.swift`, `assets/web/scray-upload.js`, `assets/web/VERSION` (**needs a new IPA build** for the Swift half)
+
+14.43 raised the piece size to 25 MiB. Mac, on a new IPA, still saw 10 MB going up at a time.
+
+**The likely cause:** a 202 names the next byte OneDrive wants, and that is not always the end of what was just sent. OneDrive can take the first part of a large piece and ask for the rest. The code already trusted `nextExpectedRanges` over what it sent — correct, and why nothing broke — but it then re-sent the remainder as a fresh 25 MiB piece, so the visible step stayed 10 MB and every piece sent 15 MiB that was thrown away. Unverified: it fits what he's seeing, but the answers themselves have not been read yet.
+
+**Change:**
+- **Follow the answers.** When a 202 acknowledges less than was sent, that size (rounded down to a whole 320 KiB, floor 1.25 MiB) becomes the piece size for the rest of the run. It only ever goes down, and it resets when the app restarts. The panel says "OneDrive is taking 10 MiB a piece" the first time it shrinks, and it goes to the log.
+- **Say the piece size.** The job status now carries `piece`, and the upload panel prints it next to the speed ("… · 25 MB pieces"). That is what settles the question next time: the panel says what is really going up, whatever the source says.
+
+**If it still reads 10 MB after this build**, that is OneDrive's limit and the app is now matching it, not fighting it. The parallel files from 14.43 are then what carries the speed.
+
+**Tested:** `node --check` passes. Swift not compiled here.
+
+### browse 14.42 / picker 14.30 / native 14.44 — test: five fixes - typed delete, hold clears filters, rename offer, number-stripping, bulk stash edit
+<!-- 2026-09-20T15:38Z -->
+
+**browse** — `staging-browse - 14.42`: `api.php`, `VERSION.txt` · **picker** — `staging - 14.30`: `ui.js`, `randomiser.js`, `file-operations.js`, `scray-stash-nav.js`, `scray-stash-edit.js`, `scray-bulk-select.js`, `style.css`, `VERSION` · **native** — `stg-native - 14.44`: the same files under `assets/web/`, plus `assets/web/VERSION`
+
+Five things Mac asked for in one go.
+
+**1. Delete from OneDrive has to be typed (native).** `showDeleteModal`'s "Also delete from OneDrive" checkbox was one stray tap away from sending every copy of a file to the Recycle bin. It is now a text box: the word **delete** has to be written out before the button becomes "Delete everywhere". The box turns red once it reads right. Phone-only delete is unchanged and still the default.
+
+**2. Holding the magnifier clears the tag filters too.** It cleared the search term only. It now runs `scrayClearAllFilters` — what the Clear all pill does: tags, studios, scores, excludes (bar the defaults) and the search boxes. The hold also fires with no search term now, as long as something is filtered, via the new `window.scrayAnyFilterOn()` (the same count the Clear all pill appears on).
+
+**3. "Rename too?" instead of an automatic rename.** 13.189 closed the Stash modal after a match and opened the rename modal on top. Now the Stash modal stays open — the scene you just attached is what you want to read while choosing a name — and a green chip at the top of the panel offers the rename. Tapping it opens the rename modal above the still-open Stash modal.
+
+**4. A number stuck on a word is dropped from search terms.** `clean()` in `scray-stash-nav.js`, which the Filename button and de-Camel both use, now strips trailing digits: "radke2" → "radke", "remaster2" → "remaster". Three letters at least, so a code like "EP447" survives, and a word that is all digits is left alone (a year in a title is worth searching for).
+
+**5. Bulk stash edit — the S button on the bulk bar.** Select files, tap the violet **S**, and the Correct details form opens in bulk mode.
+- **The form** is the same one, with the same vocabulary and dropdowns, cut to studio, performers and tags. Anything left blank is left alone on every file, so nothing is blanked by omission. Performers and tags each have **Add to what's there** (the default) or **Replace**.
+- **Saving** is two calls, not one per file: matched files take the fields as corrections (`stash_edit_override_save`), the rest as hand-entered details (`stash_edit_manual_save`). Because a hand-entered save replaces the whole entry, each of those rows carries its own existing fields back up untouched. New performers get their gender asked first, as in the single-file form.
+- **api.php:** the apps' `stash_edit_*` aliases took one row per call. They now take up to 500, the console action's own limit, reaching exactly the same per-row checks. New alias `stash_edit_list` reads several files' editable rows for the device key — the by-keys form only, never a scope, which would hand that key the whole catalogue.
+
+**Tested:** `php -l` passes; `node --check` passes on every changed file; the number-stripping was run over sample filenames ("FreyaMayer2_ANewStar_1280x720_60fps" → "Freya Mayer A New Star", "EP447 Isabella Jules" unchanged). The bulk save has not been run against real files yet — try it on two files first.
+
 ### native 14.43 — test: faster uploads - three files at once, 25 MiB pieces
 <!-- 2026-09-20T15:09Z -->
 

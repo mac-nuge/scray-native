@@ -107,6 +107,7 @@
       <button type="button" class="bulk-btn bulk-all" data-bulk="all" title="Select every file in the list">Select all</button>
       <button type="button" class="bulk-btn bulk-basket" data-bulk="basket" title="Add to the basket">B</button>
       <button type="button" class="bulk-btn bulk-refresh" data-bulk="refresh" title="Refresh data">Ref</button>
+      <button type="button" class="bulk-btn bulk-stash" data-bulk="stash" title="Edit stash details (studio, performers, tags)">S</button>
       <button type="button" class="bulk-btn bulk-delete" data-bulk="delete" title="Delete" aria-label="Delete">${BIN_SVG}</button>
       <button type="button" class="bulk-btn bulk-clear" data-bulk="close" title="Turn bulk select off">✕</button>`;
     bar.addEventListener('click', (e) => {
@@ -151,7 +152,7 @@
       const everything = n > 0 && n >= listVideos().length;
       all.textContent = everything ? 'Select none' : 'Select all';
     }
-    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-delete')
+    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-stash, .bulk-delete')
       .forEach(b => { b.disabled = n === 0; });
     placeBar();
   }
@@ -395,12 +396,74 @@
       return;
     }
 
+    if (what === 'stash') { await openBulkStash(videos); return; }
+
     if (what === 'delete') {
       if (typeof window.showBulkDeleteModal !== 'function') { alert('Delete is not available here.'); return; }
       // Its own confirmation, its own progress, and it removes the rows.
       await window.showBulkDeleteModal(videos);
       clearSelection();
     }
+  }
+
+  /**
+   * Stash details for the whole selection (picker 14.30 / native 14.44).
+   *
+   * The Correct details form from the player's Stash modal, in bulk mode: the
+   * same fields, the same vocabulary and the same dropdowns, applied to every
+   * selected file. Borrows that modal's id so it wears its stylesheet.
+   */
+  async function openBulkStash(videos) {
+    if (!window.scrayStashEdit || typeof window.scrayStashEdit.open !== 'function') {
+      alert('Stash editing is not available here.');
+      return;
+    }
+    const keys = [...new Set(videos
+      .map(v => v.videoKey || (window.scrayVideoKey ? window.scrayVideoKey(v.filename) : ''))
+      .filter(Boolean))];
+    if (!keys.length) { alert('Those files have no catalogue key.'); return; }
+
+    document.getElementById('stashModal')?.remove();
+    const modal = document.createElement('div');
+    modal.className = 'basket-json-modal';
+    modal.id = 'stashModal';
+    modal.style.cssText = 'transform:none;padding:0;z-index:2147483647;';
+    modal.innerHTML =
+      '<div class="basket-json-modal-content" style="transform:none;max-width:640px;max-height:82vh;' +
+           'display:flex;flex-direction:column;overflow:hidden;">' +
+        '<h3 style="margin-top:0;flex:0 0 auto;">Stash details</h3>' +
+        '<div id="bulkStashBody" style="flex:1 1 auto;min-height:0;overflow-y:auto;' +
+             '-webkit-overflow-scrolling:touch;">Loading&hellip;</div>' +
+        '<div id="bulkStashFooter" style="display:flex;gap:8px;margin-top:14px;flex:0 0 auto;"></div>' +
+      '</div>';
+    document.body.appendChild(modal);
+
+    await new Promise(resolve => {
+      window.scrayStashEdit.open({
+        host: modal.querySelector('#bulkStashBody'),
+        actions: modal.querySelector('#bulkStashFooter'),
+        overlay: modal,
+        video: videos[0] || {},
+        videoKey: keys[0],
+        bulkKeys: keys,
+        onDone: (res) => {
+          modal.remove();
+          if (res && res.saved !== undefined) {
+            say(res.skipped
+              ? `⚠️ ${res.saved} updated, ${res.skipped} skipped${res.why ? ` (${res.why})` : ''}`
+              : `✅ Stash details set on ${res.saved} file${res.saved === 1 ? '' : 's'}`,
+              res.skipped ? '#c0392b' : undefined);
+            clearSelection();
+            if (typeof window.filterDisplayedByFilename === 'function') {
+              window.skipSearchScroll = true;
+              window.skipPanelAutoOpen = true;
+              window.filterDisplayedByFilename();
+            }
+          }
+          resolve();
+        }
+      });
+    });
   }
 
   // ---------------------------------------------------------------- buttons

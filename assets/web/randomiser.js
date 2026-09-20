@@ -2627,6 +2627,23 @@ if (typeof window.scrayTotalFilterTerms === 'function' && window.scrayTotalFilte
    container.appendChild(ixPill);
 }
 
+/**
+ * Is any tag / studio / score / orientation-style filter on right now?
+ * (picker 14.30 / native 14.44)
+ *
+ * The same count the Clear all pill appears on, as a function, so holding the
+ * corner magnifier can clear the filters as well as the search term.
+ */
+window.scrayAnyFilterOn = function () {
+   const ex = (window.SCRAY_FACET_CLASSES || []).reduce((n, k) => {
+      const x = (window.scrayFacetExcludes || {})[k];
+      return n + (x ? x.size : 0);
+   }, 0) + (($('#excludeTagSelect').val() || [])
+      .filter(t => !(window.scrayDefaultExcludeTags && window.scrayDefaultExcludeTags.has(t))).length);
+   const inc = typeof window.scrayTotalFilterTerms === 'function' ? window.scrayTotalFilterTerms() : 0;
+   return inc + ex > 0;
+};
+
 // Clear all (picker 13.169 / native 13.165): shown as soon as ANY include or
 // exclude is on - one tag, one studio filtered out, anything. The default
 // exclude list doesn't count (13.170 / 13.166): it is always applied, so

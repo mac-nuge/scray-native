@@ -40,6 +40,9 @@ final class ScrayUploadJob {
     /// Bytes of the piece in flight that have left the phone.
     var inFlight: Int64 = 0
     var pieceLength: Int64 = 0
+    /// Where the piece in flight started, so a short acknowledgement can be
+    /// measured against what was actually sent (native 14.45).
+    var pieceStart: Int64 = 0
 
     var state: State = .uploading
     var error: String?
@@ -98,7 +101,9 @@ final class ScrayUploadJob {
             "confirmed": confirmed,
             "total": total,
             "bytesPerSecond": bytesPerSecond,
-            "attempts": attempts
+            "attempts": attempts,
+            // So the panel can say what size pieces are actually going (14.45).
+            "piece": pieceLength
         ]
         if let error = error { d["error"] = error }
         if let note = note { d["note"] = note }
@@ -117,6 +122,20 @@ final class ScrayUploads: NSObject, URLSessionDataDelegate {
     /// ceiling is 60 MiB; this stays well under it because the piece is held in
     /// memory, and up to three files (the page's PARALLEL) go at once.
     private static let pieceSize: Int64 = 320 * 1024 * 80
+
+    /// ⚙️ Smallest piece worth falling back to: 320 KiB × 4.
+    private static let minPieceSize: Int64 = 320 * 1024 * 4
+
+    /// What OneDrive is actually taking (native 14.45).
+    ///
+    /// A 202 names the next byte it wants, and that is not always the end of
+    /// what was just sent: OneDrive can accept only the first part of a large
+    /// piece and ask for the rest. Sending 25 MiB to have 10 MiB of it taken
+    /// is slower than sending 10 MiB, because the remainder is sent again.
+    /// So the piece size follows what the answers say, and the rest of the run
+    /// uses that instead. Reset per app run, only ever read and written on
+    /// `queue`.
+    private static var acceptedPiece: Int64 = pieceSize
 
     /// ⚙️ Tries per stall before giving up. Each waits longer (2, 4, 8… s, capped
     /// at 30) and the count resets whenever a piece gets through.
@@ -234,7 +253,7 @@ final class ScrayUploads: NSObject, URLSessionDataDelegate {
         guard let handle = job.handle else { return fail(job, "The file was closed") }
 
         let start = job.confirmed
-        let length = min(ScrayUploads.pieceSize, job.total - start)
+        let length = min(ScrayUploads.acceptedPiece, job.total - start)
         guard length > 0 else { return fail(job, "OneDrive expects more bytes than the file has") }
 
         let data: Data
@@ -253,6 +272,7 @@ final class ScrayUploads: NSObject, URLSessionDataDelegate {
 
         job.inFlight = 0
         job.pieceLength = length
+        job.pieceStart = start
         job.response = Data()
         let task = session.uploadTask(with: request, from: data)
         job.task = task
@@ -352,10 +372,27 @@ final class ScrayUploads: NSObject, URLSessionDataDelegate {
         case 202:
             // Accepted; OneDrive names the next byte it wants. Normally the end
             // of this piece, but trust what it says over what was sent.
-            job.confirmed = ScrayUploads.nextExpected(job.response) ?? (job.confirmed + job.pieceLength)
+            let sentEnd = job.pieceStart + job.pieceLength
+            job.confirmed = ScrayUploads.nextExpected(job.response) ?? sentEnd
+            // Took less than was sent: that is OneDrive's real piece size, and
+            // everything past it has to go again. Follow it (native 14.45),
+            // rounded down to a whole 320 KiB, and say so on the panel - this
+            // is why a bigger piece can look like it made no difference.
+            if job.confirmed > job.pieceStart && job.confirmed < sentEnd {
+                let took = job.confirmed - job.pieceStart
+                let unit: Int64 = 320 * 1024
+                let fit = max(ScrayUploads.minPieceSize, (took / unit) * unit)
+                if fit < ScrayUploads.acceptedPiece {
+                    ScrayUploads.acceptedPiece = fit
+                    job.note = "OneDrive is taking \(fit / (1024 * 1024)) MiB a piece"
+                    NSLog("[scray] OneDrive accepted %lld of %lld bytes - piece size now %lld",
+                          took, job.pieceLength, fit)
+                }
+            } else {
+                job.note = nil
+            }
             job.inFlight = 0
             job.attempts = 0
-            job.note = nil
             sendNextPiece(job)
         case 200, 201:
             finish(job, item: json)

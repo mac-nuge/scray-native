@@ -2078,22 +2078,28 @@ if (jumpSearchBtn) {
     });
 
     // ⚙️ Hold to clear (picker 13.158 / native 13.156; no prompt since
-    // 13.159 / 13.157). Holding the search button with a term in place clears
-    // it straight away - the same clear as the pill's x, with its "Filter
-    // cleared" tooltip by the button. With nothing to clear, a hold is just a
-    // slow tap and the click above runs as normal.
+    // 13.159 / 13.157). Holding the search button clears the filter straight
+    // away, with its "Filter cleared" tooltip by the button. With nothing to
+    // clear, a hold is just a slow tap and the click above runs as normal.
+    //
+    // Since picker 14.30 / native 14.44 it clears the TAG filters too - the
+    // same thing the Clear all pill does - so one hold puts the list back to
+    // the whole catalogue. A hold now also fires with no search term, as long
+    // as some filter is on.
     const SEARCH_HOLD_MS = 600;
     let searchHoldTimer = null;
     let searchHoldFired = false;
     const searchTerm = () => (document.getElementById("filenameSearchBox")?.value || "").trim();
+    const anythingToClear = () =>
+        !!searchTerm() || !!(typeof window.scrayAnyFilterOn === "function" && window.scrayAnyFilterOn());
     const endSearchHold = () => { clearTimeout(searchHoldTimer); searchHoldTimer = null; };
     jumpSearchBtn.addEventListener("pointerdown", () => {
         searchHoldFired = false;
         endSearchHold();
-        if (!searchTerm()) return;
+        if (!anythingToClear()) return;
         searchHoldTimer = setTimeout(() => {
             searchHoldTimer = null;
-            if (!searchTerm()) return;
+            if (!anythingToClear()) return;
             searchHoldFired = true;
             try { navigator.vibrate?.(15); } catch (_) {}
             const pill = document.getElementById("scraySearchPillInput");
@@ -2101,8 +2107,13 @@ if (jumpSearchBtn) {
                 pill.value = "";
                 pill.blur();
             }
-            // Positions its "Filter cleared" tooltip off the event target.
-            if (typeof window.clearSearchPillFilter === "function") {
+            // Tags, studios, scores, excludes and the search term, in one -
+            // the Clear all pill's action. It clears the search boxes itself
+            // through clearSearchPillFilter, which also positions the
+            // "Filter cleared" tooltip off the event target.
+            if (typeof window.scrayClearAllFilters === "function") {
+                window.scrayClearAllFilters({ target: jumpSearchBtn });
+            } else if (typeof window.clearSearchPillFilter === "function") {
                 window.clearSearchPillFilter({ target: jumpSearchBtn });
             }
             // The pill sizes itself on blur; nudge it so an emptied pill
@@ -2112,7 +2123,7 @@ if (jumpSearchBtn) {
     });
     ["pointerup", "pointerleave", "pointercancel"].forEach(t => jumpSearchBtn.addEventListener(t, endSearchHold));
     // No long-press callout or menu on the button.
-    jumpSearchBtn.addEventListener("contextmenu", (e) => { if (searchTerm()) e.preventDefault(); });
+    jumpSearchBtn.addEventListener("contextmenu", (e) => { if (anythingToClear()) e.preventDefault(); });
     // The click that ends a hold must not also run the jump. Capture on
     // document, so it's stopped before the button's own listener.
     document.addEventListener("click", (e) => {

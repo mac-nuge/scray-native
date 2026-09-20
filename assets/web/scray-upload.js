@@ -183,6 +183,10 @@
         if (!job) return reject(new Error("The app lost track of this upload — retry it"));
         it.sent = Number(job.sent) || 0;
         it.bps = Number(job.bytesPerSecond) || 0;
+        // What size pieces are really going up (native 14.45). Worth seeing:
+        // OneDrive can take less than the app offers, and then the app follows
+        // its lead - which is why a bigger piece can look like it did nothing.
+        it.piece = Number(job.piece) || 0;
         it.note = job.note || null;
         renderPanel();
         if (job.state === "finished") return resolve(job);
@@ -409,7 +413,8 @@
         const eta = c.bps > 0 ? fmtEta((c.size - c.sent) / c.bps) : "";
         const status = c.state === "starting" ? "asking OneDrive for an upload link…"
           : c.state === "finishing" ? "adding to the catalogue…"
-          : [`${p}%`, `${fmtBytes(c.sent)} of ${fmtBytes(c.size)}`, fmtSpeed(c.bps), eta && `${eta} left`]
+          : [`${p}%`, `${fmtBytes(c.sent)} of ${fmtBytes(c.size)}`, fmtSpeed(c.bps), eta && `${eta} left`,
+             c.piece ? `${fmtBytes(c.piece)} pieces` : ""]
               .filter(Boolean).join(" · ");
         return `
         <div class="up-now">

@@ -808,8 +808,10 @@ async function showDeleteModal(video) {
            <p class="file-operation-filename"><strong>${video.filename || ''}</strong></p>
            ${everywhereOk ? `
            <div class="scray-delete-everywhere">
-               <label><input type="checkbox" id="deleteEverywhereChk"> Also delete from OneDrive</label>
-               <span class="scray-delete-everywhere-note">Every OneDrive copy goes to the Recycle bin and the file leaves the catalogue. Needs a connection.</span>
+               <label for="deleteEverywhereWord">Also delete from OneDrive? Type <b>delete</b> to allow it.</label>
+               <input type="text" id="deleteEverywhereWord" class="scray-delete-everywhere-word"
+                      placeholder="delete" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+               <span class="scray-delete-everywhere-note">Every OneDrive copy goes to the Recycle bin and the file leaves the catalogue. Needs a connection. Leave this empty to delete the phone copy only.</span>
            </div>` : ''}
            <div class="file-operation-buttons">
                <button id="confirmDeleteBtn" class="modal-btn modal-btn-danger">Delete</button>
@@ -819,10 +821,17 @@ async function showDeleteModal(video) {
    `;
    document.body.appendChild(modal);
 
-   const everywhereBox = () => document.getElementById('deleteEverywhereChk');
-   everywhereBox()?.addEventListener('change', () => {
+   // Typed, not ticked (native 14.44): one stray tap on a checkbox used to be
+   // the whole difference between deleting the phone's copy and deleting every
+   // copy there is. The word has to be written out.
+   const everywhereWord = () => document.getElementById('deleteEverywhereWord');
+   const everywhereOn = () => (everywhereWord()?.value || '').trim().toLowerCase() === 'delete';
+   everywhereWord()?.addEventListener('input', () => {
+       const on = everywhereOn();
+       const box = everywhereWord();
+       box.classList.toggle('is-armed', on);
        const btn = document.getElementById('confirmDeleteBtn');
-       if (btn && !btn.disabled) btn.textContent = everywhereBox().checked ? 'Delete everywhere' : 'Delete';
+       if (btn && !btn.disabled) btn.textContent = on ? 'Delete everywhere' : 'Delete';
    });
 
    // Close on background click
@@ -842,7 +851,7 @@ async function showDeleteModal(video) {
        confirmBtn.textContent = 'Deleting...';
 
        try {
-           if (everywhereBox()?.checked) {
+           if (everywhereOn()) {
                const res = await scrayDeleteEverywhere(video);
                modal.remove();
                const n = Number(res && res.onedrive_deleted) || 0;
@@ -858,7 +867,7 @@ async function showDeleteModal(video) {
            console.error('Delete failed:', err);
            alert(`Delete failed: ${err.message}`);
            confirmBtn.disabled = false;
-           confirmBtn.textContent = everywhereBox()?.checked ? 'Delete everywhere' : 'Delete';
+           confirmBtn.textContent = everywhereOn() ? 'Delete everywhere' : 'Delete';
        }
    });
 }
@@ -4460,14 +4469,31 @@ async function showStashModal(video, openOpts) {
     // its own. The pop-up goes up after the rename modal so it lands on top.
     const offerRename = () => {
         if (!document.body.contains(modal)) return;
-        close();
-        if (typeof window.showRenameModal === 'function') {
+        // Offered, not done (picker 14.30 / native 14.44). 13.189 closed this
+        // modal and opened the rename one on top of it; now the modal stays
+        // where it is - the scene that has just been attached is what you
+        // want to read while deciding on a name - and a chip at the top of
+        // the panel opens the rename when you ask for it.
+        body.querySelector('#stashRenameOffer')?.remove();
+        const offer = document.createElement('div');
+        offer.id = 'stashRenameOffer';
+        offer.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;' +
+            'padding:7px 9px;border-radius:6px;background:#eaf7ee;border-left:3px solid #28a745;font-size:.82rem;';
+        offer.innerHTML = '<span>Matched. Rename the file to suit?</span>' +
+            '<button id="stashRenameNow" class="modal-btn modal-btn-secondary" ' +
+            'style="flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;">&#9998; Rename too?</button>';
+        body.prepend(offer);
+        body.scrollTop = 0;
+        offer.querySelector('#stashRenameNow').addEventListener('click', () => {
+            if (typeof window.showRenameModal !== 'function') return;
             try {
+                // On top of this modal, which stays open underneath.
                 window.showRenameModal(video, { zIndex: 2147483647 });
+                offer.remove();
             } catch (e) {
                 console.error('[stash] rename after match failed:', e);
             }
-        }
+        });
         const partial = /refused|could not/i.test(lastAttachNote);
         if (typeof window.showScoreConfirmation === 'function') {
             window.showScoreConfirmation(partial ? '⚠️ Stash matched - stored locally' : '✅ Stash matched',

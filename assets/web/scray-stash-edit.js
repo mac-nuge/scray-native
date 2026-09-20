@@ -160,6 +160,9 @@
 #stashModal .sse-danger { margin: 14px 0 4px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,.3); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 #stashModal .sse-danger button.sse-small { border-color: #dc3545; color: #dc3545; background: transparent; }
 #stashModal .sse-danger button.sse-small.sse-armed { background: #dc3545; color: #fff; }
+#stashModal .sse-how { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; font-size: .78rem; color: #555; }
+#stashModal .sse-how label { display: inline-flex; align-items: center; gap: 4px; margin: 0; cursor: pointer; }
+#stashModal .sse-how input { width: auto; margin: 0; flex: 0 0 auto; }
 #stashModal .sse-err { color: #dc3545; font-size: .85rem; margin: 6px 0 0; }
 #stashModal .sse-err:empty { display: none; }
 #stashModal .sse-dd { position: relative; z-index: 1; display: block; width: 100%; box-sizing: border-box; margin: 3px 0 0; background: #fff; color: #222; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.25); overflow-y: auto; -webkit-overflow-scrolling: touch; font-size: .85rem; text-align: left; }
@@ -188,6 +191,15 @@
     const overlay = opts.overlay || document.body;
     const video   = opts.video || {};
     const key     = opts.videoKey;
+    // Bulk stash edit (picker 14.30 / native 14.44): the same form, applied to
+    // every selected file. Only studio, performers and tags - the fields that
+    // are the same for a batch. A field left alone is not sent, so nothing is
+    // blanked by leaving it empty, and lists can be added to rather than
+    // replaced. `bulkRows` are those files' current values, read in one call.
+    const bulkKeys = Array.isArray(opts.bulkKeys) && opts.bulkKeys.length ? opts.bulkKeys.slice() : null;
+    const BULK_FIELDS = ['studio', 'performers', 'tags'];
+    const howList = { performers: 'add', tags: 'add' };
+    let bulkRows = null;
 
     let row = null;           // stash_edit_get's row
     let orig = null;          // field values as loaded
@@ -252,6 +264,22 @@
 
     (async () => {
       try {
+        if (bulkKeys) {
+          const [got] = await Promise.all([
+            api('stash_edit_list', { method: 'POST', body: { video_keys: bulkKeys } }),
+            loadVocab(false)
+          ]);
+          if (finished) return;
+          bulkRows = got.rows || [];
+          if (!bulkRows.length) throw new Error('none of those files are in the catalogue');
+          row = { filename: bulkRows.length + ' files', matched: 0, manual: 0, override_fields: [] };
+          orig = {}; FIELDS.forEach(f => { orig[f] = (f === 'performers' || f === 'tags') ? [] : f === 'duration_sec' ? null : ''; });
+          base = null;
+          cur = JSON.parse(JSON.stringify(orig));
+          render();
+          saveBtn.disabled = false;
+          return;
+        }
         const [got] = await Promise.all([
           api('stash_edit_get', { method: 'POST', body: { video_key: key } }),
           loadVocab(false)
@@ -286,6 +314,7 @@
     })();
 
     function mode() {
+      if (bulkKeys) return 'bulk';
       if (row.matched) return 'correct';
       if (row.manual) return 'manual';
       return 'new';
@@ -293,6 +322,7 @@
 
     function render() {
       const m = mode();
+      if (m === 'bulk') return renderBulk();
       const head = m === 'correct'
         ? '<strong>Correct StashDB&rsquo;s details</strong><div>Only what you change is kept, as your ' +
           'correction. StashDB&rsquo;s own copy is left alone.</div>'
@@ -378,6 +408,56 @@
       armDanger(host.querySelector('[data-unmatch]'), 'Tap again to unmatch', unmatchScene);
       FIELDS.forEach(paintSaid);
       paintDur();
+    }
+
+    /** The batch form: three fields, each optional, plus how lists are applied. */
+    function renderBulk() {
+      const matched = bulkRows.filter(r => r.matched).length;
+      const rest    = bulkRows.length - matched;
+      const how = (f) =>
+        '<div class="sse-how">' +
+          ['add', 'replace'].map(v =>
+            '<label><input type="radio" name="sse-how-' + f + '" value="' + v + '"' +
+            (howList[f] === v ? ' checked' : '') + '> ' +
+            (v === 'add' ? 'Add to what&rsquo;s there' : 'Replace') + '</label>').join('') +
+        '</div>';
+
+      host.innerHTML =
+        '<div class="sse">' +
+          '<div class="sse-head">' +
+            '<strong>Change ' + bulkRows.length + ' file' + (bulkRows.length === 1 ? '' : 's') + '</strong>' +
+            '<div>Only what you fill in is applied. Anything left blank is left alone on every file.' +
+            (matched && rest ? ' ' + matched + ' matched to StashDB (saved as your corrections) and ' +
+                               rest + ' not (saved as hand-entered details).' : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="sse-f" data-f="studio">' +
+            '<div class="sse-l">Studio</div>' +
+            '<input class="sse-in sse-combo" type="text" data-f="studio" data-kind="studio" placeholder="Leave blank to keep each file&rsquo;s own" ' +
+              'autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" value="' + esc(cur.studio) + '">' +
+          '</div>' +
+          '<div class="sse-f" data-f="performers">' +
+            '<div class="sse-l">Performers</div>' +
+            '<div class="sse-chips" data-chips="performers"></div>' +
+            '<input class="sse-in sse-combo" type="text" data-f="performers" data-kind="performer" data-many="1" ' +
+              'placeholder="Add a performer" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false">' +
+            how('performers') +
+          '</div>' +
+          '<div class="sse-f" data-f="tags">' +
+            '<div class="sse-l">Tags</div>' +
+            '<div class="sse-chips" data-chips="tags"></div>' +
+            '<input class="sse-in sse-combo" type="text" data-f="tags" data-kind="tag" data-many="1" ' +
+              'placeholder="Add a tag" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">' +
+            how('tags') +
+          '</div>' +
+          '<div class="sse-err"></div>' +
+        '</div>';
+
+      ['performers', 'tags'].forEach(f => paintChips(f));
+      host.querySelectorAll('input.sse-in').forEach(wireInput);
+      host.querySelectorAll('.sse-how input').forEach(r => r.addEventListener('change', () => {
+        howList[r.name.replace('sse-how-', '')] = r.value;
+      }));
     }
 
     const errEl = () => host.querySelector('.sse-err');
@@ -755,6 +835,7 @@
       }
 
       const m = mode();
+      if (m === 'bulk') return saveBulk(v);
       let body;
       if (m === 'correct') {
         const row1 = { video_key: key };
@@ -791,6 +872,83 @@
       } catch (err) {
         setBusy(false);
         setErr('Could not save: ' + err.message);
+      }
+    }
+
+    /**
+     * Apply the filled-in fields to every selected file.
+     *
+     * Two calls, not one per file: matched files take the same corrections
+     * (stash_edit_override_save), the rest get hand-entered details
+     * (stash_edit_manual_save), which REPLACES the entry - so each of those
+     * rows carries its own existing fields back up untouched.
+     */
+    async function saveBulk(v) {
+      const want = {};
+      if (String(v.studio || '').trim()) want.studio = String(v.studio).trim();
+      if (v.performers.length) want.performers = v.performers.slice();
+      if (v.tags.length)       want.tags       = v.tags.slice();
+      if (!Object.keys(want).length) {
+        setErr('Nothing to apply yet — fill in a studio, a performer or a tag.');
+        return;
+      }
+
+      const merge = (f, mine) => {
+        if (!want[f]) return null;
+        if (howList[f] === 'replace') return want[f].slice();
+        const out = (mine || []).slice();
+        const have = new Set(out.map(nameKey));
+        want[f].forEach(n => { if (!have.has(nameKey(n))) { have.add(nameKey(n)); out.push(n); } });
+        return out;
+      };
+
+      const overrideRows = [], manualRows = [];
+      bulkRows.forEach(r => {
+        const one = { video_key: r.video_key };
+        if (want.studio) one.studio = want.studio;
+        const p = merge('performers', r.performers);
+        const t = merge('tags', r.tags);
+        if (p) one.performers = p;
+        if (t) one.tags = t;
+        if (r.matched) { overrideRows.push(one); return; }
+        // A hand-entered save replaces the whole entry, so everything this
+        // form does not touch goes back up exactly as it is.
+        manualRows.push(Object.assign({
+          title: r.title || titleFromFilename(r.filename || ''),
+          studio: r.studio || '', performers: r.performers || [], tags: r.tags || [],
+          release_date: r.release_date || '', code: r.code || '', director: r.director || '',
+          duration_sec: r.duration_sec ?? null
+        }, one));
+      });
+
+      setBusy(true, 'Applying…');
+      try {
+        const names = (want.performers || []).filter(n => newPerformers.has(nameKey(n)));
+        for (const n of names) {
+          const g = newPerformers.get(nameKey(n));
+          await api('stash_edit_vocab_add', { method: 'POST',
+            body: { kind: 'performer', name: n, meta: g ? { gender: g } : {} } });
+        }
+        const chunk = (rows) => {
+          const out = [];
+          for (let i = 0; i < rows.length; i += 200) out.push(rows.slice(i, i + 200));
+          return out;
+        };
+        let saved = 0, skipped = 0, why = '';
+        for (const [action, rows] of [['stash_edit_override_save', overrideRows],
+                                      ['stash_edit_manual_save', manualRows]]) {
+          for (const part of chunk(rows)) {
+            const res = await api(action, { method: 'POST', body: { rows: part } });
+            saved += Number(res.saved || 0);
+            skipped += Number(res.skipped || 0);
+            if (!why && res.details && res.details[0]) why = res.details[0].why || '';
+          }
+        }
+        await refreshAfter();
+        finish({ bulk: true, saved, skipped, why });
+      } catch (err) {
+        setBusy(false);
+        setErr('Could not apply: ' + err.message);
       }
     }
 

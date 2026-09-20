@@ -70,9 +70,15 @@
     const noise = (t) => t
       .replace(/(^|\s)\d{3,4}\s*x\s*\d{3,4}(?=\s|$)/gi, ' ')
       .replace(/(^|\s)(?:\d{3,4}p|[48]k|\d{2,3}\s*fps|\d{3,5}\s*kbps)(?=\s|$)/gi, ' ');
-    return noise(noise(String(text ?? '').replace(/[^\p{L}\p{N}'\s]+/gu, ' '))
+    // A number stuck on the end of a word goes (picker 14.30 / native 14.44):
+    // "radke2" and "remaster2" are this library's copy numbers, and a
+    // performer or a title almost never carries one. Three letters at least,
+    // so a code like "EP447" or "AA12" is left alone, and a word that is all
+    // digits is left alone too - a year in a title is worth searching for.
+    const unnumber = (t) => t.replace(/(\p{L}{3,})\d+(?=\s|$)/gu, '$1');
+    return unnumber(noise(noise(String(text ?? '').replace(/[^\p{L}\p{N}'\s]+/gu, ' '))
       .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-      .replace(/([a-z0-9])([A-Z])/g, '$1 $2'))
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')))
       .replace(/\s+/g, ' ')
       .trim();
   }

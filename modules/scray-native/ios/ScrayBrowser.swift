@@ -45,7 +45,12 @@ final class ScrayBrowser: NSObject {
 
     /// `url` is where to go; nil resumes wherever the browser was left.
     /// `home` is what the house button goes to.
-    func present(url: String?, home: String) {
+    ///
+    /// `fromNative` marks a trip that started in the app's own view rather
+    /// than on a page inside the browser (native 14.49). For that session the
+    /// ‹P button becomes ‹N and closes the browser, putting you back where you
+    /// were in Native - the same thing ‹P does for Picker.
+    func present(url: String?, home: String, fromNative: Bool = false) {
         DispatchQueue.main.async {
             let homeURL = URL(string: home) ?? URL(string: "about:blank")!
 
@@ -59,6 +64,7 @@ final class ScrayBrowser: NSObject {
             }
 
             vc.pendingURL = url.flatMap { URL(string: $0) }
+            if fromNative { vc.cameFromNative = true }
 
             if vc.presentingViewController != nil {
                 vc.consumePendingURL()
@@ -203,13 +209,22 @@ final class ScrayBrowserViewController: UIViewController,
     // spread the row off both edges. As buttons in one stack they sit in a
     // single pill at sizes we control.
     private let backButton = UIButton(type: .system)
+    /// ✕, last in the strip since native 14.50 - see buildChrome.
+    private let closeButton = UIButton(type: .system)
     private let forwardButton = UIButton(type: .system)
     private let tabsButton = UIButton(type: .system)
     /// ‹P (native 14.20) - back to Picker from an external page Picker sent
-    /// you to. See pickerReturn().
+    /// you to. See pickerReturn(). Reads ‹N instead when the trip started in
+    /// Native's own view (native 14.49).
     private let pickerButton = UIButton(type: .system)
+
+    /// This browser session was opened from Native's own view, so there is
+    /// somewhere in Native to go back to. Cleared when the browser closes.
+    var cameFromNative = false
     private let newTabButton = UIButton(type: .system)
     private static let pickerPurple = UIColor(red: 0.424, green: 0.361, blue: 0.906, alpha: 1)  // #6c5ce7
+    /// ‹N wears Native's green, so the two are never mistaken for each other.
+    private static let nativeGreen = UIColor(red: 0.157, green: 0.655, blue: 0.271, alpha: 1)   // #28a745
     private let trayButton = ScrayTrayButton(frame: .zero)
     private let toastView = ScrayToastView(frame: .zero)
     private var toastBottom: NSLayoutConstraint!
@@ -387,10 +402,11 @@ final class ScrayBrowserViewController: UIViewController,
 
     // MARK: - Chrome
 
-    // ⚙️ BOTTOM TOOLBAR SIZING (native 14.24, reworked 14.25, 14.26). Nine
-    // controls - ✕ ‹P ‹ › ↻ + tabs tray ⋯. ✕ stays on its own at the left;
-    // the other eight are fixed-size buttons in one stack, so iOS 26 draws
-    // them as one pill instead of separate spaced-out glass circles.
+    // ⚙️ BOTTOM TOOLBAR SIZING (native 14.24, reworked 14.25, 14.26, 14.50).
+    // Nine controls - ‹P ‹ › ↻ + tabs tray ⋯ ✕ - all in one right-aligned
+    // stack, so iOS 26 draws them as a single pill instead of separate
+    // spaced-out glass circles. ✕ sat on its own at the LEFT until 14.50;
+    // it is now last in the strip, where the thumb reaches it.
     // TOOLBAR_BUTTON_WIDTH/HEIGHT = each button's tap box, TOOLBAR_ITEM_GAP =
     // space between them, TOOLBAR_SYMBOL_POINTS / TITLE_POINTS = glyph size.
     private static let TOOLBAR_SYMBOL_POINTS: CGFloat = 15
@@ -456,10 +472,13 @@ final class ScrayBrowserViewController: UIViewController,
 
         webContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        // ✕ sits bottom-left where the thumb already is, rather than up in
-        // the header next to the address bar.
-        let closeItem = UIBarButtonItem(image: UIImage(systemName: "xmark", withConfiguration: Self.toolbarSymbol),
-                                        style: .plain, target: self, action: #selector(closeTapped))
+        // ✕ closes the browser. Last in the strip (native 14.50), so the
+        // whole row sits under the right thumb; it was alone at the far left
+        // before. Its own tint, so the one button that ends the session does
+        // not read as just another arrow.
+        closeButton.setImage(UIImage(systemName: "xmark", withConfiguration: Self.toolbarSymbol), for: .normal)
+        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+        closeButton.tintColor = .secondaryLabel
         backButton.setImage(UIImage(systemName: "chevron.left", withConfiguration: Self.toolbarSymbol), for: .normal)
         backButton.addTarget(self, action: #selector(backTapped), for: .touchUpInside)
         forwardButton.setImage(UIImage(systemName: "chevron.right", withConfiguration: Self.toolbarSymbol), for: .normal)
@@ -487,7 +506,8 @@ final class ScrayBrowserViewController: UIViewController,
         forwardButton.isEnabled = false
 
         let navButtons: [UIButton] = [pickerButton, backButton, forwardButton, reloadButton,
-                                        newTabButton, tabsButton, trayButton, moreButton]
+                                        newTabButton, tabsButton, trayButton, moreButton,
+                                        closeButton]
         for b in navButtons {
             b.translatesAutoresizingMaskIntoConstraints = false
             // trayButton pins its own size in ScrayDownloads; match it there.
@@ -504,9 +524,8 @@ final class ScrayBrowserViewController: UIViewController,
         func flex() -> UIBarButtonItem {
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         }
-        // ✕ keeps the left edge under the thumb; the rest travel together as
-        // one group on the right.
-        toolbar.items = [closeItem, flex(), navItem]
+        // One group, right-aligned, ✕ last (native 14.50).
+        toolbar.items = [flex(), navItem]
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         downloadBar.translatesAutoresizingMaskIntoConstraints = false
@@ -1116,6 +1135,9 @@ final class ScrayBrowserViewController: UIViewController,
         super.viewDidDisappear(animated)
         // Keeps a running basket checkout alive and on the screen as a ring.
         if isBeingDismissed { ScrayRunMonitor.shared.browserDidHide() }
+        // The ‹N trip is over (native 14.49): opening the browser again from
+        // the ring or from a page in here has nothing in Native to go back to.
+        if isBeingDismissed { cameFromNative = false }
         if isBeingDismissed {
             ScrayBrowserSync.shared.flushHistory()
             ScrayBrowserSync.shared.backupLogins(force: false, completion: nil)
@@ -1164,13 +1186,23 @@ final class ScrayBrowserViewController: UIViewController,
         switch pickerReturn() {
         case .history(let item)?: currentWebView?.go(to: item)
         case .tab(let idx)?:      selectTab(idx)
-        case nil:                 openOrFocus(homeURL)   // no Picker trail - act as Picker home
+        case nil:
+            // ‹N: back to Native, where this trip started. Closing the browser
+            // IS that - the app's view is still on the page that sent you -
+            // and the tabs stay open behind it, as they do for ✕.
+            if cameFromNative { closeTapped() }
+            else { openOrFocus(homeURL) }   // no trail either way - act as Picker home
         }
     }
 
-    /// ‹P is always enabled and purple now (native 14.26) - kept as a hook
-    /// for the callers that used to toggle it.
-    private func refreshPickerItem() {}
+    /// ‹P, or ‹N when this session came from Native and this page has no
+    /// Picker trail of its own (native 14.49). Called from refreshChrome, so
+    /// it follows the tab you are on.
+    private func refreshPickerItem() {
+        let native = (pickerReturn() == nil) && cameFromNative
+        pickerButton.setTitle(native ? "\u{2039}N" : "\u{2039}P", for: .normal)
+        pickerButton.tintColor = native ? Self.nativeGreen : Self.pickerPurple
+    }
 
     @objc private func backTapped()    { if currentWebView?.canGoBack == true { currentWebView?.goBack() } }
     @objc private func forwardTapped() { if currentWebView?.canGoForward == true { currentWebView?.goForward() } }
@@ -1613,6 +1645,55 @@ final class ScrayBrowserViewController: UIViewController,
             }
         }
         return popup
+    }
+
+    // MARK: - WKUIDelegate (hold a link)
+    //
+    // Holding a link (native 14.49) offers to open it in a new tab, in the
+    // background, or to copy or share it. WebKit's own menu has none of
+    // those - this browser's tabs are its own, so nothing it offers knows
+    // about them - and the preview above the menu is WebKit's, kept.
+    //
+    // A background tab is the one worth having: reading a list of links and
+    // queueing several without losing your place is exactly what the tab tray
+    // is for.
+    func webView(_ webView: WKWebView,
+                 contextMenuConfigurationForElement elementInfo: WKContextMenuElementInfo,
+                 completionHandler: @escaping (UIContextMenuConfiguration?) -> Void) {
+        guard let url = elementInfo.linkURL else { return completionHandler(nil) }
+
+        let config = UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self, weak webView] _ in
+            let open = UIAction(title: "Open", image: UIImage(systemName: "arrow.forward")) { _ in
+                webView?.load(URLRequest(url: url))
+            }
+            let newTab = UIAction(title: "Open in New Tab",
+                                  image: UIImage(systemName: "plus.square.on.square")) { _ in
+                guard let self = self else { return }
+                let tab = self.addTab(url: url, select: true)
+                tab.opener = webView          // so ‹P can go back to the page it came from
+            }
+            let background = UIAction(title: "Open in Background",
+                                      image: UIImage(systemName: "square.on.square.dashed")) { _ in
+                guard let self = self else { return }
+                let tab = self.addTab(url: url, select: false)
+                tab.opener = webView
+                self.refreshChrome()          // the tab count on the ⧉ button
+                self.flash("Opened in a new tab")
+            }
+            let copy = UIAction(title: "Copy Link", image: UIImage(systemName: "doc.on.doc")) { _ in
+                UIPasteboard.general.url = url
+            }
+            let share = UIAction(title: "Share…", image: UIImage(systemName: "square.and.arrow.up")) { _ in
+                guard let self = self else { return }
+                let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                sheet.popoverPresentationController?.sourceView = self.view
+                sheet.popoverPresentationController?.sourceRect =
+                    CGRect(x: self.view.bounds.midX, y: self.view.bounds.midY, width: 1, height: 1)
+                self.presentSafely(sheet)
+            }
+            return UIMenu(title: url.absoluteString, children: [open, newTab, background, copy, share])
+        }
+        completionHandler(config)
     }
 
     func webViewDidClose(_ webView: WKWebView) {

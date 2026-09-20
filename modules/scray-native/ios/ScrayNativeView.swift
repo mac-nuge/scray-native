@@ -297,7 +297,9 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
                 // Where the browser syncs favourites, history and logins (native 14.29).
                 ScrayBrowserSync.shared.configure(api: d["api"] as? String, key: d["key"] as? String)
             }
-            ScrayBrowser.shared.present(url: browserURL, home: browserHome)
+            // fromNative (native 14.49): the trip started here, in the app's
+            // own view, so the browser offers ‹N back to it.
+            ScrayBrowser.shared.present(url: browserURL, home: browserHome, fromNative: true)
             resolve(id: id, result: ["success": true])
         case "deviceStorage":
             // ForImportantUsage counts purgeable space, which is what iOS
@@ -407,7 +409,8 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
            let scheme = url.scheme?.lowercased(),
            scheme == "http" || scheme == "https" {
             ScrayBrowser.shared.present(url: url.absoluteString,
-                                        home: Self.defaultBrowserHome)
+                                        home: Self.defaultBrowserHome,
+                                        fromNative: true)
         }
         return nil
     }

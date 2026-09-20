@@ -4,6 +4,35 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.50 — test: browser toolbar in one strip with the close button last
+<!-- 2026-09-20T16:28Z -->
+
+**native** — `stg-native - 14.50`: `modules/scray-native/ios/ScrayBrowser.swift`, `assets/web/VERSION` (**needs a new IPA build**)
+
+Mac picked Option B from the mockup: ✕ joins the other buttons rather than sitting alone at the far left.
+
+**Change:** ✕ was a `UIBarButtonItem` pinned to the left of the toolbar with a flexible space after it (14.25). It is now an ordinary `UIButton` at the end of the same stack as the rest, so the toolbar is one right-aligned pill of nine — ‹P ‹ › ↻ + tabs tray ⋯ ✕ — and iOS 26 draws it as one group. It takes the same 34×34 box as its neighbours.
+
+**The one risk** is that ✕ now sits next to ⋯, so a mis-tap ends the session rather than opening a menu. It wears `.secondaryLabel` rather than the blue of the navigation buttons, which is the cheapest way to make it read as a different kind of control. If it turns out to be too easy to hit, the fix is a gap before it rather than moving it back.
+
+**Tested:** Swift not compiled here.
+
+### native 14.49 — test: hold a link for a new tab, and ‹N back to Native
+<!-- 2026-09-20T16:26Z -->
+
+**native** — `stg-native - 14.49`: `modules/scray-native/ios/ScrayBrowser.swift`, `modules/scray-native/ios/ScrayNativeView.swift`, `assets/web/VERSION` (**needs a new IPA build**)
+
+Two of the three things Mac asked for in the browser. The third - moving ✕ to the right of the toolbar - is waiting on a mockup he asked to see first (Option A: the button group to the left edge, ✕ on the right; Option B: ✕ as the last button in the same pill).
+
+**Holding a link.** `contextMenuConfigurationForElement` now returns the browser's own menu: **Open**, **Open in New Tab**, **Open in Background**, **Copy Link**, **Share…**. WebKit's preview above it is kept. Its own menu could never offer these - the tabs belong to this browser, not to WebKit. Each new tab records the page it came from as its `opener`, so ‹P still works from it. A background tab refreshes the ⧉ count and says so in a toast rather than jumping you away from what you were reading.
+
+**‹N (back to Native).** ‹P has had a Picker trail to follow since 14.20 - the Picker page in this tab's history, or the Picker tab that opened it - but a trip that started in Native's own view had no equivalent and fell back to Picker's home page.
+- `present(url:home:fromNative:)` marks a session that began in Native's view. Both of `ScrayNativeView`'s ways in pass it: the `openBrowser` bridge call and a `target="_blank"` link in the app's own web view.
+- With that set and no Picker trail on the current page, the button reads **‹N** in Native's green and closes the browser - which is what going back to Native is; the app's view is still on the page that sent you, and the tabs stay open behind it, as they do for ✕.
+- A page with a Picker trail still shows ‹P, whichever way the session started, because that trail is the more specific answer. The flag clears when the browser is dismissed, so reopening it from the ring shows ‹P again.
+
+**Tested:** Swift not compiled here.
+
 ### native 14.48 — test: screen stays on while the app is in front
 <!-- 2026-09-20T16:15Z -->
 

@@ -129,6 +129,9 @@ final class ScrayBrowserTab {
     /// 14.9) - Picker, when its TinEye or Stash search opened here. A TinEye
     /// result's Search goes back to it; with none, to Native's main view.
     weak var opener: WKWebView?
+    /// Opened by the page's own window.open (native 14.53), so a
+    /// window.close() from it returns to `opener`.
+    var openedByScript = false
 
     init(webView: WKWebView, pending: URL? = nil) {
         self.webView = webView
@@ -1627,24 +1630,28 @@ final class ScrayBrowserViewController: UIViewController,
             return tab.webView
         }
 
-        // Scripted window.open — MSAL's sign-in popup. A modal sheet rather
-        // than a tab, because MSAL polls the child for the redirect and then
-        // calls window.close() on it. Built from the configuration WebKit
-        // handed us: a fresh one would not be a real child window and
-        // window.opener would come back nil.
-        let popup = makeWebView(configuration: configuration)
-        presentPopup(popup)
+        // Scripted window.open - a site forcing a new window (native 14.53).
+        // Also a new tab now, like Safari, rather than the modal sheet that
+        // was there for MSAL's sign-in popup (Picker no longer uses MSAL).
+        // Still built from the configuration WebKit handed us, so it is a
+        // real child window: window.opener works, and a sign-in popup that
+        // calls window.close() on itself closes its tab and hands you back
+        // to the page that opened it (webViewDidClose below).
+        let tab = addTab(url: nil, configuration: configuration, select: true)
+        tab.opener = webView
+        tab.openedByScript = true
+        let child = tab.webView
 
         // Belt and braces. window.open("about:blank") followed by assigning
-        // location works on its own, but a popup opened straight at a URL
+        // location works on its own, but a window opened straight at a URL
         // occasionally arrives blank.
         if let url = navigationAction.request.url, url.absoluteString != "about:blank" {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak popup] in
-                guard let popup = popup, popup.url == nil, !popup.isLoading else { return }
-                popup.load(URLRequest(url: url))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak child] in
+                guard let child = child, child.url == nil, !child.isLoading else { return }
+                child.load(URLRequest(url: url))
             }
         }
-        return popup
+        return child
     }
 
     // MARK: - WKUIDelegate (hold a link)
@@ -1698,7 +1705,12 @@ final class ScrayBrowserViewController: UIViewController,
 
     func webViewDidClose(_ webView: WKWebView) {
         if webView === popupWebView { dismissPopup(); return }
-        if let idx = tabs.firstIndex(where: { $0.webView === webView }) { closeTab(idx) }
+        guard let idx = tabs.firstIndex(where: { $0.webView === webView }) else { return }
+        // A window a page opened and then closed (a sign-in popup, native
+        // 14.53) goes back to the tab that opened it, not its neighbour.
+        let opener = tabs[idx].openedByScript ? tabs[idx].opener : nil
+        closeTab(idx)
+        if let opener = opener, let back = tabs.firstIndex(where: { $0.webView === opener }) { selectTab(back) }
     }
 
     private func presentPopup(_ popup: WKWebView) {

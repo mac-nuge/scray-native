@@ -4,6 +4,41 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 14.34 / native 14.54 — test: holding 🔍 (and Clear all) clears everything again
+<!-- 2026-09-21T10:50Z -->
+
+**picker** — `staging - 14.34`: `randomiser.js`, `VERSION`
+**native** — `stg-native - 14.54`: `assets/web/randomiser.js`, `assets/web/VERSION`. Web only.
+
+Mac: holding the corner 🔍 to clear the search and filters did nothing, in either app.
+
+**Found by reproducing it.** I served Picker locally, opened it in headless Chromium as an iPhone and held the button with touch events. The hold itself worked: no cancel, the timer fired, and `scrayClearAllFilters` ran. That function threw part-way, though, so nothing after the tag dropdowns ran. The search term, excludes, scores and orientation were never cleared.
+
+**Why it threw.** `fillSelect` re-initialises select2 on every refill, and the tag dropdowns' cascade handlers (`change.scray`) refill the other dropdowns. "All tags" also refills *itself*. By the time a dropdown has been refilled once, its own cascade handler sits ahead of select2's in the handler list. So a `change` on "All tags" runs the cascade first, which destroys the select2 instance, and then jQuery calls that destroyed instance's handler, which it had already queued for the same event. The handler finds its data adapter gone and throws "Cannot read properties of null (reading 'current')". The throw comes up through `.trigger('change')` into the caller.
+
+**Fix.** A new `scrayResetSelect(sel, value)` does the val/trigger inside a try, and says so in the console when select2 throws. It is used by:
+- `scrayClearAllFilters` (the pills bar Clear all, and the hold) for the four tag dropdowns and the default-excludes restore;
+- `clearAllFilters` (the big Clear) for all five dropdowns.
+
+It's safe to swallow: by the time the stale handler runs, the cascade has already applied the change, and the new instance painted itself when it was built.
+
+**Not changed:** `fillSelect` still re-initialises select2 each time. Reusing the instance would fix the root cause, but it changes how an open dropdown behaves when its options change underneath it. Other places that `.trigger('change')` on "All tags" can hit the same throw, but they're the last thing in their handler, so nothing after them is lost.
+
+**Tested:** in headless Chromium (iPhone 13 profile), with a search term set and the button held for one second. Before the fix: the term stayed and the throw was logged. After: the search box and pill are empty, and the console shows the one warning. `node --check` on both copies.
+
+### native 14.53 — test: a site's new window opens in a new tab
+<!-- 2026-09-21T10:40Z -->
+
+**native** — `stg-native - 14.53`: `modules/scray-native/ios/ScrayBrowser.swift`, `assets/web/VERSION`. **Needs a new IPA build.**
+
+Mac asked for any site that forces a link into a new window to open it in a new tab. A `target="_blank"` link already did (a link activation). A **scripted `window.open`** went to the modal sheet built for MSAL's sign-in popup, which Picker no longer uses since tokens moved to the server.
+
+**Change:** `createWebViewWith` now opens a scripted window as a tab too, selected, with `opener` set so ‹P can go back to the page. It's still built from the configuration WebKit hands over, so it is a real child window and `window.opener` works. A tab opened this way is marked `openedByScript`. When that page calls `window.close()` on itself (a sign-in popup, typically), `webViewDidClose` closes the tab and selects the opener rather than the tab next to it. The modal sheet is left in place, unused.
+
+**Watch:** a site that opens a popup and then polls it (OAuth) sees the same child window as before, just in a tab. If one misbehaves, the old sheet is still in the code to route that site back to.
+
+**Tested:** Swift not compiled here.
+
 ### native 14.52 — test: undo the Hetzner source (Hetzner lives in Picker)
 <!-- 2026-09-21T10:17Z -->
 

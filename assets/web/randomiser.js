@@ -829,6 +829,32 @@ window.scrayRefreshFilters = scrayRefreshFilters;
  * "Filter cleared" tooltip. Without one, the search boxes are cleared here
  * directly rather than risking showButtonFeedback on an undefined event.
  */
+/**
+ * $(sel).val(value).trigger('change'), without letting select2 abort whatever
+ * called it (picker 14.34 / native 14.54).
+ *
+ * The tag dropdowns' cascade handlers (bindDropdownWithCascade) refill the
+ * other dropdowns - and "All tags" refills itself - through fillSelect, which
+ * re-initialises select2 on each one. That destroys the instance whose own
+ * change handler jQuery has already queued for the same event, so when that
+ * handler runs it finds its data adapter gone and throws ("Cannot read
+ * properties of null (reading 'current')"). By then everything that matters
+ * has run: the cascade came first, and the new instance painted itself when
+ * it was built. But the throw came up through .trigger() into the caller, so
+ * Clear all (the pill, and holding the corner 🔍) stopped at "All tags" and
+ * never reached the excludes, the search term or the score filters.
+ */
+function scrayResetSelect(sel, value = null) {
+   const $s = $(sel);
+   if (!$s.length) return;
+   try {
+       $s.val(value).trigger('change');
+   } catch (err) {
+       console.warn(`[filters] ${sel}: select2 threw while clearing - harmless, the clear went through:`, err && err.message);
+   }
+}
+window.scrayResetSelect = scrayResetSelect;
+
 window.scrayClearAllFilters = function (ev) {
    if (window.commonSelectedTags) window.commonSelectedTags.clear();
    window.SCRAY_FACET_CLASSES.forEach(k => {
@@ -853,9 +879,7 @@ window.scrayClearAllFilters = function (ev) {
    window.scraySuppressScrollUntil = Date.now() + 1500;
    window.skipPanelAutoOpen = true;
    ['#tagFilterLevel1Select', '#tagFilterLevel2Select', '#tagFilterLevel3Select',
-    '#tagFilterAllSelect'].forEach(sel => {
-       if ($(sel).length) $(sel).val(null).trigger('change');
-   });
+    '#tagFilterAllSelect'].forEach(sel => scrayResetSelect(sel));
    // Folder excludes: only the DEFAULT ones stay - wholesale's Clear all rule
    // (picker 13.173), now outside wholesale too (picker 13.192 / native 13.193).
    // Of what is excluded right now, a tag stays only if it is on the default
@@ -871,7 +895,7 @@ window.scrayClearAllFilters = function (ev) {
            const defLower = new Set([...(defaults || [])].map(t => String(t).toLowerCase()));
            const now  = $ex.val() || [];
            const keep = now.filter(t => defLower.has(String(t).toLowerCase()));
-           if (keep.length !== now.length) $ex.val(keep).trigger('change');
+           if (keep.length !== now.length) scrayResetSelect('#excludeTagSelect', keep);
        };
        if (window.scrayDefaultExcludeTags) {
            keepDefaults(window.scrayDefaultExcludeTags);
@@ -3732,13 +3756,15 @@ if (window.scrayStudioParentFilter) window.scrayStudioParentFilter.clear();
 window.scrayNoteKeywordIntersect = false;
 
 // Reset all filters – clear level-based include dropdowns
-$('#tagFilterLevel1Select').val(null).trigger('change');
-$('#tagFilterLevel2Select').val(null).trigger('change');
-$('#tagFilterLevel3Select').val(null).trigger('change');
-$('#tagFilterAllSelect').val(null).trigger('change');
+// Through scrayResetSelect (picker 14.34 / native 14.54): a select2 throw on
+// "All tags" used to stop this function here.
+scrayResetSelect('#tagFilterLevel1Select');
+scrayResetSelect('#tagFilterLevel2Select');
+scrayResetSelect('#tagFilterLevel3Select');
+scrayResetSelect('#tagFilterAllSelect');
 
 // Clear exclude tags dropdown
-$('#excludeTagSelect').val(null).trigger('change');
+scrayResetSelect('#excludeTagSelect');
 
 // Reset durations (guarded - dropdowns may no longer be in the UI)
 if (document.getElementById("minMinutes")) document.getElementById("minMinutes").value = 0;

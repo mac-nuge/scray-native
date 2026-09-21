@@ -4563,7 +4563,7 @@ async function showStashModal(video, openOpts) {
             // files land here. Say so rather than offering a dead button.
             if (!r.oshash) {
                 body.innerHTML = (notes || '<p>No match.</p>') +
-                    '<p style="opacity:.8;margin-top:10px;">There is no OneDrive copy of this file on ' +
+                    '<p style="opacity:.8;margin-top:10px;">There is no OneDrive or Hetzner copy of this file on ' +
                     'record, so it has no fingerprint on the server and there is nothing for a StashDB ' +
                     'scene id to attach to. Submitting only works for catalogued files.</p>' +
                     manualOffer;

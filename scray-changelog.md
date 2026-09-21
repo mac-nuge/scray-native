@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.2 — test: Hetzner copies count for Stash matching
+<!-- 2026-09-21T15:37Z -->
+
+**native** — `stg-native - 15.2`: `assets/web/file-operations.js`, `assets/web/VERSION`. The server side is browse 15.2.
+
+The Stash lookup for a file uploaded to Hetzner said "No OneDrive copy of this video is on record" and offered no match. The server now fingerprints the box copy, so the lookup works. The modal's fallback line reads "There is no OneDrive or Hetzner copy of this file on record…", as in Picker.
+
 ### native 15.1 — test: Upload goes to Hetzner too
 <!-- 2026-09-21T15:23Z -->
 

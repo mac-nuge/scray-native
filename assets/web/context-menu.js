@@ -199,16 +199,17 @@ function createCompactButtonGroup(buttons, visibleCount = 2, video = null) {
      }
    }
    
-   // ⬆ Upload OneDrive (native 13.47, renamed 14.47): only for a file on the phone
+   // ⬆ Upload (native 13.47; "Upload OneDrive" 14.47, "Upload" 15.1, now that it
+   // goes to Hetzner too): only for a file on the phone
    // and not in the catalogue, and injected here for the same reason as S -
    // every per-video menu gets it without touching seven call sites. Just above
    // delete, and never above the fold, like S.
    if (video && typeof window.scrayShowUploadSheet === 'function' &&
        (typeof window.scrayIsPhoneOnly === 'function' ? window.scrayIsPhoneOnly(video) : video.inCatalogue === false) &&
-       !buttons.some(b => b && b.label === 'Upload OneDrive')) {
+       !buttons.some(b => b && b.label === 'Upload')) {
      const uploadBtn = {
-       label: "Upload OneDrive",
-       title: "Upload this file (and others not in the catalogue) to a OneDrive folder",
+       label: "Upload",
+       title: "Upload this file (and others not in the catalogue) to a OneDrive or Hetzner folder",
        color: "#0078d4",
        onClick: (e) => {
          if (e) e.stopPropagation();

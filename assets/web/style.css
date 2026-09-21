@@ -7912,6 +7912,9 @@ body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor >
 .up-steps .on { color: #0078d4; }
 .up-lead { font-size: 0.82rem; color: #666; margin: 0 0 10px; }
 .up-warn { background: #fff4e5; color: #8a5300; border-radius: 6px; padding: 8px 10px; font-size: 0.8rem; margin-bottom: 10px; }
+/* Hetzner in the Upload sheet (native 15.1): the Storage Box's name in italics,
+   as Picker sets every Hetzner filename. */
+.up-sheet .up-acct.is-hz { font-style: italic; }
 .up-sheet .up-err, #scrayUploadPanel .up-err { color: #c62828; font-size: 0.78rem; margin: 2px 0 8px; word-break: break-word; }
 .up-loading, .up-empty { color: #888; font-size: 0.82rem; padding: 12px 4px; list-style: none; }
 .up-tools { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }

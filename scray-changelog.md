@@ -4,6 +4,24 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.1 — test: Upload goes to Hetzner too
+<!-- 2026-09-21T15:23Z -->
+
+**native** — `stg-native - 15.1`: `assets/web/scray-upload.js`, `assets/web/context-menu.js`, `assets/web/style.css`, `assets/web/randomiser.js` (a comment), `assets/web/VERSION`. Goes with browse 15.1, which does the work.
+
+- The ⋯ / long-press item "Upload OneDrive" is now **"Upload"**, and the sheet's title "Upload to OneDrive" is now **"Upload"**.
+- **Hetzner** appears in the account step beside the OneDrive accounts, marked "Storage Box" and in italics, as Picker marks Hetzner files. It has:
+  - its free space;
+  - its top folders as stacks;
+  - live subfolders;
+  - its folders in the search (the placeholder now says "Find a folder in OneDrive or Hetzner…").
+
+  "Last used" works for it like any other destination.
+- The wording no longer assumes OneDrive: "asking for an upload link…", "Choose where they go.", and "Nothing to upload to is connected on the server".
+- A Hetzner path from upload_done gains its leading slash for the panel.
+- The queue, the parallel uploads, the panel, the in-browser pill, adopting the phone copy and pushing its bookmarks are all unchanged, as is Swift.
+- **No IPA build**: the gateway's receiver speaks the OneDrive protocol that ScrayUploads.swift already uses. A few of Swift's own error strings still say "OneDrive" (for example "OneDrive refused the upload"). Those change with the next build that happens anyway.
+
 ### native 15.0 — stable: version 15
 <!-- 2026-09-21T15:07Z -->
 

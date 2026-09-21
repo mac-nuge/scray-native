@@ -1,12 +1,14 @@
 // ===== scray-upload.js =====
 // Native only (13.47): upload files that are on the phone but not in the
-// catalogue to OneDrive, from the ⋯ / long-press menu.
+// catalogue to OneDrive or (15.1) the Hetzner Storage Box, from the ⋯ /
+// long-press menu.
 //
-//   Menu → "Upload OneDrive" → a sheet:
+//   Menu → "Upload" → a sheet:
 //     1. FILES    the file you opened it from, ticked, plus every other
 //                 not-in-catalogue file on the phone to tick as well;
 //     2. ACCOUNT  every OneDrive account connected on the server, with the
-//                 folders the catalogue holds its files in (its stacks);
+//                 folders the catalogue holds its files in (its stacks), and
+//                 "Hetzner" (15.1), the Storage Box, its top folders as stacks;
 //     3. FOLDER   a stack, then its live subfolders, down to where they go.
 //   Start → the files join one upload queue, shown in a panel with the
 //   percentage, speed and time left for the file going up and for the batch.
@@ -16,6 +18,11 @@
 //     upload_session hands out a pre-authenticated URL for ONE new file;
 //     upload_done checks the result with Graph and catalogues it. The device
 //     key never sees a Graph token.
+//   - Hetzner (15.1) is the same four calls with account "Hetzner": the URL
+//     is the gateway's receiver (/up/<token>, in gateway/scray-migrate.py),
+//     which speaks OneDrive's upload-session protocol, so Swift can't tell
+//     them apart and no app build was needed. The box's password never
+//     leaves the server.
 //   - Swift (ScrayUploads): reads the file in 10 MiB pieces and PUTs them,
 //     resuming from OneDrive's own count after a dropped connection.
 //   - here: the sheet, the queue (one file at a time, so the first file isn't
@@ -62,6 +69,8 @@
   }
   const pct = (a, b) => b > 0 ? Math.min(100, Math.floor((a / b) * 100)) : 0;
   const shortAcct = a => String(a || "").split("@")[0];
+  // The Storage Box, as the server names it in upload_targets (15.1).
+  const isHz = a => String(a || "").toLowerCase() === "hetzner";
   const newId = () => "up_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const api = (action, body) => window.scrayApiCall(action, { method: "POST", body: body || {} });
   const bridge = () => window.ScrayBridge || {};
@@ -202,7 +211,7 @@
   async function finishOne(it, item) {
     it.state = "finishing"; it.sent = it.size; it.bps = 0;
     persist(); renderPanel();
-    if (!item || !item.id) throw new Error("OneDrive didn't say what it saved — check the folder, then retry");
+    if (!item || !item.id) throw new Error(`${isHz(it.account) ? "The Storage Box" : "OneDrive"} didn't say what it saved — check the folder, then retry`);
     it.itemId = item.id;
 
     const v = await localVideo(it.rel);
@@ -216,7 +225,8 @@
       device: window.SCRAY_SYNC?.DEVICE_ID || "native"
     });
     it.videoKey = res.video_key;
-    it.folder = res.path || it.folder;
+    // The box's paths come back without the leading slash OneDrive's have.
+    it.folder = res.path ? "/" + String(res.path).replace(/^\/+/, "") : it.folder;
     await adoptLocally(it.rel, res.video_key, v);
     try { await bridge().uploadForget(it.uid); } catch { /* old list entry, harmless */ }
     it.state = "done";
@@ -411,7 +421,7 @@
       const one = (c) => {
         const p = pct(c.sent, c.size);
         const eta = c.bps > 0 ? fmtEta((c.size - c.sent) / c.bps) : "";
-        const status = c.state === "starting" ? "asking OneDrive for an upload link…"
+        const status = c.state === "starting" ? "asking for an upload link…"
           : c.state === "finishing" ? "adding to the catalogue…"
           : [`${p}%`, `${fmtBytes(c.sent)} of ${fmtBytes(c.size)}`, fmtSpeed(c.bps), eta && `${eta} left`,
              c.piece ? `${fmtBytes(c.piece)} pieces` : ""]
@@ -619,7 +629,7 @@
 
     if (S.step === "account") {
       const last = load(LAST_KEY, null);
-      body += `<p class="up-lead">${picked.length} file${picked.length === 1 ? "" : "s"} · ${fmtBytes(size)}. Choose the OneDrive account.</p>`;
+      body += `<p class="up-lead">${picked.length} file${picked.length === 1 ? "" : "s"} · ${fmtBytes(size)}. Choose where they go.</p>`;
       if (!S.targets) {
         body += `<div class="up-loading">Loading accounts…</div>`;
       } else {
@@ -627,7 +637,7 @@
         // every account at once: each account's catalogued folders
         // (upload_targets' `folders`), all words matching, own-name matches first.
         const terms = S.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-        body += `<div class="up-tools"><input type="search" class="up-find" placeholder="Find a folder in any OneDrive…" value="${esc(S.q)}"></div>`;
+        body += `<div class="up-tools"><input type="search" class="up-find" placeholder="Find a folder in OneDrive or Hetzner…" value="${esc(S.q)}"></div>`;
         if (terms.length) {
           const own = p => terms.every(t => p.split("/").pop().toLowerCase().includes(t)) ? 0 : 1;
           const hits = S.targets.flatMap(a => (a.folders || []).map(path => ({ account: a.account_id, path })))
@@ -644,10 +654,10 @@
         }
         body += `<ul class="up-accounts">${S.targets.map(a => `
           <li><button data-act="account" data-account="${esc(a.account_id)}" ${a.stacks.length ? "" : "disabled"}>
-            <span class="up-acct">${esc(a.account_id)}</span>
+            <span class="up-acct${isHz(a.account_id) ? " is-hz" : ""}">${esc(a.account_id)}${isHz(a.account_id) ? ` <span class="up-count">Storage Box</span>` : ""}</span>
             <span class="up-count">${a.stacks.length ? `(${a.stacks.length} folder${a.stacks.length === 1 ? "" : "s"})` : "no catalogued folders"}</span>
             ${spaceHtml(a.account_id, size, picked.length)}
-          </button></li>`).join("") || `<li class="up-empty">No OneDrive accounts are connected on the server.</li>`}</ul>`;
+          </button></li>`).join("") || `<li class="up-empty">Nothing to upload to is connected on the server.</li>`}</ul>`;
         }
       }
       buttons = `<button class="modal-btn modal-btn-secondary" data-act="to-files">Back</button>`;
@@ -675,7 +685,7 @@
     }
 
     box.innerHTML = `
-      <div class="up-top"><h3>Upload to OneDrive</h3><button class="up-x" data-act="close" title="Close">✕</button></div>
+      <div class="up-top"><h3>Upload</h3><button class="up-x" data-act="close" title="Close">✕</button></div>
       <div class="up-steps">${crumbs}</div>
       ${body}
       <div class="basket-json-modal-buttons up-buttons">${buttons}</div>`;

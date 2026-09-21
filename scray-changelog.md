@@ -4,6 +4,11 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.2 — stable: Hetzner copies count for Stash matching
+<!-- 2026-09-21T16:28Z -->
+
+Mac confirmed it works and marked it stable. This covers native 15.1–15.2, with no code change.
+
 ### native 15.2 — test: Hetzner copies count for Stash matching
 <!-- 2026-09-21T15:37Z -->
 

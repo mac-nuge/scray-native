@@ -4,6 +4,11 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.0 — stable: version 15
+<!-- 2026-09-21T15:07Z -->
+
+**native**: the version goes to 15.0 and is marked stable. Mac made this call for all three repos, closing the 14.x line. It also marks stable every 14.x test entry still open, in this repo's version file only, with no code change.
+
 ### picker 14.34 / native 14.54 — test: holding 🔍 (and Clear all) clears everything again
 <!-- 2026-09-21T10:50Z -->
 

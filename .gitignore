@@ -45,3 +45,5 @@ example
 
 # ssh details
 ssh.txt
+
+migrate.env

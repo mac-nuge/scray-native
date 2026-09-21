@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.52 — test: undo the Hetzner source (Hetzner lives in Picker)
+<!-- 2026-09-21T10:17Z -->
+
+**native** — `stg-native - 14.52`: `assets/web/index.html`, `player.js`, `scray-sync-ui.js`, `scray-upload.js` (back to 14.50), `assets/web/scray-hetzner.js` (deleted), `assets/web/VERSION`. Web only.
+
+Mac tested 14.51 (the fetch worked) and redirected. Hetzner is an account in Picker, the app that fetches from OneDrive, so there is no Hetzner button and no streaming in Native. All four files are byte-for-byte back to 14.50 and the new script is gone. browse 14.55 removes the `hetzner_list` action that 14.51 read.
+
+A Hetzner video still reaches Native's catalogue pull like any other row, but Native lists only files on the phone, so it doesn't show. A Hetzner copy linked to a OneDrive one as variants shows on Native only as the phone copy.
+
 ### native 14.51 — test: Hetzner videos as a source - fetch, stream, remove
 <!-- 2026-09-21T09:14Z -->
 

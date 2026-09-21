@@ -180,6 +180,11 @@ document.addEventListener("visibilitychange", async () => {
  * to the catalogue later is picked up regardless of where the cursor sits.
  */
 async function scraySyncLibrary({ quiet = false } = {}) {
+  // A phone file and a Hetzner row for the same video would list it twice;
+  // the phone copy wins (native 14.51).
+  if (typeof window.scrayHetznerDedupe === "function") {
+    try { await window.scrayHetznerDedupe(); } catch (err) { console.warn("[hetzner] dedupe:", err); }
+  }
   const locals = await getAllVideos();
   if (!locals.length) return { pulled: 0, flagged: 0 };
 
@@ -236,7 +241,11 @@ async function pushOfflineFlags() {
   // Publishing against it would flag the wrong catalogue's rows.
   if (window.SCRAY_DB_MODE_DRIFT) return null;
 
-  const locals = await getAllVideos();
+  // Phone files only (native 14.51). "Offline" means "on this phone"; a
+  // Hetzner row is in the library but streams, and flagging it would mark the
+  // whole box as downloaded here.
+  const locals = (await getAllVideos()).filter(v =>
+    typeof window.isLocalVideo === "function" ? window.isLocalVideo(v) : true);
 
   // offline_sync has whole-list semantics, so an empty list clears every flag
   // in the catalogue. A fresh install before the folder is picked looks

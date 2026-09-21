@@ -69,7 +69,11 @@
   // Needs uploading (13.52): not in the catalogue, or in it with no OneDrive
   // copy on record (inOneDrive false - see flagUncatalogued). Strictly false
   // both ways, so a row the sync hasn't judged yet isn't offered.
-  const isPhoneOnly = v => !!v && !!localId(v) && (v.inCatalogue === false || (v.inCatalogue === true && v.inOneDrive === false));
+  // Phone files only (native 14.51): a Hetzner row is in the catalogue with no
+  // OneDrive copy too, but there is no file on the phone to upload.
+  const isPhoneOnly = v => !!v && !!localId(v) &&
+    (typeof window.isLocalVideo !== "function" || window.isLocalVideo(v)) &&
+    (v.inCatalogue === false || (v.inCatalogue === true && v.inOneDrive === false));
 
   function load(key, fallback) {
     try { const v = JSON.parse(localStorage.getItem(key) || "null"); return v ?? fallback; } catch { return fallback; }

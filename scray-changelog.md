@@ -4,6 +4,28 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 14.51 — test: Hetzner videos as a source - fetch, stream, remove
+<!-- 2026-09-21T09:14Z -->
+
+**native** — `stg-native - 14.51`: `assets/web/scray-hetzner.js` (new), `assets/web/index.html`, `assets/web/player.js`, `assets/web/scray-sync-ui.js`, `assets/web/scray-upload.js`, `assets/web/VERSION`. Web only, no IPA build. Needs browse 14.54 (`hetzner_list`) on the server.
+
+Mac picked "Fetch button, like an account": the Storage Box joins the library as its own source, next to the phone folder, rather than being mixed in silently.
+
+**How it's shaped.** Native's library held only phone files, so a catalogue pull could never add a Hetzner-only video. The pull only refreshes rows it already has. `scray-hetzner.js` pages `hetzner_list` and writes one videoSource row per video, with `oneDriveId: "hz:<video_key>"`, `driveId: "hetzner"` and `accountKey: "hetzner::box"`. It also creates a meta row if none exists, so history and ratings attach as they do for any other video. After writing, it runs a quiet `scraySyncLibrary` so the rows pick up the catalogue's tags and levels, then stamps `cataloguePath` so later syncs treat them as delta rows.
+
+**Phone copy wins.** A video with a phone file is skipped on fetch. `scrayHetznerDedupe` runs at the start of every sync and drops any hz row whose key now has a phone copy (e.g. after a download), so nothing lists twice.
+
+**The pill.** "☁ Hetzner (n)" is appended to the folder pills by wrapping `renderFolderPills`. Tap twice to re-fetch; tap the cross, then the pill, to remove. Removing takes out only the hz rows; meta (history, ratings) stays, as it does when a folder is removed. The **Hetzner** button next to **Folder** hides once the source is on.
+
+**Playing.** `refreshVideoBeforeUse` asks `hetzner_url` by video_key for hz rows (and for rows with no id or a `key:` id) before the OneDrive path. An hz row that can't get a URL throws, rather than falling through to "Account not found".
+
+**Guards found by walking every `getAllVideos()` consumer:**
+- `pushOfflineFlags` sends only `isLocalVideo` rows. offline_sync has whole-list semantics, so otherwise the whole box would be flagged as on this phone.
+- The upload sheet's `isPhoneOnly` also requires `isLocalVideo`, so streamed rows are never offered for upload.
+- Delete/move on an hz row fails at "Account not found", which is safe. Rename goes through `scrayRenameCatalogueRow`, which the scan respects since browse 14.53.
+
+**Tested:** `node --check` on all four scripts. Not run on a device.
+
 ### native 14.50 — test: browser toolbar in one strip with the close button last
 <!-- 2026-09-20T16:28Z -->
 

@@ -616,7 +616,11 @@
    Visible in line with the player controls: full opacity while they are up
    (instead of FS_ANCHOR_OPACITY), and the existing is-controls-hidden pair
    below still takes it to 0 - with the tap-to-wake catcher - when they idle. */
-#scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek) #scrayDisguiseDock { display: flex; }
+/* The strip is what normally fills the row and pushes the frozen group to the
+   right; with it hidden COL fell to flex-start - the left (picker 15.8 /
+   native 15.6). flex-end puts it back at the right edge, exactly where it sits
+   outside FLS. */
+#scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek) #scrayDisguiseDock { display: flex; justify-content: flex-end; }
 #scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek) #scrayDisguiseDock > :not(#scrayDisguiseControl) { display: none !important; }
 
 /* ⚙️ THE FUSED ROW (13.121). #cornerButtons' inner .corner-btn-row is MOVED

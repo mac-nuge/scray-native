@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.8 / native 15.6 — test: COL on the right in FLS, where it sits outside FLS
+<!-- 2026-09-22T16:00Z -->
+- **Symptom:** after 15.7 / 15.5, COL showed in FLS but on the left of the screen (seen in portrait), not the right.
+- **Cause:** the dock spans the whole width, and normally the scrolling strip (flex: 1) fills it and pushes the frozen group to the right. FLS hides the strip, so COL fell back to flex-start: the left edge.
+- **Fix:** the FLS dock rule adds `justify-content: flex-end`. The dock keeps the same bottom and right offsets it has outside FLS, so COL lands exactly where it normally is.
+- Deploy: disguise.js (both repos).
+
 ### picker 15.7 / native 15.5 — stable: filter row tidy (Uncat, orientation icon, Hetz) + COL back in FLS
 <!-- 2026-09-22T15:31Z -->
 

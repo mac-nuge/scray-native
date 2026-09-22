@@ -4,6 +4,11 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.7 / native 15.5 — stable: filter row tidy (Uncat, orientation icon, Hetz) + COL back in FLS
+<!-- 2026-09-22T15:31Z -->
+
+Mac confirmed it works and marked it stable. This covers picker 15.5–15.7 and native 15.3–15.5 (Player controls in Settings, the stop icon, and the filter row plus COL in FLS), with no code change.
+
 ### picker 15.7 / native 15.5 — test: filter row tidy (Uncat, orientation icon, Hetz) + COL back in FLS
 <!-- 2026-09-22T15:24Z -->
 - **Orientation (both):** the toggle shows rectangles instead of words: ▭▯ (both, filter off), ▭ (landscape) and ▯ (portrait). They're inline SVG in currentColor, so they look the same on every font. It's still blue when a filter is on, and the title and aria-label name the state. randomiser.js `ORIENTATION_CYCLE` / `syncOrientationToggleLabel`.

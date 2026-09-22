@@ -4493,10 +4493,14 @@ searchBox.addEventListener("keydown", (e) => {
   // ✅ Mobile portrait secondary row: orientation toggle + CSV buttons
   // 13.62: bare labels. The idle one names the filter; once it's on, the blue
   // says a filter is armed and the value alone says which.
+  // picker 15.7 / native 15.5: drawn as rectangles instead of words - both
+  // (landscape + portrait) when off, then the one being filtered for.
+  const ORIENT_SVG = (w, h) => `<rect x="${(w === 14 ? 1 : 4)}" y="${(w === 14 ? 4 : 1)}" width="${w}" height="${h}" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"></rect>`;
+  const ORIENT_ICON = (inner, vbW) => `<svg viewBox="0 0 ${vbW} 16" width="${vbW}" height="16" aria-hidden="true" focusable="false" style="display:block;margin:0 auto;">${inner}</svg>`;
   const ORIENTATION_CYCLE = [
-      { value: "any", label: "Orientation" },
-      { value: "L",   label: "Landscape" },
-      { value: "P",   label: "Portrait" }
+      { value: "any", label: "Orientation", icon: ORIENT_ICON(ORIENT_SVG(14, 8) + `<g transform="translate(16 0)">${ORIENT_SVG(8, 14)}</g>`, 32) },
+      { value: "L",   label: "Landscape",   icon: ORIENT_ICON(ORIENT_SVG(14, 8), 16) },
+      { value: "P",   label: "Portrait",    icon: ORIENT_ICON(ORIENT_SVG(8, 14), 16) }
   ];
 
   window.syncOrientationToggleLabel = function () {
@@ -4504,7 +4508,9 @@ searchBox.addEventListener("keydown", (e) => {
       const btn = document.getElementById("orientationToggleBtn");
       if (!sel || !btn) return;
       const entry = ORIENTATION_CYCLE.find(o => o.value === sel.value) || ORIENTATION_CYCLE[0];
-      btn.textContent = entry.label;
+      btn.innerHTML = entry.icon;
+      btn.title = entry.value === "any" ? "Orientation filter: all (tap to cycle)" : `Orientation filter: ${entry.label}`;
+      btn.setAttribute("aria-label", entry.value === "any" ? "Orientation: all" : entry.label);
       btn.style.background = entry.value === "any" ? "#555" : "#007bff";
   };
 
@@ -4591,7 +4597,7 @@ searchBox.addEventListener("keydown", (e) => {
       const b = document.getElementById("uncataloguedToggleBtn");
       if (!b) return;
       const on = b.dataset.active === "1";
-      b.textContent = on ? "Uncat only" : "Uncat: All";
+      b.textContent = "Uncat"; // picker 15.7 / native 15.5: one label, the blue says it is on
       b.style.background = on ? "#007bff" : "#555";
   };
 

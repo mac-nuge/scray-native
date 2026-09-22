@@ -608,6 +608,17 @@
 #scrayDisguise.is-fs:not(.is-peek) #scrayDisguiseDock { display: none; }
 #scrayDisguise.is-fs:not(.is-peek) #scrayDisguiseStrip { display: none; }
 
+/* ⚙️ COL IS BACK IN FLS (picker 15.7 / native 15.5). 13.134 took the whole dock
+   out of fullscreen; Mac wants COL back in FLS - FLS only, MPFS keeps no dock.
+   The dock is drawn again where it always sits (bottom-right on a phone, the
+   screen's own corner, not rotated with the player), with every child except
+   COL hidden, so COL is alone in its usual spot.
+   Visible in line with the player controls: full opacity while they are up
+   (instead of FS_ANCHOR_OPACITY), and the existing is-controls-hidden pair
+   below still takes it to 0 - with the tap-to-wake catcher - when they idle. */
+#scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek) #scrayDisguiseDock { display: flex; }
+#scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek) #scrayDisguiseDock > :not(#scrayDisguiseControl) { display: none !important; }
+
 /* ⚙️ THE FUSED ROW (13.121). #cornerButtons' inner .corner-btn-row is MOVED
    into the dock at build time and renamed #scrayDisguiseStrip; the shell it
    came from is hidden. So the two rows that used to sit beside each other,
@@ -695,6 +706,10 @@
 #scrayDisguise.is-fs:not(.is-peek) #scrayDisguiseDock {
   opacity: ${FS_ANCHOR_OPACITY};
   transition: opacity 0.3s ease;
+}
+/* FLS: COL alone, at full strength while the controls are up (see COL IS BACK). */
+#scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek):not(.is-controls-hidden) #scrayDisguiseDock {
+  opacity: 1;
 }
 /* ⚙️ THE BLIND STATE (13.123). Invisible, and it must behave invisible: an
    button you cannot see must not be pressable, and tapping where it lives has

@@ -4,6 +4,19 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.7 / native 15.5 — test: filter row tidy (Uncat, orientation icon, Hetz) + COL back in FLS
+<!-- 2026-09-22T15:24Z -->
+- **Orientation (both):** the toggle shows rectangles instead of words: ▭▯ (both, filter off), ▭ (landscape) and ▯ (portrait). They're inline SVG in currentColor, so they look the same on every font. It's still blue when a filter is on, and the title and aria-label name the state. randomiser.js `ORIENTATION_CYCLE` / `syncOrientationToggleLabel`.
+- **Uncat (native):** the button reads "Uncat" in both states, and blue means it's on. It was "Uncat: All" / "Uncat only". Picker has no Uncat button, so nothing to change there.
+- **Hetz (picker only):** a new button at the end of the filter row that shows only Hetzner Storage Box files. The label stays "Hetz", and it turns red when on.
+  - It's the same shape as Offline: a flag on the button's dataset, judged by `scrayIsHetznerVideo`, the test the D, move and delete paths already use.
+  - Clear-all and the filter reset turn it off. It has the filter-toggle styling in style-index.css.
+  - No floating pill for it (Offline has one); add it if wanted.
+- **COL in FLS (both):** 13.134 took the whole disguise dock out of fullscreen. The dock is drawn again in FLS only (MPFS still has none), with every child except COL hidden. So COL sits alone in its usual bottom-right spot, in the screen's own frame and not rotated with the player.
+  - It follows the player controls: full opacity while they're up (not FS_ANCHOR_OPACITY's 0.45), and gone with the tap-to-wake catcher when they idle. That's the existing is-controls-hidden pair.
+  - Peek is unchanged: the whole dock comes back as before.
+- Deploy: picker randomiser.js, disguise.js, index.php, style-index.css. Native: assets/web/randomiser.js, disguise.js, index.html.
+
 ### picker 15.6 / native 15.4 — test: stop button icon matches play/pause (centred SVG square)
 <!-- 2026-09-22T15:12Z -->
 - **Symptom:** the ■ stop control looked small and sat off-centre next to Plyr's play/pause, most visibly in FLS.

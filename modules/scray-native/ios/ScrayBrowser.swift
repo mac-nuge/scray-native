@@ -188,6 +188,14 @@ final class ScrayBrowserViewController: UIViewController,
     private weak var popupController: UIViewController?
 
     private let addressField = UITextField()
+    /// Address-bar suggestions (native 15.7): this device's history, under the
+    /// bar while you type. See the SUGGESTIONS section further down.
+    private let suggestTable = UITableView(frame: .zero, style: .plain)
+    private var suggestions: [ScrayBrowserSync.Suggestion] = []
+    private var suggestHeight: NSLayoutConstraint!
+    /// ⚙️ How many rows the list shows, and how tall each one is.
+    private static let SUGGEST_ROWS = 6
+    private static let SUGGEST_ROW_H: CGFloat = 46
     /// The row the address field sits in. Held because the collapsed chrome
     /// (see setChrome) tightens its margins and hides its buttons.
     private var headerStack: UIStackView!
@@ -459,6 +467,26 @@ final class ScrayBrowserViewController: UIViewController,
         addressHeight = addressField.heightAnchor.constraint(equalToConstant: 34)
         addressHeight.isActive = true
 
+        addressField.addTarget(self, action: #selector(addressEditingChanged), for: .editingChanged)
+
+        // The suggestion list. Floats over the page like the download pill
+        // rather than resizing it: the keyboard is already up and a reflow of
+        // the page underneath would be one movement too many.
+        suggestTable.translatesAutoresizingMaskIntoConstraints = false
+        suggestTable.dataSource = self
+        suggestTable.delegate = self
+        suggestTable.register(ScraySuggestCell.self, forCellReuseIdentifier: "suggest")
+        suggestTable.rowHeight = Self.SUGGEST_ROW_H
+        suggestTable.backgroundColor = .secondarySystemBackground
+        suggestTable.layer.cornerRadius = 10
+        suggestTable.layer.shadowColor = UIColor.black.cgColor
+        suggestTable.layer.shadowOpacity = 0.18
+        suggestTable.layer.shadowRadius = 6
+        suggestTable.layer.shadowOffset = CGSize(width: 0, height: 3)
+        suggestTable.separatorInset = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
+        suggestTable.keyboardDismissMode = .onDrag
+        suggestTable.isHidden = true
+
         let header = UIStackView(arrangedSubviews: [addressField, stashButton, homeButton])
         headerStack = header
         header.axis = .horizontal
@@ -584,12 +612,17 @@ final class ScrayBrowserViewController: UIViewController,
             self?.downloadsTapped()
         }
         view.addSubview(toastView)
+        // Above the page and the pills, below nothing: while you are typing an
+        // address the list is the thing being used.
+        view.addSubview(suggestTable)
         toastBottom = toastView.bottomAnchor.constraint(equalTo: toolbar.topAnchor, constant: -6)
 
         toolbar.clipsToBounds = true        // its items must not spill out of a 0pt bar
         toolbarHeight = toolbar.heightAnchor.constraint(equalToConstant: 44)
 
         let guide = view.safeAreaLayoutGuide
+        suggestHeight = suggestTable.heightAnchor.constraint(equalToConstant: 0)
+
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: guide.topAnchor),
             header.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
@@ -620,6 +653,11 @@ final class ScrayBrowserViewController: UIViewController,
 
             uploadPill.topAnchor.constraint(equalTo: progressView.bottomAnchor, constant: 10),
             uploadPill.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
+
+            suggestTable.topAnchor.constraint(equalTo: progressView.bottomAnchor, constant: 4),
+            suggestTable.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
+            suggestTable.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
+            suggestHeight,
 
             toastBottom,
             toastView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
@@ -1055,19 +1093,63 @@ final class ScrayBrowserViewController: UIViewController,
         textField.textAlignment = .left
         textField.text = currentTab?.displayURL?.absoluteString ?? ""
         DispatchQueue.main.async { textField.selectAll(nil) }
+        // Focus alone offers the places you go most - the address is selected,
+        // so a tap on one of them replaces it.
+        refreshSuggestions()
     }
 
     func textFieldDidEndEditing(_ textField: UITextField) {
         textField.textAlignment = .center
+        hideSuggestions()
         refreshChrome()
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         defer { textField.resignFirstResponder() }
+        hideSuggestions()
         guard let url = normalizedURL(from: textField.text ?? "") else { return true }
         if currentWebView == nil { addTab(url: url, select: true) }
         else { currentWebView?.load(URLRequest(url: url)) }
         return true
+    }
+
+    // MARK: - SUGGESTIONS (native 15.7)
+    //
+    // The address bar completes from this phone's own history: one row per
+    // URL, ranked by how often and how recently you've been there (the
+    // ranking is in ScrayBrowserSync.suggestions). Each row carries an ✕ that
+    // forgets that URL, so a page you don't want offered again stops coming
+    // back. That drops it from THIS phone's history only - the History screen
+    // is the server's copy, and clearing a suggestion shouldn't quietly wipe a
+    // page off every device.
+
+    @objc private func addressEditingChanged() { refreshSuggestions() }
+
+    private func refreshSuggestions() {
+        guard addressField.isFirstResponder else { hideSuggestions(); return }
+        let typed = addressField.text ?? ""
+        // What's already in the bar when you focus it is the page you are on;
+        // completing against itself would just offer you where you already are.
+        let q = (typed == currentTab?.displayURL?.absoluteString) ? "" : typed
+        suggestions = ScrayBrowserSync.shared.suggestions(matching: q, limit: Self.SUGGEST_ROWS)
+        suggestTable.reloadData()
+        let rows = CGFloat(suggestions.count)
+        suggestHeight.constant = rows * Self.SUGGEST_ROW_H
+        suggestTable.isHidden = suggestions.isEmpty
+        view.bringSubviewToFront(suggestTable)
+    }
+
+    private func hideSuggestions() {
+        suggestions = []
+        suggestHeight.constant = 0
+        suggestTable.isHidden = true
+    }
+
+    @objc fileprivate func forgetSuggestionTapped(_ sender: UIButton) {
+        guard suggestions.indices.contains(sender.tag) else { return }
+        let gone = suggestions[sender.tag]
+        ScrayBrowserSync.shared.forgetSuggestion(url: gone.url)
+        refreshSuggestions()
     }
 
     /// Address-bar text to a URL: a real URL is used as typed, a bare
@@ -3335,4 +3417,66 @@ final class ScrayTabListViewController: UITableViewController {
         }
         reload()
     }
+}
+
+
+// ============================================================================
+// Address-bar suggestions (native 15.7) - the list under the address field
+// while you type, and its rows.
+// ============================================================================
+
+extension ScrayBrowserViewController: UITableViewDataSource, UITableViewDelegate {
+
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        suggestions.count
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "suggest", for: indexPath)
+        guard suggestions.indices.contains(indexPath.row) else { return cell }
+        let s = suggestions[indexPath.row]
+        let host = s.url.host ?? s.url.absoluteString
+        cell.textLabel?.text = s.title.isEmpty ? host : s.title
+        cell.textLabel?.font = .systemFont(ofSize: 14)
+        cell.textLabel?.lineBreakMode = .byTruncatingTail
+        cell.detailTextLabel?.text = s.url.absoluteString
+        cell.detailTextLabel?.font = .systemFont(ofSize: 11)
+        cell.detailTextLabel?.textColor = .secondaryLabel
+        cell.detailTextLabel?.lineBreakMode = .byTruncatingMiddle
+        cell.backgroundColor = .clear
+        cell.imageView?.image = UIImage(systemName: "clock.arrow.circlepath")
+        cell.imageView?.tintColor = .tertiaryLabel
+
+        // ✕ forgets this URL. Its own target, and a 44pt box so it is not a
+        // thing you hit by accident while aiming at the row.
+        let x = UIButton(type: .system)
+        x.setImage(UIImage(systemName: "xmark"), for: .normal)
+        x.tintColor = .tertiaryLabel
+        x.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+        x.tag = indexPath.row
+        x.accessibilityLabel = "Forget this address"
+        x.addTarget(self, action: #selector(forgetSuggestionTapped(_:)), for: .touchUpInside)
+        cell.accessoryView = x
+        return cell
+    }
+
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: false)
+        guard suggestions.indices.contains(indexPath.row) else { return }
+        let url = suggestions[indexPath.row].url
+        addressField.text = url.absoluteString
+        addressField.resignFirstResponder()
+        hideSuggestions()
+        if currentWebView == nil { addTab(url: url, select: true) }
+        else { currentWebView?.load(URLRequest(url: url)) }
+    }
+}
+
+/// A two-line cell: the page's title over its URL. UITableViewCell only gives
+/// .subtitle through init, which a registered class has to ask for itself.
+final class ScraySuggestCell: UITableViewCell {
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: .subtitle, reuseIdentifier: reuseIdentifier)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }

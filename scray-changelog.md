@@ -4,6 +4,18 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.7 — test: the in-app browser's address bar completes from history, with an ✕ per suggestion
+<!-- 2026-09-22T19:10Z -->
+- **What:** typing in the browser's address bar drops a list under it - up to 6 pages from history, title over URL. Tap one to go there. Focusing the bar with the current page in it offers the places you go most, since completing against the page you are already on is no use.
+- **Each row has an ✕** that forgets that URL, so a page you don't want offered again stops coming back. A 44pt target, so it isn't hit while aiming at the row.
+  - It drops the URL from **this phone's** history (`scray.browser.history`) only. The History screen is the server's copy, and clearing a suggestion shouldn't quietly wipe a page off every device. Visiting the page again will of course put it back.
+- **Where the list comes from:** `ScrayBrowserSync.suggestions(matching:limit:)` - this device's own history, not the server. The bar answers on every keystroke, and a round trip per keystroke would be slow and pointless: the pages you type at are the ones you visit on this phone. Offline it behaves the same.
+- **Ranking:** one row per URL however many times it has been visited; a match at the start of the host first, then the visit count, then how recently. A site opened daily beats one opened once last month.
+- **Layout:** the list floats over the page like the download pill rather than resizing it - the keyboard is already up, and a reflow underneath would be one movement too many. It closes when the bar loses focus, on Go, and on a tap through to a page.
+- Swift, so this one needs a **full IPA build**; `assets/web` alone won't pick it up.
+- Not compiled here - there's no Swift toolchain on this machine, so it has had a read-through and a brace/paren balance check only.
+- Deploy: modules/scray-native/ios/ScrayBrowser.swift, modules/scray-native/ios/ScrayBrowserSync.swift, assets/web/VERSION.
+
 ### picker 15.8 / native 15.6 — test: COL on the right in FLS, where it sits outside FLS
 <!-- 2026-09-22T16:00Z -->
 - **Symptom:** after 15.7 / 15.5, COL showed in FLS but on the left of the screen (seen in portrait), not the right.

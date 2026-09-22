@@ -208,6 +208,79 @@ final class ScrayBrowserSync {
         }
     }
 
+    // MARK: - Address-bar suggestions (native 15.7)
+    //
+    // Straight off this device's own history (scray.browser.history), not the
+    // server: the address bar answers on every keystroke, and a round trip per
+    // keystroke would be both slow and pointless - the pages you type at are
+    // the ones you visit on this phone.
+    //
+    // One row per URL, however many times it has been visited, and that count
+    // is most of the ranking: a site you open daily should beat one you opened
+    // once last month, whatever order they happen to sit in.
+
+    struct Suggestion {
+        let url: URL
+        let title: String
+        let at: Date          // last visit
+        let hits: Int         // visits on this device
+    }
+
+    func suggestions(matching q: String, limit: Int = 8) -> [Suggestion] {
+        let query = q.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let words = query.split(separator: " ").map(String.init)
+        let raw = d.array(forKey: Self.historyKey) as? [[String: Any]] ?? []
+
+        var byURL: [String: Suggestion] = [:]
+        var order: [String] = []
+        for o in raw {
+            guard let str = o["url"] as? String, let url = URL(string: str) else { continue }
+            let title = o["title"] as? String ?? ""
+            let hay = (str + " " + title).lowercased()
+            guard words.allSatisfy({ hay.contains($0) }) else { continue }
+            let at = Date(timeIntervalSince1970: o["at"] as? Double ?? 0)
+            if let seen = byURL[str] {
+                // The list is newest first, so the first sighting has the
+                // latest date and usually the better title.
+                byURL[str] = Suggestion(url: url,
+                                        title: seen.title.isEmpty ? title : seen.title,
+                                        at: max(seen.at, at), hits: seen.hits + 1)
+            } else {
+                byURL[str] = Suggestion(url: url, title: title, at: at, hits: 1)
+                order.append(str)
+            }
+        }
+
+        // What you are typing is usually the start of a host, so a match there
+        // comes first; then how often, then how recently.
+        let head = words.first ?? ""
+        func startsWithQuery(_ s: Suggestion) -> Bool {
+            guard !head.isEmpty else { return false }
+            let host = (s.url.host ?? "").lowercased()
+            return host.hasPrefix(head) || host.hasPrefix("www." + head)
+                || s.url.absoluteString.lowercased().hasPrefix(head)
+        }
+        return order.compactMap { byURL[$0] }
+            .sorted { a, b in
+                let pa = startsWithQuery(a), pb = startsWithQuery(b)
+                if pa != pb { return pa }
+                if a.hits != b.hits { return a.hits > b.hits }
+                return a.at > b.at
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    /// Drop every local visit to a URL, so it stops being suggested (native
+    /// 15.7). This phone's list only - the History screen is the server's
+    /// copy, and clearing a suggestion is not the same as asking for a page to
+    /// be forgotten everywhere.
+    func forgetSuggestion(url: URL) {
+        let s = url.absoluteString
+        let raw = d.array(forKey: Self.historyKey) as? [[String: Any]] ?? []
+        d.set(raw.filter { ($0["url"] as? String) != s }, forKey: Self.historyKey)
+    }
+
     /// This device's own visits, for when the server can't be reached.
     func localHistory(matching q: String) -> [Visit] {
         let words = q.lowercased().split(separator: " ").map(String.init)

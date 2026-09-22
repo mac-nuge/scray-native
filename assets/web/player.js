@@ -3444,14 +3444,24 @@ function scrayPlayerOverflowActions() {
     const actions = [];
     if (scrayIsTouchPlayerDevice()) {
         actions.push({
+            key: 'nativeFs',
             label: '⛶  Native fullscreen',
             onClick: () => triggerIOSNativeFullscreen()
         });
     }
     actions.push({
+        key: 'tineye',
         label: '🔍  TinEye',
         onClick: () => { scrayTinEyeSearch(); }
     });
+    // Settings > Player controls (scray-player-controls.js) decides what the
+    // menu holds in a customised mode: these two plus any bar controls moved
+    // in, in the chosen order. A mode left on its built-in layout gets these
+    // back unchanged.
+    if (typeof window.scrayPlayerControlsOverflow === 'function') {
+        try { return window.scrayPlayerControlsOverflow(actions); }
+        catch (e) { console.warn('[player-controls] overflow hook failed:', e); }
+    }
     return actions;
 }
 
@@ -7412,6 +7422,7 @@ window.plyrPlayer.on('loadstart', window.scrayRebuildPlayerControls = () => {
     attachPlayNextButton();
     attachBasketQuickButton();
     attachBookmarkQuickButton();
+    window.scrayApplyPlayerControls?.(); // Settings > Player controls (scray-player-controls.js)
     attachFrameStepButtons();
     // The rebuilt bar comes back with none of FLS's inline rotation styles -
     // including the z-index that lifts it above the reload mask - so it can
@@ -7792,6 +7803,7 @@ attachHistorySequenceButton(); //  Add play-through-history quick-action button
 attachPlayNextButton(); //  Add play-next quick-action button
 attachBasketQuickButton(); //  Add basket quick-view button
 attachBookmarkQuickButton(); //  Add bookmark quick-add button
+window.scrayApplyPlayerControls?.(); // Settings > Player controls (scray-player-controls.js)
 attachFrameStepButtons(); // Add frame-by-frame step buttons
 // Frame-step columns removed - the left half is now jog-scrub and triple-tap
 // territory. attachColumnFrameStepZones is left defined but uncalled.
@@ -8411,6 +8423,7 @@ attachHistorySequenceButton(); //  Re-attach play-through-history button on new 
 attachPlayNextButton(); //  Re-attach play-next button on new video
 attachBasketQuickButton(); //  Re-attach basket quick-view button on new video
 attachBookmarkQuickButton(); //  Re-attach bookmark quick-add button on new video
+window.scrayApplyPlayerControls?.(); // Settings > Player controls (scray-player-controls.js)
 // Deferred start point (bookmark rows, and anything else that wants to open
 // part-way in). loadedmetadata is the earliest the duration is known, so it is
 // the first attempt - the helper handles the case where the media accepts the

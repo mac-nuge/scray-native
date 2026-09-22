@@ -4,6 +4,23 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.5 / native 15.3 — test: Settings > Player controls (order, show/hide, ... menu per MPB/MPFS/FLS)
+<!-- 2026-09-22T15:06Z -->
+- **What:** a new **Player controls** section in Settings. You pick MPB, MPFS or FLS, then:
+  - set the order of the bar's controls with ▲ ▼;
+  - put each control on the **Bar**, in the **...** menu, or **Hide** it.
+  - A preview line shows the bar, the menu and the hidden controls. Each mode has **Reset to built-in** and **Copy to…** another mode.
+- **Controls covered:** ▶ play, ■ stop, ↻ rotate, ↺ back to MPFS (FLS only), 🔒 position lock (FLS only), X, Xb, H<, >, M>, BM, fullscreen, mute (the volume slider goes with it), and the ... button itself. Native fullscreen and TinEye can be moved around the menu or hidden, but can't go on the bar.
+- **How it works:** new `scray-player-controls.js`, loaded straight after player.js on every page that has the player (picker: index, bookmarks, basket-checkout; native: index, bookmarks).
+  - A mode you haven't customised is left exactly as style.css lays it out. A customised mode gets inline `order` and `display` (!important, so they beat style.css's per-mode hide rules) on the buttons player.js already makes.
+  - Nothing is created or removed. X stays in the DOM even when it's hidden, because swipe-up random clicks it.
+  - A control in the ... menu is a tap-through to the hidden button. It runs deferred and re-queried, like swipe-up random, because several of these rebuild the player. The ... button hides itself when its menu is empty.
+  - Re-applied after each control rebuild (the three attach sites in player.js) and on body-class, resize and orientation changes. Desktop, device landscape and the mini-player are never touched.
+- player.js: the overflow's two items now carry keys (`nativeFs`, `tineye`), and the menu goes through `window.scrayPlayerControlsOverflow`.
+- The layout is saved per device in localStorage (`scray_player_controls_v1`), so each browser and the app keep their own. Saving a mode that matches the built-in layout clears it.
+- **Watch for:** the editor's starting layout is read from style.css (MPB/MPFS hide X, Xb, H<, BM; FLS hides ↻ and BM). If a mode looks different on the phone before you customise it, that table (`HIDDEN_BY_DEFAULT`) is what's off. The bar itself isn't affected.
+- Deploy: picker scray-player-controls.js (new), player.js, index.php, bookmarks.php, basket-checkout.php. Native: assets/web/scray-player-controls.js (new), player.js, index.html, bookmarks.html.
+
 ### native 15.2 — stable: Hetzner copies count for Stash matching
 <!-- 2026-09-21T16:28Z -->
 

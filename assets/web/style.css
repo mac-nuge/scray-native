@@ -1991,6 +1991,21 @@ font-size: 1.5rem !important;
 flex: 0 0 auto;
 }
 
+/* The stop icon is an SVG square (picker 15.6 / native 15.4), drawn like
+   Plyr's play/pause icon - centred in the button and the same 18px size. */
+.plyr__controls .plyr-stop {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+}
+.plyr__controls .plyr-stop svg {
+width: 18px;
+height: 18px;
+display: block;
+flex: 0 0 auto;
+pointer-events: none;
+}
+
 /* iOS Native Fullscreen button - transparent background */
 .plyr-ios-fullscreen {
 min-width: 50px !important;

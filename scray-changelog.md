@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.6 / native 15.4 — test: stop button icon matches play/pause (centred SVG square)
+<!-- 2026-09-22T15:12Z -->
+- **Symptom:** the ■ stop control looked small and sat off-centre next to Plyr's play/pause, most visibly in FLS.
+- **Cause:** the stop was a text glyph (`■`), so its size and position depended on the font's metrics and baseline. Plyr's icons are 18px SVGs centred by flex.
+- **Fix:** `attachStopButton` now draws an SVG square (18×18 viewBox, 12px square, currentColor) instead of the glyph. style.css centres it with inline-flex and sizes the svg at 18px, like Plyr's icons. The Stop button also has an `aria-label`.
+- The Player controls menu entry still reads "■  Stop" (text there is fine).
+- Deploy: player.js, style.css (both repos).
+
 ### picker 15.5 / native 15.3 — test: Settings > Player controls (order, show/hide, ... menu per MPB/MPFS/FLS)
 <!-- 2026-09-22T15:06Z -->
 - **What:** a new **Player controls** section in Settings. You pick MPB, MPFS or FLS, then:

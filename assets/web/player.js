@@ -3307,7 +3307,11 @@ if (controls.querySelector('.plyr-stop')) return; // prevent duplicates
 
 const stopBtn = document.createElement("button");
 stopBtn.className = "plyr__control plyr-stop";
-stopBtn.textContent = '■';
+// An SVG square, not the ■ glyph: the glyph sat small and high in the
+// button. Drawn like Plyr's own play/pause icons (18px box, currentColor),
+// so it takes their size and centring in every mode.
+stopBtn.innerHTML = '<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false"><rect x="3" y="3" width="12" height="12" rx="1.5" fill="currentColor"></rect></svg>';
+stopBtn.setAttribute('aria-label', 'Stop');
 stopBtn.title = 'Stop playback';
 stopBtn.onclick = (e) => {
 window.inlineVideoPlayer.reset();

@@ -33,6 +33,31 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
         }
     }
 
+    /// Open the Jira report modal (scray-bugreport.js). The in-app browser's
+    /// ⋯ > Jira Report calls this once it has dismissed itself (native 15.8),
+    /// with the page it was on: that goes into the console log the report
+    /// carries, and starts the "What happened?" box, which you can clear.
+    func openBugReport(browserURL: String, browserTitle: String) {
+        let ctx: [String: String] = ["url": browserURL, "title": browserTitle]
+        let json = (try? JSONSerialization.data(withJSONObject: ctx))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        DispatchQueue.main.async {
+            self.webView.evaluateJavaScript("""
+            (function (b) {
+              console.log('[browser] Jira report from the in-app browser: ' + (b.title || '') + ' ' + (b.url || ''));
+              if (typeof window.scrayReportBug !== 'function') { console.warn('[browser] no report modal on this page'); return; }
+              Promise.resolve(window.scrayReportBug()).then(function () {
+                var d = document.getElementById('scrayBugDetails');
+                if (d && !d.value && b.url) {
+                  d.value = 'In-app browser: ' + b.url + '\\n\\n';
+                  d.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+              });
+            })(\(json));
+            """)
+        }
+    }
+
     /// Open the upload panel. The in-app browser's upload pill calls this once
     /// it has dismissed itself (native 14.37).
     func showUploads() {

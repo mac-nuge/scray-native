@@ -223,6 +223,20 @@ final class ScrayBrowserViewController: UIViewController,
     /// ✕, last in the strip since native 14.50 - see buildChrome.
     private let closeButton = UIButton(type: .system)
     private let forwardButton = UIButton(type: .system)
+    /// Back to the tab you were on before this one (native 15.8). Tapping it
+    /// again comes back, so two taps flick between a pair of tabs.
+    private let lastTabButton = UIButton(type: .system)
+    /// The tab on screen before the current one, and the one on screen now -
+    /// held by identity, not index, because closing and pinning shift indices.
+    private weak var lastTab: ScrayBrowserTab?
+    private weak var shownTab: ScrayBrowserTab?
+    /// Where each control lives (native 15.8) - see ScrayBrowserControls.swift.
+    private var controlsLayout = ScrayBrowserLayout.load()
+    /// The bottom bar's buttons. Refilled by applyControlsLayout.
+    private let navStack = UIStackView()
+    /// The bottom bar's height when it's showing: none at all if every
+    /// control has been moved off it.
+    private var toolbarShownHeight: CGFloat { controlsLayout.controls(in: .bottom).isEmpty ? 0 : 44 }
     private let tabsButton = UIButton(type: .system)
     /// ‹P (native 14.20) - back to Picker from an external page Picker sent
     /// you to. See pickerReturn(). Reads ‹N instead when the trip started in
@@ -437,9 +451,11 @@ final class ScrayBrowserViewController: UIViewController,
         homeButton.setImage(UIImage(systemName: "house"), for: .normal)
         homeButton.addTarget(self, action: #selector(homeTapped), for: .touchUpInside)
         homeButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        homeButton.heightAnchor.constraint(equalToConstant: Self.TOOLBAR_BUTTON_HEIGHT).isActive = true
 
-        // ⋯ lives in the bottom strip after the tray (native 14.26); sized
-        // with the other strip buttons below.
+        // ⋯ sits up by the address with home and downloads (native 15.8; it
+        // was in the bottom strip since 14.26) - wherever the controls layout
+        // puts it. Sized with the other control buttons below.
         moreButton.setImage(UIImage(systemName: "ellipsis.circle", withConfiguration: Self.toolbarSymbol),
                             for: .normal)
         moreButton.addTarget(self, action: #selector(moreTapped), for: .touchUpInside)
@@ -468,6 +484,10 @@ final class ScrayBrowserViewController: UIViewController,
         addressHeight.isActive = true
 
         addressField.addTarget(self, action: #selector(addressEditingChanged), for: .editingChanged)
+        // The address gives way to the buttons beside it, however many the
+        // controls layout puts up here (native 15.8).
+        addressField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        addressField.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         // The suggestion list. Floats over the page like the download pill
         // rather than resizing it: the keyboard is already up and a reflow of
@@ -487,7 +507,8 @@ final class ScrayBrowserViewController: UIViewController,
         suggestTable.keyboardDismissMode = .onDrag
         suggestTable.isHidden = true
 
-        let header = UIStackView(arrangedSubviews: [addressField, stashButton, homeButton])
+        // The controls placed at the top follow these two (applyControlsLayout).
+        let header = UIStackView(arrangedSubviews: [addressField, stashButton])
         headerStack = header
         header.axis = .horizontal
         header.alignment = .center
@@ -514,6 +535,13 @@ final class ScrayBrowserViewController: UIViewController,
         backButton.addTarget(self, action: #selector(backTapped), for: .touchUpInside)
         forwardButton.setImage(UIImage(systemName: "chevron.right", withConfiguration: Self.toolbarSymbol), for: .normal)
         forwardButton.addTarget(self, action: #selector(forwardTapped), for: .touchUpInside)
+        // Two rectangles trading places: back to the last tab, and again to return.
+        lastTabButton.setImage(UIImage(systemName: "rectangle.2.swap", withConfiguration: Self.toolbarSymbol)
+                                ?? UIImage(systemName: "arrow.left.arrow.right", withConfiguration: Self.toolbarSymbol),
+                               for: .normal)
+        lastTabButton.addTarget(self, action: #selector(lastTabTapped), for: .touchUpInside)
+        lastTabButton.accessibilityLabel = "Last tab"
+        lastTabButton.isEnabled = false
         // reloadButton swaps its image to xmark while a page is loading
         // (see the isLoading observer).
         tabsButton.setTitle("1 ⧉", for: .normal)
@@ -536,27 +564,21 @@ final class ScrayBrowserViewController: UIViewController,
         backButton.isEnabled = false
         forwardButton.isEnabled = false
 
-        let navButtons: [UIButton] = [pickerButton, backButton, forwardButton, reloadButton,
-                                        newTabButton, tabsButton, trayButton, moreButton,
-                                        closeButton]
-        for b in navButtons {
+        let sized: [UIButton] = [pickerButton, backButton, forwardButton, lastTabButton, reloadButton,
+                                 newTabButton, tabsButton, trayButton, moreButton, closeButton, homeButton]
+        for b in sized {
             b.translatesAutoresizingMaskIntoConstraints = false
             // trayButton pins its own size in ScrayDownloads; match it there.
-            if b === trayButton { continue }
+            // homeButton has its own width, above.
+            if b === trayButton || b === homeButton { continue }
             b.widthAnchor.constraint(equalToConstant: Self.TOOLBAR_BUTTON_WIDTH).isActive = true
             b.heightAnchor.constraint(equalToConstant: Self.TOOLBAR_BUTTON_HEIGHT).isActive = true
         }
-        let navStack = UIStackView(arrangedSubviews: navButtons)
+        // One group, right-aligned (native 14.50). Which buttons, and in what
+        // order, is the controls layout's call: applyControlsLayout fills it.
         navStack.axis = .horizontal
         navStack.alignment = .center
         navStack.spacing = Self.TOOLBAR_ITEM_GAP
-        let navItem = UIBarButtonItem(customView: navStack)
-
-        func flex() -> UIBarButtonItem {
-            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
-        }
-        // One group, right-aligned, ✕ last (native 14.50).
-        toolbar.items = [flex(), navItem]
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         downloadBar.translatesAutoresizingMaskIntoConstraints = false
@@ -668,6 +690,140 @@ final class ScrayBrowserViewController: UIViewController,
             toolbar.bottomAnchor.constraint(equalTo: guide.bottomAnchor),
             toolbarHeight
         ])
+        applyControlsLayout()
+    }
+
+    // MARK: - Controls layout (native 15.8)
+    //
+    // Which control is a button at the top, a button in the bottom bar, a
+    // line in the ⋯ menu, or nowhere - edited in ⋯ > Browser Controls… and
+    // kept in ScrayBrowserLayout (ScrayBrowserControls.swift). The buttons
+    // themselves are made once, in buildChrome; this only moves them.
+
+    private func controlButton(for c: ScrayBrowserControl) -> UIButton {
+        switch c {
+        case .picker:    return pickerButton
+        case .back:      return backButton
+        case .forward:   return forwardButton
+        case .lastTab:   return lastTabButton
+        case .reload:    return reloadButton
+        case .newTab:    return newTabButton
+        case .tabs:      return tabsButton
+        case .downloads: return trayButton
+        case .more:      return moreButton
+        case .close:     return closeButton
+        case .home:      return homeButton
+        }
+    }
+
+    private func applyControlsLayout() {
+        let top = controlsLayout.controls(in: .top)
+        let bottom = controlsLayout.controls(in: .bottom)
+
+        for v in headerStack.arrangedSubviews where v !== addressField && v !== stashButton {
+            headerStack.removeArrangedSubview(v)
+            v.removeFromSuperview()
+        }
+        for c in top {
+            let b = controlButton(for: c)
+            b.isHidden = chromeCollapsed        // the collapsed strip is the address alone
+            headerStack.addArrangedSubview(b)
+        }
+
+        for v in navStack.arrangedSubviews {
+            navStack.removeArrangedSubview(v)
+            v.removeFromSuperview()
+        }
+        for c in bottom {
+            let b = controlButton(for: c)
+            b.isHidden = false
+            navStack.addArrangedSubview(b)
+        }
+        // A fresh bar item each time, so the toolbar measures the new width.
+        navStack.frame.size = navStack.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        let flex = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
+        toolbar.items = bottom.isEmpty ? [] : [flex, UIBarButtonItem(customView: navStack)]
+        toolbarHeight.constant = chromeCollapsed ? 0 : toolbarShownHeight
+        view.setNeedsLayout()
+        refreshChrome()
+    }
+
+    /// A control placed in the ⋯ menu does what its button would.
+    private func performControl(_ c: ScrayBrowserControl) {
+        switch c {
+        case .picker:    pickerTapped()
+        case .back:      backTapped()
+        case .forward:   forwardTapped()
+        case .lastTab:   lastTabTapped()
+        case .reload:    reloadTapped()
+        case .newTab:    newTabTapped()
+        case .tabs:      tabsTapped()
+        case .downloads: downloadsTapped()
+        case .more:      moreTapped()
+        case .close:     closeTapped()
+        case .home:      homeTapped()
+        }
+    }
+
+    /// The ⋯ menu's line for a control placed there - worded for the moment.
+    private func menuAction(for c: ScrayBrowserControl) -> UIAlertAction {
+        var title = c.title
+        var enabled = true
+        switch c {
+        case .picker:
+            title = (pickerReturn() == nil && cameFromNative) ? "Back to Native" : "Back to Picker"
+        case .back:      enabled = currentWebView?.canGoBack ?? false
+        case .forward:   enabled = currentWebView?.canGoForward ?? false
+        case .lastTab:   enabled = lastTabIndex != nil
+        case .reload:    title = (currentWebView?.isLoading ?? false) ? "Stop Loading" : "Reload"
+        case .tabs:      title = "Tabs (\(tabs.count))"
+        case .downloads:
+            let active = ScrayDownloadCenter.shared.activeCount
+            title = active > 0 ? "Downloads (\(active) active)" : "Downloads"
+        default: break
+        }
+        let a = UIAlertAction(title: title, style: .default) { [weak self] _ in self?.performControl(c) }
+        a.setValue(UIImage(systemName: c.symbol), forKey: "image")
+        a.isEnabled = enabled
+        return a
+    }
+
+    private func controlsTapped() {
+        let editor = ScrayBrowserControlsViewController(style: .insetGrouped)
+        editor.onChange = { [weak self] layout in
+            guard let self = self else { return }
+            self.controlsLayout = layout
+            self.applyControlsLayout()
+        }
+        presentSafely(UINavigationController(rootViewController: editor))
+    }
+
+    // MARK: - Last tab (native 15.8)
+
+    /// Where the last tab is now, if it's still open.
+    private var lastTabIndex: Int? {
+        guard let t = lastTab else { return nil }
+        return tabs.firstIndex { $0 === t }
+    }
+
+    @objc private func lastTabTapped() {
+        guard let i = lastTabIndex else { flash("No other tab to go back to"); return }
+        selectTab(i)
+    }
+
+    // MARK: - Jira report (native 15.8)
+
+    /// The report modal lives in Scray's own page, behind this browser, so
+    /// the browser steps aside for it - the tabs stay as they are, as for ✕.
+    /// The page you were on goes into the report's details.
+    private func jiraTapped() {
+        guard let host = ScrayNativeView.current else {
+            flash("Couldn't reach Scray's report - open it from the app's menu")
+            return
+        }
+        let url = currentTab?.displayURL?.absoluteString ?? ""
+        let title = currentTab?.displayTitle ?? ""
+        dismiss(animated: true) { host.openBugReport(browserURL: url, browserTitle: title) }
     }
 
     // MARK: - Chrome that gets out of the way
@@ -748,7 +904,7 @@ final class ScrayBrowserViewController: UIViewController,
         chromeCollapsed = collapsed
 
         addressHeight.constant = collapsed ? Self.chromeStripHeight : Self.chromeFullHeight
-        toolbarHeight.constant = collapsed ? 0 : 44
+        toolbarHeight.constant = collapsed ? 0 : toolbarShownHeight
 
         UIView.animate(withDuration: 0.22, delay: 0,
                        options: [.curveEaseOut, .beginFromCurrentState]) {
@@ -757,7 +913,8 @@ final class ScrayBrowserViewController: UIViewController,
                                                           bottom: collapsed ? 1 : 4, right: 6)
             // isHidden inside a stack view animates the width away, which is
             // what makes the strip go full width rather than leaving gaps.
-            self.homeButton.isHidden  = collapsed
+            // Every control placed at the top, not just home (native 15.8).
+            for c in self.controlsLayout.controls(in: .top) { self.controlButton(for: c).isHidden = collapsed }
             self.stashButton.isHidden = collapsed || !self.stashEligible
             self.toolbar.alpha = collapsed ? 0 : 1
             self.view.layoutIfNeeded()
@@ -796,8 +953,14 @@ final class ScrayBrowserViewController: UIViewController,
 
     private func selectTab(_ index: Int) {
         guard tabs.indices.contains(index) else { return }
+        // The tab leaving the screen becomes the last tab (native 15.8) -
+        // unless it has just been closed, when the last tab stays as it was.
+        if let was = shownTab, was !== tabs[index], tabs.contains(where: { $0 === was }) {
+            lastTab = was
+        }
         currentIndex = index
         let tab = tabs[index]
+        shownTab = tab
 
         webContainer.subviews.forEach { $0.removeFromSuperview() }
         let wv = tab.webView
@@ -910,6 +1073,8 @@ final class ScrayBrowserViewController: UIViewController,
         guard !tabs.isEmpty else { return }
         let idx = UserDefaults.standard.integer(forKey: Self.indexKey)
         selectTab(min(max(idx, 0), tabs.count - 1))
+        lastTab = nil       // a fresh start has no tab before this one
+        refreshChrome()
     }
 
     private func persistTabs() {
@@ -1065,6 +1230,7 @@ final class ScrayBrowserViewController: UIViewController,
         }
         backButton.isEnabled = currentWebView?.canGoBack ?? false
         forwardButton.isEnabled = currentWebView?.canGoForward ?? false
+        lastTabButton.isEnabled = lastTabIndex != nil
         refreshPickerItem()
         // Deliberately above the isFirstResponder guard below: the button's
         // visibility has nothing to do with whether the address bar is being
@@ -1371,15 +1537,9 @@ final class ScrayBrowserViewController: UIViewController,
         sheet.popoverPresentationController?.sourceView = moreButton
         sheet.popoverPresentationController?.sourceRect = moreButton.bounds
 
-        let active = ScrayDownloadCenter.shared.activeCount
-        let downloadsTitle = active > 0 ? "Downloads (\(active) active)" : "Downloads"
-        sheet.addAction(UIAlertAction(title: downloadsTitle, style: .default) { [weak self] _ in
-            self?.downloadsTapped()
-        })
-
-        sheet.addAction(UIAlertAction(title: "New Tab", style: .default) { [weak self] _ in
-            self?.newTabTapped()
-        })
+        // Downloads and New Tab are buttons now, not lines here (native 15.8).
+        // What goes here instead is whatever Browser Controls puts in the menu.
+        for c in controlsLayout.controls(in: .menu) { sheet.addAction(menuAction(for: c)) }
 
         // Favourites (native 14.8). Offered for a real web page only.
         if let url = currentTab?.displayURL, (url.scheme ?? "").hasPrefix("http") {
@@ -1421,6 +1581,16 @@ final class ScrayBrowserViewController: UIViewController,
                 self?.flash("Downloads will ask where to save")
             })
         }
+
+        // native 15.8
+        let jira = UIAlertAction(title: "Jira Report", style: .default) { [weak self] _ in self?.jiraTapped() }
+        jira.setValue(UIImage(systemName: "ladybug"), forKey: "image")
+        sheet.addAction(jira)
+        let controls = UIAlertAction(title: "Browser Controls…", style: .default) { [weak self] _ in
+            self?.controlsTapped()
+        }
+        controls.setValue(UIImage(systemName: "slider.horizontal.3"), forKey: "image")
+        sheet.addAction(controls)
 
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         presentSafely(sheet)

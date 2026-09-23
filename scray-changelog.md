@@ -4,6 +4,26 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.8 — test: in-app browser: last-tab button, controls moved and customisable, Jira report in the menu
+<!-- 2026-09-23T20:30Z -->
+
+**native** — `stg-native - 15.8`: `ScrayBrowser.swift`, `ScrayBrowserControls.swift` (new), `ScrayNativeView.swift`, `assets/web/VERSION`. **Swift - needs an IPA build.**
+
+- **Last tab** (⇄ as `rectangle.2.swap`, two rectangles trading places), between › and reload. It goes to the tab you were on before this one; tapping again comes back, so it flicks between a pair.
+  - Held by identity, not index (`lastTab` / `shownTab`, both weak), since closing and pinning shift indices. Whatever takes you to another tab counts: the tab list, a new tab, a link opening in one.
+  - Closing the tab on screen doesn't reset it - the last tab stays what it was. Closing the last tab itself greys the button. A fresh launch starts with none.
+- **Downloads and ⋯ moved to the top**, after home. The collapsed address strip hides every top control now, not just home.
+- **⋯ menu:** Downloads and New Tab lines are gone (both are buttons). New: **Jira Report** and **Browser Controls…**.
+  - **Jira Report:** the modal lives in Scray's own page behind the browser, so the browser steps aside (as ✕ does - tabs stay) and `ScrayNativeView.openBugReport` opens it. The page you were on goes into the report's console log and starts the "What happened?" box as `In-app browser: <url>`, which you can clear. No change to scray-bugreport.js.
+- **Browser Controls…** - the browser's Player Controls. Every control is in one of four places, in an order you set: **Top** (beside the address), **Bottom bar**, **In the ⋯ menu** (a line at the top of the menu, doing what the button does - Back/Forward/Last Tab greyed when there's nowhere to go), or **Hidden**. Drag by the handles; each drop is saved and applied behind the sheet straight away. Reset puts the default back.
+  - Default: top = home, downloads, ⋯; bottom = ‹P, ‹, ›, last tab, reload, +, tabs, ✕.
+  - Two rules: ⋯ is always a button (it's the way back to this screen) and ✕ can go in the menu but can't be hidden. Enforced both when dragging and when reading what's saved.
+  - Nothing on the bottom bar → the bar goes and the page gets the room.
+  - Saved per phone in UserDefaults `scray.browser.controls.v1`; a control that's missing from what's saved (a new one in a later build) goes where the default has it.
+  - The StashDB ↱ stays fixed beside the address - it only shows on stashdb.org.
+- **Watch:** lots of buttons at the top squeeze the address field (it gives way to them); the bottom bar fits about ten.
+- Tested: the three Swift files parse cleanly (tree-sitter). Not compiled - there's no Swift toolchain here - so the IPA build is the first compile.
+
 ### native 15.7 — test: the in-app browser's address bar completes from history, with an ✕ per suggestion
 <!-- 2026-09-22T19:10Z -->
 - **What:** typing in the browser's address bar drops a list under it - up to 6 pages from history, title over URL. Tap one to go there. Focusing the bar with the current page in it offers the places you go most, since completing against the page you are already on is no use.

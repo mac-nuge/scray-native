@@ -4,6 +4,23 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.13 / native 15.9 — test: filter button on the bookmark edit rail
+<!-- 2026-09-24T08:50Z -->
+
+**picker** — `staging - 15.13`, **native** — `stg-native - 15.9`: `player.js` (both, same patch). No Swift - native picks it up in the dev app straight away.
+
+- **Asked for:** on the marker rail's ✎ editor (Adjust / Delete), a filter option with a filter symbol that turns the bookmark's term into a filter; with several terms, pick one or more and a tap anywhere else confirms.
+- **Where:** a funnel button (inline SVG - there's no funnel character that renders reliably) right after the bookmark's name on the edit rail. The rail asks for one button's width more.
+- **What a "term" is:** the note's keywords, `scrayNoteKeywords` - its hand-filed keyword list from manage-data if it has one, else the note's own words minus stopwords. They go into `scrayNoteKeywordFilter`, the same set the NOTE cloud's keyword chips and the purple keyword pills use, so the pill appears in the bar and removes the usual way.
+  - **One term:** applied straight away, rail closes, `Filter: kiss` feedback.
+  - **Several:** the rail becomes a chip per term. Tap to tick (purple) / untick (dashed). Terms already in the filter start ticked, so unticking one takes it off. **A tap anywhere off the rail confirms** and is swallowed - it doesn't also play/pause, seek or raise another marker's rail. ✕ goes back to the edit rail without changing anything. Confirming with nothing changed just closes.
+  - **No keywords at all** (a note made only of stopwords): falls back to the mapped note itself as a Notes pick. No note at all: "No note to filter by".
+- Keyword picks combine with the existing any/all keyword switch as they do from the cloud (any by default).
+- Uses Clear all's guards when refreshing (`scraySuppressScrollUntil`, `skipPanelAutoOpen`) so the list behind the player doesn't scroll and the landscape random panel doesn't pop open.
+- Tested in jsdom against the real rail code: single term applied; three terms with one already on → ticks, untick, outside mousedown confirms and the following click is swallowed; a tap inside the rail doesn't confirm; ✕ returns to the edit rail and leaves outside taps alone afterwards; stopword-only note → Notes pick. `node --check` on both.
+- **Watch:** on-device, that the outside tap in FLS confirms without also toggling the controls; and a note with many keywords squeezes the chips (ellipsis) on a narrow bar.
+- Deploy: picker player.js.
+
 ### native 15.8 — test: in-app browser: last-tab button, controls moved and customisable, Jira report in the menu
 <!-- 2026-09-23T20:30Z -->
 

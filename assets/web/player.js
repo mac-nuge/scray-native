@@ -7079,6 +7079,12 @@ const editTarget = (rail, entry) => {
         'flex-grow: 1; flex-shrink: 1; flex-basis: 0; overflow: hidden; text-overflow: ellipsis; font-weight: normal; text-decoration: underline dotted; text-underline-offset: 2px;');
     nameBtn.title = 'Edit the name in the bookmarks window';
     rail.appendChild(nameBtn);
+    // Funnel: the note's terms as a filter (picker 15.13 / native 15.9).
+    const filterBtn = makeRailButton('', () => filterFrom(rail, entry),
+        `flex-basis: ${RAIL_EDIT_BTN_PX}px; padding: 4px 0;`);
+    filterBtn.innerHTML = FUNNEL_SVG;
+    filterBtn.title = 'Filter by this bookmark';
+    rail.appendChild(filterBtn);
     const adjust = makeRailButton('Adjust', () => adjustTo(entry), 'background: #007bff;');
     adjust.title = 'Move this bookmark to the playhead';
     // The label follows the playhead, so what Adjust will do is on the button.
@@ -7092,7 +7098,121 @@ const editTarget = (rail, entry) => {
     rail.appendChild(adjust);
     rail.appendChild(makeRailButton('Delete', () => confirmDelete(rail, entry), 'background: #dc3545;'));
     rail.appendChild(cancelBtn());
-    rail.__place?.(RAIL_EDIT_WIDTH_PX);
+    rail.__place?.(RAIL_EDIT_WIDTH_PX + RAIL_EDIT_BTN_PX + CHIP_GAP_PX);
+};
+
+// ---- filter from a bookmark (picker 15.13 / native 15.9) ------------------------
+// The funnel on the edit rail turns the bookmark's note into a filter. Its
+// terms are scrayNoteKeywords - the note's own words, or its hand-filed
+// keyword list - and they go into the keyword filter, the same set the NOTE
+// cloud's keyword chips and the purple keyword pills use. One term applies
+// straight away. Several become chips to tick; a tap anywhere off the rail
+// confirms, and that tap does nothing else. ✕ goes back to the edit rail.
+// A note with no keywords at all (stopwords only) filters by the mapped note
+// itself instead, as a Notes pick.
+const FUNNEL_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" '
+    + 'style="display:block;margin:0 auto;pointer-events:none">'
+    + '<path d="M3 4h18l-7 8.5V19l-4 2v-8.5z" fill="currentColor"/></svg>';
+const FILTER_PICK_ON_BG = '#6f42c1';   // the NOTE cloud's picked colour
+
+const applyNoteFilter = (kwOn, kwOff, noteName) => {
+    const kw = window.scrayNoteKeywordFilter;
+    if (kw) {
+        kwOn.forEach(k => kw.add(k));
+        kwOff.forEach(k => kw.delete(k));
+    }
+    if (noteName) window.scrayFacetFilters?.note?.add(noteName);
+    // Clear all's guards: the list behind the player doesn't scroll, and the
+    // random panel doesn't auto-open in landscape.
+    window.scraySuppressScrollUntil = Date.now() + 1500;
+    window.skipPanelAutoOpen = true;
+    window.skipSearchScroll = true;
+    if (typeof window.scrayRefreshFilters === 'function') window.scrayRefreshFilters();
+};
+
+const filterFrom = (rail, entry) => {
+    if (!rail.isConnected) return;
+    const raw = String(entry.bm.note || '').trim();
+    const terms = (raw && typeof window.scrayNoteKeywords === 'function') ? window.scrayNoteKeywords(raw) : [];
+    if (!terms.length) {
+        const name = raw ? (window.scrayMapName ? window.scrayMapName('note', raw) : raw) : '';
+        if (!name) { showPlayerFeedback('No note to filter by', 'top-left'); return; }
+        leaveEdit();
+        applyNoteFilter([], [], name);
+        showPlayerFeedback(`Filter: ${name}`, 'top-left');
+        return;
+    }
+    if (terms.length === 1) {
+        leaveEdit();
+        applyNoteFilter(terms, [], '');
+        showPlayerFeedback(`Filter: ${terms[0]}`, 'top-left');
+        return;
+    }
+    pickFilterTerms(rail, entry, terms);
+};
+
+const pickFilterTerms = (rail, entry, terms) => {
+    clearInterval(rail.__adjustTick);
+    rail.replaceChildren();
+    // Terms already in the filter start ticked, so unticking one takes it off.
+    const live = window.scrayNoteKeywordFilter || new Set();
+    const wasOn = new Set(terms.filter(t => live.has(t)));
+    const picked = new Set(wasOn);
+    const paint = (b, t) => {
+        const on = picked.has(t);
+        b.style.background = on ? FILTER_PICK_ON_BG : 'rgba(0, 0, 0, 0.85)';
+        b.style.outline = on ? 'none' : '1px dashed rgba(255,255,255,0.7)';
+    };
+    terms.forEach(t => {
+        const b = makeRailButton(t, () => {
+            if (picked.has(t)) picked.delete(t); else picked.add(t);
+            paint(b, t);
+        }, 'flex-grow: 1; flex-shrink: 1; flex-basis: 0; overflow: hidden; text-overflow: ellipsis; outline-offset: -2px;');
+        b.title = `Filter by ${t}`;
+        paint(b, t);
+        rail.appendChild(b);
+    });
+
+    let done = false;
+    const unbind = () => {
+        document.removeEventListener('touchstart', outside, true);
+        document.removeEventListener('mousedown', outside, true);
+    };
+    const finish = (commit) => {
+        if (done) return;
+        done = true;
+        unbind();
+        if (!commit) { editTarget(rail, entry); return; }
+        const on = terms.filter(t => picked.has(t) && !wasOn.has(t));
+        const off = terms.filter(t => !picked.has(t) && wasOn.has(t));
+        leaveEdit();
+        if (!on.length && !off.length) return;
+        applyNoteFilter(on, off, '');
+        const now = terms.filter(t => picked.has(t));
+        showPlayerFeedback(now.length ? `Filter: ${now.join(', ')}` : `Filter off: ${off.join(', ')}`, 'top-left');
+    };
+    // Capture phase on document, so it hears the tap before Plyr, the markers
+    // or the bar do - and swallows it, plus the touchend/click that follows,
+    // so confirming never also plays, pauses or seeks.
+    const outside = (e) => {
+        if (!rail.isConnected) { unbind(); return; }   // the rail went some other way
+        if (rail.contains(e.target)) return;
+        e.stopPropagation();
+        if (e.cancelable) e.preventDefault();
+        const follow = e.type === 'touchstart' ? 'touchend' : 'click';
+        const eat = (ev) => { ev.stopPropagation(); if (ev.cancelable) ev.preventDefault(); };
+        document.addEventListener(follow, eat, { capture: true, once: true });
+        setTimeout(() => document.removeEventListener(follow, eat, true), 700);
+        finish(true);
+    };
+    document.addEventListener('touchstart', outside, { capture: true, passive: false });
+    document.addEventListener('mousedown', outside, true);
+
+    const back = makeRailButton('\u2715', () => finish(false), 'padding: 4px 7px;');
+    back.title = 'Back without filtering';
+    rail.appendChild(back);
+    rail.__place?.(Math.max(RAIL_EDIT_WIDTH_PX,
+        terms.length * (80 + CHIP_GAP_PX) + RAIL_EDIT_BTN_PX));
 };
 
 const renameInModal = (entry) => {

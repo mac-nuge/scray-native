@@ -4,6 +4,32 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.10 / browse 15.55 — test: Hetzner in Native - fetch button, streaming, Hetz filter, Migrated sort
+<!-- 2026-09-24T14:10Z -->
+
+**native** — `stg-native - 15.10`: `assets/web/scray-hetzner.js` (new), `index.html`, `player.js`, `scray-sync-ui.js`, `scray-upload.js`, `db.js`, `randomiser.js`, `render.js`, `basket.js`, `history.js`, `random-panel.js`, `style.css`. Web only, no IPA build. **browse** — `staging-browse - 15.55`: `api.php` (`hetzner_list`).
+
+- **Asked for:** the Hetzner box has no sign-in, unlike OneDrive, so Native can stream it. A Hetzner button to add every file on the box to the library, a Hetz toggle, the Migrated sort, and whatever else streaming needs. This reverses 14.52, which undid 14.51's Hetzner source when Hetzner was to live in Picker only. 14.51 is the base, updated for everything since.
+- **browse `hetzner_list`** is back (14.54's, retired in 14.55): every non-deleted catalogue video with a Hetzner copy, in video_key pages. It returns file facts, tags, levels, `created_date`, where the file is on the box (`scrayHetznerFilePath`), the copy's instance id, and whether there's a OneDrive copy. It's read-only and meant for the device key, so it must **not** go on `SCRAY_PRIVILEGED`.
+- **The Hetzner button** (next to Folder, `scray-hetzner.js`) lists the box and writes one library row per video: `hz:<video_key>`, driveId `hetzner`, accountKey `Hetzner::hetzner` (the catalogue's own values, so `scrayIsHetznerVideo` reads them as Picker's does). It then runs a quiet catalogue sync, which brings down scores, bookmarks, variant links and `migrated_at`.
+  - Once added, the button hides and a **☁ Hetzner (n)** pill joins the folder pills. Tap it twice to re-fetch, which adds new files and drops ones gone from the box. Tap the cross, then the pill, to remove them; that removes them from the phone's library only.
+  - A row 14.51 left behind (`hetzner::box`) is updated or dropped by the first fetch.
+- **Phone vs box.** A migrated file is its own catalogue row on the box (`<name>#hetzner`), linked to the original as a variant. So a phone file and its box copy are **one row with two size chips**: superscript **P** (phone) and **H** (Hetzner). **The phone copy is shown by default** (`scrayPickVariant`: remembered pick, else the largest phone copy, else the largest), and on a same-size tie the phone's chip comes first. Only a box copy under the very same key as a phone file would list twice; that one is skipped, and `scrayHetznerDedupe` drops it at the start of every sync if a phone copy turns up later.
+  - Hetzner filenames are italic, and so is any row that has a Hetzner copy (as picker 14.36/14.38).
+- **Streaming:** `refreshVideoBeforeUse` asks `hetzner_url` by video_key before any OneDrive account is looked up (`scrayHetznerRefresh`, as picker 14.31). If a Hetzner row can't get a link, the error overlay says so; before this it would have failed silently.
+- **D on a Hetzner row** opens the signed link with `dl=1` in the in-app browser, which saves it to its Downloads. The other D paths set `window.location.href`, which would have navigated Scray's own page away. This applies to all six D handlers (list, basket, history, random panel).
+- **Hetz toggle** (after Uncat): off, then Hetz (on the box), then No Hetz. Red when armed. Clear all and the filter reset turn it off. Same code as picker 15.9.
+- **Migrated sort** (after Created): `migrated_at` is now a meta field (`db.js META_FIELDS`), so phone files get it too, since they take no source fields from a pull. browse 15.53 backfilled it on rows this phone's cursor has already passed, so the next sync does **one full pull** for every key (localStorage `scray.repull.migratedAt`), then goes back to deltas.
+- **Guards, as in 14.51:** `pushOfflineFlags` sends phone files only; otherwise the whole box would be flagged as on this phone. `scrayIsPhoneOnly` requires a phone file, so Hetzner rows get no upload offer, no blue ⬆ badge and no Uncat entry. Folder scans only ever remove `driveId "local"` rows, so they leave Hetzner rows alone. Delete, move and rename on a Hetzner row stop at "Account not found", which is safe.
+- **Tested:**
+  - `php -l`; `hetzner_list` against an in-memory SQLite database: only videos with a box copy, paging by `after`, `hetzner_path` and instance id right.
+  - `node --check` on every changed script.
+  - `scray-hetzner.js` in jsdom with fake-indexeddb. A three-row listing over two pages gave 2 added, the phone's key skipped, and a 14.51 leftover removed. Paths, tags and created date were right, the rows were stamped synced, and the pill showed. D gave the `&dl=1` link. Dedupe dropped a row once its phone copy appeared. Remove left the phone files alone.
+  - The variant pick: phone shown by default at the same size, and still shown when a bigger Hetzner copy is in the group.
+  - Not run on a device.
+- **Watch:** the first sync after this is a full pull, so slower once. Streaming needs the gateway's signed URLs to play in WKWebView, which they do in Safari (Part 3.4). D needs the `dl=1` nginx map from picker 14.35; without it the browser just plays the file in a tab.
+- Deploy: browse `api.php` first. Native's assets/web files are picked up by the dev app straight away.
+
 ### picker 15.13 / native 15.9 — test: filter button on the bookmark edit rail
 <!-- 2026-09-24T08:50Z -->
 

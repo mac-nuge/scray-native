@@ -177,7 +177,9 @@ onClick: () => {
       try {
           let vid = historyVideos[idx];
           vid = await refreshVideoBeforeUse(vid);
-          if (vid && vid.downloadUrl) {
+          if (vid && typeof window.scrayHetznerDownload === "function" && window.scrayHetznerDownload(vid)) {
+                 // native 15.10: a Hetzner file downloads in the in-app browser
+             } else if (vid && vid.downloadUrl) {
               window.location.href = vid.downloadUrl;
           } else {
               showDownloadError("Missing or expired download URL", historyVideos[idx]);

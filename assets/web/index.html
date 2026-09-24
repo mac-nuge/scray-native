@@ -51,6 +51,9 @@
     "scray-bridge.js",
     "scray-sync-ui.js",
     "local-library.js",
+    // Hetzner Storage Box as a library source (native 15.10; first tried in
+    // 14.51). After local-library.js - it wraps renderFolderPills.
+    "scray-hetzner.js",
     "scray-upload.js",
     "scray-rename.js",
     "player.js",
@@ -521,6 +524,7 @@
 <!-- ✅ Compact button row -->
 <div class="top-buttons-row">
 <button id="pickFolderBtn">Folder</button>
+<button id="hetznerFetchBtn" title="Add every video on the Hetzner Storage Box to this device's library - they stream, nothing is downloaded (native 15.10)">Hetzner</button>
 <button id="rescanLibraryBtn">Refresh</button>
 <button id="openPickerBtn" title="Open Picker in the in-app browser">Picker</button>
 <button id="openStashNavBtn" title="Stash nav: find a studio or performer (native 14.31)">Stash</button>
@@ -542,6 +546,7 @@
      still adds its "✎ N names" pill after Uncat when there is something to
      review, and that one wraps on its own. -->
 <button id="uncataloguedToggleBtn" data-active="0" title="Show only files on this phone that aren't in the catalogue">Uncat</button>
+<button id="hetznerOnlyToggleBtn" data-state="any" title="Cycle the Hetzner filter: off, on the box, not on the box (native 15.10)">Hetz</button>
 </div>
 
 <!-- ✅ Folder pills (reuses the existing .account-pill styling) -->
@@ -627,6 +632,7 @@
 <button class="sort-btn" data-list-sort="watched" title="Sort by time watched">Watched</button>
 <button class="sort-btn" data-list-sort="played" title="Sort by last played">Played</button>
 <button class="sort-btn" data-list-sort="created" title="Sort by date created">Created</button>
+<button class="sort-btn" data-list-sort="migrated" title="Sort by when it was last migrated from OneDrive to Hetzner (files never migrated go last)">Migrated</button>
 <!-- Bookmarks view only: bookmark time. In the DOM on both views but hidden in
      Videos (scray-views.js), because the sort row is wired by data-list-sort
      once at boot and a button that came and went would lose its handler. -->

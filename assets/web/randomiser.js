@@ -136,6 +136,9 @@ const SCRAY_LIST_SORT_KEYS = {
   watched:    { type: 'num',  first: 'desc', zero: true, value: v => v.time_viewed },
   played:     { type: 'date', first: 'desc', value: v => v.last_played },
   created:    { type: 'date', first: 'desc', value: v => v.createdDateTime },
+  // When migrate last copied it OneDrive -> Hetzner (native 15.10 / picker
+  // 15.14, browse 15.53's videos.migrated_at). Never-migrated files go last.
+  migrated:   { type: 'date', first: 'desc', value: v => v.migrated_at },
   // Bookmarks page: a bookmark entry carries its note and time (bookmarks-page.js).
   // Nothing on the main list has either, so these never move a video there.
   note:       { type: 'text', first: 'asc',  value: v => v.__bmNote },
@@ -946,6 +949,10 @@ window.scrayClearAllFilters = function (ev) {
    const uncatBtn = document.getElementById("uncataloguedToggleBtn");
    if (uncatBtn) uncatBtn.dataset.active = "0";
    window.syncUncataloguedToggleLabel?.();
+
+   const hetzBtn = document.getElementById("hetznerOnlyToggleBtn");
+   if (hetzBtn) hetzBtn.dataset.state = "any";
+   window.syncHetznerOnlyToggleLabel?.();
 
    window.skipSearchScroll = true;
    scrayRefreshFilters();
@@ -3524,6 +3531,15 @@ if (document.getElementById("uncataloguedToggleBtn")?.dataset.active === "1") {
      : v.inCatalogue === false);
 }
 
+// Hetzner filter (native 15.10, as picker 15.9). Judged by scrayIsHetznerVideo
+// (scray-hetzner.js): a row that streams from the box.
+//   any  - no filter        only - on the box        none - not on the box
+const hetznerState = document.getElementById("hetznerOnlyToggleBtn")?.dataset.state || "any";
+if (hetznerState !== "any" && typeof window.scrayIsHetznerVideo === "function") {
+ const wantHz = hetznerState === "only";
+ videos = videos.filter(v => !!window.scrayIsHetznerVideo(v) === wantHz);
+}
+
 // ✅ NEW: MIME type filter
 const mimeTypeFilter = $('#mimeTypeFilter').val() || [];
 if (mimeTypeFilter.length > 0) {
@@ -3803,6 +3819,11 @@ if (typeof window.syncBookmarkFilterToggleLabel === "function") window.syncBookm
 const uncataloguedBtn = document.getElementById("uncataloguedToggleBtn");
 if (uncataloguedBtn) uncataloguedBtn.dataset.active = "0";
 if (typeof window.syncUncataloguedToggleLabel === "function") window.syncUncataloguedToggleLabel();
+
+// Reset the Hetzner filter (native 15.10)
+const hetznerOnlyBtn = document.getElementById("hetznerOnlyToggleBtn");
+if (hetznerOnlyBtn) hetznerOnlyBtn.dataset.state = "any";
+if (typeof window.syncHetznerOnlyToggleLabel === "function") window.syncHetznerOnlyToggleLabel();
 
 // ✅ NEW: Reset MIME type filter
 $('#mimeTypeFilter').val(null).trigger('change');
@@ -4610,6 +4631,39 @@ searchBox.addEventListener("keydown", (e) => {
           filterDisplayedByFilename();
       });
       window.syncUncataloguedToggleLabel();
+  }
+
+  // ✅ Hetzner filter (native 15.10, as picker 15.9). Three states on the
+  // button's own dataset: off, on the box, not on the box. Red either way a
+  // filter is armed - the label says which.
+  const HETZNER_FILTER_CYCLE = [
+      { value: "any",  label: "Hetz",    bg: "#555" },
+      { value: "only", label: "Hetz",    bg: "#dc3545" },
+      { value: "none", label: "No Hetz", bg: "#dc3545" }
+  ];
+
+  window.syncHetznerOnlyToggleLabel = function () {
+      const b = document.getElementById("hetznerOnlyToggleBtn");
+      if (!b) return;
+      const entry = HETZNER_FILTER_CYCLE.find(o => o.value === b.dataset.state) || HETZNER_FILTER_CYCLE[0];
+      b.textContent = entry.label;
+      b.style.background = entry.bg;
+      b.style.color = "#fff";
+      b.title = entry.value === "only" ? "Showing only files on the Hetzner Storage Box"
+              : entry.value === "none" ? "Showing only files NOT on the Hetzner Storage Box"
+              : "Hetzner filter: off (tap to cycle)";
+  };
+
+  const hetznerOnlyToggleBtn = document.getElementById("hetznerOnlyToggleBtn");
+  if (hetznerOnlyToggleBtn) {
+      hetznerOnlyToggleBtn.addEventListener("click", () => {
+          const i = HETZNER_FILTER_CYCLE.findIndex(o => o.value === (hetznerOnlyToggleBtn.dataset.state || "any"));
+          hetznerOnlyToggleBtn.dataset.state = HETZNER_FILTER_CYCLE[(i + 1) % HETZNER_FILTER_CYCLE.length].value;
+          window.syncHetznerOnlyToggleLabel();
+          window.skipSearchScroll = true;
+          filterDisplayedByFilename();
+      });
+      window.syncHetznerOnlyToggleLabel();
   }
 
   const orientationToggleBtn = document.getElementById("orientationToggleBtn");

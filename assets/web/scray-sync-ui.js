@@ -180,6 +180,11 @@ document.addEventListener("visibilitychange", async () => {
  * to the catalogue later is picked up regardless of where the cursor sits.
  */
 async function scraySyncLibrary({ quiet = false } = {}) {
+  // A phone file and a Hetzner row under the same key would list it twice;
+  // the phone copy wins (native 15.10, as in 14.51).
+  if (typeof window.scrayHetznerDedupe === "function") {
+    try { await window.scrayHetznerDedupe(); } catch (err) { console.warn("[hetzner] dedupe:", err); }
+  }
   const locals = await getAllVideos();
   if (!locals.length) return { pulled: 0, flagged: 0 };
 
@@ -197,6 +202,14 @@ async function scraySyncLibrary({ quiet = false } = {}) {
   }
   if (!freshKeys.size && !deltaKeys.size) return { pulled: 0, flagged: 0 };
 
+  // One full pull, once (native 15.10): browse 15.53 backfilled
+  // videos.migrated_at on rows this device's cursor has already gone past, so
+  // a delta would never bring it down for the Migrated sort.
+  const MIGRATED_AT_REPULL = "scray.repull.migratedAt";
+  let oneOffRepull = false;
+  try { oneOffRepull = localStorage.getItem(MIGRATED_AT_REPULL) !== "1"; } catch {}
+  if (oneOffRepull) { deltaKeys.forEach(k => freshKeys.add(k)); deltaKeys.clear(); }
+
   const cursor = await window.scrayGetSyncState("cursor");
   let pulled = 0;
   window._scrayTombstonesIgnored = 0;
@@ -211,6 +224,7 @@ async function scraySyncLibrary({ quiet = false } = {}) {
 
   const stats = await window.scrayApiCall("stats");
   await window.scraySetSyncState("cursor", { seq: stats.head, at: new Date().toISOString() });
+  if (oneOffRepull) { try { localStorage.setItem(MIGRATED_AT_REPULL, "1"); } catch {} }
 
   if (window._scrayTombstonesIgnored) {
     console.log(`[sync] ${window._scrayTombstonesIgnored} catalogue tombstone(s) ignored — those files are on this device`);
@@ -236,7 +250,11 @@ async function pushOfflineFlags() {
   // Publishing against it would flag the wrong catalogue's rows.
   if (window.SCRAY_DB_MODE_DRIFT) return null;
 
-  const locals = await getAllVideos();
+  // Phone files only (native 15.10, as in 14.51). "Offline" means "on this
+  // phone"; a Hetzner row is in the library but streams, and flagging it
+  // would mark the whole box as downloaded here.
+  const locals = (await getAllVideos()).filter(v =>
+    typeof window.isLocalVideo === "function" ? window.isLocalVideo(v) : true);
 
   // offline_sync has whole-list semantics, so an empty list clears every flag
   // in the catalogue. A fresh install before the folder is picked looks

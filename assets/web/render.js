@@ -207,7 +207,9 @@ function buildVideoRowButtons(video, listContext, index, options = {}) {
          try {
              let vid = video;
              vid = await refreshVideoBeforeUse(vid);
-             if (vid && vid.downloadUrl) {
+             if (vid && typeof window.scrayHetznerDownload === "function" && window.scrayHetznerDownload(vid)) {
+                 // native 15.10: a Hetzner file downloads in the in-app browser
+             } else if (vid && vid.downloadUrl) {
                  window.location.href = vid.downloadUrl;
              } else {
                  showDownloadError("Missing or expired download URL", video);
@@ -700,6 +702,9 @@ function scrayBuildListRow(video, index, cfg) {
   // is the filename itself, and it is there to be read and copied.
   if (window.scrayMountBookmarkDiamond) window.scrayMountBookmarkDiamond(file, video);
   if (filename.split('.').pop().toLowerCase() !== 'mp4') file.classList.add('lc-non-mp4');
+  // Italic for a file that streams from Hetzner (native 15.10, as picker
+  // 14.36/14.38): a linked group goes italic when ANY of its copies is there.
+  if (scrayRowIsHetzner(video) || (variants && variants.some(scrayRowIsHetzner))) file.classList.add('lc-hetzner');
   // A class, never an inline underline - see scray-offline-title in style.css.
   if (window.scrayIsOffline && window.scrayIsOffline(video)) file.classList.add('scray-offline-title');
   // Native only: on this device but not in the catalogue. The tappable ⚠ that
@@ -898,6 +903,7 @@ function ensureListRowDetail(li) {
   const fname = document.createElement('span');
   fname.className = 'lc-d-filename';
   if ((video.filename || '').split('.').pop().toLowerCase() !== 'mp4') fname.classList.add('lc-non-mp4');
+  if (scrayRowIsHetzner(video)) fname.classList.add('lc-hetzner');
   if (window.scrayIsOffline && window.scrayIsOffline(video)) fname.classList.add('scray-offline-title');
   fname.appendChild(createClickableFilename(video.filename));
   // ♦ in front when the file has bookmarks (13.65).
@@ -929,13 +935,24 @@ function ensureListRowDetail(li) {
       // One chip per copy, largest first; the lit one is on screen. Tapping
       // another switches the whole row to that file.
       sizeDur.append(' (');
+      // Where each copy is (native 15.10, as picker 14.32's O/H), when they
+      // aren't all in one place: a superscript P for the phone, H for Hetzner.
+      const mixed = li._scrayVariants.some(scrayRowIsHetzner) && li._scrayVariants.some(v => !scrayRowIsHetzner(v));
       li._scrayVariants.forEach((copy, i) => {
         const on = scrayVariantIdOf(copy) === scrayVariantIdOf(video);
+        const hz = scrayRowIsHetzner(copy);
         const chip = document.createElement('button');
         chip.type = 'button';
-        chip.className = 'lc-variant-chip' + (on ? ' is-on' : '');
+        chip.className = 'lc-variant-chip' + (on ? ' is-on' : '') + (hz ? ' lc-hetzner' : '');
         chip.textContent = formatFileSize(copy.sizeBytes);
-        chip.title = on ? `Showing ${copy.filename}` : `Switch to ${copy.filename}`;
+        if (mixed) {
+          const sup = document.createElement('sup');
+          sup.className = 'lc-variant-src';
+          sup.textContent = hz ? 'H' : 'P';
+          chip.appendChild(sup);
+        }
+        chip.title = (on ? `Showing ${copy.filename}` : `Switch to ${copy.filename}`)
+          + (mixed ? (hz ? ' (Hetzner - streams)' : ' (on this phone)') : '');
         chip.addEventListener('click', (e) => {
           e.stopPropagation();
           if (!on) scraySwitchVariant(li, copy);
@@ -1250,10 +1267,22 @@ function scrayRememberVariant(video) {
   try { localStorage.setItem(SCRAY_VARIANT_CHOICE_KEY, JSON.stringify(choices)); } catch {}
 }
 
-/** The copy a group shows: the one last picked here, else the largest. */
+/** A row that streams from the Hetzner box (native 15.10, scray-hetzner.js). */
+function scrayRowIsHetzner(video) {
+  return typeof window.scrayIsHetznerVideo === 'function' && !!window.scrayIsHetznerVideo(video);
+}
+const scrayRowIsOnPhone = v => typeof window.isLocalVideo === 'function' && window.isLocalVideo(v);
+
+/**
+ * The copy a group shows: the one last picked here, else the largest copy on
+ * the phone (native 15.10 - a phone file plays offline, so it beats its
+ * Hetzner copy), else the largest.
+ */
 function scrayPickVariant(group, members) {
   const want = scrayVariantChoices()[group];
-  return (want && members.find(m => scrayVariantIdOf(m) === want)) || members[0];
+  return (want && members.find(m => scrayVariantIdOf(m) === want))
+    || members.find(scrayRowIsOnPhone)
+    || members[0];
 }
 
 /**
@@ -1287,7 +1316,10 @@ function scrayCollapseVariants(list, pool) {
   });
   byGroup.forEach((copies, g) => {
     if (copies.size < 2) return;
-    groups.set(g, [...copies.values()].sort((a, b) => (Number(b.sizeBytes) || 0) - (Number(a.sizeBytes) || 0)));
+    // Same size (a phone file and its Hetzner copy): the phone's chip first.
+    groups.set(g, [...copies.values()].sort((a, b) =>
+      ((Number(b.sizeBytes) || 0) - (Number(a.sizeBytes) || 0))
+      || ((scrayRowIsOnPhone(b) ? 1 : 0) - (scrayRowIsOnPhone(a) ? 1 : 0))));
   });
   if (!groups.size) return { videos: list, groups };
 

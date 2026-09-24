@@ -48,7 +48,11 @@ window.VIDEO_SCHEMA = VIDEO_SCHEMA;
 // owns it and never takes it back from a push.
 const META_FIELDS = new Set([
   "user_score", "notes", "bookmarks", "view_count", "time_viewed",
-  "last_played", "first_seen", "f_tally", "variant_group"
+  "last_played", "first_seen", "f_tally", "variant_group",
+  // native 15.10: browse 15.53's videos.migrated_at, for the Migrated sort.
+  // A meta field so a phone file (which takes no source fields from a pull)
+  // gets it too. Only ever written by a pull, so it never rides the outbox.
+  "migrated_at"
 ]);
 window.VIDEO_META_FIELDS = META_FIELDS;
 

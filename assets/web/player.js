@@ -9625,12 +9625,60 @@ overlay.addEventListener('click', (e) => {
 // ========================
 // Refresh before playback
 // ========================
+/**
+ * A signed Hetzner URL for a row that streams from the box (native 15.10,
+ * after 14.51; picker 14.31 has the same step).
+ *
+ * Hetzner rows (scray-hetzner.js: driveId "hetzner", id "hz:<video_key>") and
+ * any row without a real OneDrive id can't take the Graph path below - there
+ * is no account to find, and Native has no OneDrive sign-in. This asks
+ * api.php's hetzner_url for the gateway's signed URL by video_key instead.
+ * Same contract as Graph's downloadUrl (time-limited, no header, Range
+ * honoured), so the player and scrubbing take it unchanged. The device key may
+ * ask by video_key (hetzner_url is not in SCRAY_PRIVILEGED). Returns null when
+ * there is no Hetzner copy, and the caller carries on exactly as before.
+ */
+async function scrayHetznerRefresh(video) {
+    const id = String((video && video.oneDriveId) || "");
+    const hz = typeof window.scrayIsHetznerVideo === "function"
+        ? window.scrayIsHetznerVideo(video)
+        : (video && (video.driveId === "hetzner" || id.startsWith("hz:")));
+    if (!hz && id && !id.startsWith("key:")) return null;
+    if (typeof window.scrayApiCall !== "function") return null;
+    const key = video.videoKey
+        || (typeof window.scrayVideoKey === "function" ? window.scrayVideoKey(video.filename || "") : "");
+    if (!key) return null;
+    try {
+        const r = await window.scrayApiCall("hetzner_url", { params: { video_key: key } });
+        if (!r || !r.url) return null;
+        video.downloadUrl = r.url;
+        video.source = "hetzner";
+        if (video.durationMs == null && r.duration_ms != null) video.durationMs = r.duration_ms;
+        console.log(`Video refreshed from Hetzner: ${video.filename}`);
+        return video;
+    } catch (err) {
+        console.warn(`[hetzner] no Hetzner copy for ${video.filename}:`, err && err.message);
+        // A Hetzner row has nowhere else to play from - say why, rather than
+        // carry on into "Account not found".
+        if (hz) {
+            const e = new Error(`Couldn't get a Hetzner link for ${video.filename}: ${(err && err.message) || "no URL"}`);
+            e.needsReauth = false;
+            throw e;
+        }
+        return null;
+    }
+}
+window.scrayHetznerRefresh = scrayHetznerRefresh;
+
 async function refreshVideoBeforeUse(video) {
    // Local videos need no refreshing — this function exists purely for
    // OneDrive's expiring download URLs, which don't apply here.
    if (video.driveId === "local" || (video.accountKey || "").startsWith("local::")) {
        return video;
    }
+   // Hetzner rows stream from the box (native 15.10).
+   const hzVideo = await scrayHetznerRefresh(video);
+   if (hzVideo) return hzVideo;
    try {
        const [accountIdStored] = (video.accountKey || "").split("::");
        let accountInfo = accountsData.find(acc => acc.accountId === accountIdStored);
@@ -11100,7 +11148,8 @@ if (err.message?.includes('HTTP 404') || err.message?.includes('404')) {
 }
 
  // ONLY show error overlay for authentication errors
- if (err.needsReauth || err.message?.includes('Authentication') || err.message?.includes('Account not found')) {
+ // native 15.10: and a Hetzner row that couldn't get a link - it has nowhere else to play from.
+ if (err.needsReauth || err.message?.includes('Authentication') || err.message?.includes('Account not found') || err.message?.includes('Hetzner link')) {
      showVideoError(err.message || 'Failed to load video', video);
  }
  return;

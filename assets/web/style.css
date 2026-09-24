@@ -7267,6 +7267,20 @@ specificity (the extra .lc-row class). */
   color: #fff !important;
   cursor: default;
 }
+/* native 15.10 (as picker 14.36): a file that streams from Hetzner has its
+   filename in italics - list rows, the open row's filename line, and a linked
+   pair's Hetzner size chip. */
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) :is(.lc-file, .lc-d-filename, .lc-variant-chip).lc-hetzner {
+  font-style: italic !important;
+}
+/* native 15.10 (as picker 14.32): which copy is where - P phone, H Hetzner. */
+:is(#taggedVideosContainer, #playlist) .lc-variant-chip .lc-variant-src {
+  font-size: 0.7em;
+  font-weight: 700;
+  margin-left: 2px;
+  line-height: 0;
+  vertical-align: super;
+}
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-d-stats {
   font-size: 0.7rem;
   color: #777;

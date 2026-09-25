@@ -4,6 +4,20 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.15 / native 15.16 — test: studio names in the list open the filter modal
+<!-- 2026-09-25T14:44Z -->
+
+**picker** — `staging - 15.15`: `ui.js`, `render.js`, `style.css`. **native** — `stg-native - 15.16`: `assets/web/ui.js`, `render.js`, `style.css`. Web only, no IPA build. The patches are the same in both apps.
+
+- **Asked for:** make the studio names in the list's studio column tappable, bringing up the same filter modal as tapping the name in the open row.
+- **StashDB studio** (dark text): a tap goes to `scrayPerformerChoice(video, name, 'studio')`, the filter-or-search modal that the purple studio chip in the open row uses.
+- **Studio from the folders** (grey text, e.g. "aa" or "aa / sub"): each folder is its own tappable name, and a tap gets the folder crumb's filter / search / exclude modal, the same as the blue crumbs on the open row's path line.
+  - To share that, the crumb's click handler in `createClickablePath` is moved, unchanged, into `scrayFolderTagAction(folder)` in ui.js (window-exported), and the crumbs call it. The open row behaves exactly as before.
+- **Only a tap ON a name** is taken (the span stops the click). A tap on the empty part of the cell still does whatever Settings > Tap a column says for Studio (default: nothing). Bulk mode still takes every tap first, at the document.
+- The names get a faint dotted underline (`.lc-studio-link`) as the cue that they can be tapped. The text and colours are otherwise unchanged, so the column reads, searches, highlights and sorts as before. It applies to every list built by `scrayBuildListRow` (main, random, history, basket); folder-group header lines aren't touched.
+- **Tested:** `node --check` on ui.js and render.js in both apps. jsdom on `scrayLinkStudioCell`: a StashDB studio called the performer/studio choice with 'studio'; "aa / sub" became two names and tapping "sub" called the folder action with "sub"; neither reached the row's click, and a tap on the cell outside the names did. Not run on a device.
+- Deploy: Picker's three files to sp-staging-sql; Native's assets/web is picked up by the dev app straight away.
+
 ### native 15.15 — test: offline download panel starts minimised
 <!-- 2026-09-25T12:34Z -->
 

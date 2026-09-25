@@ -472,6 +472,49 @@ function scrayListColumns(video) {
 }
 window.scrayListColumns = scrayListColumns;
 
+/**
+ * The studio column's names, tappable (native 15.16) - the same as tapping them in
+ * the open row. A StashDB studio asks filter or search (scrayPerformerChoice,
+ * as the purple chip does); a studio standing in from the folders is one
+ * span per folder, each with the folder crumb's filter / search / exclude
+ * modal (scrayFolderTagAction). The text is unchanged, so the column still
+ * reads and sorts the same; only a tap ON a name is taken - the rest of the
+ * cell still does what Settings > Tap a column says. Bulk mode swallows
+ * the click at the document before it gets here.
+ */
+function scrayLinkStudioCell(cellEl, video, cols) {
+  if (!cols || !cols.studio) return;
+  const link = (label, onTap) => {
+    const s = document.createElement('span');
+    s.className = 'lc-studio-link';
+    s.textContent = label;
+    s.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onTap();
+    });
+    return s;
+  };
+  cellEl.textContent = '';
+  if (!cols.studioFromPath) {
+    const name = cols.studio;
+    cellEl.appendChild(link(name, () => {
+      if (typeof window.scrayPerformerChoice === 'function') window.scrayPerformerChoice(video, name, 'studio');
+      else if (typeof window.scrayAddTagFilter === 'function') window.scrayAddTagFilter('studio', name);
+    }));
+    return;
+  }
+  const crumbs = scrayListCrumbs(video).slice(0, -1);
+  // Should always agree with cols.studio; if it ever doesn't, print what the
+  // column says, untappable, rather than something else.
+  if (crumbs.join(' / ') !== cols.studio) { cellEl.textContent = cols.studio; return; }
+  crumbs.forEach((folder, i) => {
+    if (i) cellEl.appendChild(document.createTextNode(' / '));
+    cellEl.appendChild(link(folder, () => {
+      if (typeof window.scrayFolderTagAction === 'function') window.scrayFolderTagAction(folder);
+    }));
+  });
+}
+
 // Short forms for the columns. The open row prints the long forms through
 // formatFileSize / formatDuration like everywhere else.
 function scrayListSize(bytes) {
@@ -690,6 +733,7 @@ function scrayBuildListRow(video, index, cfg) {
   const studio = cell('lc-studio', cols.studio);
   studio.title = cols.studio;
   if (cols.studioFromPath) studio.classList.add('lc-from-path');
+  scrayLinkStudioCell(studio, video, cols);
 
   const perf = cell('lc-perf', cols.performers);
   perf.title = cols.performers;

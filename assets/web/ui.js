@@ -313,6 +313,134 @@ function scrayPathSep(text) {
 }
 window.scrayPathSep = scrayPathSep;
 
+/**
+ * A folder name tapped: the filter / search / exclude modal, then whatever was
+ * picked there. Was the click handler on each folder crumb in
+ * createClickablePath; pulled out (native 15.16) so the list's studio column can
+ * do exactly the same from a closed row.
+ */
+async function scrayFolderTagAction(folder) {
+
+// Convert folder name to tag format (lowercase with hyphens)
+// ✅ Remove leading * if present
+const cleanFolder = folder.startsWith('*') ? folder.substring(1) : folder;
+const tagName = cleanFolder.trim().replace(/\s+/g, "-").toLowerCase();
+const displayName = cleanFolder;
+
+// ✅ Show modal on all devices
+const action = await showTagActionModal(tagName, displayName);
+  
+  if (action === 'filter') {
+     // Original behavior - add to tag filters
+     window.commonSelectedTags.add(tagName);
+     
+     // Find which dropdown contains this tag and select it
+     ['Level1', 'Level2', 'Level3', 'All'].forEach(levelName => {
+       const selectId = `tagFilter${levelName}Select`;
+       const $select = $(`#${selectId}`);
+       
+       // Check if this dropdown has this tag as an option
+       if ($select.find(`option[value="${tagName}"]`).length) {
+         const currentVals = $select.val() || [];
+         if (!currentVals.includes(tagName)) {
+           currentVals.push(tagName);
+           $select.val(currentVals).trigger('change');
+         }
+       }
+     });
+     
+     // Refresh filters and pills
+if (typeof updateFloatingTagPillsFromCommon === 'function') {
+  updateFloatingTagPillsFromCommon();
+}
+window.skipSearchScroll = true;
+window.skipPanelAutoOpen = true; // ✅ Prevent panel auto-open
+if (typeof filterDisplayedByFilename === 'function') {
+  filterDisplayedByFilename();
+}
+
+   } else if (action === 'search') {
+// New behavior - add to search box
+const searchBox = document.getElementById('filenameSearchBox');
+if (searchBox) {
+  // ✅ Check if in landscape mobile mode
+  const isLandscape = window.matchMedia('(orientation: landscape)').matches;
+  const isMobile = window.innerWidth <= 1024;
+  
+  // ✅ Only dismiss panels if NOT in landscape mobile
+  if (!(isLandscape && isMobile)) {
+      if (typeof toggleBasket === 'function') toggleBasket(false);
+      if (typeof toggleHistory === 'function') toggleHistory(false);
+      if (typeof toggleRandomPlaylistPanel === 'function') toggleRandomPlaylistPanel(false);
+  }
+  
+  // Replace existing text
+  searchBox.value = displayName;
+  
+  // Trigger search
+  const clearX = document.getElementById('clearSearchX');
+  if (clearX) clearX.style.display = 'block';
+  
+  // ✅ Also update panel search box if it exists
+  const panelSearchBox = document.getElementById('panelSearchBox');
+  const panelSearchClearX = document.getElementById('panelSearchClearX');
+  if (panelSearchBox) {
+      panelSearchBox.value = displayName;
+      if (panelSearchClearX) {
+          panelSearchClearX.style.display = 'block';
+      }
+  }
+  
+  // ✅ PREVENT panel from auto-opening
+  window.skipPanelAutoOpen = true;
+  
+  if (typeof filterDisplayedByFilename === 'function') {
+    filterDisplayedByFilename();
+  }
+   
+   // ✅ Only scroll if NOT in landscape mobile
+ if (!(isLandscape && isMobile)) {
+     if (typeof scrollToSearchBox === 'function') {
+         scrollToSearchBox(searchBox);
+     }
+ }
+   
+   // Mobile: don't focus (prevents keyboard)
+   // Desktop: focus for convenience
+   const isMobileDevice = window.innerWidth <= 768;
+   if (!isMobileDevice) {
+       searchBox.focus({ preventScroll: true });
+       setTimeout(() => { searchBox.select(); }, 50);
+   }
+ }
+} else if (action === 'exclude') {
+        // Add to exclude dropdown
+        const $excludeSelect = $('#excludeTagSelect');
+        if ($excludeSelect.length) {
+            // Check if this tag exists in the exclude dropdown options
+            if ($excludeSelect.find(`option[value="${tagName}"]`).length) {
+                const currentExcludes = $excludeSelect.val() || [];
+                if (!currentExcludes.includes(tagName)) {
+                    currentExcludes.push(tagName);
+                    $excludeSelect.val(currentExcludes).trigger('change');
+                    console.log(`Added "${tagName}" to exclude tags`);
+                }
+            } else {
+                console.warn(`Tag "${tagName}" not found in exclude dropdown options`);
+            }
+        }
+    } else if (action === 'default-exclude') {
+        // Toggle the tag on the shared exclude_tags table. Pressing it on a
+        // tag that's already listed offers to remove it, which is how the
+        // list gets pruned. All six copies of this handler across the two
+        // apps are one-liners into scray-exclude.js now.
+        if (typeof window.handleDefaultExcludeAction === 'function') {
+            await window.handleDefaultExcludeAction(tagName, displayName);
+        }
+    }
+}
+window.scrayFolderTagAction = scrayFolderTagAction;
+
 function createClickablePath(video, includeFilename = true, useCataloguePath = false) {
 const container = document.createDocumentFragment();
 
@@ -514,126 +642,9 @@ const folders = [
       folderSpan.title = `On this device - click to filter by "${folder}"`;
     }
     
-    folderSpan.addEventListener('click', async (e) => {
-e.stopPropagation();
-
-// Convert folder name to tag format (lowercase with hyphens)
-// ✅ Remove leading * if present
-const cleanFolder = folder.startsWith('*') ? folder.substring(1) : folder;
-const tagName = cleanFolder.trim().replace(/\s+/g, "-").toLowerCase();
-const displayName = cleanFolder;
-
-// ✅ Show modal on all devices
-const action = await showTagActionModal(tagName, displayName);
-  
-  if (action === 'filter') {
-     // Original behavior - add to tag filters
-     window.commonSelectedTags.add(tagName);
-     
-     // Find which dropdown contains this tag and select it
-     ['Level1', 'Level2', 'Level3', 'All'].forEach(levelName => {
-       const selectId = `tagFilter${levelName}Select`;
-       const $select = $(`#${selectId}`);
-       
-       // Check if this dropdown has this tag as an option
-       if ($select.find(`option[value="${tagName}"]`).length) {
-         const currentVals = $select.val() || [];
-         if (!currentVals.includes(tagName)) {
-           currentVals.push(tagName);
-           $select.val(currentVals).trigger('change');
-         }
-       }
-     });
-     
-     // Refresh filters and pills
-if (typeof updateFloatingTagPillsFromCommon === 'function') {
-  updateFloatingTagPillsFromCommon();
-}
-window.skipSearchScroll = true;
-window.skipPanelAutoOpen = true; // ✅ Prevent panel auto-open
-if (typeof filterDisplayedByFilename === 'function') {
-  filterDisplayedByFilename();
-}
-
-   } else if (action === 'search') {
-// New behavior - add to search box
-const searchBox = document.getElementById('filenameSearchBox');
-if (searchBox) {
-  // ✅ Check if in landscape mobile mode
-  const isLandscape = window.matchMedia('(orientation: landscape)').matches;
-  const isMobile = window.innerWidth <= 1024;
-  
-  // ✅ Only dismiss panels if NOT in landscape mobile
-  if (!(isLandscape && isMobile)) {
-      if (typeof toggleBasket === 'function') toggleBasket(false);
-      if (typeof toggleHistory === 'function') toggleHistory(false);
-      if (typeof toggleRandomPlaylistPanel === 'function') toggleRandomPlaylistPanel(false);
-  }
-  
-  // Replace existing text
-  searchBox.value = displayName;
-  
-  // Trigger search
-  const clearX = document.getElementById('clearSearchX');
-  if (clearX) clearX.style.display = 'block';
-  
-  // ✅ Also update panel search box if it exists
-  const panelSearchBox = document.getElementById('panelSearchBox');
-  const panelSearchClearX = document.getElementById('panelSearchClearX');
-  if (panelSearchBox) {
-      panelSearchBox.value = displayName;
-      if (panelSearchClearX) {
-          panelSearchClearX.style.display = 'block';
-      }
-  }
-  
-  // ✅ PREVENT panel from auto-opening
-  window.skipPanelAutoOpen = true;
-  
-  if (typeof filterDisplayedByFilename === 'function') {
-    filterDisplayedByFilename();
-  }
-   
-   // ✅ Only scroll if NOT in landscape mobile
- if (!(isLandscape && isMobile)) {
-     if (typeof scrollToSearchBox === 'function') {
-         scrollToSearchBox(searchBox);
-     }
- }
-   
-   // Mobile: don't focus (prevents keyboard)
-   // Desktop: focus for convenience
-   const isMobileDevice = window.innerWidth <= 768;
-   if (!isMobileDevice) {
-       searchBox.focus({ preventScroll: true });
-       setTimeout(() => { searchBox.select(); }, 50);
-   }
- }
-} else if (action === 'exclude') {
-        // Add to exclude dropdown
-        const $excludeSelect = $('#excludeTagSelect');
-        if ($excludeSelect.length) {
-            // Check if this tag exists in the exclude dropdown options
-            if ($excludeSelect.find(`option[value="${tagName}"]`).length) {
-                const currentExcludes = $excludeSelect.val() || [];
-                if (!currentExcludes.includes(tagName)) {
-                    currentExcludes.push(tagName);
-                    $excludeSelect.val(currentExcludes).trigger('change');
-                    console.log(`Added "${tagName}" to exclude tags`);
-                }
-            } else {
-                console.warn(`Tag "${tagName}" not found in exclude dropdown options`);
-            }
-        }
-    } else if (action === 'default-exclude') {
-        // Toggle the tag on the shared exclude_tags table. Pressing it on a
-        // tag that's already listed offers to remove it, which is how the
-        // list gets pruned. All six copies of this handler across the two
-        // apps are one-liners into scray-exclude.js now.
-        if (typeof window.handleDefaultExcludeAction === 'function') {
-            await window.handleDefaultExcludeAction(tagName, displayName);
-        }
-    }
+    folderSpan.addEventListener('click', (e) => {
+      e.stopPropagation();
+      scrayFolderTagAction(folder);
  });
     
     // Opening bracket for the case where the iOS folder is the whole path and

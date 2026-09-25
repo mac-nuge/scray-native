@@ -7227,6 +7227,14 @@ specificity (the extra .lc-row class). */
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-studio.lc-from-path,
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-perf.lc-from-path { color: #9a9a9a; }
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-file { color: #222; }
+/* native 15.16: a studio name in the list is tappable (filter / search), so it
+   gets a faint dotted underline - the cue without the blue of a link. */
+.lc-studio-link {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-decoration-color: rgba(0, 0, 0, 0.3);
+  text-underline-offset: 2px;
+}
 /* ⚙️ Has bookmarks: a ♦ in front of the filename, wherever one is drawn to be
    read (13.65). Its own colour rule, so it keeps the purple inside rows that
    set a colour of their own - non-mp4s, the clickable-path wrapper. The

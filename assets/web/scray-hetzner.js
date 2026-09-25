@@ -255,54 +255,211 @@
   // ---- D: save a Hetzner file to the phone (native 15.11) --------------------
   // The D paths call refreshVideoBeforeUse first, so downloadUrl is a fresh
   // signed link. ScrayOffline.swift downloads it into <video folder>/Offline/,
-  // this polls for progress in a small panel bottom-left, and a finished file
-  // is added to the library at once - after which the sync drops the Hetzner
-  // row if it has the same key (the phone copy wins), or the two sit as one
-  // row with P and H chips, the phone's lit.
+  // and a finished file is added to the library at once - after which the
+  // sync drops the Hetzner row if it has the same key (the phone copy wins),
+  // or the two sit as one row with P and H chips, the phone's lit.
+  //
+  // Progress (native 15.13) is the Upload panel's template (scray-upload.js):
+  // #scrayOfflinePanel wears the same up-* classes and style.css styles both
+  // panels with one set of rules - the file going down with its bar, %, size,
+  // speed and time left, an "All" bar when there are several, ▾ to fold it to
+  // a pill, the list with Retry, Clear. It sits where the Upload panel sits,
+  // lifted clear of the corner buttons, and stacks above the Upload panel
+  // when both are showing (placePanel).
   const OFFLINE_FOLDER = "Offline";
-  const dlJobs = new Map();          // id -> { filename, el }
+  const POLL_MS = 1000;
+  // One entry per file: { id, filename, rowId, state, received, total, bps, error }
+  // state: starting → downloading → adding → done | failed | cancelled
+  const dl = { items: [], minimized: false, showList: false };
   let dlTimer = null;
-  const fmtMB = b => `${(Number(b || 0) / 1048576).toFixed(b >= 1073741824 ? 0 : 1)} MB`;
+  const DL_ACTIVE = new Set(["starting", "downloading", "adding"]);
 
-  function dlPanel() {
-    let box = document.getElementById("scrayOfflineDownloads");
-    if (box) return box;
-    box = document.createElement("div");
-    box.id = "scrayOfflineDownloads";
-    box.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:2147483000;display:flex;flex-direction:column;" +
-      "gap:4px;max-width:calc(100vw - 16px);pointer-events:none;";
-    document.body.appendChild(box);
-    return box;
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, m =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+  function fmtBytes(b) {
+    let n = Number(b);
+    if (!Number.isFinite(n) || n < 0) return "—";
+    const u = ["B", "KB", "MB", "GB", "TB"];
+    let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? String(n) : n.toFixed(n < 10 ? 2 : n < 100 ? 1 : 0)) + " " + u[i];
   }
-  function dlLine(id, filename) {
-    const el = document.createElement("div");
-    el.style.cssText = "pointer-events:auto;display:flex;align-items:center;gap:8px;background:rgba(20,20,20,.88);" +
-      "color:#fff;border-radius:6px;padding:5px 8px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.35);";
-    const text = document.createElement("span");
-    text.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70vw;";
-    text.textContent = `⬇ ${filename}`;
-    const x = document.createElement("button");
-    x.type = "button";
-    x.textContent = "✕";
-    x.title = "Stop this download";
-    x.style.cssText = "all:unset;cursor:pointer;padding:0 4px;font-size:13px;";
-    x.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const job = dlJobs.get(id);
-      if (job && job.state && job.state !== "downloading") { drop(id); return; }
-      try { await window.ScrayBridge.offlineCancel(id); } catch {}
-    });
-    el.append(text, x);
-    el._text = text;
-    dlPanel().appendChild(el);
-    return el;
+  const fmtSpeed = bps => bps > 0 ? fmtBytes(bps) + "/s" : "";
+  function fmtEta(sec) {
+    if (!Number.isFinite(sec) || sec < 0 || sec > 86400 * 2) return "";
+    sec = Math.round(sec);
+    if (sec < 60) return `${sec}s`;
+    const m = Math.floor(sec / 60), s = sec % 60;
+    if (m < 60) return `${m}m ${String(s).padStart(2, "0")}s`;
+    return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
   }
-  function drop(id) {
-    const job = dlJobs.get(id);
-    job?.el?.remove();
-    dlJobs.delete(id);
-    try { window.ScrayBridge?.offlineForget?.(id); } catch {}
-    if (!dlJobs.size) { clearInterval(dlTimer); dlTimer = null; }
+  const pct = (a, b) => b > 0 ? Math.min(100, Math.floor((a / b) * 100)) : 0;
+  const dlFind = id => dl.items.find(i => i.id === id);
+  const newDlId = () => "off-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const forgetJob = id => { try { window.ScrayBridge?.offlineForget?.(id)?.catch?.(() => {}); } catch {} };
+
+  // ------------------------------------------------------------------ panel
+  let panel = null;
+  let upWatch = null;
+
+  function showPanel(on) {
+    if (!on) { if (panel) panel.hidden = true; return; }
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = "scrayOfflinePanel";
+      panel.addEventListener("click", onPanelClick);
+      document.body.appendChild(panel);
+      window.addEventListener("resize", placePanel);
+    }
+    panel.hidden = false;
+    renderPanel();
+  }
+
+  /**
+   * Both panels anchor to the same corner. When the Upload panel is showing,
+   * this one sits on top of it rather than over it; otherwise style.css's
+   * place (clear of the corner buttons) stands.
+   */
+  function placePanel() {
+    if (!panel || panel.hidden) return;
+    panel.style.bottom = "";
+    panel.style.maxHeight = "";
+    const up = document.getElementById("scrayUploadPanel");
+    if (up && !upWatch && typeof ResizeObserver === "function") {
+      upWatch = new ResizeObserver(() => placePanel());
+      upWatch.observe(up);
+    }
+    if (!up || up.hidden) return;
+    const r = up.getBoundingClientRect();
+    if (!r.height) return;
+    const mine = parseFloat(getComputedStyle(panel).bottom) || 0;
+    const need = Math.round(window.innerHeight - r.top + 8);
+    if (need <= mine) return;
+    panel.style.bottom = `${need}px`;
+    panel.style.maxHeight = `${Math.max(90, Math.round(r.top - 8 - 20))}px`;
+  }
+
+  function renderPanel() {
+    if (!panel || panel.hidden) return;
+    const items = dl.items;
+    const actives = items.filter(i => DL_ACTIVE.has(i.state));
+    const current = actives[0];
+    const done = items.filter(i => i.state === "done");
+    const failed = items.filter(i => i.state === "failed");
+
+    // Batch figures: what's going and what's landed, so the bar doesn't jump
+    // back when a file finishes.
+    const batch = items.filter(i => i.state !== "cancelled" && i.state !== "failed");
+    const bTotal = batch.reduce((a, i) => a + (i.total || 0), 0);
+    const bGot   = batch.reduce((a, i) => a + (i.state === "done" || i.state === "adding" ? (i.total || 0) : (i.received || 0)), 0);
+    const bps  = actives.reduce((a, i) => a + (i.bps || 0), 0);
+    const left = actives.reduce((a, i) => a + Math.max(0, (i.total || 0) - (i.received || 0)), 0);
+    const overallEta = bps > 0 ? fmtEta(left / bps) : "";
+
+    panel.classList.toggle("is-min", dl.minimized);
+    if (dl.minimized) {
+      const label = current ? `${pct(bGot, bTotal)}%` : failed.length ? `${failed.length} failed` : done.length ? "✓" : "";
+      panel.innerHTML = `<button class="up-pill" data-act="expand" title="Saving offline">⬇ ${esc(label)}</button>`;
+      placePanel();
+      return;
+    }
+
+    let head;
+    if (current) {
+      const one = (c) => {
+        const p = pct(c.received, c.total);
+        const eta = c.bps > 0 && c.total ? fmtEta((c.total - c.received) / c.bps) : "";
+        const status = c.state === "starting" ? "asking for the file…"
+          : c.state === "adding" ? "adding to the library…"
+          : [c.total ? `${p}%` : "", c.total ? `${fmtBytes(c.received)} of ${fmtBytes(c.total)}` : fmtBytes(c.received),
+             fmtSpeed(c.bps), eta && `${eta} left`].filter(Boolean).join(" · ");
+        return `
+        <div class="up-now">
+          <div class="up-name" title="${esc(c.filename)}">${esc(c.filename)}</div>
+          <div class="up-dest">Phone › ${esc(OFFLINE_FOLDER)}</div>
+          <div class="up-bar"><i style="width:${c.state === "adding" ? 100 : p}%"></i></div>
+          <div class="up-stat">${esc(status)}</div>
+          ${c.state !== "adding" ? `<button class="up-link" data-act="cancel" data-id="${esc(c.id)}">Cancel this file</button>` : ""}
+        </div>`;
+      };
+      head = actives.map(one).join("") + `
+        ${batch.length > 1 ? `
+        <div class="up-batch">
+          <div class="up-bar thin"><i style="width:${pct(bGot, bTotal)}%"></i></div>
+          <div class="up-stat">All: ${done.length} of ${batch.length} saved${actives.length > 1 ? `, ${actives.length} coming down` : ""} · ${fmtBytes(bGot)} of ${fmtBytes(bTotal)}${bps > 0 ? ` · ${fmtSpeed(bps)}` : ""}${overallEta ? ` · ${overallEta} left` : ""}</div>
+        </div>` : ""}`;
+    } else {
+      head = `<div class="up-now"><div class="up-stat">${
+        failed.length ? `${done.length} saved, ${failed.length} failed`
+          : done.length ? `All ${done.length} saved to ${esc(OFFLINE_FOLDER)}` : "Nothing saved"}</div></div>`;
+    }
+
+    const rows = items.map(i => {
+      const icon = { starting: "⬇", downloading: "⬇", adding: "⬇", done: "✓", failed: "✕", cancelled: "–" }[i.state];
+      const cls = i.state === "downloading" || i.state === "starting" || i.state === "adding" ? "uploading" : i.state;
+      const act = (i.state === "failed" || i.state === "cancelled")
+        ? `<button class="up-link" data-act="retry" data-id="${esc(i.id)}">Retry</button>` : "";
+      const sub = i.state === "failed" ? `<div class="up-err">${esc(i.error)}</div>`
+        : i.state === "done" ? `<div class="up-sub">Phone › ${esc(OFFLINE_FOLDER)}</div>` : "";
+      return `<li class="st-${cls}"><span class="up-ico">${icon}</span>
+        <div class="up-li"><div class="up-li-name">${esc(i.filename)} ${i.total ? `<span class="up-size">${fmtBytes(i.total)}</span>` : ""}</div>${sub}</div>${act}</li>`;
+    }).join("");
+
+    panel.innerHTML = `
+      <div class="up-head">
+        <b>SAVING OFFLINE</b>
+        <span class="up-grow"></span>
+        ${!current && items.length ? `<button class="up-link" data-act="clear">Clear</button>` : ""}
+        <button class="up-x" data-act="minimize" title="Minimise">▾</button>
+      </div>
+      ${head}
+      ${current && items.length > 1 ? `<button class="up-link up-toggle" data-act="list">${dl.showList ? "Hide" : "Show"} the list (${items.length})</button>` : ""}
+      ${!current || dl.showList ? `<ul class="up-list">${rows}</ul>` : ""}`;
+    placePanel();
+  }
+
+  function onPanelClick(e) {
+    const b = e.target.closest("button[data-act]");
+    if (!b) return;
+    e.stopPropagation();
+    const id = b.dataset.id;
+    switch (b.dataset.act) {
+      case "minimize": dl.minimized = true; renderPanel(); break;
+      case "expand":   dl.minimized = false; renderPanel(); break;
+      case "cancel":   cancelDownload(id); break;
+      case "retry":    retryDownload(id).catch(err => failItem(dlFind(id), err)); break;
+      case "clear":    clearFinished(); break;
+      case "list":     dl.showList = !dl.showList; renderPanel(); break;
+    }
+  }
+
+  // ------------------------------------------------------------------ jobs
+  function failItem(it, err) {
+    if (!it) return;
+    it.state = "failed";
+    it.bps = 0;
+    it.error = String((err && err.message) || err || "download failed").replace(/^Error: /, "");
+    renderPanel();
+  }
+
+  async function cancelDownload(id) {
+    const it = dlFind(id);
+    if (!it || !(it.state === "starting" || it.state === "downloading")) return;
+    it.state = "cancelled";
+    it.bps = 0;
+    renderPanel();
+    try { await window.ScrayBridge.offlineCancel(id); } catch { /* not running on the native side */ }
+    forgetJob(id);
+  }
+
+  function clearFinished() {
+    dl.items = dl.items.filter(i => DL_ACTIVE.has(i.state));
+    renderPanel();
+    if (!dl.items.length) showPanel(false);
+  }
+
+  function ensureTimer() {
+    if (!dlTimer) dlTimer = setInterval(() => { pollDownloads().catch(() => {}); }, POLL_MS);
   }
 
   /** A saved file into the library, as scrayPlayDownloaded does (native 13.195). */
@@ -316,51 +473,119 @@
     }
     if (typeof refreshAllLists === "function") refreshAllLists();
     if (typeof window.renderFolderPills === "function") await window.renderFolderPills();
+    if (typeof window.syncOfflineOnlyToggleLabel === "function") window.syncOfflineOnlyToggleLabel();
   }
 
   async function pollDownloads() {
-    const ids = [...dlJobs.keys()].filter(id => !dlJobs.get(id).state || dlJobs.get(id).state === "downloading");
-    if (!ids.length) return;
+    const going = dl.items.filter(i => i.state === "downloading");
+    if (!going.length) {
+      if (!dl.items.some(i => DL_ACTIVE.has(i.state))) { clearInterval(dlTimer); dlTimer = null; }
+      return;
+    }
     let jobs = [];
-    try { jobs = ((await window.ScrayBridge.offlineStatus(ids)) || {}).jobs || []; } catch { return; }
+    try { jobs = ((await window.ScrayBridge.offlineStatus(going.map(i => i.id))) || {}).jobs || []; } catch { return; }
     for (const st of jobs) {
-      const job = dlJobs.get(st.id);
-      if (!job || job.state === st.state) {
-        if (job && st.state === "downloading") {
-          const pct = st.total ? Math.floor(st.received / st.total * 100) : null;
-          const rate = st.bytesPerSecond ? ` · ${fmtMB(st.bytesPerSecond)}/s` : "";
-          job.el._text.textContent = `⬇ ${job.filename} ${pct != null ? pct + "%" : fmtMB(st.received)}${rate}`;
-        }
-        continue;
-      }
-      job.state = st.state;
+      const it = dlFind(st.id);
+      if (!it || it.state !== "downloading") continue;
+      it.received = Number(st.received) || 0;
+      if (Number(st.total) > 0) it.total = Number(st.total);
+      it.bps = Number(st.bytesPerSecond) || 0;
+      if (st.state === "downloading") continue;
+      it.bps = 0;
       if (st.state === "finished") {
-        job.el._text.textContent = `✅ Saved to ${OFFLINE_FOLDER}: ${job.filename}`;
-        try { await addToLibrary(st.path); }
-        catch (err) { job.el._text.textContent = `⚠ ${job.filename}: ${err.message || err}`; continue; }
-        setTimeout(() => drop(st.id), 4000);
+        it.state = "adding";
+        renderPanel();
+        try {
+          await addToLibrary(st.path);
+          it.state = "done";
+          if (it.total) it.received = it.total;
+        } catch (err) { failItem(it, err); }
+        forgetJob(st.id);
       } else if (st.state === "failed") {
-        job.el._text.textContent = `⚠ ${job.filename}: ${st.error || "download failed"}`;
-      } else {
-        drop(st.id);                       // cancelled
+        failItem(it, st.error || "download failed");
+        forgetJob(st.id);
+      } else {                               // cancelled
+        it.state = "cancelled";
+        forgetJob(st.id);
       }
     }
+    renderPanel();
   }
 
-  async function startOffline(vid) {
-    const id = "off-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  /**
+   * Start one file. `it` is an existing entry when this is a Retry, so the
+   * list keeps its place; otherwise a new one joins the list.
+   */
+  async function startOffline(vid, it) {
+    const id = newDlId();
+    const total = Number(vid.sizeBytes) || 0;
+    if (it) {
+      forgetJob(it.id);
+      Object.assign(it, { id, state: "starting", received: 0, total: total || it.total || 0, bps: 0, error: null });
+    } else {
+      it = { id, filename: vid.filename, rowId: vid.oneDriveId || null, state: "starting", received: 0, total, bps: 0, error: null };
+      dl.items.push(it);
+    }
+    dl.minimized = false;
+    showPanel(true);
     try {
       await window.ScrayBridge.offlineStart({ id, url: vid.downloadUrl, filename: vid.filename, folder: OFFLINE_FOLDER });
     } catch (err) {
       const m = String((err && err.message) || err);
       // An app built before 15.11: the in-app browser's download instead.
-      if (/Unknown action/i.test(m)) { browserDownload(vid); return; }
-      alert(`Couldn't save ${vid.filename} to the phone: ${m}`);
+      if (/Unknown action/i.test(m)) {
+        dl.items = dl.items.filter(x => x !== it);
+        if (!dl.items.length) showPanel(false); else renderPanel();
+        browserDownload(vid);
+        return;
+      }
+      failItem(it, m);
       return;
     }
-    dlJobs.set(id, { filename: vid.filename, el: dlLine(id, vid.filename), state: "downloading" });
-    if (!dlTimer) dlTimer = setInterval(() => { pollDownloads().catch(() => {}); }, 1000);
+    if (it.state === "starting") it.state = "downloading";
+    renderPanel();
+    ensureTimer();
   }
+
+  /** Retry: a fresh signed link for the same row, then start it again. */
+  async function retryDownload(id) {
+    const it = dlFind(id);
+    if (!it || !(it.state === "failed" || it.state === "cancelled")) return;
+    it.state = "starting"; it.error = null;
+    renderPanel();
+    const all = typeof getAllVideos === "function" ? await getAllVideos() : [];
+    const want = nfcLower(it.filename);
+    const row = (it.rowId && all.find(v => v.oneDriveId === it.rowId))
+      || all.find(v => isHetznerRow(v) && nfcLower(v.filename) === want);
+    if (!row) throw new Error("this file isn't in the Hetzner list any more - fetch Hetzner and press D again");
+    const fresh = await window.refreshVideoBeforeUse({ ...row });
+    if (!fresh || !fresh.downloadUrl) throw new Error("couldn't get a fresh link for this file");
+    it.rowId = row.oneDriveId;
+    await startOffline(fresh, it);
+  }
+
+  /**
+   * After a reload the list is gone but Swift's downloads aren't: pick up
+   * anything still coming down (or finished and not yet in the library).
+   */
+  async function recoverDownloads() {
+    const b = window.ScrayBridge;
+    if (!b || typeof b.offlineStatus !== "function") return;
+    let jobs = [];
+    try { jobs = ((await b.offlineStatus(null)) || {}).jobs || []; } catch { return; }
+    for (const st of jobs) {
+      if (dlFind(st.id)) continue;
+      if (st.state === "downloading" || st.state === "finished") {
+        dl.items.push({ id: st.id, filename: st.filename, rowId: null, state: "downloading",
+          received: Number(st.received) || 0, total: Number(st.total) || 0, bps: 0, error: null });
+      } else {
+        forgetJob(st.id);
+      }
+    }
+    if (dl.items.length) { showPanel(true); ensureTimer(); }
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => setTimeout(recoverDownloads, 500));
+  else setTimeout(recoverDownloads, 500);
 
   /** Before 15.11's build: the signed link with dl=1 in the in-app browser. */
   function browserDownload(vid) {

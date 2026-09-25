@@ -4,6 +4,24 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.13 — test: offline downloads in the upload-style panel, offline count fixed
+<!-- 2026-09-25T12:12Z -->
+
+**native** — `stg-native - 15.13`: `assets/web/scray-hetzner.js`, `randomiser.js`, `style.css`. Web only, no IPA build.
+
+- **Asked for:** the dark "⬇ name 46% · 18.6 MB/s" strips that D on a Hetzner row showed bottom-left were ugly and sat under the corner buttons (X R H …). Use the OneDrive/Hetzner upload panel's template instead, collapsible and all, clear of the corner buttons. And the Offline button's count said 0: it should count every offline video, not just the ones in Offline/.
+- **SAVING OFFLINE panel** (`#scrayOfflinePanel`, scray-hetzner.js) is built like the UPLOADS panel from `scray-upload.js`, with the same `up-*` classes:
+  - for each file coming down: name, "Phone › Offline", a bar, then % · got of total · speed · time left, and Cancel this file. With several files there's an "All" bar with the combined figures. Each file then shows "adding to the library…" and lands in the list with ✓.
+  - ▾ folds it to a pill ("⬇ 46%", "✓" or "n failed"), and tapping the pill opens it again. Show/Hide the list; failed or cancelled files get **Retry**, which gets a fresh signed link for the same row and starts over; **Clear** once nothing's going.
+  - A start that Swift refuses (the name is already in Offline, say) now shows as a failed line in the panel rather than an alert.
+  - It no longer vanishes 4s after finishing. It stays until Clear, as uploads do.
+  - After a page reload it picks up downloads Swift is still running (`offlineStatus(null)`), which the old strips lost.
+- **Placement:** style.css's upload-panel rules are now written for both ids (`:is(#scrayUploadPanel, #scrayOfflinePanel)`), so it gets the same place: bottom-right on phones, lifted by UPLOAD_PANEL_LIFT (88px) above the corner-button row. If the upload panel is up as well, `placePanel` stacks this one on top of it (a ResizeObserver on the upload panel keeps it there as that one grows, shrinks or folds) and caps its height to the room left.
+- **Offline count:** `syncOfflineOnlyToggleLabel` counted `window.allVideos`, which only Picker sets, so it was always 0. It now counts every phone file in the library (`scrayIsOffline` = `isLocalVideo`), whatever folder it's in and whatever else is filtered. `getFilteredVideos` refreshes the count from the library list it already reads (`scrayCountOffline`), a label sync with no count yet reads the library itself, and a finished D download updates it. The filter itself was already right; only the number was wrong.
+- **Picker:** nothing to port. Picker has no on-phone download, and its Offline count reads the keys Native publishes (`scrayOfflineKeys`), which is a different path that already works.
+- **Tested:** `node --check`, plus jsdom with a stand-in bridge. Two D's gave two file blocks, the list toggle and the All bar. ▾ gave the "⬇ 46%" pill and it expanded again. A finished file was added to the library, marked ✓ and forgotten in Swift. A refused start showed as failed with the reason. Cancel went to Swift and showed Retry. Clear hid the panel. A download already running before a reload was picked up. **Not checked on the phone:** where it sits against the corner buttons in portrait, landscape and FLS. It uses the upload panel's lift, so it should land where uploads do.
+- Deploy: assets/web, picked up by the dev app straight away.
+
 ### native 15.12 — test: green loaded segments on the progress bar for Hetzner streams
 <!-- 2026-09-25T08:20Z -->
 

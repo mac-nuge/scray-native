@@ -3325,6 +3325,9 @@ Filtering Functions
 ========================================= */
 async function getFilteredVideos(includeTags, excludeTags, minDurationMs, maxDurationMs) {
 let videos = await getAllVideos();
+// Offline count for the Offline button (native 15.13): the whole library,
+// before any filter narrows it.
+if (typeof window.scrayCountOffline === "function") window.scrayCountOffline(videos);
 
 // ✅ Use arguments if provided, otherwise pull from commonSelectedTags
 let includeAll;
@@ -4647,15 +4650,32 @@ searchBox.addEventListener("keydown", (e) => {
 
   // ✅ Offline filter (native 15.11, as Picker's). Orange when on, with the
   // count of files on this phone in the label.
-  window.syncOfflineOnlyToggleLabel = function () {
+  // native 15.13: the count read window.allVideos, which only Picker sets, so
+  // it was always 0. It now counts the whole library - every phone file in
+  // every folder, not just Offline/ - whatever else is filtered. The count is
+  // kept in scrayOfflineCount: getFilteredVideos refreshes it from the list it
+  // has already read, and a call here with none yet reads the library itself.
+  window.scrayCountOffline = function (all) {
+      if (!Array.isArray(all) || typeof window.scrayIsOffline !== "function") return null;
+      const n = all.filter(window.scrayIsOffline).length;
+      const changed = n !== window.scrayOfflineCount;
+      window.scrayOfflineCount = n;
+      if (changed) window.syncOfflineOnlyToggleLabel({ fromCount: true });
+      return n;
+  };
+
+  window.syncOfflineOnlyToggleLabel = function (opts) {
       const b = document.getElementById("offlineOnlyToggleBtn");
       if (!b) return;
       const on = b.dataset.active === "1";
-      const all = Array.isArray(window.allVideos) ? window.allVideos : [];
-      const n = typeof window.scrayIsOffline === "function" ? all.filter(window.scrayIsOffline).length : 0;
-      b.textContent = on ? `Offline (${n})` : "Offline: All";
+      const n = window.scrayOfflineCount;
+      b.textContent = on ? `Offline (${n ?? "…"})` : "Offline: All";
       b.style.background = on ? "#ff9800" : "#555";
       b.style.color = "#fff";
+      // Recount from the library unless this call came from a count.
+      if (!(opts && opts.fromCount) && typeof getAllVideos === "function") {
+          getAllVideos().then(window.scrayCountOffline).catch(() => {});
+      }
   };
 
   const offlineOnlyToggleBtn = document.getElementById("offlineOnlyToggleBtn");

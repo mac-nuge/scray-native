@@ -7983,10 +7983,13 @@ body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor >
    The sheet reuses .basket-json-modal; these are its insides, and the
    floating UPLOADS panel that shows the queue.
    ========================================================================= */
+/* native 15.13: the SAVING OFFLINE panel (D on a Hetzner row, scray-hetzner.js)
+   is the same template, so every panel rule below is written for both ids.
+   scray-hetzner.js stacks it above this one when both are up. */
 .up-sheet { max-width: 560px; padding: 18px; }
 /* Native's mobile rule makes every button and input full width with 12px of
    padding; nothing in here wants that. */
-.up-sheet button, .up-sheet input, #scrayUploadPanel button { width: auto; margin-bottom: 0; }
+.up-sheet button, .up-sheet input, :is(#scrayUploadPanel, #scrayOfflinePanel) button { width: auto; margin-bottom: 0; }
 .up-sheet input[type=checkbox] { padding: 0; }
 .up-top { display: flex; align-items: center; gap: 8px; }
 .up-top h3 { margin: 0; flex: 1; font-size: 1.05rem; }
@@ -7998,7 +8001,7 @@ body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor >
 /* Hetzner in the Upload sheet (native 15.1): the Storage Box's name in italics,
    as Picker sets every Hetzner filename. */
 .up-sheet .up-acct.is-hz { font-style: italic; }
-.up-sheet .up-err, #scrayUploadPanel .up-err { color: #c62828; font-size: 0.78rem; margin: 2px 0 8px; word-break: break-word; }
+.up-sheet .up-err, :is(#scrayUploadPanel, #scrayOfflinePanel) .up-err { color: #c62828; font-size: 0.78rem; margin: 2px 0 8px; word-break: break-word; }
 .up-loading, .up-empty { color: #888; font-size: 0.82rem; padding: 12px 4px; list-style: none; }
 .up-tools { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
 .up-find { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.85rem; }
@@ -8040,46 +8043,46 @@ body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor >
 .up-buttons { display: flex; gap: 8px; margin-top: 14px; }
 .up-buttons .modal-btn { flex: 1; }
 
-#scrayUploadPanel {
+:is(#scrayUploadPanel, #scrayOfflinePanel) {
   position: fixed; right: 10px; left: 10px; bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   max-width: 460px; margin-left: auto; z-index: 2147482000;
   background: #fff; color: #222; border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.35);
   padding: 10px 12px; font-size: 0.82rem; max-height: 55vh; overflow-y: auto; box-sizing: border-box; }
-#scrayUploadPanel.is-min { left: auto; padding: 0; background: none; box-shadow: none; overflow: visible; }
+:is(#scrayUploadPanel, #scrayOfflinePanel).is-min { left: auto; padding: 0; background: none; box-shadow: none; overflow: visible; }
 /* ⚙️ Phones (13.187): the disguise's bottom button row (X R H ... COL) sits
    over the bottom of the screen and was covering the panel's last rows. Lift
    the panel clear of it; the list still scrolls inside the panel. Nudge
    UPLOAD_PANEL_LIFT if that row ever moves. */
 @media (max-width: 1024px) {
-  #scrayUploadPanel {
+  :is(#scrayUploadPanel, #scrayOfflinePanel) {
     --upload-panel-lift: 88px; /* ⚙️ UPLOAD_PANEL_LIFT */
     bottom: calc(env(safe-area-inset-bottom, 0px) + var(--upload-panel-lift));
     max-height: min(55vh, calc(100vh - var(--upload-panel-lift) - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px) - 20px));
   }
 }
-#scrayUploadPanel .up-pill { background: #0078d4; color: #fff; border: 0; border-radius: 999px; padding: 9px 14px;
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-pill { background: #0078d4; color: #fff; border: 0; border-radius: 999px; padding: 9px 14px;
   font-size: 0.85rem; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.35); cursor: pointer; }
-#scrayUploadPanel .up-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
-#scrayUploadPanel .up-head b { font-size: 0.72rem; letter-spacing: .1em; color: #0078d4; }
-#scrayUploadPanel .up-grow { flex: 1; }
-#scrayUploadPanel .up-name { font-weight: 600; word-break: break-word; }
-#scrayUploadPanel .up-dest, #scrayUploadPanel .up-sub { color: #777; font-size: 0.75rem; word-break: break-word; }
-#scrayUploadPanel .up-bar { height: 8px; background: #e6eef6; border-radius: 4px; overflow: hidden; margin: 6px 0 4px; }
-#scrayUploadPanel .up-bar.thin { height: 4px; }
-#scrayUploadPanel .up-bar i { display: block; height: 100%; background: #0078d4; transition: width .4s ease; }
-#scrayUploadPanel .up-stat { font-variant-numeric: tabular-nums; }
-#scrayUploadPanel .up-note { color: #8a5300; font-size: 0.75rem; }
-#scrayUploadPanel .up-batch { margin-top: 8px; padding-top: 6px; border-top: 1px solid #eee; color: #555; }
-#scrayUploadPanel .up-list { margin-top: 8px; border-top: 1px solid #eee; }
-#scrayUploadPanel .up-toggle { display: block; margin: 6px 0 0 -6px; }
-#scrayUploadPanel .up-list li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f4f4f4; }
-#scrayUploadPanel .up-ico { width: 14px; text-align: center; color: #888; flex: none; }
-#scrayUploadPanel .st-done .up-ico { color: #2e7d32; }
-#scrayUploadPanel .st-failed .up-ico { color: #c62828; }
-#scrayUploadPanel .st-uploading .up-ico, #scrayUploadPanel .st-starting .up-ico, #scrayUploadPanel .st-finishing .up-ico { color: #0078d4; }
-#scrayUploadPanel .up-li { flex: 1; min-width: 0; }
-#scrayUploadPanel .up-li-name { word-break: break-word; }
-#scrayUploadPanel .st-cancelled .up-li-name { color: #999; text-decoration: line-through; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-head b { font-size: 0.72rem; letter-spacing: .1em; color: #0078d4; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-grow { flex: 1; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-name { font-weight: 600; word-break: break-word; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-dest, :is(#scrayUploadPanel, #scrayOfflinePanel) .up-sub { color: #777; font-size: 0.75rem; word-break: break-word; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-bar { height: 8px; background: #e6eef6; border-radius: 4px; overflow: hidden; margin: 6px 0 4px; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-bar.thin { height: 4px; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-bar i { display: block; height: 100%; background: #0078d4; transition: width .4s ease; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-stat { font-variant-numeric: tabular-nums; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-note { color: #8a5300; font-size: 0.75rem; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-batch { margin-top: 8px; padding-top: 6px; border-top: 1px solid #eee; color: #555; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-list { margin-top: 8px; border-top: 1px solid #eee; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-toggle { display: block; margin: 6px 0 0 -6px; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-list li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f4f4f4; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-ico { width: 14px; text-align: center; color: #888; flex: none; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .st-done .up-ico { color: #2e7d32; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .st-failed .up-ico { color: #c62828; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .st-uploading .up-ico, :is(#scrayUploadPanel, #scrayOfflinePanel) .st-starting .up-ico, :is(#scrayUploadPanel, #scrayOfflinePanel) .st-finishing .up-ico { color: #0078d4; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-li { flex: 1; min-width: 0; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .up-li-name { word-break: break-word; }
+:is(#scrayUploadPanel, #scrayOfflinePanel) .st-cancelled .up-li-name { color: #999; text-decoration: line-through; }
 
 /* ---- the Filter box, on a phone (13.84) --------------------------------
    The pill took this over. With +B gone as well (13.86) there is nothing else

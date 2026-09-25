@@ -270,7 +270,8 @@
   const POLL_MS = 1000;
   // One entry per file: { id, filename, rowId, state, received, total, bps, error }
   // state: starting → downloading → adding → done | failed | cancelled
-  const dl = { items: [], minimized: false, showList: false };
+  // Starts folded to its pill (native 15.15) - tap it to open.
+  const dl = { items: [], minimized: true, showList: false };
   let dlTimer = null;
   const DL_ACTIVE = new Set(["starting", "downloading", "adding"]);
 
@@ -526,7 +527,10 @@
       it = { id, filename: vid.filename, rowId: vid.oneDriveId || null, state: "starting", received: 0, total, bps: 0, error: null };
       dl.items.push(it);
     }
-    dl.minimized = false;
+    // native 15.15: a new download starts with the panel folded to its pill.
+    // If the panel is already on screen (open, or a Retry pressed in it), it
+    // stays as it is.
+    if (!panel || panel.hidden) dl.minimized = true;
     showPanel(true);
     try {
       await window.ScrayBridge.offlineStart({ id, url: vid.downloadUrl, filename: vid.filename, folder: OFFLINE_FOLDER });

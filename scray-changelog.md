@@ -4,6 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.15 — test: offline download panel starts minimised
+<!-- 2026-09-25T12:34Z -->
+
+**native** — `stg-native - 15.15`: `assets/web/scray-hetzner.js`. Web only, no IPA build.
+
+- **Asked for:** when an offline download starts, show its status folded to the pill rather than open.
+- The SAVING OFFLINE panel now starts minimised: D shows the "⬇ 46%" pill, and tapping it opens the full panel. That covers downloads picked up after a reload too.
+- If the panel is already on screen, a new D leaves it as it is, open or folded. So does Retry, which is pressed inside the open panel.
+- **Tested:** `node --check`; in jsdom, D showed the pill ("⬇ 46%") with the panel folded.
+- Deploy: assets/web, picked up by the dev app straight away.
+
 ### native 15.14 — test: Offline toggle label, now-playing D saves Hetzner files, Played sort removed
 <!-- 2026-09-25T12:30Z -->
 

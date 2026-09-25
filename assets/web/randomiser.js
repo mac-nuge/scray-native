@@ -3652,6 +3652,36 @@ Updated filterDisplayedByFilename
 let scrayFilterSeq = 0;
 let scrayFilterLatest = Promise.resolve();
 
+/**
+ * What X, X^n, X^T and Xb pick from (native 15.17): the main list exactly as it
+ * stands - every filter (tags, studios, performers, notes, keywords, the
+ * toggles), the search box, the view (Videos or Bookmarks), and linked copies
+ * collapsed to the one each row shows. Rule of thumb: the list on screen IS
+ * the pool. Basket and history have their own buttons and aren't this.
+ *
+ * paginationState.allVideos is that list (all of it, not just the rows drawn
+ * so far). Before the first draw it's empty, so the list is worked out the
+ * way scrayFilterDisplayedPass does it - a list that genuinely matches
+ * nothing comes out empty that way too.
+ */
+async function scrayPlayPool() {
+  const drawn = (typeof paginationState !== 'undefined' && paginationState && Array.isArray(paginationState.allVideos))
+    ? paginationState.allVideos : [];
+  if (drawn.length) return drawn.slice();
+  const includeTags = $('#tagFilterSelect').val() || [];
+  const excludeTags = $('#excludeTagSelect').val() || [];
+  const minDurationMs = getDurationMsFromInputs("minMinutes", "minSeconds");
+  const maxDurationMs = getDurationMsFromInputs("maxMinutes", "maxSeconds");
+  let videos = await getFilteredVideos(includeTags, excludeTags, minDurationMs, maxDurationMs);
+  const searchText = (document.getElementById("filenameSearchBox")?.value || '').trim();
+  if (searchText) {
+    const query = parseSearchQuery(searchText);
+    videos = videos.filter(video => matchesSearchQuery(video, query));
+  }
+  return videos;
+}
+window.scrayPlayPool = scrayPlayPool;
+
 async function filterDisplayedByFilename() {
 const seq = ++scrayFilterSeq;
 const run = scrayFilterDisplayedPass(seq);
@@ -4798,19 +4828,8 @@ if (!(isLandscape && isMobile)) {
  if (typeof toggleRandomPlaylistPanel === 'function') toggleRandomPlaylistPanel(false);
 }
 
-const includeTags = Array.from(window.commonSelectedTags);
-const excludeTags = $('#excludeTagSelect').val() || [];
-const minDurationMs = getDurationMsFromInputs("minMinutes", "minSeconds");
-const maxDurationMs = getDurationMsFromInputs("maxMinutes", "maxSeconds");
-
-let videosToChooseFrom = await getFilteredVideos(includeTags, excludeTags, minDurationMs, maxDurationMs);
-
-const searchBoxWeighted = document.getElementById("filenameSearchBox");
-const searchTextWeighted = searchBoxWeighted?.value.trim() || '';
-if (searchTextWeighted.length > 0) {
-const query = parseSearchQuery(searchTextWeighted);
-videosToChooseFrom = videosToChooseFrom.filter(video => matchesSearchQuery(video, query));
-}
+// The list as it stands is the pool (native 15.17) - see scrayPlayPool.
+let videosToChooseFrom = await scrayPlayPool();
 
 if (!videosToChooseFrom || videosToChooseFrom.length === 0) {
 alert("No videos match current filters");
@@ -4858,7 +4877,7 @@ if (totalWeight <= 0) {
     }
 }
 
-const actualIndex = videosToChooseFrom.findIndex(v => v.oneDriveId === randomVideo.oneDriveId);
+const actualIndex = videosToChooseFrom.indexOf(randomVideo);
 
 const vidIdWeighted = randomVideo.oneDriveId ?? randomVideo.idFromAPI ?? null;
 if (vidIdWeighted) {
@@ -4918,19 +4937,8 @@ if (!(isLandscape && isMobile)) {
  if (typeof toggleRandomPlaylistPanel === 'function') toggleRandomPlaylistPanel(false);
 }
 
-const includeTags = Array.from(window.commonSelectedTags);
-const excludeTags = $('#excludeTagSelect').val() || [];
-const minDurationMs = getDurationMsFromInputs("minMinutes", "minSeconds");
-const maxDurationMs = getDurationMsFromInputs("maxMinutes", "maxSeconds");
-
-let videosToChooseFrom = await getFilteredVideos(includeTags, excludeTags, minDurationMs, maxDurationMs);
-
-const searchBoxTime = document.getElementById("filenameSearchBox");
-const searchTextTime = searchBoxTime?.value.trim() || '';
-if (searchTextTime.length > 0) {
-const queryTime = parseSearchQuery(searchTextTime);
-videosToChooseFrom = videosToChooseFrom.filter(video => matchesSearchQuery(video, queryTime));
-}
+// The list as it stands is the pool (native 15.17) - see scrayPlayPool.
+let videosToChooseFrom = await scrayPlayPool();
 
 if (!videosToChooseFrom || videosToChooseFrom.length === 0) {
 alert("No videos match current filters");
@@ -4955,7 +4963,7 @@ const timedPool = finalPoolTime.filter(v => Number(v.durationMs) > 0);
 if (timedPool.length > 0) finalPoolTime = timedPool;
 
 const randomVideo = finalPoolTime[Math.floor(Math.random() * finalPoolTime.length)];
-const actualIndex = videosToChooseFrom.findIndex(v => v.oneDriveId === randomVideo.oneDriveId);
+const actualIndex = videosToChooseFrom.indexOf(randomVideo);
 
 const durationSec = Number(randomVideo.durationMs) > 0 ? randomVideo.durationMs / 1000 : 0;
 const fraction = START_MIN_FRACTION + Math.random() * (START_MAX_FRACTION - START_MIN_FRACTION);
@@ -5011,22 +5019,8 @@ if (!(isLandscape && isMobile)) {
 }
 
 // Get current filter settings
-const includeTags = Array.from(window.commonSelectedTags);
-const excludeTags = $('#excludeTagSelect').val() || [];
-const minDurationMs = getDurationMsFromInputs("minMinutes", "minSeconds");
-const maxDurationMs = getDurationMsFromInputs("maxMinutes", "maxSeconds");
-
-// Apply filters to get eligible videos (includes MP4-only checkbox)
-let videosToChooseFrom = await getFilteredVideos(includeTags, excludeTags, minDurationMs, maxDurationMs);
-
-// ✅ Apply text search filter if search box has text
-const searchBox = document.getElementById("filenameSearchBox");
-const searchText = searchBox?.value.trim() || '';
-if (searchText.length > 0) {
-const query = parseSearchQuery(searchText);
-videosToChooseFrom = videosToChooseFrom.filter(video => matchesSearchQuery(video, query));
-console.log(`Applied search filter "${searchText}" - ${videosToChooseFrom.length} videos match`);
-}
+// The list as it stands is the pool (native 15.17) - see scrayPlayPool.
+let videosToChooseFrom = await scrayPlayPool();
 
 if (!videosToChooseFrom || videosToChooseFrom.length === 0) {
 alert("No videos match current filters");
@@ -5065,7 +5059,8 @@ if (recentlyPlayedVideos.length > 10) {
 if (window.inlineVideoPlayer && randomVideo) {
 console.log(`Playing random video: ${randomVideo.filename} (avoiding last ${recentlyPlayedVideos.length - 1} played)`);
 window.lastPlayLabel = 'Random';
-window.inlineVideoPlayer.play(randomVideo, 'main', randomIndex);
+// Its place in the list, not in the pool minus recent plays (native 15.17).
+window.inlineVideoPlayer.play(randomVideo, 'main', Math.max(0, videosToChooseFrom.indexOf(randomVideo)));
 
 // ✅ Mobile: auto-scroll to player after brief delay
 if (window.innerWidth <= 1024) {

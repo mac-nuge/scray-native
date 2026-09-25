@@ -4,6 +4,28 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.16 / native 15.17 — test: X, Xn, XT, Xb and > follow the list filters
+<!-- 2026-09-25T14:56Z -->
+
+**picker** — `staging - 15.16`: `randomiser.js`, `player.js`, `scray-views.js`. **native** — `stg-native - 15.17`: `assets/web/randomiser.js`, `player.js`, `scray-views.js`. Web only, no IPA build. The patches are the same in both apps.
+
+- **Asked for:** with a bookmark note filter on, Xb ignored it. The rule of thumb: every X button and > play from the list as the filters leave it; the filtered list is the pool. Basket and history keep their own.
+- **Why Xb didn't follow:** in Videos view it picked from every bookmark in the library, on purpose (the old comment said "the main page's tag filters are deliberately NOT consulted"). Only the Bookmarks view, through `scrayFilteredBookmarkEntries`, used the filters.
+- **One pool: `scrayPlayPool()`** (randomiser.js, window-exported). It's the main list exactly as it stands: `paginationState.allVideos`, the whole filtered and sorted list, not just the rows drawn, with linked copies collapsed to the copy each row shows. That covers every filter, the search box and the view. Before the list's first draw it works the list out the same way `scrayFilterDisplayedPass` does.
+- **X, Xn, XT:** each did its own filter pass (`getFilteredVideos` plus the search box). That was nearly the list but not quite: linked copies weren't collapsed, so a file with two copies was twice as likely and could come up as the copy the row doesn't show. They now take `scrayPlayPool()`. The recent-plays rule, Xn's weighting and XT's random start point are unchanged.
+- **Xb:**
+  - **Videos view:** every bookmark of the files in the list that passes the note filter (picked notes, excluded notes, keywords), through the new `scrayBookmarkPassesNoteFilter` in scray-views.js, the same test Bookmarks view uses per bookmark.
+  - **Bookmarks view:** the bookmark rows in the list.
+  - With nothing armed that's every bookmark, as before. An empty result says "No bookmarks in this list".
+  - Picker's old bookmarks.php page keeps its own behaviour.
+- **> and <:** the list was already the filtered main list, but they stepped from `currentVideoIndex`, which went stale:
+  - X passed its place in its own pool (the list minus recent plays), not in the list, so > after X jumped to an arbitrary row.
+  - Xn and XT passed a place in the unsorted filtered list.
+  - A re-filter or re-sort moved the list under it.
+  - For the main and bookmarks lists they now step from where the playing file actually is (`scrayPlayingIndexIn`): by file, plus bookmark time in Bookmarks view, then by linked-copy group. If the file isn't in the list any more, the stored place stands, so > still stays inside what the filters leave. The X buttons now pass the file's real list position too. The random panel, basket and history contexts are unchanged.
+- **Tested:** `node --check` on all three files in both apps. jsdom on Xb and `scrayPlayingIndexIn`, with a list of two files and a third filtered out, and a "kiss" note filter: 20 Xb picks gave only the kiss bookmarks of the two listed files (not the third file, not the "hug" bookmark). The lookup found a bookmark clone by file and time, and a different copy by its linked group. Not run on a device.
+- Deploy: Picker's three files to sp-staging-sql; Native's assets/web is picked up by the dev app straight away.
+
 ### picker 15.15 / native 15.16 — test: studio names in the list open the filter modal
 <!-- 2026-09-25T14:44Z -->
 

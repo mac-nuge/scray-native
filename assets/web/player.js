@@ -2304,6 +2304,28 @@ function scrayPlaceHistoryPlay(video, index) {
 window.scrayPlaceHistoryPlay = scrayPlaceHistoryPlay;
 
 /**
+ * Where the playing file is in `list` (native 15.17). currentVideoIndex is where it
+ * was when it started, and that goes stale: the list is re-filtered or
+ * re-sorted under it, or the play came from X, which used to pass its place
+ * in its own pool. Looked up by the file (and the bookmark time in Bookmarks
+ * view), then by its linked-copy group; if it isn't in the list any more,
+ * the stored index stands, so > still steps through what the filters leave.
+ */
+function scrayPlayingIndexIn(list) {
+   const cur = window.currentPlayingVideo;
+   if (!cur || !Array.isArray(list) || !list.length) return currentVideoIndex;
+   const idOf = v => (v ? (v.oneDriveId ?? v.idFromAPI ?? null) : null);
+   const id = idOf(cur);
+   let at = -1;
+   if (id != null && cur.__bmStartAt != null) {
+       at = list.findIndex(v => idOf(v) === id && v.__bmStartAt === cur.__bmStartAt);
+   }
+   if (at < 0 && id != null) at = list.findIndex(v => idOf(v) === id);
+   if (at < 0 && cur.variant_group) at = list.findIndex(v => v && v.variant_group && String(v.variant_group) === String(cur.variant_group));
+   return at >= 0 ? at : currentVideoIndex;
+}
+
+/**
 * Play next video in current list context
 * If nothing is playing, play first item from main list
 */
@@ -2344,8 +2366,10 @@ function playNextInCurrentList() {
        return;
    }
    
-   // Calculate next index
-   let nextIndex = currentVideoIndex + 1;
+   // Calculate next index - from where the playing file is now (native 15.17).
+   const walkFrom = (currentListContext === 'main' || currentListContext === 'bookmarks')
+       ? scrayPlayingIndexIn(currentList) : currentVideoIndex;
+   let nextIndex = walkFrom + 1;
    
    // Wrap around to start if at end
    if (nextIndex >= currentList.length) {
@@ -2414,8 +2438,10 @@ function playPreviousInCurrentList() {
        return;
    }
    
-   // Calculate previous index
-   let prevIndex = currentVideoIndex - 1;
+   // Calculate previous index - from where the playing file is now (native 15.17).
+   const walkFrom = (currentListContext === 'main' || currentListContext === 'bookmarks')
+       ? scrayPlayingIndexIn(currentList) : currentVideoIndex;
+   let prevIndex = walkFrom - 1;
    
    // Wrap around to end if at start
    if (prevIndex < 0) {
@@ -3919,6 +3945,46 @@ async function scrayPlayRandomBookmark() {
         if (entries && !entries.length) {
             showPlayerFeedback('No bookmarks match filter', 'top-left');
             return;
+        }
+    }
+
+    // Everywhere else (native 15.17): the bookmarks in the list as it stands -
+    // the files every filter and the search box leave, and of their
+    // bookmarks only the ones that pass the note filter (picked notes,
+    // excluded notes, keywords). With nothing armed that is every bookmark,
+    // as before. A Bookmarks-view entry is already one bookmark.
+    if (!entries && typeof window.scrayPlayPool === 'function') {
+        let pool = [];
+        try {
+            pool = await window.scrayPlayPool();
+        } catch (err) {
+            console.warn('[Xb] could not read the list:', err);
+            pool = null;
+        }
+        if (pool) {
+            const noteOk = typeof window.scrayBookmarkPassesNoteFilter === 'function'
+                ? window.scrayBookmarkPassesNoteFilter : () => true;
+            entries = [];
+            pool.forEach(video => {
+                if (!video) return;
+                if (video.__bmStartAt != null) {
+                    entries.push({ video, time: video.__bmStartAt, note: (video.__bmNote || '').trim() });
+                    return;
+                }
+                const bms = window.scrayVisibleBookmarks
+                    ? window.scrayVisibleBookmarks(video)
+                    : (Array.isArray(video.bookmarks) ? video.bookmarks : []);
+                bms.forEach(bm => {
+                    if (!bm || typeof bm.time !== 'number' || bm.time <= 0) return;
+                    const note = (bm.note || '').trim();
+                    if (!noteOk(note)) return;
+                    entries.push({ video, time: bm.time, note });
+                });
+            });
+            if (!entries.length) {
+                showPlayerFeedback('No bookmarks in this list', 'top-left');
+                return;
+            }
         }
     }
 

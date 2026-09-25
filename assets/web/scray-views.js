@@ -210,6 +210,9 @@
    * as it did before this file existed, and the main list is not a list of
    * bookmarks to pick from.
    */
+  /** One bookmark's note against the note filter (native 15.17) - Xb in Videos view. */
+  window.scrayBookmarkPassesNoteFilter = (rawNote) => passesNoteFilter({ __bmNote: noteOf({ note: rawNote || '' }) });
+
   window.scrayFilteredBookmarkEntries = function () {
     if (!bookmarksView) return null;
     const term = (document.getElementById('filenameSearchBox')?.value || '').trim();

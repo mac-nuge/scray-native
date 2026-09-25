@@ -6271,6 +6271,7 @@ permanentProgress.id = 'permanentProgressBar';
 document.body.classList.toggle('scray-ts-with-controls', PROGRESS_TIMESTAMP_WITH_CONTROLS);
 permanentProgress.innerHTML = `
 <div class="permanent-progress-ts-anchor"><div class="permanent-progress-timestamp">0:00 / 0:00</div></div>
+<div class="permanent-progress-buffered-label"></div>
 <div class="permanent-progress-bar">
 <div class="permanent-progress-filled"></div>
 </div>
@@ -6538,7 +6539,67 @@ console.log('✅ Permanent progress bar created below video');
 
 // Render bookmark markers now that the bar exists
 renderBookmarkMarkers();
+updateBufferedProgress();
 }
+
+/**
+* What has loaded of a streaming video, in green on the progress bar (native
+* 15.12 - Picker's updateBufferedProgress, brought over for Hetzner rows).
+* Those parts play at once if you seek there; the rest has to load first.
+* video.buffered can hold several separate ranges after seeking around, so
+* one segment is drawn per range on every call, and "n% buffered" sits to the
+* right above the bar.
+*
+* Streaming only: a phone file is all there, so it would just be a solid bar
+* that says nothing.
+*/
+function updateBufferedProgress() {
+const bar = document.querySelector('.permanent-progress-bar');
+const label = document.querySelector('.permanent-progress-buffered-label');
+if (!bar) return;
+
+// Clear previous segments - buffered ranges can grow/merge as more loads
+bar.querySelectorAll('.permanent-progress-buffered').forEach(el => el.remove());
+
+const v = window.currentPlayingVideo;
+const streaming = !!v && !(typeof window.isLocalVideo === 'function'
+    ? window.isLocalVideo(v)
+    : (v.driveId === 'local' || String(v.accountKey || '').startsWith('local::')));
+const media = window.plyrPlayer?.media;
+const duration = window.plyrPlayer?.duration;
+
+if (!streaming || !media || !media.buffered || !duration || isNaN(duration) || duration <= 0) {
+    if (label) label.textContent = '';
+    return;
+}
+
+const buffered = media.buffered;
+let totalBufferedSeconds = 0;
+
+for (let i = 0; i < buffered.length; i++) {
+    const start = buffered.start(i);
+    const end = buffered.end(i);
+    totalBufferedSeconds += (end - start);
+
+    const startPercent = Math.max(0, Math.min(100, (start / duration) * 100));
+    const endPercent = Math.max(0, Math.min(100, (end / duration) * 100));
+    const widthPercent = endPercent - startPercent;
+    if (widthPercent <= 0) continue;
+
+    const seg = document.createElement('div');
+    seg.className = 'permanent-progress-buffered';
+    seg.style.left = `${startPercent}%`;
+    seg.style.width = `${widthPercent}%`;
+    bar.appendChild(seg);
+}
+
+if (label) {
+    const percent = Math.min(100, Math.round((totalBufferedSeconds / duration) * 100));
+    label.textContent = `${percent}% buffered`;
+}
+}
+
+window.updateBufferedProgress = updateBufferedProgress;
 
 // ⚙️ How long (ms) bookmark markers stay tappable after the progress
 // bar itself is tapped, in forced-landscape mode.
@@ -7570,6 +7631,8 @@ window.plyrPlayer.on('playing', () => {
     videoLoadHoldTimer = setTimeout(endVideoLoadHold, CONTROLS_LINGER_AFTER_PLAY_MS);
 });
 window.plyrPlayer.on('error', endVideoLoadHold);
+// Green "loaded" segments on the bar for a streaming video (native 15.12).
+window.plyrPlayer.on('timeupdate', updateBufferedProgress);
 window.plyrPlayer.on('canplay', () => window.scrayApplyPendingStartAt?.('canplay'));
 
 // Pause-menu gate. The six circles in .plyr-frame-step-group are only
@@ -8382,6 +8445,7 @@ loadingOverlay.textContent = 'Loading...';
 container.querySelector('.plyr').appendChild(loadingOverlay);
 
 window.plyrPlayer.on('progress', (event) => {
+updateBufferedProgress();   // native 15.12
 const buffered = event.detail.plyr.media.buffered;
 if (buffered && buffered.length) {
     const loadedSeconds = buffered.end(buffered.length - 1);

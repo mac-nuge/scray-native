@@ -5886,6 +5886,51 @@ height: 100%;
 background: #fff;
 width: 0%;
 transition: width 0.1s linear;
+/* native 15.12: positioned so it paints over the green loaded segments
+   (z 20) and under the bookmark markers (z 60), as in Picker. */
+position: relative;
+z-index: 30;
+}
+
+/* What has loaded of a streaming (Hetzner) video - plays at once if you seek
+   there (native 15.12, Picker's). ⚙️ shade/opacity to taste. */
+.permanent-progress-buffered {
+position: absolute;
+top: 0;
+height: 100%;
+background: rgba(40, 167, 69, 0.5); /* ⚙️ green "loaded" highlight, 50% opacity */
+z-index: 20; /* above the black bar, below the white "played" fill */
+pointer-events: none;
+transition: width 0.1s linear;
+}
+
+.permanent-progress-buffered-label {
+color: #fff;
+font-size: 0.7rem;
+font-weight: normal;
+white-space: nowrap;
+text-align: right;
+background: transparent;
+text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+position: absolute;
+bottom: 15px;
+right: 10%; /* mirrors the timestamp's left: 10% on the opposite side */
+z-index: 40;
+pointer-events: none;
+transition: opacity 1s ease;
+}
+.plyr--hide-controls .permanent-progress-buffered-label {
+opacity: 0 !important;
+}
+.plyr--fullscreen .permanent-progress-buffered-label {
+font-size: 0.75rem;
+bottom: 17px;
+}
+@media (max-width: 768px) {
+.permanent-progress-buffered-label {
+font-size: 0.6rem;
+bottom: 13px;
+}
 }
 
 /* Hide in mini-player modes */

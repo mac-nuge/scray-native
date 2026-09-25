@@ -1,1 +1,1 @@
-stg-native - 15.11 test: offline mode (D saves Hetzner files to Offline, bold offline titles, Offline toggle) + delete/rename/move on Hetzner
+stg-native - 15.12 test: green loaded segments on the progress bar for Hetzner streams

@@ -4,6 +4,19 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.12 — test: green loaded segments on the progress bar for Hetzner streams
+<!-- 2026-09-25T08:20Z -->
+
+**native** — `stg-native - 15.12`: `assets/web/player.js`, `assets/web/style.css`. Web only, no IPA build.
+
+- **Asked for:** Picker's green "loaded" highlight on the progress bar, for videos Native streams from Hetzner.
+- **Ported from Picker** (`updateBufferedProgress`, same CSS): one green segment per range in `media.buffered`, redrawn on Plyr's `progress` and `timeupdate` and when the bar is built. "n% buffered" sits above the bar on the right, mirroring the timestamp, and hides with the controls. Native never had it: phone files are all there.
+- **Streaming only:** the current video must not be a phone file (`isLocalVideo`). A phone file would just be a solid green bar, so it gets nothing, as before.
+- `.permanent-progress-filled` is now `position: relative; z-index: 30`, so the white "played" fill paints over the green (z 20) and under the bookmark markers (z 60), as in Picker. In Native the fill is in the normal flow rather than absolute, so this changes no layout.
+- The bar runs at its usual reduced opacity, so the green is dimmed with it, as in Picker.
+- Tested: `node --check`. Otherwise a straight copy of Picker's function plus the streaming check; not run on a device.
+- Deploy: assets/web, picked up by the dev app straight away.
+
 ### native 15.11 / browse 15.56 — test: offline mode (D saves Hetzner files to Offline, bold offline titles, Offline toggle) + delete/rename/move on Hetzner
 <!-- 2026-09-24T15:05Z -->
 

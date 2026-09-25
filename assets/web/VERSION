@@ -1,1 +1,1 @@
-stg-native - 15.10 test: Hetzner in Native - fetch button, streaming, Hetz filter, Migrated sort
+stg-native - 15.11 test: offline mode (D saves Hetzner files to Offline, bold offline titles, Offline toggle) + delete/rename/move on Hetzner

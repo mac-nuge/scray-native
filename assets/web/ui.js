@@ -421,6 +421,12 @@ const appendFilename = (bracket) => {
     span.style.color = '#007bff';
   });
   container.appendChild(wrapper);
+
+  // On this phone (native 15.11, as Picker's offline files): bold and
+  // underlined, by class - see scray-offline-title in style.css.
+  if (window.scrayIsOffline && window.scrayIsOffline(video)) {
+    wrapper.classList.add('scray-offline-title');
+  }
 };
 
 if (namePlan && namePlan.mode === 'scene') {

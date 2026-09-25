@@ -647,10 +647,10 @@ const paintScope = () => {
     const note = document.getElementById('renameScopeNote');
     if (!scopeChk || !note) return;
     note.textContent = !scopeOnline
-        ? 'Offline - everywhere needs a connection, so only this phone\u2019s file is renamed. OneDrive and the catalogue keep the old name.'
+        ? 'Offline - everywhere needs a connection, so only this phone\u2019s file is renamed. OneDrive, Hetzner and the catalogue keep the old name.'
         : scopeChk.checked
-            ? 'This file is also in the catalogue. Renames it on this phone, every OneDrive copy and the catalogue (its score, bookmarks, stash match and variants go with it). If the server refuses, nothing is renamed.'
-            : 'This phone only. OneDrive and the catalogue keep the old name, and the difference shows up in the \u270E names list.';
+            ? 'This file is also in the catalogue. Renames it on this phone, every OneDrive and Hetzner copy (including a linked Hetzner copy of the same file) and the catalogue (its score, bookmarks, stash match and variants go with it). If the server refuses, nothing is renamed.'
+            : 'This phone only. OneDrive, Hetzner and the catalogue keep the old name, and the difference shows up in the \u270E names list.';
 };
 scopeChk?.addEventListener('change', paintScope);
 paintScope();
@@ -796,6 +796,8 @@ async function showDeleteModal(video) {
    // through the server's delete_file, and the phone copy is deleted only once
    // the server has answered ok.
    const everywhereOk = isLocalVideo(video) && video.inCatalogue === true;
+   // native 15.11: a row that streams from Hetzner deletes from the box itself.
+   const hzRow = typeof window.scrayIsHetznerVideo === 'function' && window.scrayIsHetznerVideo(video) && !isLocalVideo(video);
    const modal = document.createElement('div');
     modal.className = 'basket-json-modal';
     modal.innerHTML = `
@@ -803,15 +805,18 @@ async function showDeleteModal(video) {
            <h3>Delete File</h3>
            ${(video.driveId === "local" || (video.accountKey || "").startsWith("local::"))
                ? '<p class="file-operation-warning">This permanently deletes the file from your device. There is no recycle bin.</p>'
+               : hzRow
+               ? '<p class="file-operation-warning">This permanently deletes the file from the Hetzner Storage Box and takes it out of the catalogue. The box has no recycle bin.'
+                 + (video.inOneDrive ? ' Its OneDrive copy goes to the OneDrive Recycle bin.' : '') + '</p>'
                : '<p class="file-operation-warning">This will move the file to the OneDrive Recycle bin</p>'}
            <p class="file-operation-path">${video.path || ''}</p>
            <p class="file-operation-filename"><strong>${video.filename || ''}</strong></p>
            ${everywhereOk ? `
            <div class="scray-delete-everywhere">
-               <label for="deleteEverywhereWord">Also delete from OneDrive? Type <b>delete</b> to allow it.</label>
+               <label for="deleteEverywhereWord">Also delete from OneDrive and Hetzner? Type <b>delete</b> to allow it.</label>
                <input type="text" id="deleteEverywhereWord" class="scray-delete-everywhere-word"
                       placeholder="delete" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
-               <span class="scray-delete-everywhere-note">Every OneDrive copy goes to the Recycle bin and the file leaves the catalogue. Needs a connection. Leave this empty to delete the phone copy only.</span>
+               <span class="scray-delete-everywhere-note">Every OneDrive copy goes to the Recycle bin, every Hetzner copy (including a linked Hetzner copy of the same file) is deleted for good, and the file leaves the catalogue. Needs a connection. Leave this empty to delete the phone copy only.</span>
            </div>` : ''}
            <div class="file-operation-buttons">
                <button id="confirmDeleteBtn" class="modal-btn modal-btn-danger">Delete</button>
@@ -855,14 +860,20 @@ async function showDeleteModal(video) {
                const res = await scrayDeleteEverywhere(video);
                modal.remove();
                const n = Number(res && res.onedrive_deleted) || 0;
-               alert(`Deleted everywhere: ${video.filename}\n` + (n
-                   ? `Phone, OneDrive (${n} cop${n === 1 ? 'y' : 'ies'}, in the Recycle bin) and the catalogue`
-                   : 'Phone and the catalogue - no OneDrive copy was on record'));
+               const h = Number(res && res.hetzner_deleted) || 0;
+               const parts = ['Phone',
+                   n ? `OneDrive (${n} cop${n === 1 ? 'y' : 'ies'}, in the Recycle bin)` : null,
+                   h ? `Hetzner (${h} cop${h === 1 ? 'y' : 'ies'})` : null].filter(Boolean);
+               alert(`Deleted everywhere: ${video.filename}\n` + parts.join(', ') + ' and the catalogue'
+                   + (!n && !h ? ' - no OneDrive or Hetzner copy was on record' : ''));
                return;
            }
-           await deleteFile(video);
+           const delRes = await deleteFile(video);
            modal.remove();
-           alert(`Successfully deleted: ${video.filename}`);
+           alert(hzRow
+               ? `Deleted from Hetzner: ${video.filename}` + (Number(delRes && delRes.onedrive_deleted)
+                   ? '\nIts OneDrive copy is in the Recycle bin' : '')
+               : `Successfully deleted: ${video.filename}`);
        } catch (err) {
            console.error('Delete failed:', err);
            alert(`Delete failed: ${err.message}`);
@@ -895,6 +906,21 @@ async function scrayDeleteEverywhere(video) {
    }
    // localOnly as ever: the server has already written the tombstone.
    await deleteLocalFile(video);
+   // The Hetzner copy of the same file this phone file is linked to (native
+   // 15.11) - filed under its own key when OneDrive holds the name, so
+   // delete_file above didn't reach it.
+   res = res || {};
+   res.hetzner_deleted = Number(res.hetzner_deleted) || 0;
+   if (typeof window.scrayHetznerLinkedCopies === 'function') {
+       for (const hz of await window.scrayHetznerLinkedCopies(video)) {
+           try {
+               const r2 = await window.scrayHetznerDeleteRow(hz);
+               res.hetzner_deleted += Number(r2 && r2.hetzner_deleted) || 0;
+           } catch (err) {
+               throw new Error(`Deleted on the phone, OneDrive and the catalogue, but not its Hetzner copy ${hz.filename}: ${err.message}`);
+           }
+       }
+   }
    return res;
 }
 window.scrayDeleteEverywhere = scrayDeleteEverywhere;
@@ -1147,6 +1173,12 @@ async function deleteFile(video) {
    // ✅ Local files bypass Graph entirely
    if (isLocalVideo(video)) {
        return deleteLocalFile(video);
+   }
+   // A row that streams from Hetzner (native 15.11): the server deletes it
+   // from the box - no Graph account on the phone to find.
+   if (typeof window.scrayIsHetznerVideo === "function" && window.scrayIsHetznerVideo(video) &&
+       typeof window.scrayHetznerDeleteRow === "function") {
+       return window.scrayHetznerDeleteRow(video);
    }
 
    // Get account info and refresh token
@@ -1828,6 +1860,13 @@ confirmBtn.textContent = 'Processing...';
 
 try {
 // ✅ Detect cross-account move
+const hzSrc = typeof window.scrayIsHetznerVideo === 'function' && window.scrayIsHetznerVideo(video);
+const hzDest = typeof window.scrayIsHetznerVideo === 'function' && window.scrayIsHetznerVideo({ accountKey: selectedPath.accountKey });
+if ((hzSrc || hzDest) && hzSrc !== hzDest) {
+    // native 15.11: a Hetzner file moves within the box only; D saves a copy to the phone.
+    throw new Error(hzSrc ? 'A Hetzner file can only move to another Hetzner folder - use D to save a copy to this phone'
+                          : 'A phone file can\'t be moved onto Hetzner from here');
+}
 if (selectedPath.accountKey !== video.accountKey) {
     confirmBtn.textContent = 'Moving between accounts...';
     await moveFileBetweenAccounts(video, selectedPath, newFolderName);
@@ -1873,6 +1912,14 @@ if (e.target === modal) modal.remove();
 * ✅ Optionally create a new folder at the destination
 */
 async function moveFile(video, destinationPath, newFolderName = null) {
+// A row that streams from Hetzner (native 15.11): moved on the box by the
+// server. A new folder is made inside the chosen one, as for OneDrive.
+if (typeof window.scrayIsHetznerVideo === "function" && window.scrayIsHetznerVideo(video) &&
+    !isLocalVideo(video) && typeof window.scrayHetznerMoveRow === "function") {
+  const base = String(destinationPath || "").replace(/^\*/, "").replace(/^\/+|\/+$/g, "");
+  const extra = String(newFolderName || "").trim().replace(/^\/+|\/+$/g, "");
+  return window.scrayHetznerMoveRow(video, [base, extra].filter(Boolean).join("/"));
+}
 // Get account info and refresh token
 const [accountIdStored] = (video.accountKey || "").split("::");
 let accountInfo = accountsData.find(acc => acc.accountId === accountIdStored);

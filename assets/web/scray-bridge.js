@@ -47,6 +47,14 @@ window.ScrayBridge = {
   // The queue's one-line state for the in-app browser's upload pill (native
   // 14.37): { label, active }. Rejects with "Unknown action" on an older IPA.
   uploadBadge: (badge) => callNative('uploadBadge', badge),
+  // ✅ Saving a Hetzner file to the phone (native 15.11) - ScrayOffline.swift.
+  // { id, url, filename, folder } into <video folder>/<folder>/; status reports
+  // state/received/total/bytesPerSecond/path per id. "Unknown action" on an
+  // older IPA.
+  offlineStart: (job) => callNative('offlineStart', job),
+  offlineStatus: (ids) => callNative('offlineStatus', { ids: ids || null }),
+  offlineCancel: (id) => callNative('offlineCancel', { id }),
+  offlineForget: (id) => callNative('offlineForget', { id }),
   // ✅ In-app browser. Pass nothing to resume where it was left.
   openBrowser: (url) => callNative('openBrowser', {
     url: url || null,

@@ -59,7 +59,9 @@
     const filename = r.filename || key;
     const hzPath   = String(r.hetzner_path || filename);
     const slash    = hzPath.lastIndexOf("/");
-    const dir      = slash > 0 ? "/" + hzPath.slice(0, slash) : "";
+    // The folder on the box, no leading slash - the same shape as a phone
+    // row's path, so the Move list lines them up (native 15.11).
+    const dir      = slash > 0 ? hzPath.slice(0, slash) : "";
     const size = r.file_size_bytes != null ? Number(r.file_size_bytes) : null;
     const dur  = r.duration_ms != null ? Number(r.duration_ms) : null;
     const w    = r.width != null ? Number(r.width) : null;
@@ -241,25 +243,242 @@
     return n;
   }
 
-  /**
-   * D on a Hetzner row (native 15.10). The other D paths set
-   * window.location.href to the file, which here would navigate Scray's own
-   * page away. Instead the signed link opens in the in-app browser with dl=1,
-   * which the gateway answers as an attachment (picker 14.35's nginx map), so
-   * ScrayBrowser saves it to its Downloads like any other download. Returns
-   * true when it took the row, false to leave the caller's own path.
-   */
-  function hetznerDownload(vid) {
-    if (!isHetznerRow(vid) || !vid.downloadUrl) return false;
+  // ---- offline: what is on this phone (native 15.11) -------------------------
+  // Every phone file is offline - it plays with no connection - and a Hetzner
+  // row streams. render.js and ui.js set such a file's name bold and
+  // underlined (scray-offline-title, as in Picker), and the Offline toggle
+  // (randomiser.js) shows only these.
+  window.scrayIsOffline = v => !!v && (typeof window.isLocalVideo === "function"
+    ? window.isLocalVideo(v)
+    : v.driveId === "local");
+
+  // ---- D: save a Hetzner file to the phone (native 15.11) --------------------
+  // The D paths call refreshVideoBeforeUse first, so downloadUrl is a fresh
+  // signed link. ScrayOffline.swift downloads it into <video folder>/Offline/,
+  // this polls for progress in a small panel bottom-left, and a finished file
+  // is added to the library at once - after which the sync drops the Hetzner
+  // row if it has the same key (the phone copy wins), or the two sit as one
+  // row with P and H chips, the phone's lit.
+  const OFFLINE_FOLDER = "Offline";
+  const dlJobs = new Map();          // id -> { filename, el }
+  let dlTimer = null;
+  const fmtMB = b => `${(Number(b || 0) / 1048576).toFixed(b >= 1073741824 ? 0 : 1)} MB`;
+
+  function dlPanel() {
+    let box = document.getElementById("scrayOfflineDownloads");
+    if (box) return box;
+    box = document.createElement("div");
+    box.id = "scrayOfflineDownloads";
+    box.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:2147483000;display:flex;flex-direction:column;" +
+      "gap:4px;max-width:calc(100vw - 16px);pointer-events:none;";
+    document.body.appendChild(box);
+    return box;
+  }
+  function dlLine(id, filename) {
+    const el = document.createElement("div");
+    el.style.cssText = "pointer-events:auto;display:flex;align-items:center;gap:8px;background:rgba(20,20,20,.88);" +
+      "color:#fff;border-radius:6px;padding:5px 8px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.35);";
+    const text = document.createElement("span");
+    text.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70vw;";
+    text.textContent = `⬇ ${filename}`;
+    const x = document.createElement("button");
+    x.type = "button";
+    x.textContent = "✕";
+    x.title = "Stop this download";
+    x.style.cssText = "all:unset;cursor:pointer;padding:0 4px;font-size:13px;";
+    x.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const job = dlJobs.get(id);
+      if (job && job.state && job.state !== "downloading") { drop(id); return; }
+      try { await window.ScrayBridge.offlineCancel(id); } catch {}
+    });
+    el.append(text, x);
+    el._text = text;
+    dlPanel().appendChild(el);
+    return el;
+  }
+  function drop(id) {
+    const job = dlJobs.get(id);
+    job?.el?.remove();
+    dlJobs.delete(id);
+    try { window.ScrayBridge?.offlineForget?.(id); } catch {}
+    if (!dlJobs.size) { clearInterval(dlTimer); dlTimer = null; }
+  }
+
+  /** A saved file into the library, as scrayPlayDownloaded does (native 13.195). */
+  async function addToLibrary(relPath) {
+    const got = await window.scrayLocalVideoRow(relPath);
+    if (!got || !got.meta) throw new Error(`saved, but Scray can't read ${relPath}`);
+    await saveVideos([got.row], getActiveFolderName(), "local", "local");
+    // Brings its score and bookmarks down, and drops a same-key Hetzner row.
+    if (typeof window.scraySyncLibrary === "function") {
+      try { await window.scraySyncLibrary({ quiet: true }); } catch (err) { console.warn("[offline] sync:", err); }
+    }
+    if (typeof refreshAllLists === "function") refreshAllLists();
+    if (typeof window.renderFolderPills === "function") await window.renderFolderPills();
+  }
+
+  async function pollDownloads() {
+    const ids = [...dlJobs.keys()].filter(id => !dlJobs.get(id).state || dlJobs.get(id).state === "downloading");
+    if (!ids.length) return;
+    let jobs = [];
+    try { jobs = ((await window.ScrayBridge.offlineStatus(ids)) || {}).jobs || []; } catch { return; }
+    for (const st of jobs) {
+      const job = dlJobs.get(st.id);
+      if (!job || job.state === st.state) {
+        if (job && st.state === "downloading") {
+          const pct = st.total ? Math.floor(st.received / st.total * 100) : null;
+          const rate = st.bytesPerSecond ? ` · ${fmtMB(st.bytesPerSecond)}/s` : "";
+          job.el._text.textContent = `⬇ ${job.filename} ${pct != null ? pct + "%" : fmtMB(st.received)}${rate}`;
+        }
+        continue;
+      }
+      job.state = st.state;
+      if (st.state === "finished") {
+        job.el._text.textContent = `✅ Saved to ${OFFLINE_FOLDER}: ${job.filename}`;
+        try { await addToLibrary(st.path); }
+        catch (err) { job.el._text.textContent = `⚠ ${job.filename}: ${err.message || err}`; continue; }
+        setTimeout(() => drop(st.id), 4000);
+      } else if (st.state === "failed") {
+        job.el._text.textContent = `⚠ ${job.filename}: ${st.error || "download failed"}`;
+      } else {
+        drop(st.id);                       // cancelled
+      }
+    }
+  }
+
+  async function startOffline(vid) {
+    const id = "off-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    try {
+      await window.ScrayBridge.offlineStart({ id, url: vid.downloadUrl, filename: vid.filename, folder: OFFLINE_FOLDER });
+    } catch (err) {
+      const m = String((err && err.message) || err);
+      // An app built before 15.11: the in-app browser's download instead.
+      if (/Unknown action/i.test(m)) { browserDownload(vid); return; }
+      alert(`Couldn't save ${vid.filename} to the phone: ${m}`);
+      return;
+    }
+    dlJobs.set(id, { filename: vid.filename, el: dlLine(id, vid.filename), state: "downloading" });
+    if (!dlTimer) dlTimer = setInterval(() => { pollDownloads().catch(() => {}); }, 1000);
+  }
+
+  /** Before 15.11's build: the signed link with dl=1 in the in-app browser. */
+  function browserDownload(vid) {
     const url = vid.downloadUrl + (vid.downloadUrl.includes("?") ? "&" : "?") + "dl=1";
     if (window.ScrayBridge && typeof window.ScrayBridge.openBrowser === "function") {
       window.ScrayBridge.openBrowser(url).catch(err => console.error("[hetzner] download:", err));
     } else {
       window.open(url, "_blank");
     }
+  }
+
+  /**
+   * D on a Hetzner row. Returns true when it took the row, false to leave the
+   * caller's own path (which sets window.location.href - for a Hetzner file
+   * that would navigate Scray's own page away).
+   */
+  function hetznerDownload(vid) {
+    if (!isHetznerRow(vid) || !vid.downloadUrl) return false;
+    if (window.ScrayBridge && typeof window.ScrayBridge.offlineStart === "function") {
+      startOffline(vid).catch(err => alert(`Couldn't save ${vid.filename}: ${err.message || err}`));
+    } else {
+      browserDownload(vid);
+    }
     return true;
   }
   window.scrayHetznerDownload = hetznerDownload;
+
+  // ---- delete / rename / move on a streamed row (native 15.11) ---------------
+  const api = (action, body) => window.scrayApiCall(action, { method: "POST", body: body || {} });
+  const device = () => window.SCRAY_SYNC?.DEVICE_ID || "native";
+  const nfcLower = s => String(s ?? "").normalize("NFC").trim().toLowerCase();
+  const friendly = err => String((err && err.message) || err || "failed").replace(/^HTTP \d+: /, "");
+
+  /** Forget a Hetzner row here only - the server has already dealt with the file. */
+  async function forgetRow(v) {
+    const id = v.oneDriveId;
+    if (window.currentPlayingVideo?.oneDriveId === id && window.inlineVideoPlayer) {
+      try { window.inlineVideoPlayer.stop(); } catch {}
+    }
+    await deleteVideoFromDB(id, { localOnly: true });
+    try {
+      const db = await openDB();
+      const tx = db.transaction(META_STORE_NAME, "readwrite");
+      tx.objectStore(META_STORE_NAME).delete(id);
+      await done(tx);
+    } catch {}
+    if (typeof removeVideoFromMemory === "function") removeVideoFromMemory(id);
+    if (typeof window.removeRowFromLists === "function") window.removeRowFromLists(id);
+    if (typeof refreshAllLists === "function") refreshAllLists();
+    if (typeof window.renderFolderPills === "function") await window.renderFolderPills();
+  }
+
+  /**
+   * Delete a streamed Hetzner file: delete_file deletes its copies (the box
+   * has no recycle bin; a OneDrive copy under the same key goes to the
+   * Recycle bin) and tombstones the catalogue row - the same action Native's
+   * "delete everywhere" uses. Then the row leaves this library.
+   */
+  async function deleteRow(v) {
+    const key = v.videoKey || (window.scrayVideoKey ? window.scrayVideoKey(v.filename) : "");
+    if (!key) throw new Error("no video key for this file");
+    let res;
+    try { res = await api("delete_file", { video_key: key, device: device() }); }
+    catch (err) { throw new Error(friendly(err)); }
+    await forgetRow(v);
+    return res;
+  }
+  window.scrayHetznerDeleteRow = deleteRow;
+
+  /**
+   * Move a streamed Hetzner file to another folder on the box: hetzner_move
+   * (browse 15.56 lets the device key do this). The row takes the new folder
+   * and its tags at once; the next sync confirms them.
+   */
+  async function moveRow(v, destDir) {
+    const iid = v.hetznerInstanceId;
+    if (!iid) throw new Error("This Hetzner row is from before 15.11 - tap the Hetzner pill twice to re-fetch, then try again");
+    const dest = String(destDir || "").replace(/\\/g, "/").replace(/^[\/*]+|\/+$/g, "");
+    let r;
+    try { r = await api("hetzner_move", { instance_id: iid, dest_dir: dest, device: device() }); }
+    catch (err) { throw new Error(friendly(err)); }
+    if (r && r.noop) return r;
+    const facts = r.facts || {};
+    const split = x => typeof x === "string" && x ? x.split(";").filter(Boolean) : [];
+    const fields = {
+      path: dest,
+      hetznerPath: (dest ? dest + "/" : "") + (r.filename || v.filename),
+      cataloguePath: undefined,          // re-ask the catalogue next sync
+    };
+    if (facts.tags !== undefined) fields.tags = split(facts.tags);
+    if (facts.bracket_tags !== undefined) fields.bracketTags = split(facts.bracket_tags);
+    for (let i = 1; i <= 5; i++) if (facts[`level_${i}`] !== undefined) fields[`level_${i}`] = facts[`level_${i}`] || null;
+    if (typeof window.updateVideoInDB === "function") await window.updateVideoInDB(v.oneDriveId, fields, { fromSync: true });
+    if (typeof window.updateVideoInMemory === "function") window.updateVideoInMemory(v.oneDriveId, fields);
+    Object.assign(v, fields);
+    if (typeof refreshAllLists === "function") refreshAllLists();
+    return r;
+  }
+  window.scrayHetznerMoveRow = moveRow;
+
+  /**
+   * The Hetzner copies of the same file that a phone file is linked to: rows
+   * in this library that stream from the box, in the phone file's variant
+   * group, under the same file name (a migrated copy keeps its name, and is
+   * filed as <name>#hetzner when OneDrive holds the name). "Everywhere" on the
+   * phone file reaches these too. A linked copy with another name is another
+   * file - a 4K version, say - and is left alone.
+   */
+  async function linkedCopies(video, name) {
+    const g = video && video.variant_group;
+    if (!g || typeof getAllVideos !== "function") return [];
+    const key = video.videoKey;
+    const want = nfcLower(name || video.filename);
+    return (await getAllVideos()).filter(x => isHetznerRow(x) && String(x.variant_group || "") === String(g)
+      && x.videoKey !== key && nfcLower(x.filename) === want);
+  }
+  window.scrayHetznerLinkedCopies = linkedCopies;
+
 
   window.scrayHetznerFetch  = fetchHetzner;
   window.scrayHetznerRemove = removeHetzner;

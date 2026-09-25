@@ -3531,6 +3531,13 @@ if (document.getElementById("uncataloguedToggleBtn")?.dataset.active === "1") {
      : v.inCatalogue === false);
 }
 
+// Offline filter (native 15.11, as Picker's): only files on this phone - the
+// ones that play with no connection - not the ones that stream from Hetzner.
+if (document.getElementById("offlineOnlyToggleBtn")?.dataset.active === "1" &&
+    typeof window.scrayIsOffline === "function") {
+ videos = videos.filter(v => window.scrayIsOffline(v));
+}
+
 // Hetzner filter (native 15.10, as picker 15.9). Judged by scrayIsHetznerVideo
 // (scray-hetzner.js): a row that streams from the box.
 //   any  - no filter        only - on the box        none - not on the box
@@ -3819,6 +3826,11 @@ if (typeof window.syncBookmarkFilterToggleLabel === "function") window.syncBookm
 const uncataloguedBtn = document.getElementById("uncataloguedToggleBtn");
 if (uncataloguedBtn) uncataloguedBtn.dataset.active = "0";
 if (typeof window.syncUncataloguedToggleLabel === "function") window.syncUncataloguedToggleLabel();
+
+// Reset the offline filter (native 15.11)
+const offlineOnlyBtn = document.getElementById("offlineOnlyToggleBtn");
+if (offlineOnlyBtn) offlineOnlyBtn.dataset.active = "0";
+if (typeof window.syncOfflineOnlyToggleLabel === "function") window.syncOfflineOnlyToggleLabel();
 
 // Reset the Hetzner filter (native 15.10)
 const hetznerOnlyBtn = document.getElementById("hetznerOnlyToggleBtn");
@@ -4631,6 +4643,31 @@ searchBox.addEventListener("keydown", (e) => {
           filterDisplayedByFilename();
       });
       window.syncUncataloguedToggleLabel();
+  }
+
+  // ✅ Offline filter (native 15.11, as Picker's). Orange when on, with the
+  // count of files on this phone in the label.
+  window.syncOfflineOnlyToggleLabel = function () {
+      const b = document.getElementById("offlineOnlyToggleBtn");
+      if (!b) return;
+      const on = b.dataset.active === "1";
+      const all = Array.isArray(window.allVideos) ? window.allVideos : [];
+      const n = typeof window.scrayIsOffline === "function" ? all.filter(window.scrayIsOffline).length : 0;
+      b.textContent = on ? `Offline (${n})` : "Offline: All";
+      b.style.background = on ? "#ff9800" : "#555";
+      b.style.color = "#fff";
+  };
+
+  const offlineOnlyToggleBtn = document.getElementById("offlineOnlyToggleBtn");
+  if (offlineOnlyToggleBtn) {
+      offlineOnlyToggleBtn.addEventListener("click", () => {
+          offlineOnlyToggleBtn.dataset.active =
+              offlineOnlyToggleBtn.dataset.active === "1" ? "0" : "1";
+          window.syncOfflineOnlyToggleLabel();
+          window.skipSearchScroll = true;
+          filterDisplayedByFilename();
+      });
+      window.syncOfflineOnlyToggleLabel();
   }
 
   // ✅ Hetzner filter (native 15.10, as picker 15.9). Three states on the

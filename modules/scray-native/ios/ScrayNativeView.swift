@@ -381,6 +381,35 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
                 ScrayUploads.shared.forget(id: uploadId)
             }
             resolve(id: id, result: ["success": true])
+        // ---- Saving a Hetzner file to the phone (native 15.11) - see ScrayOffline.swift ----
+        case "offlineStart":
+            guard let d = payload as? [String: Any],
+                  let jobId = d["id"] as? String,
+                  let url = d["url"] as? String,
+                  let filename = d["filename"] as? String else {
+                reject(id: id, error: "Invalid download payload")
+                return
+            }
+            do {
+                try ScrayOffline.shared.start(id: jobId, urlString: url, filename: filename,
+                                              folder: d["folder"] as? String)
+                resolve(id: id, result: ["success": true])
+            } catch {
+                reject(id: id, error: error.localizedDescription)
+            }
+        case "offlineStatus":
+            let ids = (payload as? [String: Any])?["ids"] as? [String]
+            resolve(id: id, result: ["jobs": ScrayOffline.shared.status(ids: ids)])
+        case "offlineCancel":
+            if let jobId = (payload as? [String: Any])?["id"] as? String {
+                ScrayOffline.shared.cancel(id: jobId)
+            }
+            resolve(id: id, result: ["success": true])
+        case "offlineForget":
+            if let jobId = (payload as? [String: Any])?["id"] as? String {
+                ScrayOffline.shared.forget(id: jobId)
+            }
+            resolve(id: id, result: ["success": true])
         case "memoryStats":
             // Performance monitor by the console (13.180).
             resolve(id: id, result: ScrayMemoryStats.shared.snapshot())

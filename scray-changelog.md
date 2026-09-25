@@ -4,6 +4,37 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.11 / browse 15.56 — test: offline mode (D saves Hetzner files to Offline, bold offline titles, Offline toggle) + delete/rename/move on Hetzner
+<!-- 2026-09-24T15:05Z -->
+
+**native** — `stg-native - 15.11`: `modules/scray-native/ios/ScrayOffline.swift` (new), `ScrayNativeView.swift`, `ScrayRunMonitor.swift`, `assets/web/scray-hetzner.js`, `scray-bridge.js`, `file-operations.js`, `scray-rename.js`, `randomiser.js`, `ui.js`, `index.html`, `style.css`. **Swift - needs an IPA build** for D's download; the rest works in the dev app straight away. **browse** — `staging-browse - 15.56`: `api.php` (`hetzner_move` for the device key).
+
+- **Asked for:** an offline mode like Picker's. D saves a Hetzner file to an offline folder; every offline file (the existing phone files too) is bold and underlined; there's an Offline-only toggle; streamed and offline files look different. Delete, rename and move should work on streamed Hetzner rows as they do for OneDrive. For a phone file linked to a Hetzner catalogue row, rename and delete should ask "this phone only" or "everywhere".
+- **D saves to `<video folder>/Offline/`** (Mac chose the direct route over the in-app browser's download).
+  - `ScrayOffline.swift` downloads the signed link with a URLSession download task and moves the file into `Offline/` inside the linked folder. From then on it's an ordinary phone file. New bridge calls: `offlineStart` / `offlineStatus` / `offlineCancel` / `offlineForget`.
+  - While saving, the screen is held on (`ScrayRunMonitor`, as for uploads), with a short background grace.
+  - A name already in Offline is refused before starting. A clash that turns up during the download is kept as "name (2)", never written over.
+  - The page (`scray-hetzner.js`) shows a small panel bottom-left, "⬇ name 42% · 3.1 MB/s", with ✕ to stop. When it finishes, the file is added to the library at once (as `scrayPlayDownloaded` does) and a quiet sync follows. That drops a Hetzner row with the same key (the phone copy wins); otherwise the two show as one row with P and H chips, the phone's lit.
+  - A 403 or 410 (an expired link) says to try D again.
+  - On an app built before 15.11, D falls back to 15.10's in-app-browser download.
+- **Offline = on this phone.** `scrayIsOffline` is `isLocalVideo`. `scray-offline-title` (bold and underlined, Picker's CSS) now exists in Native's style.css. render.js already applied it, but the class was never defined, and `ui.js`'s filename wrapper now applies it too. A streamed Hetzner row stays plain, and italic.
+- **Offline toggle** (after Orientation): "Offline: All", or orange "Offline (n)" showing only phone files. Clear all and the filter reset turn it off, as in Picker. No floating pill, since Native's bar has none of these.
+- **Streamed Hetzner rows:**
+  - **Delete** goes through `delete_file`, the same action as Native's "delete everywhere". It deletes the box copy for good (no recycle bin) and tombstones the catalogue row; a OneDrive copy under the same key goes to the Recycle bin, and the modal says so. The row then leaves the library.
+  - **Rename** already went through `scrayRenameCatalogueRow` → `rename_file`, which renames the box copy and moves the catalogue row. Only the message changes: it now counts the Hetzner copies.
+  - **Move** uses `hetzner_move` with the row's instance id (`hetznerInstanceId`, stored since 15.10). The new-folder box works as for OneDrive. The row takes the new folder and tags at once. A Hetzner file can't be moved to a phone folder (use D), or the other way round.
+  - Hetzner rows now store their folder with no leading slash, the same shape as phone rows, so the Move list lines them up.
+- **Phone files linked to Hetzner:** rename's "Rename everywhere" and delete's typed "delete" already reached every copy under the file's own key, Hetzner included (rename_file / delete_file). They now also reach **the Hetzner copy of the same file it's linked to** when that copy is filed under its own key (`<name>#hetzner`, because OneDrive holds the name). That means a library row in the same variant group, streaming from the box, with the same file name (`scrayHetznerLinkedCopies`). A linked copy with a different name (a 4K version, say) is another file and is left alone. The wording in both modals says OneDrive, Hetzner and the catalogue.
+- **browse 15.56:** `hetzner_move` accepts the device key. It already reaches further through `delete_file`, which deletes box copies for good; a move keeps the file. `hetzner_rename`, `_delete` and `_mkdir` stay Picker's. **Check `hetzner_move` isn't in `SCRAY_PRIVILEGED` in `scray_auth.php`.**
+- **Tested:**
+  - `php -l`; `node --check` on every changed script.
+  - `scray-hetzner.js` in jsdom with fake-indexeddb and a stand-in bridge. D sent `{ id, url, filename, folder: "Offline" }`. The panel showed "50% · 1.0 MB/s". On "finished" the file was added as `Offline/a.mp4`, counted as offline, and synced.
+  - The linked `#hetzner` copy was found by variant group and name.
+  - Move sent the instance id and the folder, and the row took the new path and tags. Delete called `delete_file` and left the phone copy.
+  - **The Swift isn't compiled here** (no Xcode). The IPA build is its first compile.
+- **Watch:** a big download needs the app in front; the screen stays on, but iOS suspends it once the app has been in the background a while, and D starts it over. Delete on a streamed row is permanent on the box.
+- Deploy: browse `api.php`, then an IPA build for native.
+
 ### native 15.10 / browse 15.55 — test: Hetzner in Native - fetch button, streaming, Hetz filter, Migrated sort
 <!-- 2026-09-24T14:10Z -->
 

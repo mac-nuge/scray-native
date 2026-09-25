@@ -61,9 +61,11 @@
       return { title: "Renamed on this phone only", detail: "OneDrive and the catalogue keep the old name" };
     }
     const n = Number(res.onedrive) || 0;
+    const h = Number(res.hetzner) || 0;
     const parts = [
       res.onPhone ? "phone" : null,
       n ? `OneDrive (${n} cop${n === 1 ? "y" : "ies"})` : null,
+      h ? `Hetzner (${h} cop${h === 1 ? "y" : "ies"})` : null,
       "the catalogue"
     ].filter(Boolean);
     const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
@@ -141,11 +143,11 @@
         <div class="basket-json-modal-content rn-sheet">
           <h3>Rename ${video ? "this file" : "these files"}</h3>
           ${what}
-          <p class="rn-lead">${video ? "It's" : "Some are"} also in the catalogue. Rename in OneDrive and the catalogue too?</p>
+          <p class="rn-lead">${video ? "It's" : "Some are"} also in the catalogue. Rename in OneDrive, on Hetzner and in the catalogue too?</p>
           <div class="rn-choices">
             <button class="modal-btn modal-btn-primary" data-scope="everywhere" ${online ? "" : "disabled"}>
-              Everywhere<small>${online ? "Phone, OneDrive and the catalogue" : "Needs a connection"}</small></button>
-            <button class="modal-btn modal-btn-secondary" data-scope="phone">This phone only<small>OneDrive and the catalogue keep the old name</small></button>
+              Everywhere<small>${online ? "Phone, OneDrive, Hetzner and the catalogue" : "Needs a connection"}</small></button>
+            <button class="modal-btn modal-btn-secondary" data-scope="phone">This phone only<small>OneDrive, Hetzner and the catalogue keep the old name</small></button>
             <button class="modal-btn rn-cancel" data-scope="">Cancel</button>
           </div>
         </div>`;
@@ -180,7 +182,21 @@
     }
 
     // Everywhere: the server first. A refusal throws before anything changes.
+    // The Hetzner copy of the same file it's linked to (native 15.11) is looked
+    // up now, under the old name.
+    const linked = typeof window.scrayHetznerLinkedCopies === "function"
+      ? await window.scrayHetznerLinkedCopies(video) : [];
     const r = await renameOnServer(keyOf(video), newName);
+    let hetzner = Number(r.hetzner_renamed) || 0;
+    for (const hz of linked) {
+      try {
+        const r2 = await renameOnServer(keyOf(hz), newName);
+        await setRowFields(localId(hz), { filename: r2.filename, videoKey: r2.video_key });
+        hetzner += Number(r2.hetzner_renamed) || 0;
+      } catch (err) {
+        console.warn(`[rename] linked Hetzner copy ${hz.filename} kept its name:`, err);
+      }
+    }
     try {
       if (nfc(video.filename) !== nfc(newName)) await window.renameLocalFile(video, newName);
     } catch (err) {
@@ -192,7 +208,7 @@
     await setRowFields(localId(video), { videoKey: r.video_key, catalogueFilename: r.filename });
     Object.assign(video, { videoKey: r.video_key, catalogueFilename: r.filename });
     await refresh();
-    return { scope: "everywhere", onedrive: r.onedrive_renamed || 0, onPhone: true };
+    return { scope: "everywhere", onedrive: r.onedrive_renamed || 0, hetzner, onPhone: true };
   }
 
   /** A catalogue row that isn't on the phone: the server renames OneDrive and the row. */
@@ -202,7 +218,7 @@
     await setRowFields(id, { filename: r.filename, videoKey: r.video_key });
     Object.assign(video, { filename: r.filename, videoKey: r.video_key });
     if (typeof window.refreshAllLists === "function") window.refreshAllLists();
-    return { scope: "everywhere", onedrive: r.onedrive_renamed || 0, onPhone: false };
+    return { scope: "everywhere", onedrive: r.onedrive_renamed || 0, hetzner: r.hetzner_renamed || 0, onPhone: false };
   }
 
   // ---- 2. the list -------------------------------------------------------------

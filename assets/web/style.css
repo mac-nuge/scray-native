@@ -7267,6 +7267,15 @@ specificity (the extra .lc-row class). */
   color: #fff !important;
   cursor: default;
 }
+/* native 15.11 (as Picker's): a file on this phone - offline - is bold and
+   underlined, so it reads apart from one that streams from Hetzner. A class
+   rather than an inline style: the list click handlers take an inline
+   `text-decoration: underline` to mean a tag was tapped. */
+.scray-offline-title {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 /* native 15.10 (as picker 14.36): a file that streams from Hetzner has its
    filename in italics - list rows, the open row's filename line, and a linked
    pair's Hetzner size chip. */

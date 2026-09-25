@@ -141,7 +141,9 @@ final class ScrayRunMonitor: NSObject {
         // as well - a locked phone suspends them just the same - but get no
         // ring: their progress is on the page that started them, and the ring
         // opens the browser, which has nothing to show about them.
-        let uploading = ScrayUploads.shared.activeCount > 0
+        // Saving a Hetzner file to the phone (native 15.11, ScrayOffline) holds
+        // it on too, for the same reason and with the same no-ring rule.
+        let uploading = ScrayUploads.shared.activeCount > 0 || ScrayOffline.shared.activeCount > 0
 
         setScreenAwake(busy || uploading)
         if busy || uploading { startTicker() } else { stopTicker() }

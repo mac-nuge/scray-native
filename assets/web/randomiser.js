@@ -4669,7 +4669,20 @@ searchBox.addEventListener("keydown", (e) => {
       if (!b) return;
       const on = b.dataset.active === "1";
       const n = window.scrayOfflineCount;
-      b.textContent = on ? `Offline (${n ?? "…"})` : "Offline: All";
+      // native 15.14: "Offline" when off; when on, just a download symbol (a
+      // down arrow in a circle, drawn so it's the same on every iOS) and the
+      // count.
+      if (on) {
+          b.innerHTML = '<svg viewBox="0 0 16 16" width="1.05em" height="1.05em" aria-hidden="true" ' +
+              'style="vertical-align:-0.18em;margin-right:4px"><circle cx="8" cy="8" r="7" fill="none" ' +
+              'stroke="currentColor" stroke-width="1.6"/><path d="M8 4v7M5 8.2 8 11.2l3-3" fill="none" ' +
+              'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+              String(n ?? "…");
+          b.setAttribute("aria-label", `Offline only: ${n ?? "…"} on this phone`);
+      } else {
+          b.textContent = "Offline";
+          b.removeAttribute("aria-label");
+      }
       b.style.background = on ? "#ff9800" : "#555";
       b.style.color = "#fff";
       // Recount from the library unless this call came from a count.

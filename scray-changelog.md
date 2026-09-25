@@ -4,6 +4,19 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.14 — test: Offline toggle label, now-playing D saves Hetzner files, Played sort removed
+<!-- 2026-09-25T12:30Z -->
+
+**native** — `stg-native - 15.14`: `assets/web/randomiser.js`, `player.js`, `index.html`. Web only, no IPA build.
+
+- **Asked for:** the Offline toggle to read just "Offline" when off, and only the count with a download symbol (a down arrow in a circle) when on. The D button in the now-playing row wasn't downloading. Remove the last-played sort button.
+- **Offline toggle:** off reads "Offline" (was "Offline: All"); on reads a circled down arrow and the count, e.g. "⬇ 212", still orange. The arrow is a small inline SVG in the button's text colour rather than an emoji, so it looks the same on every iOS version and doesn't turn into a blue emoji tile. The count is the whole library's phone files, as in 15.13.
+- **Now-playing D:** the button row under the playing video (player.js) had its own copy of D from before Hetzner, which set the page's location to the file's link. For a streamed Hetzner file that meant nothing was saved. It now goes through `scrayHetznerDownload` first, as the list rows' D has since 15.10, so a Hetzner file saves to Offline with the SAVING OFFLINE panel. Phone and OneDrive files behave as before. `downloadVideoInline` (window.downloadVideo, nothing calls it at the moment) got the same check.
+- **Played sort:** the "Played" button is gone from the sort row. The `played` sort key stays in scrayListSort, so a sort saved with it still loads and Clear still removes it.
+- **Picker:** not touched. Say if you want the same label and sort-row change there.
+- **Tested:** `node --check` on player.js and randomiser.js. Not run on a device.
+- Deploy: assets/web, picked up by the dev app straight away.
+
 ### native 15.13 — test: offline downloads in the upload-style panel, offline count fixed
 <!-- 2026-09-25T12:12Z -->
 

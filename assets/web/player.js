@@ -10946,7 +10946,12 @@ onClick: async (e) => {
     try {
         let vid = video;
         vid = await refreshVideoBeforeUse(vid);
-        if (vid && vid.downloadUrl) {
+        // native 15.14: a Hetzner file saves to Offline (scray-hetzner.js), as
+        // D does on the list rows. Without this the now-playing D sent the
+        // page itself to the signed link, so nothing downloaded.
+        if (vid && typeof window.scrayHetznerDownload === "function" && window.scrayHetznerDownload(vid)) {
+            // taken - progress is in the SAVING OFFLINE panel
+        } else if (vid && vid.downloadUrl) {
             window.location.href = vid.downloadUrl;
         } else {
             showDownloadError("Missing or expired download URL", video);
@@ -11424,6 +11429,9 @@ async function downloadVideoInline(video) {
      showDownloadError("Missing or expired download URL");
      return;
  }
+
+ // native 15.14: a Hetzner file saves to Offline, as every other D does.
+ if (typeof window.scrayHetznerDownload === "function" && window.scrayHetznerDownload(video)) return;
  
  window.open(video.downloadUrl, "_blank");
 }

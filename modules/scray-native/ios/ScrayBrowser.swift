@@ -1506,6 +1506,26 @@ final class ScrayBrowserViewController: UIViewController,
         return "window.scrayStashUrlFromBrowser && window.scrayStashUrlFromBrowser('\(escaped)');"
     }
 
+    // MARK: - NordVPN (native 15.20)
+
+    /// The NordVPN app's own URL scheme. Opening another app's scheme needs no
+    /// LSApplicationQueriesSchemes entry - that is only for canOpenURL.
+    private static let nordVPNApp = URL(string: "nordvpn://")!
+    /// Its App Store page: the way in if the scheme ever stops answering (or
+    /// the app isn't installed) - the page has an Open button when it is.
+    private static let nordVPNStore = URL(string: "https://apps.apple.com/app/id905953485")!
+
+    /// Scray stays as it is underneath; switch back from the app switcher or
+    /// the ◀ Scray link iOS puts in the corner.
+    private func nordVPNTapped() {
+        UIApplication.shared.open(Self.nordVPNApp, options: [:]) { [weak self] opened in
+            guard !opened else { return }
+            UIApplication.shared.open(Self.nordVPNStore, options: [:]) { ok in
+                if !ok { self?.flash("Couldn't open NordVPN") }
+            }
+        }
+    }
+
     @objc private func safariTapped() {
         guard let url = currentWebView?.url else { return }
         UIApplication.shared.open(url, options: [:], completionHandler: nil)
@@ -1562,6 +1582,12 @@ final class ScrayBrowserViewController: UIViewController,
         sheet.addAction(UIAlertAction(title: "Open in Safari", style: .default) { [weak self] _ in
             self?.safariTapped()
         })
+
+        // native 15.20: the NordVPN app, to turn it on or change server before
+        // a site - see nordVPNTapped.
+        let vpn = UIAlertAction(title: "Open NordVPN", style: .default) { [weak self] _ in self?.nordVPNTapped() }
+        vpn.setValue(UIImage(systemName: "network.badge.shield.half.filled"), forKey: "image")
+        sheet.addAction(vpn)
 
         let folder = ScrayDownloadFolder.shared
         let label = folder.hasFolder

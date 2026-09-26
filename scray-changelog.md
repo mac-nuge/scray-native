@@ -4,6 +4,34 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.20 — test: Open NordVPN in the browser menu
+<!-- 2026-09-26T10:55Z -->
+
+`stg-native - 15.20`: `modules/scray-native/ios/ScrayBrowser.swift`. **Swift, so it needs an IPA build.**
+
+- **Asked for:** a way to open the NordVPN app from the in-app browser's ⋯ menu. Also asked whether the VPN could be switched on and off from inside Scray.
+- **Now:** **Open NordVPN** in the ⋯ menu, under Open in Safari. It opens `nordvpn://`, the app's own URL scheme. Opening another app's scheme needs no `LSApplicationQueriesSchemes` entry (that's only for `canOpenURL`), so there's no Info.plist change. If nothing answers (the app isn't installed, or the scheme ever changes), it opens NordVPN's App Store page instead (id 905953485), which has an Open button when the app is installed. Scray stays as it was underneath; iOS's ◀ Scray link in the corner goes back.
+- **The scheme is unconfirmed:** NordVPN doesn't document it. The App Store fallback means the button still gets there if it's wrong.
+- **On / off from inside Scray: not directly.** iOS only lets an app manage its own VPN configurations (`NEVPNManager` / `NETunnelProviderManager`), never another app's. The workable route would be Shortcuts: two shortcuts in the Shortcuts app (NordVPN's own connect/disconnect actions if it offers them, or iOS's Set VPN action), which Scray runs through `shortcuts://x-callback-url/run-shortcut?name=…&x-success=<scray scheme>`, so it bounces back afterwards. Not built. Offered.
+- **Not tested:** no Swift toolchain here; check it after the build.
+
+### browse 15.70 / picker 15.18 / native 15.19 — test: Porntrex links, and Eporner and Porntrex on every scene
+<!-- 2026-09-26T10:45Z -->
+
+**browse** — `staging-browse - 15.70`: `scray-stash-profiles.js`. **picker** — `staging - 15.18`: `scray-stash-nav.js`. **native** — `stg-native - 15.19`: `assets/web/scray-stash-nav.js`, the same patch, byte-identical to Picker's. Web only, no IPA build.
+
+- **Asked for:** a porntrex.com link in the Stash panels everywhere, like the Eporner one, and Eporner on every listing: video, performer and studio.
+- **Where Eporner was:** performer and studio profiles only (the apps' top bar, browse's profile buttons). A scene (a file's match, the candidate cards, the scenes listed in a profile) had StashDB and Google only.
+- **Now:**
+  - **Performer and studio profiles:** Indexxx (unless StashDB links there already), Eporner, **Porntrex**.
+  - **Every scene:**
+    - Apps: each scene card's foot, after Google.
+    - Browse: each scene line in a profile, and the matched scene in a file's own Stash panel.
+    - Both get **Eporner** and **Porntrex**, searching the scene's title, or the studio and first performer when it has no title.
+- **The URL:** Porntrex searches the same way Eporner does, a dashed slug in the path: `https://www.porntrex.com/search/<slug>/` (checked against a published porntrex client library, since the site itself refuses fetches). The slug is the one Eporner already used: lower case, accents dropped, anything else dashed.
+- **Apps:** one helper, `tubeLinks(text, cls)`, builds both buttons for the profile bar (`ssn-ext ssn-extsm`) and the scene cards (`ssn-google ssn-google-card`, as Google's), so the two can't drift apart.
+- **Checked:** `node --check` on all three. The helper gave `…/search/abigaile-johnson/`, `…/search/minsi-comp-vol-2/` for "Minsi: Comp! Vol. 2", `…/search/fucked-hard-18-jake-wolf/` for an untitled scene, and nothing for an empty name.
+
 ### browse 15.68 / native 15.18 — test: Hetzner files move in data-explorer, new folder when uploading
 <!-- 2026-09-26T10:13Z -->
 

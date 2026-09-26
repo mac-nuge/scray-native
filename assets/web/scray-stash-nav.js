@@ -956,6 +956,22 @@
       });
     }
 
+    // Eporner / Porntrex (picker 15.18 / native 15.19): both search by a
+    // dashed slug in the path. A name as it is; a scene by its title, or the
+    // studio and first performer when it has none.
+    const siteSlug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const sceneTerms = (c) => c.title ||
+      [c.studio, ((c.cast || [])[0] || {}).name].filter(Boolean).join(' ');
+    function tubeLinks(text, cls) {
+      const slug = siteSlug(text);
+      if (!slug) return '';
+      return '<button type="button" class="' + cls + '" title="Search Eporner" data-ext="' +
+               esc('https://www.eporner.com/search/' + slug + '/') + '">Eporner &#8599;</button>' +
+             '<button type="button" class="' + cls + '" title="Search Porntrex" data-ext="' +
+               esc('https://www.porntrex.com/search/' + slug + '/') + '">Porntrex &#8599;</button>';
+    }
+
     // Google for one scene (13.165 / 13.164): the title as an exact phrase,
     // then the studio and up to two performers to pin it down.
     function googleUrl(c) {
@@ -1090,13 +1106,14 @@
           (c.stash_url ? '<button type="button" class="ssn-ext" data-ext="' + esc(c.stash_url) + '">StashDB &#8599;</button>' : '') +
           (googleUrl(c) ? '<button type="button" class="ssn-google ssn-google-card" title="Search Google for this scene" data-ext="' +
                           esc(googleUrl(c)) + '">Google &#8599;</button>' : '') +
+          tubeLinks(sceneTerms(c), 'ssn-google ssn-google-card') +
           libHtml(c, i) +
         '</div>' +
         '<div class="ssn-cerr"></div>' +
       '</div>';
     }
 
-    // ---- In library, Indexxx, Eporner (picker 14.24 / native 14.36) ------
+    // ---- In library, Indexxx, Eporner, Porntrex (picker 14.24 / native 14.36; Porntrex picker 15.18 / native 15.19) ----
     // A profile's top bar. In library swaps StashDB's paged scene list for
     // the scenes of your own files (browse 14.38's in_library) and puts this
     // studio / performer in the app's tag filter, taking it back out when
@@ -1106,12 +1123,9 @@
     function extLinks(name, urls) {
       if (!name) return '';
       const hasIndexxx = (urls || []).some(u => /indexxx\./i.test(u.url || ''));
-      const slug = String(name).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
       return (hasIndexxx ? '' : '<button type="button" class="ssn-ext ssn-extsm" data-ext="' +
                 esc('https://www.indexxx.com/search/?query=' + encodeURIComponent(name)) + '">Indexxx &#8599;</button>') +
-             (slug ? '<button type="button" class="ssn-ext ssn-extsm" data-ext="' +
-                esc('https://www.eporner.com/search/' + slug + '/') + '">Eporner &#8599;</button>' : '');
+             tubeLinks(name, 'ssn-ext ssn-extsm');
     }
     /** The value the app's STU / PERF filter holds: studios by their mapped name, lower-cased. */
     function facetName(kind, name) {

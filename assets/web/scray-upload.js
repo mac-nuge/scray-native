@@ -10,6 +10,8 @@
 //                 folders the catalogue holds its files in (its stacks), and
 //                 "Hetzner" (15.1), the Storage Box, its top folders as stacks;
 //     3. FOLDER   a stack, then its live subfolders, down to where they go.
+//                 + New folder (15.18) makes one inside the folder you're in
+//                 (api.php upload_mkdir) and opens it, ready to upload into.
 //   Start → the files join one upload queue, shown in a panel with the
 //   percentage, speed and time left for the file going up and for the batch.
 //
@@ -498,7 +500,7 @@
   async function openSheet(video) {
     closeSheet();
     S = { step: "files", ticked: new Set(), files: [], filter: "", q: "", targets: null, account: null, path: null,
-          folders: null, loading: false, error: null, needsBuild: false, quota: {} };
+          folders: null, loading: false, error: null, needsBuild: false, quota: {}, mk: null, note: null };
     const start = localId(video);
     if (start) S.ticked.add(start);
 
@@ -510,6 +512,7 @@
     modal.firstElementChild.addEventListener("click", onSheetClick);
     modal.firstElementChild.addEventListener("change", onSheetChange);
     modal.firstElementChild.addEventListener("input", onSheetInput);
+    modal.firstElementChild.addEventListener("keydown", onSheetKey);
     document.body.appendChild(modal);
     S.modal = modal;
     renderSheet();
@@ -678,6 +681,22 @@
         ? acct.stacks.map(s => ({ name: s.name, path: s.path, extra: `${s.files} file${s.files === 1 ? "" : "s"}` }))
         : (S.folders || []).map(f => ({ name: f.name, path: f.path, extra: "" }));
       body += `<div class="up-trail">${trail}</div>`;
+      // + New folder (15.18). Inside any folder; at the top only on the Storage
+      // Box - a OneDrive upload has to land inside a folder the account is
+      // catalogued from (upload_session's rule), so a new top folder there
+      // could never be uploaded into.
+      if (!S.needsBuild && (S.path !== null || isHz(S.account))) {
+        const inName = S.path === null ? shortAcct(S.account) : segs[segs.length - 1];
+        body += S.mk
+          ? `<div class="up-newrow">
+               <input type="text" class="up-newname" placeholder="New folder in ${esc(inName)}" value="${esc(S.mk.name)}"
+                      autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" ${S.mk.busy ? "disabled" : ""}>
+               <button class="up-link" data-act="mk-go" ${S.mk.busy ? "disabled" : ""}>${S.mk.busy ? "Creating…" : "Create"}</button>
+               <button class="up-link" data-act="mk-cancel" ${S.mk.busy ? "disabled" : ""}>Cancel</button>
+             </div>`
+          : `<div class="up-newrow"><button class="up-link up-newbtn" data-act="mk-open" ${S.loading ? "disabled" : ""}>+ New folder</button></div>`;
+      }
+      if (S.note) body += `<div class="up-note">${esc(S.note)}</div>`;
       if (S.path !== null && S.loading) body += `<div class="up-loading">Loading folders…</div>`;
       else body += `<ul class="up-folders">${list.map(f => `
           <li><button data-act="open" data-path="${esc(f.path)}"><span class="up-folder">📁 ${esc(f.name)}</span>
@@ -699,6 +718,42 @@
       inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
       S.refocus = false;
     }
+    if (S.mkFocus) {
+      const inp = box.querySelector(".up-newname");
+      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      S.mkFocus = false;
+    }
+  }
+
+  // ---- + New folder (15.18) ----
+  // Made on the server straight away (upload_mkdir), then opened like any
+  // other folder, so it lists, and the Upload button puts the files in it.
+  // Already there is fine: it's opened instead.
+  const BAD_FOLDER = /["*:<>?\/\\|]/;
+  async function makeFolder() {
+    if (!S || !S.mk || S.mk.busy) return;
+    const name = S.mk.name.trim();
+    if (!name) { S.error = "Type a name for the new folder."; S.mkFocus = true; renderSheet(); return; }
+    if (BAD_FOLDER.test(name) || name[0] === "." || /[\s.]$/.test(name) || name.length > 250) {
+      S.error = `A folder name can't contain " * : < > ? / \\ |, start with a dot, or end with a space or a dot.`;
+      S.mkFocus = true; renderSheet(); return;
+    }
+    const acct = S.account;
+    const path = `${S.path === null ? "" : S.path.replace(/\/+$/, "")}/${name}`;
+    S.mk.busy = true; S.error = null; S.note = null; renderSheet();
+    try {
+      const r = await api("upload_mkdir", { account: acct, path });
+      if (!S || S.account !== acct) return;
+      await openFolder(r.path || path);
+      if (!S) return;
+      S.note = r.existed ? `"${name}" was already there, so it's open.` : `Made "${name}". Upload here, or open a folder in it.`;
+      renderSheet();
+    } catch (err) {
+      if (!S || !S.mk) return;
+      S.mk.busy = false; S.mkFocus = true;
+      S.error = `Couldn't make the folder: ${friendlyError(err)}`;
+      renderSheet();
+    }
   }
 
   async function loadTargets() {
@@ -716,7 +771,7 @@
   }
 
   async function openFolder(path) {
-    S.path = path; S.folders = null; S.error = null; S.q = "";
+    S.path = path; S.folders = null; S.error = null; S.q = ""; S.mk = null; S.note = null;
     if (path === null) { renderSheet(); return; }
     S.loading = true; renderSheet();
     const want = path;
@@ -758,6 +813,9 @@
       case "found": S.account = b.dataset.account; S.step = "folder"; openFolder(b.dataset.path); break;
       case "open": openFolder(b.dataset.path); break;
       case "crumb": openFolder(b.dataset.path || null); break;
+      case "mk-open": S.mk = { name: "", busy: false }; S.note = null; S.error = null; S.mkFocus = true; renderSheet(); break;
+      case "mk-cancel": S.mk = null; S.error = null; renderSheet(); break;
+      case "mk-go": makeFolder(); break;
       case "start": {
         if (S.path === null) break;
         const files = tickedFiles();
@@ -779,10 +837,18 @@
   }
 
   function onSheetInput(e) {
+    // The new folder's name is kept, not redrawn on every letter (15.18).
+    if (S && S.mk && e.target.classList.contains("up-newname")) { S.mk.name = e.target.value; return; }
     if (!S || !e.target.classList.contains("up-find")) return;
     if (S.step === "account") S.q = e.target.value; else S.filter = e.target.value;
     S.refocus = true;
     renderSheet();
+  }
+
+  function onSheetKey(e) {
+    if (!S || !S.mk || !e.target.classList.contains("up-newname")) return;
+    if (e.key === "Enter") { e.preventDefault(); makeFolder(); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); S.mk = null; S.error = null; renderSheet(); }
   }
 
   // -------------------------------------------------------------- exports

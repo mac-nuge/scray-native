@@ -8047,6 +8047,11 @@ body.scray-ts-with-controls .plyr--hide-controls .permanent-progress-ts-anchor >
 .up-crumb { background: none; border: 0; color: #0078d4; padding: 3px 4px; cursor: pointer; font-size: 0.85rem; }
 .up-trail .up-crumb:last-child { color: #222; font-weight: 600; }
 .up-sep { color: #aaa; }
+/* + New folder in the Upload sheet (native 15.18) */
+.up-newrow { display: flex; gap: 6px; align-items: center; margin: -4px 0 8px; }
+.up-newrow .up-newbtn { padding-left: 0; }
+.up-newrow .up-newname { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid #0078d4; border-radius: 6px; font-size: 0.85rem; }
+.up-note { color: #2e7d32; font-size: 0.78rem; margin: 0 0 8px; }
 .up-folders { max-height: 46vh; overflow-y: auto; }
 .up-buttons { display: flex; gap: 8px; margin-top: 14px; }
 .up-buttons .modal-btn { flex: 1; }

@@ -4,6 +4,33 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.68 / native 15.18 — test: Hetzner files move in data-explorer, new folder when uploading
+<!-- 2026-09-26T10:13Z -->
+
+**browse** — `staging-browse - 15.68`: `data-explorer.html`, `api.php` (new `upload_mkdir`). **native** — `stg-native - 15.18 test: new folder when uploading`: `assets/web/scray-upload.js`, `assets/web/style.css`. Web only, no IPA build. Native's part needs browse's api.php deployed first.
+
+**1. Move… in data-explorer works on Hetzner files**
+- **Reported:** Move on a file that's only on the Storage Box said "None of these can be moved · no OneDrive copy on record". The dialog only ever looked for a OneDrive copy and only listed OneDrive folders.
+- **Now:** when a row has no OneDrive copy on record (or OneDrive answers 404), its Storage Box copy is used instead (`hetznerCopyOf`: the newest `file_instances` row with `source = 'hetzner'`, or the line itself from Copies…). The same dialog then works within the box:
+  - folders come from `hetzner_ls`, starting in the file's own folder; the crumb reads 🗄 Hetzner;
+  - the search box offers every folder the catalogue has seen on the box ("Find a folder on the Storage Box…");
+  - **+ New folder** uses `hetzner_mkdir`;
+  - **Move here** uses `hetzner_move`, which moves the file and updates the catalogue in one call (and moves it back if the catalogue write fails), so there's no separate catalogue write as for OneDrive.
+- A video in OneDrive and on the box still moves its OneDrive copy, as before. Ticking a mix of Hetzner-only and OneDrive files is refused the way two OneDrive accounts already were: move works within one OneDrive, or within the box, at a time.
+- Some box rows keep the filename on the end of `path` (see `scrayHetznerFilePath`); `hzDirOf` strips it, so "files are here" and the start folder are right.
+
+**2. + New folder in Native's Upload sheet**
+- **Asked for:** uploading to OneDrive or Hetzner from the phone could only go into folders that already existed.
+- **Now:** in step 3 FOLDER, **+ New folder** opens a name box under the path (Create, or Enter; Cancel or Esc). The folder is made straight away and opened, with a green "Made …" note, and **Upload N here** puts the files in it. A folder that already exists is simply opened.
+- **Where:** inside any folder. At the top level only for Hetzner. A OneDrive upload has to land inside a folder the account is catalogued from (`upload_session`'s stack rule for the device key), so a new top folder there could never be uploaded into.
+- **Server, `upload_mkdir`** (body `{ account, path }`): Hetzner → `scrayHetznerMkdirs`; OneDrive → Graph `POST …/children` with `conflictBehavior: fail`, where a 409 means it already exists (answered `existed: true`). Same limits as `upload_session`, including the stack rule for the device key. It isn't in `SCRAY_PRIVILEGED`, so Native's device key can call it. Why a server call and not just uploading to the new path: `upload_folders` 404s on a OneDrive folder that doesn't exist yet, and three files uploading at once could race to create it.
+- The name is checked on the phone and again on the server: none of `" * : < > ? / \ |`, no leading dot, no trailing space or dot.
+
+**Tested** in Chromium:
+- data-explorer, against a stub api.php: a Hetzner-only file opened in /A with 1 already here; the search found A/Sub; + New folder made A/Sub/Fresh and opened it; Move here sent `hetzner_move` with that path, the dialog closed with "1 moved to /A/Sub/Fresh", and the grid row followed.
+- The Upload sheet, in a harness with a stubbed API: no + New folder at the OneDrive top level; in /Vids a bad name was refused; "New Stuff" made `/Vids/New Stuff` and opened it with Upload 1 here ready, and it listed under /Vids afterwards. On Hetzner, a new top folder /Fresh Box worked and the upload session went to it. Esc cancels.
+- `php -l` clean. No page errors. `upload_mkdir` has not been run against real Graph or the real box.
+
 ### picker 15.16 / native 15.17 — test: X, Xn, XT, Xb and > follow the list filters
 <!-- 2026-09-25T14:56Z -->
 

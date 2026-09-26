@@ -2820,7 +2820,19 @@ final class ScrayBrowserViewController: UIViewController,
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: "\\", with: "-")
             .replacingOccurrences(of: ":", with: "-")
-        return cleaned.isEmpty ? "download" : cleaned
+        return Self.withExtension(cleaned.isEmpty ? "download" : cleaned)
+    }
+
+    /// native 15.22: a download whose name has no extension is saved as .mp4 -
+    /// sites hand out bare names ("download", "1821278"), and the library and
+    /// the Files app only recognise a video by its extension. A name that has
+    /// one keeps it, whatever it is. Trailing dots and spaces go first, so
+    /// "clip." becomes "clip.mp4", not "clip..mp4".
+    static func withExtension(_ name: String) -> String {
+        var base = name
+        while let last = base.last, last == "." || last == " " { base.removeLast() }
+        if base.isEmpty { base = "download" }
+        return (base as NSString).pathExtension.isEmpty ? base + ".mp4" : base
     }
 
     /// The Safari-style "do you want to download this?" prompt. Also the point
@@ -3118,7 +3130,7 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
             return
         }
 
-        let name = suggestedFilename.isEmpty ? "download" : suggestedFilename
+        let name = Self.withExtension(suggestedFilename.isEmpty ? "download" : suggestedFilename)
         let expected = response.expectedContentLength > 0 ? response.expectedContentLength : 0
 
         // The completion handler may be called asynchronously, which is what

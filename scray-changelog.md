@@ -4,6 +4,56 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.73 / picker 15.20 / native 15.22 — test: Rescan the Hetzner box, In library plays here, loaded bar, download extensions
+<!-- 2026-09-26T11:46Z -->
+
+**browse** — `staging-browse - 15.73 test: Rescan the Hetzner box from migrate`: `api.php`, `migrate.html`. **picker** — `staging - 15.20 test: In library plays this device copy first`: `scray-stash-nav.js`. **native** — `stg-native - 15.22 test: Box rescan on re-fetch, In library plays here, loaded bar, download extensions`: `assets/web/scray-hetzner.js`, `scray-stash-nav.js`, `player.js`, and **`modules/scray-native/ios/ScrayBrowser.swift` — the download change needs an IPA build**; the rest is web only.
+
+**1. ↻ Rescan box (migrate.html, api.php)**
+- **Asked for:** files moved around the box in WinSCP kept their old locations in data-explorer. Refreshing through Picker works but is slow (it reads each new file's metadata) and needs Picker open. Wanted: the server does it in the background, like migrate and delete, with a status bar.
+- **The job (`hetzner_rescan` / `hetzner_rescan_work`):** walks the whole box on the server, one PROPFIND per folder, into `hz_scan_dirs` / `hz_scan_seen`. The runner works 40 s at a time and hands over to a fresh request, the delete queue's pattern (`scrayMigDelPost`). If it dies, `migrate_state` or the gateway's claims start it again, so the page can be closed. Then one transaction brings the catalogue in line:
+  - **same path:** kept (size updated if it changed);
+  - **moved:** a file gone from one place and a new one with the same name and size somewhere else, exactly one of each. The copy keeps its instance id, so its history, Picker row and links stay; the row takes the new path's tags and levels when it's the copy the row describes, as `hetzner_move` does;
+  - **new:** catalogued as a Hetzner copy under `scrayHetznerCatalogueKey`'s key (`name#hetzner` when OneDrive holds the name). No duration or resolution, since WebDAV doesn't know them; Picker reads them when it next fetches that folder;
+  - **gone:** the copy is forgotten, as `hetzner_prune` does; the video row and its history stay.
+  - Then the cross-account sweep links any new file to its OneDrive twin.
+- **Won't guess, won't half-apply:**
+  - Two same-name, same-size files gone and one found (or the reverse) are left as gone + new.
+  - A file renamed in WinSCP isn't followed: it's forgotten under the old name and catalogued under the new, and the old name's history shows in DUPLICATES → STRANDED.
+  - A folder that fails three times, or a walk that finds no video files while copies are on record, stops the scan with nothing changed.
+- **migrate.html:** **↻ Rescan box** beside Refresh, and a strip under the delete row in the same style: RESCANNING BOX (folders read of total, video files) → ✓ BOX RESCANNED with MOVED / NEW / GONE / UNCHANGED (plus RESIZED and LINKED when any). It lists up to 8 examples of each change, or the reason it stopped. Cancel while running (nothing is changed), Clear after. The rows re-read once when it finishes.
+- **Who may run it:** the console. Native's device key may **start** one and read its **status** only (see 2), not cancel or clear. `start` takes `min_age`: a scan that finished that recently is left as it is.
+
+**2. Native's Hetzner re-fetch rescans too (scray-hetzner.js)**
+- Native doesn't read the box. Its Hetzner rows are the catalogue's list (`hetzner_list`), each file's folder taken from its box copy on record, so fixing the catalogue fixes Native.
+- A re-fetch (the pill, or the Hetzner button) now also starts the server rescan, unless one finished in the last 10 minutes. It **lists at once without waiting**, as before, so it's no slower. It watches the rescan every 5 s for up to 15 minutes while the app is open, and re-lists quietly if anything moved, appeared or went.
+- Cost on the server: roughly one PROPFIND per folder on the box, a few tenths of a second each. Nothing on the phone.
+
+**3. ▶ In library plays this device's copy first (scray-stash-nav.js, Picker and Native, identical)**
+- On Native it always opened Picker in the in-app browser. It now looks in this device's own library for any of the scene's files (not just the first), preferring a phone copy, then the Hetzner stream, and plays it right here. Picker is only the fallback when there's none.
+- Picker previews from its own library as before, now across all the scene's files, preferring one that isn't a Hetzner copy.
+
+**4. The green loaded bar for every file (Native player.js)**
+- `updateBufferedProgress` drew what had loaded for streamed files only (native 15.12), on the grounds that a phone file is all there. It now draws for phone files too, as Picker does.
+
+**5. Browser downloads without an extension get .mp4 (ScrayBrowser.swift)**
+- `withExtension()`: a name with no extension is saved as `.mp4`. Trailing dots and spaces are trimmed first, so "clip." becomes "clip.mp4". A name that has an extension keeps it.
+- Applied in both places a download is named: `sanitizedFilename` (page-driven downloads) and `WKDownload`'s `decideDestinationUsing`.
+
+**Tested:**
+- The reconcile, pulled out of api.php and run against SQLite:
+  - a kept file;
+  - a moved file (kept its id and score of 7, took C/D's tags and levels);
+  - a resized file;
+  - a gone file;
+  - two same-name, same-size files gone and one found (left as gone + new);
+  - a new file whose name OneDrive holds (filed `odname.mp4#hetzner`);
+  - the no-files guard (refused).
+- migrate.html against a stub: the strip through walking, done (with examples) and failed, plus Cancel / Clear.
+- Native's rescan watcher with a fake server: start → status → done with changes → one quiet re-list; a recent scan → nothing more; no changes → no re-list.
+- `php -l` and `node --check` clean.
+- **Not tested:** the walk against the real box, and the Swift change (no toolchain here).
+
 ### browse 15.72 / picker 15.19 / native 15.21 — test: Hetzner in every move, rename and delete
 <!-- 2026-09-26T11:22Z -->
 

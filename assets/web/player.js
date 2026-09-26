@@ -6616,8 +6616,10 @@ updateBufferedProgress();
 * one segment is drawn per range on every call, and "n% buffered" sits to the
 * right above the bar.
 *
-* Streaming only: a phone file is all there, so it would just be a solid bar
-* that says nothing.
+* native 15.22: every file, phone files included, as Picker does. It was
+* streaming only, on the grounds that a phone file is all there - but the bar
+* shows what the player has actually read in, which is how Mac wants to see
+* an offline file too.
 */
 function updateBufferedProgress() {
 const bar = document.querySelector('.permanent-progress-bar');
@@ -6627,14 +6629,10 @@ if (!bar) return;
 // Clear previous segments - buffered ranges can grow/merge as more loads
 bar.querySelectorAll('.permanent-progress-buffered').forEach(el => el.remove());
 
-const v = window.currentPlayingVideo;
-const streaming = !!v && !(typeof window.isLocalVideo === 'function'
-    ? window.isLocalVideo(v)
-    : (v.driveId === 'local' || String(v.accountKey || '').startsWith('local::')));
 const media = window.plyrPlayer?.media;
 const duration = window.plyrPlayer?.duration;
 
-if (!streaming || !media || !media.buffered || !duration || isNaN(duration) || duration <= 0) {
+if (!media || !media.buffered || !duration || isNaN(duration) || duration <= 0) {
     if (label) label.textContent = '';
     return;
 }

@@ -138,8 +138,11 @@
    * now has a phone copy under the same key. Then a catalogue sync brings their
    * scores, bookmarks and variant links down, as it does after a folder scan.
    */
-  async function fetchHetzner({ onProgress } = {}) {
+  async function fetchHetzner({ onProgress, rescan = true } = {}) {
     if (typeof window.scrayApiCall !== "function") throw new Error("sync layer not loaded");
+    // native 15.22: the server re-reads the box too, in the background - see
+    // kickBoxRescan. This listing doesn't wait for it.
+    if (rescan) kickBoxRescan();
     onProgress?.("Listing Hetzner…");
     const listed = await listAll(onProgress);
 
@@ -192,6 +195,48 @@
     if (typeof refreshAllLists === "function") refreshAllLists();
     if (typeof window.renderFolderPills === "function") await window.renderFolderPills();
     return { listed: listed.length, added, updated, removed, skipped };
+  }
+
+  /**
+   * Box rescan (native 15.22). This list is the catalogue's idea of the box,
+   * so a file moved, added or deleted over WinSCP only showed up once Picker
+   * had fetched that folder. A re-fetch now also asks api.php to rescan the
+   * box (hetzner_rescan, browse 15.73) - unless one finished in the last ten
+   * minutes - and carries on listing without waiting: the rescan runs on the
+   * server, reading every folder on the box. When it finishes with anything
+   * changed, the list is fetched again, quietly, so moved files take their
+   * new folders and new ones appear. Nothing waits on it, and closing the app
+   * doesn't stop it (only this follow-up re-list).
+   */
+  let rescanWatching = false;
+  const RESCAN_MIN_AGE_S = 600;
+  function kickBoxRescan() {
+    if (rescanWatching) return;
+    rescanWatching = true;
+    const t0 = Date.now();
+    const stop = () => { rescanWatching = false; };
+    api("hetzner_rescan", { do: "start", device: device(), min_age: RESCAN_MIN_AGE_S }).then(r => {
+      const st = r && r.scan && r.scan.state;
+      if (st !== "walking" && st !== "reconciling") { stop(); return; }    // recent enough, or couldn't start
+      console.log(`[hetzner] box rescan ${r.already ? "already running" : "started"} on the server`);
+      const tick = async () => {
+        let z = {};
+        try { z = (await api("hetzner_rescan", { do: "status" })).scan || {}; } catch {}
+        if ((z.state === "walking" || z.state === "reconciling") && Date.now() - t0 < 15 * 60 * 1000) {
+          setTimeout(tick, 5000);
+          return;
+        }
+        stop();
+        const x = z.result || {};
+        if (z.state !== "done") { if (z.error) console.warn("[hetzner] box rescan:", z.error); return; }
+        console.log(`[hetzner] box rescanned: ${x.moved || 0} moved, ${x.added || 0} new, ${x.gone || 0} gone`);
+        if ((x.moved || 0) + (x.added || 0) + (x.gone || 0) > 0) {
+          try { await fetchHetzner({ rescan: false }); }
+          catch (err) { console.warn("[hetzner] re-list after the rescan failed:", err); }
+        }
+      };
+      setTimeout(tick, 5000);
+    }).catch(err => { stop(); console.warn("[hetzner] box rescan not started:", friendly(err)); });
   }
 
   /**

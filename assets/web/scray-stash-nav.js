@@ -999,12 +999,31 @@
     async function openLibrary(i) {
       const e = top();
       const c = e && e.data && e.data.scenes[i];
-      const l = c && libOthers(c)[0];
+      const libs = c ? libOthers(c) : [];
+      const l = libs[0];
       if (!l) return;
 
-      // Native's main web view: the file belongs to the catalogue, which this
-      // phone may not hold, so it opens in Picker in the in-app browser. The
-      // modal stays as it was underneath.
+      // This device's own copy first (picker 15.20 / native 15.22): on Native a
+      // phone file, else the box's copy streamed from Hetzner, plays right here
+      // - it used to go to Picker every time. Any of the scene's files counts,
+      // not just the first; a copy that isn't a Hetzner stream is preferred.
+      let match = null;
+      try {
+        const all = typeof window.getAllVideos === 'function' ? await window.getAllVideos() : [];
+        const keyOf = v => v.videoKey || (window.scrayVideoKey ? window.scrayVideoKey(v.filename || '') : '');
+        const want = new Set(libs.map(x => x.video_key));
+        const here = all.filter(v => want.has(keyOf(v)));
+        const isHz = v => typeof window.scrayIsHetznerVideo === 'function' && window.scrayIsHetznerVideo(v);
+        match = here.find(v => !isHz(v)) || here[0] || null;
+      } catch (err) {
+        console.error('[stash] library lookup failed:', err);
+      }
+      if (finished) return;
+      if (match) { preview(match, host.closest('.basket-json-modal') || null); return; }
+
+      // Native, and this phone has no copy: the file belongs to the catalogue,
+      // so it opens in Picker in the in-app browser. The modal stays as it was
+      // underneath.
       if (window.ScrayBridge && window.ScrayBridge.openBrowser) {
         const base = typeof window.scrayPickerUrl === 'function' ? window.scrayPickerUrl() : '';
         if (!base) { alert('No Picker address is set.'); return; }
@@ -1020,20 +1039,8 @@
         return;
       }
 
-      // Picker: it's in this library, so preview it right here.
-      let match = null;
-      try {
-        const all = typeof window.getAllVideos === 'function' ? await window.getAllVideos() : [];
-        match = all.find(v => (v.videoKey || (window.scrayVideoKey ? window.scrayVideoKey(v.filename || '') : '')) === l.video_key) || null;
-      } catch (err) {
-        console.error('[stash] library lookup failed:', err);
-      }
-      if (finished) return;
-      if (!match) {
-        alert('That file isn\u2019t in the library here yet - it may need a sync.\n\n' + (l.path ? l.path + '/' : '') + l.filename);
-        return;
-      }
-      preview(match, host.closest('.basket-json-modal') || null);
+      // Picker, and no copy found above.
+      alert('That file isn\u2019t in the library here yet - it may need a sync.\n\n' + (l.path ? l.path + '/' : '') + l.filename);
     }
 
     function cardHtml(c, i, herePid, hereSid) {

@@ -4,6 +4,39 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.72 / picker 15.19 / native 15.21 — test: Hetzner in every move, rename and delete
+<!-- 2026-09-26T11:22Z -->
+
+**browse** — `staging-browse - 15.72`: `data-explorer.html`, `bulk-stash.html`. **picker** — `staging - 15.19`: `file-operations.js`. **native** — `stg-native - 15.21`: `assets/web/file-operations.js`. Web only, no IPA build.
+
+- **Reported:** Rename on a Storage Box file in data-explorer failed with "no OneDrive copy of this file is on record" (after Delete, 15.71, did the same). Asked to check every move, rename and delete across the three repos for Hetzner.
+
+**Audit — already fine:**
+- data-explorer: Move (15.68), Delete (15.71), bulk Rename (`rename_file`), Copies… rename / delete / preview (15.8), 📁 Its folder… (`scray-folder-ops.js`, `side: 'hetzner'`).
+- migrate.html: rename through `rename_file`; delete through `migrate_delete_*`, which deletes box copies server side; folders through `scray-folder-ops.js`.
+- manage-data: renames through `rename_file`.
+- Picker: `renameFile`, `deleteFile`, `moveFile` hand box files to `scray-hetzner.js` (`rename_file` / `hetzner_delete` / `hetzner_move`). Bulk rename and delete go through them. OneDrive ↔ Hetzner moves are refused on purpose (migrate.html's job).
+- Native: rename through `rename_file` (catalogue rows); delete through `delete_file` / `scrayHetznerDeleteRow`; move through `hetzner_move` (15.11), within the box.
+- Left alone: DUPLICATES → merge & delete removes same-size **OneDrive** extras only, as it always has. A copy on the box is kept, so a migrated file's box copy is never taken for a duplicate.
+
+**Fixed:**
+1. **data-explorer single Rename:** `renameFlow` renames through Graph only. A file with any copy on the box now goes through `rename_file`, like the bulk rename and Native: every copy, OneDrive's and the box's, and the row, all or nothing. The key comes from its answer, since a box-only video can be filed as `name#hetzner`.
+2. **bulk-stash** had its own older copy of data-explorer's file tools with no Hetzner handling at all: the Copies panel called a box copy "on the phone" and refused it. Ported:
+   - data-explorer 15.8's Copies code: box copies show "on Hetzner" with ▶ / Rename… / Delete for good; per-copy rename through `rename_file` or `hetzner_rename` + `instance_split`; per-copy delete through `hetzner_delete`.
+   - The single-Rename routing above.
+   - 15.71's Delete routing (`delete_file`, the "deleted for good" note, the wrapping error box).
+3. **The Move dialog's Delete Folder and Go to Folder** (Picker and Native share it) had been dead for every folder, not only box ones. Since moves across accounts, the picked folder is `{ path, accountKey, accountName }`, and both buttons read it as a string: Delete threw before its confirm, Go to Folder failed inside `getFolderWebUrl`.
+   - **Picker:** `folderPick()` reads either shape.
+     - A box folder is deleted through `folder_delete` (`side: 'hetzner'`), only when empty, since the box has no recycle bin; the server refuses one with anything in it. Picker's Graph look-alike for the box still refuses folder writes, so this goes round it.
+     - Go to Folder is hidden for box folders, which have no web page.
+     - A OneDrive folder in a different account than the file is refused, not guessed at: the same path in the file's own drive could be another folder.
+   - **Native:** the device key can't delete folders (`folder_delete` is console-only), and Native has no Graph token helper (`refreshTokenForAccount` isn't defined there), so both buttons are hidden for box folders. **Not changed:** for OneDrive folders the two buttons still show on Native but can't work there either.
+
+**Tested** in Chromium against a SQLite catalogue with stubs:
+- data-explorer and bulk-stash both showed a box file's Copies line as "on Hetzner" with ▶ / Rename… / Delete…. Rename of `1821278_720p.mp4` sent `rename_file` and the grid followed the new key. bulk-stash's Delete showed the "deleted for good" note, sent `delete_file`, and reported "1 deleted (1 from the Storage Box, for good)".
+- Picker's `folderPick` / `deleteHetznerFolder` checked in node: `*7HTZ/lezkiss/old` on the box → `folder_delete` with `7HTZ/lezkiss/old`; a OneDrive folder → not hz; the plain-string shape still read; an empty path refused.
+- `node --check` on both apps' files. No page errors.
+
 ### native 15.20 — test: Open NordVPN in the browser menu
 <!-- 2026-09-26T10:55Z -->
 

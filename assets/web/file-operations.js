@@ -1706,10 +1706,15 @@ if (pathInfo.path === video.path && pathInfo.accountKey === video.accountKey) {
     selectedPath = pathInfo; // ✅ Store full path info (includes accountKey)
     confirmBtn.disabled = false;
         
-        // ✅ Show all folder action buttons
-        goToFolderBtn.style.display = 'block';
+        // ✅ Show all folder action buttons - not for a folder on the Storage
+        // Box (native 15.21): the box has no web page for a folder, and the
+        // device key can't delete folders there (api.php's folder_delete is
+        // console-only). Picker's Move dialog can delete an empty one.
+        const hzFolder = typeof window.scrayIsHetznerVideo === 'function'
+            && window.scrayIsHetznerVideo({ accountKey: pathInfo && pathInfo.accountKey });
+        goToFolderBtn.style.display = hzFolder ? 'none' : 'block';
         goToFolderBtn.disabled = false;
-        deleteFolderBtn.style.display = 'block';
+        deleteFolderBtn.style.display = hzFolder ? 'none' : 'block';
         deleteFolderBtn.disabled = false;
     });
     

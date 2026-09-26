@@ -4,6 +4,40 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.74 / native 15.23 — test: Box rescan reads video details, Rescan box in data-explorer
+<!-- 2026-09-26T12:00Z -->
+
+**browse** — `staging-browse - 15.74`: `api.php`, `migrate.html`, `data-explorer.html`. **native** — `stg-native - 15.23 test: Re-list after the box rescan reads video details`: `assets/web/scray-hetzner.js`. Web only.
+
+- **Asked for:** 15.73's rescan to pick up dimensions and metadata the way Picker does, without Picker (option 1: the server reads the headers itself); and ↻ Rescan box in data-explorer too.
+
+**A third stage: reading video details**
+- After the catalogue is put right, the rescan goes on to **probing**. Every Hetzner copy on record that is an **mp4 / m4v / mov** with no duration or no width (new ones and any older ones still missing them) gets its header read on the server.
+- **`scrayMp4Probe($get, $size)`:** walks the top-level boxes to `moov`, wherever it sits (at the start of a web-ready file, at the end of most camera and editor output). From `mvhd` it takes the duration; from the video track's `tkhd` the width and height, swapped when its matrix turns the picture a quarter turn, so it's what the player shows. That's two or three range reads of a few KB each (`$get` does WebDAV range GETs, as `scrayHetznerOshash` already does). It returns null for anything that isn't an MP4-family file.
+- **`scrayHzScanProbeOne`** writes duration, width, height and bitrate (bits a second from size and duration, as Graph gives it) to the copy on record. It writes the same, plus orientation L/P, to the video row when the row has none or describes this copy, with a new `seq`, so the apps sync them.
+- **mkv / wmv / avi and the rest aren't read**; they still get their details from Picker.
+- Queue: `hz_scan_probe` (filled at the end of reconciling). One file per step inside the runner's 40 s slices, so a long queue just takes more slices. A copy gone meanwhile is marked done, not retried.
+- **Cancel** during this stage keeps the moves, new and gone files already applied, and says so.
+- The runner is now one loop over the three stages (`walking` → `reconciling` → `probing` → `done`). `SCRAY_HZSCAN_ACTIVE` includes `probing`, so `migrate_state`, the gateway and Native keep it alive and wait for it.
+
+**Pages**
+- **migrate.html strip:** "reading video details · N to go" with DETAILS n of m while probing; DETAILS READ (and NO DETAILS when some couldn't be read) when done; the "✓ box rescanned" line adds "details read for N".
+- **data-explorer:** **↻ Rescan box** beside Refresh starts the same server job. Its progress is on the button (Reading the box… n/m → Updating the catalogue… → Video details… n/m). It checks once on load in case one is running. When it finishes with the page open, the grid re-reads and the row count line says what changed. Details stay in migrate.html's strip.
+- **Native:** the re-fetch's watcher waits through `probing` too, and re-lists when details were read, not only when files moved or appeared.
+
+**Tested:**
+- `scrayMp4Probe` on files made with ffmpeg, matched against ffprobe:
+  - moov at the end (7.5 s, 1280×720, 3 reads);
+  - moov at the start (1 read);
+  - a 2 MB 1080p file with moov at the end;
+  - an m4v;
+  - a mov with 90° display rotation → 720×1280;
+  - an mkv → null.
+- `scrayHzScanProbeQueue` + `scrayHzScanProbeOne` against SQLite over a small HTTP range server with the files under names with spaces: mp4 and mov filled in (the mov as P); the mkv and a file that already had details weren't queued; a vanished copy was marked done in one step; `seq` bumped.
+- data-explorer's button and migrate's strip through walking → probing → done against a stub.
+- `php -l` / `node --check` clean.
+- **Not run against the real box yet.**
+
 ### browse 15.73 / picker 15.20 / native 15.22 — test: Rescan the Hetzner box, In library plays here, loaded bar, download extensions
 <!-- 2026-09-26T11:46Z -->
 

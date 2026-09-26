@@ -217,20 +217,22 @@
     const stop = () => { rescanWatching = false; };
     api("hetzner_rescan", { do: "start", device: device(), min_age: RESCAN_MIN_AGE_S }).then(r => {
       const st = r && r.scan && r.scan.state;
-      if (st !== "walking" && st !== "reconciling") { stop(); return; }    // recent enough, or couldn't start
+      const busy = s => s === "walking" || s === "reconciling" || s === "probing";   // probing: browse 15.74
+      if (!busy(st)) { stop(); return; }    // recent enough, or couldn't start
       console.log(`[hetzner] box rescan ${r.already ? "already running" : "started"} on the server`);
       const tick = async () => {
         let z = {};
         try { z = (await api("hetzner_rescan", { do: "status" })).scan || {}; } catch {}
-        if ((z.state === "walking" || z.state === "reconciling") && Date.now() - t0 < 15 * 60 * 1000) {
+        if (busy(z.state) && Date.now() - t0 < 15 * 60 * 1000) {
           setTimeout(tick, 5000);
           return;
         }
         stop();
         const x = z.result || {};
         if (z.state !== "done") { if (z.error) console.warn("[hetzner] box rescan:", z.error); return; }
-        console.log(`[hetzner] box rescanned: ${x.moved || 0} moved, ${x.added || 0} new, ${x.gone || 0} gone`);
-        if ((x.moved || 0) + (x.added || 0) + (x.gone || 0) > 0) {
+        console.log(`[hetzner] box rescanned: ${x.moved || 0} moved, ${x.added || 0} new, ${x.gone || 0} gone, details read for ${x.probed || 0}`);
+        // Details read (duration, size) are worth a re-list too: they're what the rows show.
+        if ((x.moved || 0) + (x.added || 0) + (x.gone || 0) + (x.probed || 0) > 0) {
           try { await fetchHetzner({ rescan: false }); }
           catch (err) { console.warn("[hetzner] re-list after the rescan failed:", err); }
         }

@@ -4,6 +4,29 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.25 / native 15.34 — test: Rescue files the plain player refuses, file description in the log
+<!-- 2026-09-27T19:45Z -->
+
+**picker** — `staging - 15.25 test: Rescue files the plain player refuses`: `scray-twoway.js`, `scray-mp4-chunks.js`. **native** — `stg-native - 15.34 test: Rescue files the plain player refuses`: `assets/web/scray-twoway.js`, `assets/web/scray-mp4-chunks.js`. Both files are the same in both apps. Web only. The dev app shows it without a new IPA, because the failure happens there too with two-way off.
+
+- **Before this:** native 15.33 was confirmed in IPA build 121. `TAP_Zazie_Skymm.mp4` plays with two-way on (`file:// page - MediaSource as srcObject works`, `chunked · srcObject`). With two-way off it still fails, in every app on the phone. Mac asked for it to work with two-way off too, and for the reason. Another file with several audio tracks plays either way, so extra audio tracks aren't it.
+- **Rescue:** with two-way off (or when two-way couldn't start for this play), if the phone's own player refuses a Hetzner mp4/m4v/mov, the same file is played through the chunked loader instead, from the start. Files the plain player accepts play exactly as before. It doesn't rescue when two-way already ran for this play, because two-way has tried chunking and fell back for its own reason. At most one rescue per play.
+  - The refusal arrives as an `error` on the `<source>`. That event doesn't bubble, so a capture listener on the `<video>` picks it up. It only counts when that source was the last one. A plain `src` refusal (as after `fail()`) is caught on the element itself.
+  - `prepare(video, { force: true })` ignores the Settings switch for this one play. On a `file://` page it uses `srcObject`, as in 15.33.
+  - The `play()` that `playVideoInline` was waiting on ends with the reload (logged as a benign AbortError), so the rescue calls `play()` itself.
+  - The log shows `the plain player refused <file> - playing it chunked`, and buffer i shows `· rescue` on the mode line.
+- **File description** (`scrayMp4Chunks.describe`): logged once per file per page load whenever a file is chunked. The `[twoway] file <name>: …` line gives:
+  - size, the top-level boxes with offsets and sizes, and whether the index comes before or after the media;
+  - the ftyp brands, and the mvhd timescale and length;
+  - every track: handler, codec entry, size, avcC profile, level and SPS count, extra config boxes, timescale, length, DISABLED flag, sample and keyframe counts, ctts version and negative offsets, zero-length samples, stco or co64, and the edit list;
+  - how far apart video and audio are stored, where the first bytes of each sit, their start times, and whether their lengths differ.
+- **Tested** in Chromium against the stand-in gateway, adding a mode that refuses the player's open-ended `bytes=0-` requests while allowing the chunker's bounded ones (so the plain player fails the way the iPhone's does on this file):
+  - two-way off + refused: rescued and plays, seeks, and the next video also rescues;
+  - two-way on: unchanged, no rescue armed;
+  - two-way off + plain OK: plays plain, no rescue;
+  - `file://` page in Chromium: tries, then logs that it can't (Chromium has no MediaSource `srcObject`).
+- `describe()` was run in node over the test clips: moov at the start and at the end, a QuickTime .mov with an empty edit, HEVC, video only, VP9/Opus.
+
 ### picker 15.24 / native 15.33 — test: Two-way on the IPA's file:// page
 <!-- 2026-09-27T19:10Z -->
 

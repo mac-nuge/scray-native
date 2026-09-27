@@ -597,7 +597,7 @@ console.log("scray-twoway.js loaded");
       const behind = Math.max(0, t - sg[w.lo].start), ahead = Math.max(0, sg[w.hi].start + sg[w.hi].dur - t);
       return {
         budget: this.budget / MB,
-        mode: `2-way · ${MANAGED ? "MMS" : "MSE"} · ${this.kind}${this.useObj ? " · obj" : ""}`,
+        mode: `2-way · ${MANAGED ? "MMS" : "MSE"} · ${this.kind}${this.useObj ? " · obj" : ""}${this.rescued ? " · rescue" : ""}`,
         frag: `${(this.pl.total / this.pl.segs.length).toFixed(1)}s × ${this.pl.segs.length}`,
         mb: bytes / 1048576,
         loading: this.inflight.size,
@@ -616,14 +616,14 @@ console.log("scray-twoway.js loaded");
    * { src, type } for a MediaSource the loader will fill, or null to play the
    * usual way. Never throws.
    */
-  async function prepare(video) {
+  async function prepare(video, opts = {}) {
     stop();
     lastNote = "";
     const my = ++prepSeq;
     const stale = () => my !== prepSeq;
     const c = cfg();
     try {
-      if (!c.enabled) { lastNote = "off in Settings"; return null; }
+      if (!c.enabled && !opts.force) { lastNote = "off in Settings"; return null; }
       if (!MSClass) { lastNote = "no MediaSource in this WebView"; log(lastNote); return null; }
       const base = video && video.downloadUrl;
       if (!base || !/^https?:/.test(base)) { lastNote = "not a streamed file"; return null; }
@@ -633,7 +633,10 @@ console.log("scray-twoway.js loaded");
       if (!window.scrayMp4Chunks || !/\.(mp4|m4v|mov)$/i.test(video.filename || "")) {
         lastNote = "not an mp4/mov"; return null;
       }
-      try { src = await openChunked(video, base); }
+      try {
+        src = await openChunked(video, base);
+        describeOnce(video, src.ix);
+      }
       catch (e) { lastNote = "can't chunk: " + (e && e.message); log(lastNote, "-", video.filename); return null; }
       const mime = pickMime(src.initBuf);
       if (!mime) { lastNote = "codec not supported here"; return null; }
@@ -681,6 +684,7 @@ console.log("scray-twoway.js loaded");
     while (indexCache.size > INDEX_KEEP) indexCache.delete(indexCache.keys().next().value);
     return {
       kind: "chunked",
+      ix,
       pl: { segs: ix.segs, total: ix.total },
       initBuf: C.initSegment(ix),
       load: async (i, read) => {
@@ -701,6 +705,77 @@ console.log("scray-twoway.js loaded");
     const s = session;
     session = null;
     s.close();
+  }
+
+  // How each file is put together, logged once per file per page load (native
+  // 15.34 / picker 15.25) - a report then says why the plain player might
+  // refuse it: where the index sits, every track, edit lists, how far apart
+  // video and audio are stored.
+  const described = new Set();
+  function describeOnce(video, ix) {
+    try {
+      const k = (video && (video.videoKey || video.filename)) || "";
+      if (!ix || described.has(k) || !window.scrayMp4Chunks.describe) return;
+      described.add(k);
+      log(`file ${video.filename}: ${window.scrayMp4Chunks.describe(ix)}`);
+    } catch (e) { /* diagnostics only */ }
+  }
+
+  // ------------------------------------------------------------------ rescue
+  // native 15.34 / picker 15.25. Two-way off, and the phone's own player
+  // refuses a Hetzner mp4/m4v/mov (TAP_Zazie_Skymm.mp4): the file still plays,
+  // through the chunked loader, which hands the player only clean pieces of
+  // the first video and audio track. Only on that refusal - every file the
+  // plain player takes plays exactly as before. Not when two-way already ran
+  // for this play: it has tried chunking, and fell back for a reason.
+  //
+  // The refusal shows up as an 'error' on the <source> (it doesn't bubble,
+  // hence the capture listener) - or on the element itself when the plain
+  // URL was set as src, as fail() does.
+  let rescue = null;   // { media, video, h, done }
+  function rescueWatch(media, video) {
+    rescueUnwatch();
+    if (!media || !video || video.source !== "hetzner") return;
+    const base = video.downloadUrl;
+    if (!base || !/^https?:/.test(base) || !/\.(mp4|m4v|mov)$/i.test(video.filename || "")) return;
+    if (session && session.media === media) return;        // two-way is on it
+    const noQ = (u) => String(u || "").split("?")[0];
+    const r = { media, video, done: false };
+    r.h = (e) => {
+      if (r.done || rescue !== r) return;
+      if (session) return;
+      const t = e && e.target;
+      const isSource = !!(t && t.tagName === "SOURCE");
+      const failed = isSource ? t.src : media.currentSrc || media.getAttribute("src");
+      if (noQ(failed) !== noQ(base)) return;
+      if (isSource && t.nextElementSibling) return;        // another <source> still to try
+      r.done = true;
+      doRescue(r).catch(err => log("rescue failed:", err && err.message));
+    };
+    media.addEventListener("error", r.h, true);
+    rescue = r;
+  }
+  function rescueUnwatch() {
+    if (rescue && rescue.media) rescue.media.removeEventListener("error", rescue.h, true);
+    rescue = null;
+  }
+  async function doRescue(r) {
+    const { media, video } = r;
+    const e = media.error;
+    log(`the plain player refused ${video.filename}${e ? ` (media error ${e.code})` : ""} - playing it chunked`);
+    const src = await prepare(video, { force: true });
+    if (!src || !session || rescue !== r || !media.isConnected) {
+      if (rescue === r) log("can't play it chunked either" + (lastNote ? ": " + lastNote : ""));
+      return;
+    }
+    const s = session;
+    s.rescued = true;
+    while (media.firstChild) media.removeChild(media.firstChild);
+    if (s.useObj) media.removeAttribute("src");
+    else media.src = s.url;
+    s.attach(media);                // srcObject on a file:// page, in this same turn
+    // The play() the player was waiting on ends with the reload; start again.
+    media.play().catch(() => {});
   }
 
   // ------------------------------------------------------------------ overlay
@@ -860,8 +935,8 @@ console.log("scray-twoway.js loaded");
 
   window.scrayTwoWay = {
     prepare, attach, stop, cfg,
-    watch: statsWatch,
-    unwatch: statsUnwatch,
+    watch: (media, video) => { rescueWatch(media, video); statsWatch(media, video); },
+    unwatch: () => { rescueUnwatch(); statsUnwatch(); },
     toggleInfo,
     get infoOn() { return infoOn(); },
     get originalUrl() { return session ? session.base : null; },

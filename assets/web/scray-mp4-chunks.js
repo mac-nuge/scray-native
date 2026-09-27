@@ -18,6 +18,11 @@ console.log("scray-mp4-chunks.js loaded");
 //   rangesFor(ix, k)    the byte ranges of the file piece k's frames live in -
 //                       usually one, since video and audio are interleaved.
 //   buildSegment(ix, k, parts)  moof + mdat for piece k from those bytes.
+//   describe(ix)        one line on how the file is put together - top-level
+//                       boxes, where the index sits, every track, edit lists,
+//                       how far apart video and audio are stored (native 15.34
+//                       / picker 15.25) - for working out why the plain player
+//                       refuses a file.
 //
 // First video track and first audio track only (what ffmpeg -map 0:v:0
 // -map 0:a:0 would take). The video track's edit list (the usual B-frame
@@ -57,6 +62,7 @@ console.log("scray-mp4-chunks.js loaded");
     const total = first.total;
     if (!(total > 0)) throw new Error("file size unknown");
     const head = new Uint8Array(first.buf);
+    const boxes = [];              // top-level boxes up to and including moov
     let pos = 0;
     for (let n = 0; n < 64 && pos + 8 <= total; n++) {
       let hb;
@@ -71,13 +77,21 @@ console.log("scray-mp4-chunks.js loaded");
         size = u64(dv, 8);
       } else if (size === 0) size = total - pos;
       if (size < 8) throw new Error(`bad box at ${pos}`);
+      const bx = { type, pos, size };
+      if (type === "ftyp" && pos + size <= head.byteLength && size >= 16) {
+        const fd = new DataView(head.buffer, head.byteOffset + pos, size);
+        const cs = [];
+        for (let o = 16; o + 4 <= size; o += 4) cs.push(fourcc(fd, o));
+        bx.brands = fourcc(fd, 8) + "/" + cs.join(",");
+      }
+      boxes.push(bx);
       if (type === "moov") {
         if (size > 64 * 1024 * 1024) throw new Error("index too large");
         const bytes = pos + size <= head.byteLength
           ? head.slice(pos, pos + size)
           : new Uint8Array((await read(pos, size)).buf);
         if (bytes.byteLength !== size) throw new Error("index cut short");
-        return { moov: bytes, total };
+        return { moov: bytes, total, boxes };
       }
       if (type === "moof") throw new Error("already fragmented");
       pos += size;
@@ -228,7 +242,7 @@ console.log("scray-mp4-chunks.js loaded");
   }
 
   async function open(read) {
-    const { moov, total } = await locateMoov(read);
+    const { moov, total, boxes } = await locateMoov(read);
     const dv = new DataView(moov.buffer, moov.byteOffset, moov.byteLength);
     const top = kids(dv, 0, moov.byteLength)[0];
     const mk = inside(dv, top);
@@ -250,7 +264,157 @@ console.log("scray-mp4-chunks.js loaded");
     const segs = plan(v, a);
     const last = segs[segs.length - 1];
     const totalSec = Math.max(last.start + last.dur, a ? a.end / a.timescale : 0);
-    return { moov, dv, mvhd, v, a, segs, total: totalSec, fileSize: total };
+    return { moov, dv, mvhd, v, a, segs, total: totalSec, fileSize: total, boxes,
+             traks: mk.filter(b => b.type === "trak"), mk };
+  }
+
+  // ------------------------------------------------------------ describing
+  // Everything here is read-only and best effort: a box it can't read is
+  // reported as such rather than thrown.
+  const mbs = (n) => n >= 1073741824 ? (n / 1073741824).toFixed(2) + " GB"
+    : n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : n >= 1024 ? (n / 1024).toFixed(0) + " KB" : n + " B";
+
+  function describeTrak(dv, trak, ix) {
+    try {
+      const tk = inside(dv, trak);
+      const tkhd = one(tk, "tkhd"), mdia = one(tk, "mdia");
+      if (!tkhd || !mdia) return "trak without tkhd/mdia";
+      const v1 = dv.getUint8(tkhd.body) === 1;
+      const flags = dv.getUint32(tkhd.body) & 0xffffff;
+      const id = v1 ? dv.getUint32(tkhd.body + 20) : dv.getUint32(tkhd.body + 12);
+      const wOff = tkhd.body + (v1 ? 88 : 76);
+      const tw = dv.getUint32(wOff) / 65536, th = dv.getUint32(wOff + 4) / 65536;
+      const md = inside(dv, mdia);
+      const mdhd = one(md, "mdhd"), hdlr = one(md, "hdlr");
+      const mv1 = mdhd && dv.getUint8(mdhd.body) === 1;
+      const ts = mdhd ? (mv1 ? dv.getUint32(mdhd.body + 20) : dv.getUint32(mdhd.body + 12)) : 0;
+      const mdur = mdhd ? (mv1 ? u64(dv, mdhd.body + 24) : dv.getUint32(mdhd.body + 16)) : 0;
+      const handler = hdlr ? fourcc(dv, hdlr.body + 8) : "????";
+      const bits = [`#${id} ${handler}`];
+      let entry = "?";
+      const minf = one(md, "minf"), stbl = minf && one(inside(dv, minf), "stbl");
+      const st = stbl ? inside(dv, stbl) : [];
+      const stsd = one(st, "stsd");
+      if (stsd) {
+        const ecount = dv.getUint32(stsd.body + 4);
+        const e0 = stsd.body + 8;
+        entry = fourcc(dv, e0 + 4);
+        let d = entry + (ecount > 1 ? ` (+${ecount - 1} more entries)` : "");
+        if (handler === "vide") {
+          const w = dv.getUint16(e0 + 8 + 24), h = dv.getUint16(e0 + 8 + 26);
+          d += ` ${w}x${h}`;
+          const ent = { body: e0 + 8 + 78, end: e0 + dv.getUint32(e0) };
+          const cfg = kids(dv, ent.body, ent.end);
+          const avcC = one(cfg, "avcC"), hvcC = one(cfg, "hvcC");
+          if (avcC) {
+            const prof = dv.getUint8(avcC.body + 1), lvl = dv.getUint8(avcC.body + 3);
+            const nsps = dv.getUint8(avcC.body + 5) & 31;
+            d += ` avcC profile ${prof} level ${(lvl / 10).toFixed(1)} ${nsps} SPS`;
+          } else if (hvcC) d += " hvcC";
+          else d += " (no avcC/hvcC)";
+          const extra = cfg.map(b => b.type).filter(t => !/^(avcC|hvcC|pasp|btrt|colr)$/.test(t));
+          if (extra.length) d += ` [+${extra.join(",")}]`;
+          if (tw && th && (Math.round(tw) !== w || Math.round(th) !== h)) d += ` display ${Math.round(tw)}x${Math.round(th)}`;
+        } else if (handler === "soun") {
+          const ch = dv.getUint16(e0 + 8 + 16), sr = dv.getUint32(e0 + 8 + 24) >>> 16;
+          const ver = dv.getUint16(e0 + 8 + 8);
+          d += ` ${ch}ch ${sr} Hz${ver ? " (QuickTime v" + ver + " entry)" : ""}`;
+        }
+        bits.push(d);
+      } else bits.push("no stsd");
+      bits.push(`ts ${ts}`, `${ts ? (mdur / ts).toFixed(2) : "?"}s`);
+      if (!(flags & 1)) bits.push("DISABLED");
+      const n = (() => { const z = one(st, "stsz"); return z ? dv.getUint32(z.body + 8) : 0; })();
+      bits.push(`${n} samples`);
+      const stss = one(st, "stss");
+      if (handler === "vide") bits.push(stss ? `${dv.getUint32(stss.body + 4)} keyframes` : "no stss (all keyframes?)");
+      const ctts = one(st, "ctts");
+      if (ctts) {
+        const ver = dv.getUint8(ctts.body), ec = dv.getUint32(ctts.body + 4);
+        let neg = 0, first = null;
+        for (let e = 0; e < ec; e++) {
+          const o = dv.getInt32(ctts.body + 12 + 8 * e);
+          if (first === null) first = o;
+          if (o < 0) neg++;
+        }
+        bits.push(`ctts v${ver} first ${first}${neg ? `, ${neg} negative` : ""}`);
+      }
+      const stts = one(st, "stts");
+      if (stts) {
+        const ec = dv.getUint32(stts.body + 4);
+        let zero = 0;
+        for (let e = 0; e < ec; e++) if (dv.getUint32(stts.body + 12 + 8 * e) === 0) zero += dv.getUint32(stts.body + 8 + 8 * e);
+        if (zero) bits.push(`${zero} zero-length samples`);
+        if (ec > 1 && handler === "vide") bits.push(`stts ${ec} runs`);
+      }
+      bits.push(one(st, "co64") ? "co64" : "stco");
+      const edts = one(tk, "edts"), elst = edts && one(inside(dv, edts), "elst");
+      if (elst) {
+        const ev1 = dv.getUint8(elst.body) === 1, ec = dv.getUint32(elst.body + 4);
+        const list = [];
+        let p = elst.body + 8;
+        for (let e = 0; e < Math.min(ec, 4); e++) {
+          const segDur = ev1 ? u64(dv, p) : dv.getUint32(p);
+          const mt = ev1 ? dv.getInt32(p + 8) * 4294967296 + dv.getUint32(p + 12) : dv.getInt32(p + 4);
+          const rate = dv.getInt16(p + (ev1 ? 16 : 8));
+          list.push(`${mt}+${segDur}${rate !== 1 ? "@" + rate : ""}`);
+          p += ev1 ? 20 : 12;
+        }
+        bits.push(`elst[${list.join(" ")}${ec > 4 ? " …" + ec : ""}]`);
+      }
+      return bits.join(" ");
+    } catch (e) {
+      return "unreadable trak (" + e.message + ")";
+    }
+  }
+
+  /** How the file is put together, for the log. Never throws. */
+  function describe(ix) {
+    try {
+      const dv = ix.dv;
+      const out = [];
+      const ftyp = (ix.boxes || []).find(b => b.type === "ftyp");
+      out.push(`${mbs(ix.fileSize)}`);
+      const top = (ix.boxes || []).map(b => `${b.type}@${mbs(b.pos)}(${mbs(b.size)})`);
+      const moovBox = (ix.boxes || []).find(b => b.type === "moov");
+      const moovEnd = moovBox ? moovBox.pos + moovBox.size : 0;
+      out.push("boxes " + top.join(" ") + (moovEnd && moovEnd < ix.fileSize ? ` …${mbs(ix.fileSize - moovEnd)} after` : ""));
+      out.push(moovBox && (ix.boxes.some(b => b.type === "mdat" && b.pos < moovBox.pos)) ? "index AFTER the media" : "index first");
+      out.push(ftyp ? "ftyp " + (ftyp.brands || "?") : "no ftyp");
+      const mvhd = ix.mvhd;
+      if (mvhd) {
+        const v1 = dv.getUint8(mvhd.body) === 1;
+        const ts = v1 ? dv.getUint32(mvhd.body + 20) : dv.getUint32(mvhd.body + 12);
+        const d = v1 ? u64(dv, mvhd.body + 24) : dv.getUint32(mvhd.body + 16);
+        out.push(`mvhd ts ${ts} ${(d / ts).toFixed(2)}s`);
+      }
+      const other = (ix.mk || []).map(b => b.type).filter(t => !/^(mvhd|trak|udta|meta|iods|free|skip)$/.test(t));
+      if (other.length) out.push("moov also has " + other.join(","));
+      out.push(`${(ix.traks || []).length} track(s): ` + (ix.traks || []).map(t => describeTrak(dv, t, ix)).join(" | "));
+      // How far apart the video and audio for the same moment are stored. The
+      // plain player reads them from one stream; far apart means it has to
+      // jump back and forth across the file.
+      if (ix.v && ix.a && ix.segs && ix.segs.length) {
+        let worst = 0, sum = 0;
+        for (const sg of ix.segs) {
+          let lo = Infinity, hi = 0;
+          for (let i = sg.vFrom; i < sg.vTo; i++) { lo = Math.min(lo, ix.v.off[i]); hi = Math.max(hi, ix.v.off[i] + ix.v.size[i]); }
+          for (let i = sg.aFrom; i < sg.aTo; i++) { lo = Math.min(lo, ix.a.off[i]); hi = Math.max(hi, ix.a.off[i] + ix.a.size[i]); }
+          const span = hi > lo ? hi - lo : 0;
+          worst = Math.max(worst, span - sg.len);
+          sum += span - sg.len;
+        }
+        out.push(`interleave gap avg ${mbs(Math.max(0, sum / ix.segs.length))} worst ${mbs(Math.max(0, worst))}`);
+        const v0 = ix.v.dts[0] / ix.v.timescale, a0 = ix.a.dts[0] / ix.a.timescale;
+        out.push(`first bytes: video @${mbs(ix.v.off[0])} audio @${mbs(ix.a.off[0])}`);
+        if (v0 || a0) out.push(`start times v ${v0}s a ${a0}s`);
+        const vEnd = ix.v.end / ix.v.timescale, aEnd = ix.a.end / ix.a.timescale;
+        if (Math.abs(vEnd - aEnd) > 2) out.push(`lengths differ: v ${vEnd.toFixed(1)}s a ${aEnd.toFixed(1)}s`);
+      }
+      return out.join(" · ");
+    } catch (e) {
+      return "couldn't describe: " + e.message;
+    }
   }
 
   // ------------------------------------------------------------ writing boxes
@@ -381,5 +545,5 @@ console.log("scray-mp4-chunks.js loaded");
     return out.buffer;
   }
 
-  root.scrayMp4Chunks = { open, initSegment, rangesFor, buildSegment, TARGET, _setGap: g => { GAP = g; } };
+  root.scrayMp4Chunks = { open, initSegment, rangesFor, buildSegment, describe, TARGET, _setGap: g => { GAP = g; } };
 })(typeof window !== "undefined" ? window : globalThis);

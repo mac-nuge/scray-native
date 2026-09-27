@@ -36,8 +36,13 @@ basketVideos = window.basketVideos;
 localStorage.setItem("scray_basket", JSON.stringify(basketVideos));
 // window.basketVideos already updated above, no need to reassign
 
-// ✅ Auto-sync DISABLED - user must manually push/pull
-// Basket changes are saved locally only until user clicks Push
+// native 15.31: the basket is shared by every install of Native (the server's
+// 'native_basket' row - scray-basket-sync.js), so every local change pushes,
+// as Picker's does. localStorage stays as the offline copy and as what paints
+// the panel before the first pull. schedulePush() debounces, and does nothing
+// until the first pull has landed - which is what stops the boot basket
+// overwriting the server copy.
+if (window.scrayBasketSync) window.scrayBasketSync.schedulePush();
 }
 
 function updateBasketCount() {
@@ -71,7 +76,12 @@ const sizeText = document.createElement("span");
 sizeText.textContent = `Total size: ${formatFileSize(totalSize)}`;
 totalDiv.appendChild(sizeText);
 
-// ✅ No sync indicator - manual push/pull only
+// Sync traffic light (native 15.31): grey idle, amber pushing/pulling, green
+// settled, red failed - hover or long-press for the reason, including how
+// many items are only on other devices.
+if (window.scrayBasketSync) {
+    totalDiv.appendChild(window.scrayBasketSync.makeLight());
+}
 
 basketList.appendChild(totalDiv);
 
@@ -729,6 +739,9 @@ if (!basketVideos.some(v => v.oneDriveId === oneDriveId)) {
 
 
 function clearBasket() {
+// Clear empties the basket on every device (native 15.31) - including items
+// only other installs can show, which a plain remove leaves alone.
+if (window.scrayBasketSync) window.scrayBasketSync.markCleared();
 // Empty the basket array and storage
 basketVideos = [];
 window.basketVideos = basketVideos;
@@ -1831,9 +1844,10 @@ window.addEventListener("DOMContentLoaded", () => {
 
 document.getElementById("basketToggleBtn")?.addEventListener("click", () => toggleBasket());
 
-// The ↑ push / ↓ pull (to Excel) toolbar buttons are gone - Native's basket
-// stays on the device, and the Excel backend is retired. Save/Load to Excel
-// are still in the ... menu below.
+// The ↑ push / ↓ pull (to Excel) toolbar buttons are gone, and the Excel
+// backend is retired. Since native 15.31 the basket syncs across Native
+// installs by itself (scray-basket-sync.js). Save/Load to Excel are still in
+// the ... menu below.
 
 document.getElementById("basketSelectAllBtn")?.addEventListener("click", () => {
  basketVideos.forEach(v => selectedBasketIds.add(v.oneDriveId));

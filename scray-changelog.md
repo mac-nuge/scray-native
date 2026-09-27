@@ -4,6 +4,54 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.79 / native 15.31 — test: Native basket shared across Native installs
+<!-- 2026-09-27T18:05Z -->
+
+**browse** — `staging-browse - 15.79 test: Native basket synced across installs`: `api.php`. **native** — `stg-native - 15.31 test: Basket synced across Native installs`: `assets/web/scray-basket-sync.js` (now loaded), `basket.js`, `index.html`, `style.css`. Web only.
+
+- **Asked for:** keep Native's basket in sync the way Picker's is, in Native only, so every install of Native shows the same basket, limited to the items that install has in its own library.
+
+**Server (`api.php`)**
+- **`native_basket_get` / `native_basket_set`:** the same shape as `basket_get` / `basket_set`, but on their own `app_state` row, **`native_basket`**. So Native's and Picker's baskets stay separate.
+- These are new action names rather than a parameter on `basket_*`. `SCRAY_PRIVILEGED` is a denylist, so the device key Native holds can use them with no change to `scray_auth.php`.
+- The two cases share one body. Last write wins and `rev` counts changes, as with Picker's.
+
+**Native (`scray-basket-sync.js`)**
+- Native had a copy of Picker's file but never loaded it. It's now rewritten for Native and loaded before `basket.js`. Picker's copy is unchanged.
+- **The same model as Picker:**
+  - the first pull on start (behind `scrayWatch`);
+  - a debounced push from every `saveBasket()`;
+  - the READY guard, so the boot basket never overwrites the server;
+  - the SUPPRESS guard, so applying a pull doesn't push it back;
+  - a pull when the app comes back to the foreground (throttled 5 s);
+  - the traffic light in the total-size row.
+- **Keys:** the stored `videoKey` first, then the filename. Native never had `scrayKeyFor`, and adopted keys differ from the filename.
+- **Items this install can't show aren't lost.** Each install shows only what its library has: its phone files and its Hetzner rows. The keys it can't show are kept with the key they came after, and go back into every push in the same place.
+  - Removing, adding or reordering here never drops what only another install can play.
+  - If their anchor was removed here, they go at the end.
+  - At push time the server's copy is read first. If another device changed it since the last pull, the hidden list is taken from that, so a stale install doesn't bring back old places or lose new items.
+- **Clear empties the basket everywhere,** hidden items included. `clearBasket` calls `markCleared()` first. A plain remove leaves them alone.
+- **The first install to sync keeps its basket.** When the server has never had one (rev 0, empty) and this device's isn't empty, it's sent up instead of being wiped. After that the server wins on start.
+- **After a library change** (`scraySyncLibrary`: a scan, a Hetzner fetch), the basket is resolved again when there are hidden items, since some may show here now.
+- **The light's tooltip** says how many items are only on other devices.
+
+**Tested**
+- Two Native installs with different libraries against a stand-in server in node, running the real file, 17 checks all passing:
+  - the first install seeds the empty server; the second takes the server basket over its stale local one and doesn't push it;
+  - items only on the other install survive adds, removes and reorders, in their places;
+  - an install that hasn't looked since the other changed things doesn't lose or move them;
+  - removing the anchor of a hidden item keeps the item;
+  - an item appears once a library scan brings it in;
+  - Clear empties it everywhere;
+  - a pull with nothing new doesn't push.
+- The server cases against SQLite:
+  - Native and Picker baskets stay separate;
+  - duplicates are dropped;
+  - `rev` counts up;
+  - `updated_by` is the device.
+- `php -l` and `node --check` clean.
+- **Not yet run on devices.**
+
 ### picker 15.22 / native 15.30 — test: Two-way window sized to what the player can hold
 <!-- 2026-09-27T16:18Z -->
 

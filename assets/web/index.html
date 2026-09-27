@@ -58,6 +58,10 @@
     "scray-rename.js",
     "player.js",
     "scray-player-controls.js", // Settings > Player controls - straight after player.js
+    // Two-way buffer (native 15.24) - hooked from playVideoInline. The chunker
+    // (15.27) cuts the original mp4/mov into pieces for it, so it goes first.
+    "scray-mp4-chunks.js",
+    "scray-twoway.js",
     // Performance monitor, above the console (13.180/13.181). After player.js, which
     // it reads; before the lock screen script below, which asks it whether
     // this load is its own "Refresh page".

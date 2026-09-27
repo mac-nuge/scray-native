@@ -28,7 +28,8 @@ Hooks:
                                         each control rebuild, and a body
                                         class watcher calls it on mode change
   window.scrayPlayerControlsOverflow(a) player.js's overflow menu hands its
-                                        own items (native fullscreen, TinEye)
+                                        own items (native fullscreen, TinEye,
+                                        buffer i)
                                         through this, and shows what it returns
 
 Saved per device in localStorage (scray_player_controls_v1): picker in each
@@ -62,7 +63,8 @@ browser and the native app keep their own layouts.
     { k: 'mute',       face: '🔇', name: 'Mute',                      sel: '[data-plyr="mute"]', also: '.plyr__volume' },
     { k: 'more',       face: '...', name: 'Overflow menu button',     sel: '.plyr-more', barOnly: true },
     { k: 'nativeFs',   face: '⛶',  name: 'Native fullscreen',         virtual: true },
-    { k: 'tineye',     face: '🔍', name: 'TinEye',                    virtual: true }
+    { k: 'tineye',     face: '🔍', name: 'TinEye',                    virtual: true },
+    { k: 'bufferInfo', face: 'ⓘ',  name: 'buffer i',                  virtual: true }   // native 15.26
   ];
   const BY_KEY = {};
   CONTROLS.forEach(c => { BY_KEY[c.k] = c; });

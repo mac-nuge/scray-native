@@ -4,6 +4,255 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.29 — stable: Played fill up to the loaded green, playhead line inside the bar
+<!-- 2026-09-27T15:50Z -->
+
+Mac confirmed it works and marked it stable. This covers native 15.28–15.29: the loaded bar showing both sides of the playhead, the packaged path removed from the app, and the played fill running up to the loaded green, with no code change.
+
+### native 15.29 — test: Played fill up to the loaded green, playhead line inside the bar
+<!-- 2026-09-27T15:46Z -->
+
+**native** — `stg-native - 15.29 test: Played fill up to the loaded green, playhead line inside the bar`: `assets/web/style.css`. Web only.
+
+- **Asked for:** on the progress bar, show the elapsed part filled white again as before 15.28, but only up to where the green loaded part (behind and ahead) starts. Keep the playhead marker, at the bar's own height with no overflow.
+
+**How**
+- **Done with stacking order alone; no script change.** The white fill (`.permanent-progress-filled`) is back, from 0 to the playhead, but it now sits *under* the green loaded segments (z 20). So the white shows only up to where the green starts, and what's loaded behind the playhead stays green.
+- The fill has `z-index: auto` on purpose. With no stacking context of its own, its `::after` playhead line (z 40) can rise above the green, while bookmark markers (z 60) stay on top.
+- **The playhead line** is now `top: 0; bottom: 0`, the bar's own height. In 15.28 it stuck out 3 px above and below.
+- **The green is solid** `rgb(20, 84, 35)`, which is exactly how 50% green over the black bar looked. Semi-transparent green over the white fill would have come out pale behind the playhead and dark ahead of it.
+- Everything that sets the fill's width (timeupdate, tap, drag, reset) is unchanged. So is the 15.28 redraw of the green after every piece goes in or out.
+
+**Tested:** rendered with Native's own `style.css` in Chromium, in four cases:
+- playhead inside a loaded stretch, with a second stretch further on: white to the green, green through the line, black, green, black;
+- loaded from 0: all green up to the loaded end, line inside it;
+- nothing loaded: white to the playhead, which is the line;
+- the same first case at the bar's real 30% opacity.
+- The line stays inside the bar in all four.
+
+### browse 15.77 / native 15.28 — test: Loaded bar both sides with a playhead line, packaging undone
+<!-- 2026-09-27T15:12Z -->
+
+**native** — `stg-native - 15.28 test: Loaded bar shows both sides, playhead line, packaged path removed`: `assets/web/style.css`, `scray-twoway.js`. **browse** — `staging-browse - 15.77 test: Undo packaging on the gateway, CORS kept`: `gateway/scray-pack.py`. Web only; the gateway part needs one command.
+
+- **Asked for:**
+  - keep chunking (15.27) and undo the other tests;
+  - on the progress bar, show in green how far back it's loaded as well as ahead (as buffer i does), with just a line where the playhead is.
+
+**Progress bar (native `style.css`)**
+- The green loaded segments were already drawn for every range (`updateBufferedProgress`, 15.12). But the white "played" fill (`.permanent-progress-filled`, z 30) sat on top of everything from 0 to the playhead, so what was loaded behind was hidden.
+- The fill is now transparent, and the playhead is a 2 px white line (`::after`, with a dark shadow so it shows on light frames) at its right edge.
+- The element's width still follows the time, so every place that sets it is unchanged: timeupdate, tap, drag, reset.
+- **The green now updates after every piece goes in or out** (`scray-twoway.js` calls `updateBufferedProgress` on each SourceBuffer `updateend`). Before, it only redrew on timeupdate, so loading behind while paused didn't show.
+- Native only for now. Picker's bar still has the white fill.
+
+**Undoing the other tests**
+- **Packaged path out of the app (`scray-twoway.js`):**
+  - Gone: the playlist parser, `pk` URLs, `openPackaged`, and the per-source URL switch.
+  - It's chunked or the plain player, nothing between. A file that can't be chunked now gives its reason straight away (`can't chunk: …`, `not an mp4/mov`), with no playlist probe after it.
+  - The setting is now **Two-way buffer**, not "(test)", and its tick reads "Use it for Hetzner videos".
+- **`scray-pack.py --undo-packaging` (gateway):**
+  - removes the two pk maps;
+  - puts the rewrite back to `rewrite ^/v/(.*)$ /$1? break;`;
+  - deletes `video/.scray-hls/` from the box (WebDAV `DELETE`, Depth infinity);
+  - then checks plain play, the CORS preflight, and that `pk` no longer does anything.
+- **CORS stays.** The app's chunked playback reads byte ranges itself and needs it.
+- The same backup / `nginx -t` / put-back safety as before. Also now: **if the reload fails, the backup goes back too.** Before, a failed reload after a good `nginx -t` left the new file in place. That showed up when the local test nginx wasn't running.
+- **Left to Mac:**
+  - the gateway cache (`--cache-off` removes it; it speeds up re-reading anything played, chunked pieces included);
+  - ffmpeg (`apt remove -y ffmpeg && apt autoremove -y`);
+  - `/opt/scray/scray-pack.py` itself, still needed for the cache commands.
+
+**Tested**
+- **The bar:** rendered with Native's own `style.css` in Chromium. With the playhead at 45%, green shows on both sides of the white line, plus a separate loaded range further on. At 0% the line sits on the start cap.
+- **The loader without the packaged path, in Chromium with the real Plyr:**
+  - a plain mp4 plays chunked, windows both ways;
+  - `.mkv` → "not an mp4/mov";
+  - an already-fragmented file → "can't chunk: already fragmented", plain player;
+  - a missing file → "can't chunk: HTTP 404…".
+  - The earlier loader tests pass.
+- **`--undo-packaging`** on a real nginx 1.24 set up as the gateway is now (the live shape + 15.75's pk and CORS + 15.76's cache):
+  - the diff is exactly the pk maps out and the rewrite back;
+  - `.scray-hls` deleted from the stand-in box;
+  - plain 206, preflight 204, `pk=idx` now just the video; the cache still HITs.
+  - A second run changes nothing. `--cache-off` afterwards leaves only the CORS lines added.
+
+### native 15.27 — stable: Two-way buffer for every Hetzner mp4, no packaging
+<!-- 2026-09-27T15:00Z -->
+
+Mac confirmed it works on the iPhone and marked it stable. Chunked two-way playback works under ManagedMediaSource in Native's WKWebView. This covers native 15.26–15.27 (buffer i in the player menu, then chunking the original mp4/mov in the page), with no code change.
+
+### native 15.27 — test: Two-way buffer for every Hetzner mp4, no packaging
+<!-- 2026-09-27T15:10Z -->
+
+**native** — `stg-native - 15.27 test: Two-way buffer for every Hetzner mp4, no packaging`: new `assets/web/scray-mp4-chunks.js`; `scray-twoway.js`, `index.html`. Web only, no gateway or box change.
+
+- **Asked for:** two-way loading without packaging the library (ruled out: about twice the storage and days of transfers). Of the remaining options, try chunking on the phone first: it's the same experience as the packaged test, web only, and could come to Picker.
+
+**How it works**
+- **`scray-mp4-chunks.js` cuts the original file into ~2 s pieces as it plays.** It reads the file's index (`moov`) with a few range reads:
+  - one when the index is at the start;
+  - three when it's at the end, which is how most cameras and ffmpeg write it.
+- It then plans pieces that each start on a keyframe. Each piece is the file's own frames, re-wrapped as fragmented MP4 (`moof` + `mdat`); nothing is re-encoded.
+- **The header piece** copies the original track headers, codec setup (`stsd`) and rotation matrix (`tkhd`) byte for byte, with empty sample tables and `mvex/trex`.
+- **Each piece's frames** usually sit in one byte range, since video and audio are interleaved; ranges closer than 64 KB are fetched as one. Over-fetch was 0–6% on the test files.
+- **Timing:** the video's edit list (the usual B-frame delay) goes in through signed composition offsets (`trun` v1), so pictures start at 0 as in the plain player. AAC's priming trim (~21 ms) is kept by starting the video that much later rather than the audio earlier, so audio and video stay exactly as far apart as in the plain player.
+- **Only the first video and first audio track** are used (like ffmpeg `-map 0:v:0 -map 0:a:0`).
+- **It refuses these,** and the next option is tried: no video track, a compressed or already-fragmented index, `stz2` sample tables, encrypted tracks.
+
+**In the loader (`scray-twoway.js`)**
+- `prepare` tries **chunked** first for any `.mp4/.m4v/.mov`, then a **packaged** copy (15.24's path), then the plain player. For mp4/mov that means no more wasted 404 probe for a playlist.
+- The `Session` now reads through a source: `load(i, read)` gives piece `i`, chunked or packaged. `read` re-signs expired links as before, and a server that ignores Range still falls back straight away.
+- **The index is kept for the last 3 videos**, so replaying or coming back to one starts without reading it again (0 ms against 170 ms in the test). An hour's index is a few MB.
+- **Codec string** read from the built header: avc1 / hvc1 as before. It now also reads:
+  - the real AAC profile from `esds` (`mp4a.40.5` for HE-AAC, `mp4a.6B` for MP3), no longer assuming `.40.2`;
+  - VP9 (`vpcC`) and Opus, which the tests needed.
+- buffer i's first line names the source: `2-way · MMS · chunked` (or `· packaged`). When neither works it gives the reason, e.g. `can't chunk: already fragmented` or `not an mp4/mov`.
+
+**Tested**
+- **Chunker against ffmpeg:** each file rebuilt from its header + every piece, as the loader would. Decoded pictures (framemd5) and audio packets compared one for one with the original, all identical:
+  - H.264 with B-frames, index at the end and at the start;
+  - HEVC;
+  - a MOV rotated 90° (the rotation survives);
+  - no audio;
+  - 10 minutes (18,000 frames, 200 pieces, index read in 32 ms and all pieces built in 124 ms in node);
+  - a 250-frame keyframe gap (7–8 s pieces);
+  - an edit-list offset MOV and a TS remux.
+- Also identical when every piece was forced into several byte ranges (2.8 on average).
+- Codec strings match ffmpeg's for H.264. For HEVC it's the usual `hvc1.1.6.L63.90` where ffmpeg writes `hvc1.1.4.L63.B01`.
+- **In headless Chromium with the real Plyr 3.7.8**, on a plain unpackaged VP9/Opus mp4 through the stand-in gateway:
+  - it plays chunked; the window fills 30–120 around 70 s;
+  - backward jogs land in 10–25 ms; eviction, expired-link re-signing and 'ended' all work;
+  - a missing file, a `.mkv`, and an already-fragmented file each take the right path (plain, plain, packaged). A broken index plus a corrupt packaged piece falls back to the plain URL.
+  - buffer i's toggle and the earlier loader tests still pass.
+- **Not yet run on the iPhone.** To watch: rotated phone videos (whether Safari's MSE honours the rotation) and HEVC under ManagedMediaSource. If `isTypeSupported` says no, it plays the plain way.
+
+### native 15.26 — test: buffer i in the player menu
+<!-- 2026-09-27T13:58Z -->
+
+**native** — `stg-native - 15.26 test: buffer i in the player menu`: `assets/web/scray-twoway.js`, `player.js`, `scray-player-controls.js`. Web only.
+
+- **Asked for:** the two-way buffer's stats box was only meant for the test, but it's useful. Make it a player control called **buffer i**, in the ... menu by default, and able to be moved or hidden in Settings.
+
+**What changed**
+- **ⓘ buffer i** is a new item in the player's ... menu, next to Native fullscreen and TinEye. A tap shows or hides the box on whatever is playing, and the menu shows a ✓ while it's on.
+  - It stays on across videos and app restarts until tapped again. The on/off state is saved on the device under its own key, `scray.bufferInfo`, so an older saved `stats` value from 15.24/15.25 doesn't turn it back on.
+  - It's **off by default** now.
+- **It works for any video**, not only Hetzner ones (15.25 limited it to the box).
+  - On a video that isn't playing two-way, the first line reads `progressive` plus the reason ("not packaged", "not a streamed file", …). Below that come seconds loaded behind and ahead, stalls and seek→ready times.
+  - That first line is the quickest way to tell whether a video is really playing two-way.
+- **Settings → Player controls** lists it as `ⓘ buffer i`, a menu-only control like TinEye and Native fullscreen: in the ... menu, or hidden. A layout saved before 15.26 gets it added in the menu.
+- **Settings → Two-way buffer (test)** loses its "Show the stats box" tick. It keeps the on/off switch and the seconds behind and ahead.
+
+**Tested:**
+- In headless Chromium with the real Plyr swap: off by default, a toggle shows the box on a non-Hetzner video (`progressive`), and it stays on into the next video (`2-way · MSE`). Toggling again hides it and clears the key.
+- The earlier loader tests all pass.
+- `scray-player-controls.js` in node: the default layouts put buffer i in the menu, and an older saved layout gains it in the menu. A customised mode's menu lists it, and a mode with it hidden leaves it out.
+- `node --check` clean.
+- Picker is unchanged. It has no two-way loader yet, so the control isn't in its list.
+
+### browse 15.75 / native 15.25 — stable: One-command gateway setup, two-way buffer on by default
+<!-- 2026-09-27T13:45Z -->
+
+Mac confirmed it works and marked it stable: `--setup` ran on the real gateway, and the packaged test file plays two-way in Native on the iPhone, so ManagedMediaSource is available in Native's WKWebView. This covers native 15.24–15.25 (the two-way loader, then on by default) and browse 15.75 (`gateway/scray-pack.py`), with no code change.
+
+### browse 15.75 / native 15.25 — test: One-command gateway setup, two-way buffer on by default
+<!-- 2026-09-27T13:33Z -->
+
+**browse** — `staging-browse - 15.75 test: One-command gateway setup for the two-way buffer`: new `gateway/scray-pack.py`. **native** — `stg-native - 15.25 test: Two-way buffer on by default, one-command gateway setup`: `assets/web/scray-twoway.js`. Web only.
+
+- **Asked for:** as little manual work as possible to get native 15.24's two-way buffer test running. ffmpeg was already on the gateway.
+
+**`scray-pack.py --setup` (gateway)**
+- **One command** after uploading the file (anywhere, e.g. `/root`) does everything:
+  - installs ffmpeg if it's missing and copies itself to `/opt/scray/`;
+  - patches nginx, reloads it and packages a test file;
+  - checks the gateway end to end.
+  Running it again changes nothing that's already in place.
+- **nginx patch** (found by `location /v/` + `secure_link` under `conf.d/` or `sites-enabled/`):
+  - the two pk maps go above the first `server {`;
+  - the CORS and preflight lines go at the top of `location /v/`;
+  - the rewrite becomes `$scray_pk_pre/$1$scray_pk_post` with `set $scray_pk $arg_pk;` before it.
+- **Safety:** each piece is only added when missing. The old file is backed up to `/root/scray-nginx-…bak` first. If `nginx -t` rejects the result, the backup goes straight back and nothing is reloaded.
+- **Config shapes handled:**
+  - the live shape (`rewrite ^/v/(.*)$ /$1? break;` plus the dl lines);
+  - Part 3's shape with no rewrite (a rewrite goes before `proxy_pass`);
+  - a block that already has CORS headers (only the missing lines go in, with a note if the existing `Access-Control-Allow-Origin` has no `always`).
+  - Any other `rewrite` in the block stops it with a pointer to the manual steps.
+- **Test file:**
+  - With no path it walks the box over WebDAV (dot folders skipped, stops at 60 candidates) for mp4/m4v/mov between 150 MB and 3 GB inside a folder, nearest 800 MB first.
+  - It checks each candidate's codec with ffprobe straight over WebDAV (reads only the header) and takes the first H.264.
+  - A path can be given instead. It's skipped if it's already packaged.
+- **Checks:** it signs its own links with the secret read from `secure_link_md5`, then checks playlist 200, packaged Range 206, preflight 204 + CORS, plain play 206 and expired 410 + CORS. It ends by naming the video to play in Native.
+- **Wait after reload:** a 2 s pause, because `nginx -s reload` / `systemctl reload` return before the new workers take over. The first run against the no-rewrite shape failed its playlist check for exactly that reason.
+- Also `--verify <path>` to rerun the checks alone.
+
+**Native**
+- The two-way buffer is **on by default** (`enabled: true`), so there's nothing to tick. Only a Hetzner video with a packaged copy plays differently. Every other Hetzner play costs one extra small request (a 404 for the playlist) during the test.
+- The stats box is on by default and only shows on Hetzner videos.
+
+**Tested:**
+- `--setup` against three nginx shapes, each a real nginx 1.24 with `secure_link` in front of a stand-in box, with WebDAV for the walk and upload.
+  - Live shape, no path given: skipped a VP9 file, picked and packaged the H.264 `Café & Friends – #1.mp4`, all five checks passed. A second run changed nothing.
+  - No-rewrite shape: all five passed.
+  - Existing-CORS shape: four passed. The 410 check failed, as expected, because of the existing header without `always`, and the note said so.
+  - A failing `nginx -t`: the file was restored byte for byte.
+  - `dl=1` still gives `attachment` after the patch.
+- Native's loader tests rerun with the new defaults: all pass, including the real Plyr swap.
+- **Not yet run on the real gateway or the iPhone.**
+
+
+### native 15.24 — test: Two-way buffer test for packaged Hetzner videos
+<!-- 2026-09-27T13:18Z -->
+
+**native** — `stg-native - 15.24 test: Two-way buffer test for packaged Hetzner videos`: new `assets/web/scray-twoway.js`; `player.js`, `index.html`. Web only. **Gateway** (not in a repo yet): `scray-pack.py` and three additions to `scray.conf`.
+
+- **Asked for:** jogging backwards to be as smooth as forwards on Hetzner videos. Test it in Native first. The plan was the HLS option, starting with a Phase 0 spike on the phone.
+
+**Why it needs its own loader**
+- A plain `<video src>` only ever reads ahead from the playhead. hls.js loads forward too. So the loading behind the playhead has to come from our own code, through Media Source Extensions: **ManagedMediaSource** on the iPhone, MediaSource elsewhere.
+- A plain MP4 can't be fed to MSE in pieces, so each file is repackaged once on the gateway into fragmented MP4. This is copy only (`ffmpeg -c copy`, single-file fMP4 HLS, ~2 s fragments), with no re-encode and no quality change.
+
+**Packaging (gateway)**
+- `scray-pack.py <path>` downloads from the box with the writable sub-account in `/etc/scray/migrate.env` and prints the keyframe spacing (from packet flags, no decoding). It remuxes, then uploads to `video/.scray-hls/<path>/` in the order `media.mp4`, `master.m3u8`, `index.m3u8`, with the index last so a player never sees a half-uploaded copy. `--check` stops after the keyframe report; `--remove` deletes the packaged copy. The original is never touched.
+- The dot folder is skipped by every box walk in `api.php` (`$name[0] === '.'`), so packaged copies never turn up as videos.
+- `index.m3u8` carries a `#EXT-X-SCRAY-CODECS` line copied from ffmpeg's master playlist, so the player needs one fetch. Players ignore tags they don't know.
+- `-bsf:a aac_adtstoasc` is there because a .ts source's AAC otherwise fails to mux. It's a no-op for MP4 sources. HEVC gets `-tag:v hvc1`. Codecs other than H.264 and HEVC are refused.
+- The hls muxer rebases timestamps to ~0 even for sources that start late (tested with a +10 s offset MOV and TS), so fragment times match the playlist.
+
+**Gateway (nginx)**
+- **No new signing.** `&pk=idx` / `&pk=media` on the original's signed URL are mapped in the `/v/` rewrite onto the packaged files. `secure_link` hashes only the path, so the existing signature covers them. A holder of a valid link gets the same video repackaged and nothing more.
+- **CORS:** the loader fetches with a `Range` header, which triggers a preflight, so the gateway answers `OPTIONS` with 204. `Access-Control-*` headers are marked `always`, so a 410 (expired) is readable and the loader can re-sign.
+
+**Loader (`scray-twoway.js`)**
+- **`prepare(video)`** runs for `video.source === 'hetzner'` when the setting is on. It fetches the playlist and init segment, picks a MIME type (playlist codecs, then codecs read from `avcC`/`hvcC` in the init, then plain `video/mp4`, whichever `isTypeSupported` accepts first) and returns a Plyr source entry `{ src: blob, type }`. It returns null for off, not packaged (404), no MediaSource in this WebView, CORS blocked or codec unsupported, and the player carries on exactly as before. The reason shows in the stats box. A newer prepare makes an older one give up.
+- **`attach(media)`** runs in the same turn as the Plyr swap, before resource selection, so `disableRemotePlayback` is set in time. ManagedMediaSource won't open without it or an AirPlay source.
+- **The plain URL is the second `<source>`.** If the MediaSource can't open, the element falls through to it by itself. The open timeout sees that and leaves it playing.
+- **Order after a seek:** the fragment under the playhead first, then outwards, two ahead for each one behind, up to the window (default 30 s behind, 60 s ahead). Two fetches at once. Fetches the seek has left outside the window are aborted. A tap or jog fetches its fragment at once; a scrub drag waits until it pauses for 150 ms. A 19-position drag loaded only the final window.
+- **Eviction:** anything more than 10 s outside the window is removed. A QuotaExceededError trims hard and retries. iOS's own evictions (`bufferedchange` removedRanges not caused by us) are counted and logged; this is the Phase 0 question.
+- **"Loaded"** is read from `sourceBuffer.buffered` (fragment midpoint), not a set we keep, so iOS dropping data is picked up and refetched without extra bookkeeping.
+- **Expired links:** a 403/410 calls `scrayHetznerRefresh` once (single flight) and retries on the new URL.
+- **Falling back:** a rejected fragment (SourceBuffer `error`, or appended three times without appearing), a media error or an append exception all switch the element to the plain URL at the same time, still playing. `sourceclose` (the player moved on) stops the loader. Not `emptied`: Plyr's own double load fires that at the start, which is what first broke it in testing.
+- **endOfStream** is called only when the window reaches the last fragment and it's loaded, so 'ended' still fires for auto-next.
+- **Stats box** (Settings → Two-way buffer (test) → Show the stats box): mode, fragment size, MB loaded, loading/queued/done, retries, cuts, evictions, iOS drops, the streaming flag, seconds loaded behind and ahead, stalls, and seek→ready times. It also works on the usual path, so the same file can be compared with the setting on and off. It sits at the top left of the player with `pointer-events: none`.
+- **player.js:** `prepare` before the source swap; the second `<source>`; `attach` + `watch` straight after; `stop` + `unwatch` in `resetVideoInline`. The TinEye frame copy uses the signed URL instead of the blob.
+
+**Tested** (headless Chromium, which has no H.264, so on a VP9/Opus clip packaged the same way, against a stand-in gateway with Range, CORS, pk and expiry):
+- The packaged file plays two-way and the duration comes from the playlist.
+- Paused at 70 s, the window fills 30–120.
+- Four 5 s backward jogs landed in 4–15 ms with no fetch for the jogged-to spots; the only fetches were the window sliding back.
+- Seeking back to 5 s evicts past 75.
+- An expired link is re-signed once and loading continues.
+- 'ended' fires.
+- Unpackaged → usual path ("not packaged"); setting off → usual path.
+- With the real **Plyr 3.7.8** source swap, twice in a row: blob source, playing, window 42–120 around 82 s. This first failed because prepare returned `{ url }` and Plyr copies keys straight onto `<source>`; it now returns `{ src }`.
+- A fragment filled with garbage → falls back to the plain URL at 4.8 s, still playing.
+- `codecsFromInit` on real H.264 and HEVC init segments: avc1 matches ffmpeg exactly. For HEVC it gives the usual `hvc1.1.6.L63.90` where ffmpeg writes `hvc1.1.4.L63.B01`, so both are tried.
+- `scray-pack.py` against a local WebDAV with a `Café & Friends – #1.mp4` path: check, pack, bad path, remove.
+- `node --check` clean.
+- **Not yet run on the iPhone.** Whether ManagedMediaSource exists in Native's WKWebView, and whether iOS keeps the backward buffer, is what this test is for.
+
+
 ### browse 15.74 / native 15.23 — test: Box rescan reads video details, Rescan box in data-explorer
 <!-- 2026-09-26T12:00Z -->
 

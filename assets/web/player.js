@@ -3457,6 +3457,9 @@ if (isDesktop) {
 //                          button was)
 //   🔍 TinEye              reverse image search of the current frame
 //                          (13.186) - see TINEYE below
+//   ⓘ  buffer i            shows / hides the buffering box - what's loaded
+//                          behind and ahead, seek times (native 15.26,
+//                          scray-twoway.js). A ✓ when it's on.
 //
 // Add an entry to scrayPlayerOverflowActions.
 //
@@ -3484,6 +3487,13 @@ function scrayPlayerOverflowActions() {
         label: '🔍  TinEye',
         onClick: () => { scrayTinEyeSearch(); }
     });
+    if (window.scrayTwoWay && typeof window.scrayTwoWay.toggleInfo === 'function') {
+        actions.push({
+            key: 'bufferInfo',
+            label: 'ⓘ  buffer i' + (window.scrayTwoWay.infoOn ? '  ✓' : ''),
+            onClick: () => window.scrayTwoWay.toggleInfo()
+        });
+    }
     // Settings > Player controls (scray-player-controls.js) decides what the
     // menu holds in a customised mode: these two plus any bar controls moved
     // in, in the chosen order. A mode left on its built-in layout gets these
@@ -3530,7 +3540,9 @@ function scrayFrameToDataUrl(source, w, h) {
 }
 
 async function scrayGrabFrameFromCopy(video) {
-    const src = video.currentSrc || video.src;
+    let src = video.currentSrc || video.src;
+    // Two-way buffer: a MediaSource blob can't be copied - use the signed URL.
+    if (/^blob:/.test(src) && window.scrayTwoWay?.originalUrl) src = window.scrayTwoWay.originalUrl;
     if (!src) throw new Error('no video source');
     const at = video.currentTime || 0;
 
@@ -11328,6 +11340,15 @@ if (unplayable) {
     return;
 }
 
+// Two-way buffer test (native 15.24, scray-twoway.js): a Hetzner video with a
+// packaged copy on the box plays through a MediaSource that the loader fills
+// behind the playhead as well as ahead. null = play the usual way.
+window.scrayTwoWay?.stop();
+let scrayTwoWaySrc = null;
+if (video.source === 'hetzner' && window.scrayTwoWay) {
+    scrayTwoWaySrc = await window.scrayTwoWay.prepare(video);
+}
+
 // Captured for scrayPrunePlyrListeners - the swap below replaces all three.
 const scrayPrevPlyrParts = {
     media: window.plyrPlayer.media,
@@ -11337,10 +11358,20 @@ const scrayPrevPlyrParts = {
 try {
 window.plyrPlayer.source = {
     type: 'video',
-    sources: [ { src: video.downloadUrl, type: scrayMimeForFile(video.filename) } ],
+    // Two-way: the plain URL goes second, so if the MediaSource can't open the
+    // element falls through to it and plays the usual way.
+    sources: scrayTwoWaySrc
+        ? [ scrayTwoWaySrc, { src: video.downloadUrl, type: scrayMimeForFile(video.filename) } ]
+        : [ { src: video.downloadUrl, type: scrayMimeForFile(video.filename) } ],
     title: (window.scrayStashDisplayName && window.scrayStashDisplayName(video))
            || video.filename || ""
 };
+
+// Two-way buffer: hook the loader to the <video> Plyr just made, in this same
+// turn - before resource selection runs, so disableRemotePlayback is already
+// set when ManagedMediaSource attaches. The stats box watches either path.
+if (scrayTwoWaySrc) window.scrayTwoWay.attach(window.plyrPlayer.media);
+window.scrayTwoWay?.watch(window.plyrPlayer.media, video);
 
 // AVFoundation doesn't always self-report duration for locally-streamed
 // files via our custom scheme, so fetch it directly from the real file
@@ -11576,6 +11607,8 @@ try {
     
     // Pause and clear source
     window.plyrPlayer.pause();
+    window.scrayTwoWay?.stop();     // two-way buffer test (native 15.24)
+    window.scrayTwoWay?.unwatch();
     // ✅ Exit PIP mode if active
    if (pipMode && typeof exitPIPMode === 'function') {
        exitPIPMode();

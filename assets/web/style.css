@@ -5886,10 +5886,25 @@ height: 100%;
 background: #fff;
 width: 0%;
 transition: width 0.1s linear;
-/* native 15.12: positioned so it paints over the green loaded segments
-   (z 20) and under the bookmark markers (z 60), as in Picker. */
+/* native 15.29: white "played" from 0 to the playhead again, but UNDER the
+   green loaded segments (z 20) - so it shows only up to where the green
+   begins, and what's loaded behind the playhead stays green (two-way
+   buffer). z-index auto on purpose: no stacking context of its own, so the
+   playhead line below can rise above the green. */
 position: relative;
-z-index: 30;
+z-index: auto;
+pointer-events: none;
+}
+.permanent-progress-filled::after {
+content: '';
+position: absolute;
+top: 0;
+bottom: 0;                             /* the bar's own height, no overflow */
+right: -1px;
+width: 2px;                            /* ⚙️ playhead line width */
+background: #fff;                      /* ⚙️ playhead line colour */
+box-shadow: 0 0 2px rgba(0, 0, 0, 0.9);
+z-index: 40;                           /* over the green (20), under bookmark markers (60) */
 }
 
 /* What has loaded of a streaming (Hetzner) video - plays at once if you seek
@@ -5898,8 +5913,8 @@ z-index: 30;
 position: absolute;
 top: 0;
 height: 100%;
-background: rgba(40, 167, 69, 0.5); /* ⚙️ green "loaded" highlight, 50% opacity */
-z-index: 20; /* above the black bar, below the white "played" fill */
+background: rgb(20, 84, 35); /* ⚙️ green "loaded" - what 50% green over the black bar looked like, made solid (15.29) so the white "played" fill under it doesn't lighten it */
+z-index: 20; /* above the white "played" fill, below the playhead line (40) */
 pointer-events: none;
 transition: width 0.1s linear;
 }

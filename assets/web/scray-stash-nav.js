@@ -32,6 +32,21 @@
 // picker 14.24 / native 14.36 (browse 14.38): In library on every profile,
 // plus Indexxx and Eporner links.
 // picker 15.23 / native 15.32: 🎯 Stash hunt on the home view.
+// picker 15.26 / native 15.35: the search view filters its results by studio
+// and performer, Unblur all is a 👁 in the Search row, and in a hunt the ▶ goes
+// (the hunt bar has one) and the studio of the hunt's last match is a pill.
+// picker 15.27 / native 15.36: the result filters are searchable dropdowns
+// like the profile views' (several picks each), and a studio pill offers
+// Filter these results / Open the studio's page / Add to search words, and
+// ▶ moves from the Search row to the footer, between Back and Close.
+// picker 15.31 / native 15.40: every searchable dropdown has Done, beside its
+// search box and under its list, to close it and bring the results back.
+// picker 15.32 / native 15.41: a studio pill's Add to the search words runs
+// the search straight away.
+// picker 15.33 / native 15.42: "Take studio/performers" on every card - the
+// studio and/or performers you tick go into this file's details
+// (opts.onTake -> scrayStashEdit.take), for when StashDB hasn't got the video
+// but has others from the same studio or with the same people.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -132,6 +147,14 @@
 #stashModal .ssn .ssn-ptag.ssn-ptag-studio:not(.on) { border-color: #cbbef5; background: #f3efff; color: #5b3fd1; }
 #stashModal .ssn .ssn-play { padding: 6px 11px; }
 #stashModal .ssn .ssn-unblur { margin-left: auto; }
+#stashModal .ssn .ssn-eye { margin-left: auto; padding: 6px 10px; font-size: .95rem; line-height: 1; }
+#stashModal .ssn-rf-row { display: flex; gap: 6px; align-items: center; }
+#stashModal .ssn .ssn-rf-row .ssn-studio-btn { flex: 1 1 0; }
+#stashModal .ssn .ssn-rf-row .ssn-rf-x { flex: 0 0 auto; padding: 6px 9px; }
+#stashModal .ssn .ssn-ptag.filt { box-shadow: 0 0 0 2px #6c5ce7; }
+#ssnPillMenu .ssn-pm-note { margin: -4px 0 10px; font-size: .8rem; color: #777; }
+#stashModal .ssn .ssn-ptag.ssn-ptag-hunt:not(.on) { border-color: #9bd8a8; background: #eaf7ee; color: #1e7e34; font-weight: 600; }
+#stashModal .ssn-rf-none { padding: 10px 4px; font-size: .84rem; color: #666; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 #stashModal .ssn .ssn-google.ssn-google-card { margin-left: 0; padding: 6px 12px; font-size: .8rem; }
 #stashModal .ssn .ssn-lib { background: #28a745; border-color: #28a745; color: #fff; }
 #stashModal .ssn-topbar { justify-content: flex-end; margin: 0 0 8px; }
@@ -188,6 +211,13 @@
 #stashModal .ssn-foot { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 #stashModal .ssn .ssn-accept { background: #28a745; border-color: #28a745; color: #fff; }
 #stashModal .ssn .ssn-accept.armed { background: #dc3545; border-color: #dc3545; }
+#stashModal .ssn .ssn-take { background: #f3efff; border-color: #cbbef5; color: #5b3fd1; }
+#ssnTakeMenu .ssn-tk-note { margin: -4px 0 10px; font-size: .8rem; color: #777; }
+#ssnTakeMenu .ssn-tk-head { margin: 8px 0 2px; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: #888; }
+#ssnTakeMenu label { display: flex; gap: 10px; align-items: center; padding: 8px 2px; border-bottom: 1px solid #eee; font-size: .92rem; cursor: pointer; text-align: left; }
+#ssnTakeMenu label input { width: 20px; height: 20px; margin: 0; padding: 0; flex: 0 0 auto; }
+#ssnTakeMenu label small { color: #888; }
+#ssnTakeMenu .ssn-tk-err { color: #dc3545; font-size: .82rem; margin: 6px 0 0; }
 #stashModal .ssn .ssn-ext { background: transparent; color: #6c5ce7; border-color: rgba(108,92,231,.4); }
 #stashModal .ssn-cerr { color: #dc3545; font-size: .78rem; margin-top: 6px; }
 #stashModal .ssn-cerr:empty { display: none; }
@@ -218,6 +248,10 @@
 #stashModal .ssn .ssn-studio-opt small { opacity: .6; flex: 0 0 auto; }
 #stashModal .ssn-studio-none { padding: 8px 6px; font-size: .8rem; opacity: .6; }
 #stashModal .ssn-studio-how { font-size: .72rem; opacity: .65; margin: 0 0 6px; }
+#stashModal .ssn-dd-top { display: flex; gap: 6px; align-items: center; margin: 0 0 6px; }
+#stashModal .ssn-dd-top input.ssn-studio-find { flex: 1 1 auto; min-width: 0; margin: 0; }
+#stashModal .ssn .ssn-dd-done { flex: 0 0 auto; background: #6c5ce7; border-color: #6c5ce7; color: #fff; font-weight: 600; }
+#stashModal .ssn .ssn-dd-done-bottom { display: block; width: 100%; margin-top: 6px; padding: 9px 12px; }
 #stashModal .ssn .ssn-studio-opt.net { font-weight: 600; }
 #stashModal .ssn .ssn-studio-opt.child { padding-left: 24px; }
 /* picker 14.6 / native 14.10: studio names on cards open the studio view. */
@@ -252,6 +286,15 @@
     let revealAll = false;
     const unblurBtn = () => '<button type="button" class="ssn-unblur" data-unblur>' +
       (revealAll ? '&#128584; Blur all' : '&#128065; Unblur all') + '</button>';
+    // The search view's own, in the Search row (picker 15.26 / native 15.35).
+    const eyeBtn = () => '<button type="button" class="ssn-eye" data-unblur title="' +
+      (revealAll ? 'Blur all covers again' : 'Unblur all covers') + '">' + (revealAll ? '&#128584;' : '&#128065;') + '</button>';
+    // In a Stash hunt (scray-stash-hunt.js) the hunt bar already has ▶, and
+    // the studio of the hunt's last match is offered as a pill.
+    const hunt = window.scrayStashHunt;
+    const inHunt = !!(hunt && typeof hunt.optsFor === 'function' && hunt.optsFor(video));
+    const huntStudio = inHunt && typeof hunt.suggestStudio === 'function'
+      ? String(hunt.suggestStudio(video) || '').trim() : '';
     const headingWas = heading ? heading.textContent : '';
 
     // The studio + performer box (picker 14.19 / native 14.31). Kept out here
@@ -276,7 +319,23 @@
     closeBtn.type = 'button';
     closeBtn.className = 'modal-btn modal-btn-cancel';
     closeBtn.textContent = 'Close';
+    // ▶ preview between Back and Close (picker 15.27 / native 15.36), on every
+    // view, when there's a file to play - not on the Stash button's own card.
+    let playBtn = null;
+    if (video && video.filename) {
+      playBtn = document.createElement('button');
+      playBtn.type = 'button';
+      playBtn.className = 'modal-btn modal-btn-secondary ssn-foot-play';
+      playBtn.style.cssText = 'flex:0 0 64px;width:64px;min-width:0;';
+      playBtn.title = 'Preview this file';
+      playBtn.innerHTML = '&#9654;';
+      playBtn.addEventListener('click', () => {
+        if (busyAccept || finished) return;
+        preview(video, host.closest('.basket-json-modal') || null);
+      });
+    }
     actions.appendChild(backBtn);
+    if (playBtn) actions.appendChild(playBtn);
     actions.appendChild(closeBtn);
 
     const finish = (result) => {
@@ -291,6 +350,9 @@
       host.removeEventListener('focusin', onFocusIn);
       backBtn.remove();
       closeBtn.remove();
+      if (playBtn) playBtn.remove();
+      document.getElementById('ssnPillMenu')?.remove();
+      document.getElementById('ssnTakeMenu')?.remove();
       defaults.forEach(b => { b.style.display = b.dataset.ssnDisplay || ''; });
       if (heading) heading.textContent = headingWas;
       if (typeof opts.onDone === 'function') opts.onDone(result || null);
@@ -547,7 +609,7 @@
       }
       backBtn.textContent = stack.length > 1 ? '‹ Back' : (opts.rootBackLabel || '‹ Back to lookup');
 
-      host.innerHTML = '<div class="ssn">' + finderHtml() +
+      host.innerHTML = '<div class="ssn">' + (e.type === 'search' ? rfilterHtml(e) : '') + finderHtml() +
         (e.type === 'home'
           ? '<div class="ssn-home">Type a studio&rsquo;s or performer&rsquo;s name, then pick one to open their page.</div>' +
             // 🎯 Stash hunt (picker 15.23 / native 15.32, scray-stash-hunt.js).
@@ -572,10 +634,9 @@
         const nb = host.querySelector('input.ssn-term');
         if (nb) { nb.focus(); nb.setSelectionRange(nb.value.length, nb.value.length); }
       }
-      const wantDd = focusDd || (e.studioFocus ? 'main' : e.subFocus ? 'sub' : '');
+      const wantDd = focusDd || Object.keys(DD).find(k => e[DD[k].focus]) || '';
       if (wantDd) {
-        e.studioFocus = false;
-        e.subFocus = false;
+        Object.keys(DD).forEach(k => { e[DD[k].focus] = false; });
         const sb = host.querySelector('.ssn-studio[data-dd="' + wantDd + '"] input.ssn-studio-find');
         if (sb) { try { sb.focus({ preventScroll: true }); } catch (_) { sb.focus(); } }
       }
@@ -633,50 +694,207 @@
       studioStart = out.length;
       return out.concat(extra);
     })();
-    const ptagsHtml = () => '<div class="ssn-ptags">' +
-      pathTags.map((t, i) => '<button type="button" class="ssn-ptag' + (i >= studioStart ? ' ssn-ptag-studio' : '') +
-        '" data-ptag="' + i + '"' + (i >= studioStart ? ' title="Studio name mapped in manage-data"' : '') +
-        '>' + esc(t) + '</button>').join('') +
+    // Folder tags toggle their words in the box. Studio pills - the names the
+    // folder tags stand for, and in a hunt the studio of its last match - open
+    // a menu (picker 15.27 / native 15.36): filter these results, open the
+    // studio's page, or add to the search words.
+    const ptagsHtml = (e) => '<div class="ssn-ptags">' +
+      (huntStudio
+        ? '<button type="button" class="ssn-ptag ssn-ptag-hunt" data-pstudio="' + esc(huntStudio) + '" data-pname="' + esc(huntStudio) +
+          '" title="Studio of the hunt&rsquo;s last match">&#127919; ' + esc(huntStudio) + '</button>'
+        : '') +
+      pathTags.map((t, i) => i >= studioStart
+        ? '<button type="button" class="ssn-ptag ssn-ptag-studio" data-pstudio="' + esc(t) + '" data-pname="' + esc(t) +
+          '" title="Studio name mapped in manage-data">' + esc(t) + '</button>'
+        : '<button type="button" class="ssn-ptag" data-ptag="' + i + '" data-pname="' + esc(t) + '">' + esc(t) + '</button>').join('') +
       '</div>';
     const reEsc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const tagRe = (t) => new RegExp('(^|\\s)' + reEsc(t) + '(?=\\s|$)', 'i');
     function paintPtags() {
       const box = host.querySelector('input.ssn-term');
       if (!box) return;
-      host.querySelectorAll('.ssn-ptag').forEach(b => {
-        const t = pathTags[+b.dataset.ptag];
+      const e = top();
+      host.querySelectorAll('.ssn-ptag[data-pname]').forEach(b => {
+        const t = b.dataset.pname;
         b.classList.toggle('on', !!t && tagRe(t).test(box.value));
+        // A studio pill that is filtering the results gets an outline.
+        b.classList.toggle('filt', !!(e && b.dataset.pstudio && rfHas(e, 'rfs', t)));
       });
     }
-    function togglePtag(i) {
+    function toggleWord(t) {
       const box = host.querySelector('input.ssn-term');
-      const t = pathTags[i];
       if (!box || !t) return;
       box.value = tagRe(t).test(box.value)
         ? box.value.replace(tagRe(t), ' ').replace(/\s+/g, ' ').trim()
         : (box.value.trim() + ' ' + t).trim();
       paintPtags();
     }
+    function togglePtag(i) { toggleWord(pathTags[i]); }
+
+    // ---- filtering the search results (picker 15.26 / native 15.35) --------
+    // By studio and by performer, from what is in the results. Searchable
+    // dropdowns like the profile views' (picker 15.27 / native 15.36), each
+    // taking several: any of the studios, all of the performers together.
+    // Kept on the entry, so a refined search and Back keep them.
+    const lk = (x) => String(x ?? '').normalize('NFC').trim().toLowerCase();
+    // Names compared without spaces or punctuation: a folder's "Teenfidelity"
+    // is StashDB's "Teen Fidelity".
+    const ck = (x) => lk(x).replace(/[^\p{L}\p{N}]+/gu, '');
+    const rfList = (e, dd) => e[DD[dd].picks] || (e[DD[dd].picks] = []);
+    const rfHas = (e, dd, name) => rfList(e, dd).some(x => x.k === ck(name));
+    function rfToggle(e, dd, name) {
+      const list = rfList(e, dd), k = ck(name);
+      if (!k) return;
+      e[DD[dd].picks] = list.some(x => x.k === k) ? list.filter(x => x.k !== k) : list.concat([{ k, name }]);
+    }
+    function rfPass(e, c) {
+      const sts = rfList(e, 'rfs'), pfs = rfList(e, 'rfp');
+      if (sts.length && !sts.some(x => x.k === ck(c.studio))) return false;
+      if (pfs.length && !pfs.every(x => (c.cast || []).some(p => ck(p.name) === x.k))) return false;
+      return true;
+    }
+    function rfCounts(e) {
+      const st = new Map(), pf = new Map();
+      ((e.data && e.data.scenes) || []).forEach(c => {
+        if (c.studio) { const k = ck(c.studio); const x = st.get(k) || { k, name: c.studio, n: 0 }; x.n++; st.set(k, x); }
+        const seen = new Set();
+        (c.cast || []).forEach(p => {
+          const k = ck(p.name);
+          if (!k || seen.has(k)) return;
+          seen.add(k);
+          const x = pf.get(k) || { k, name: p.name, n: 0 }; x.n++; pf.set(k, x);
+        });
+      });
+      const order = (m) => [...m.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+      return { rfs: order(st), rfp: order(pf) };
+    }
+    function rfilterHtml(e) {
+      const n = e.data ? e.data.scenes.length : 0;
+      if (!n && !rfList(e, 'rfs').length && !rfList(e, 'rfp').length) return '';
+      const counts = rfCounts(e);
+      const open = e.rfsOpen ? 'rfs' : e.rfpOpen ? 'rfp' : '';
+      const LBL = { rfs: ['Studio', 'studios'], rfp: ['Performer', 'performers'] };
+      const btn = (dd) => {
+        const picks = rfList(e, dd);
+        const [one, many] = LBL[dd];
+        const label = !picks.length ? 'All ' + many + ' (' + counts[dd].length + ')'
+          : picks.length <= 2 ? picks.map(x => x.name).join(dd === 'rfs' ? ', ' : ' + ')
+          : picks.slice(0, 2).map(x => x.name).join(dd === 'rfs' ? ', ' : ' + ') + ' +' + (picks.length - 2);
+        return '<button type="button" class="ssn-studio-btn' + (picks.length ? ' on' : '') + '" data-rf-toggle="' + dd + '" ' +
+            'title="' + (picks.length ? (picks.length > 1 ? one + 's' : one) + ': ' + esc(picks.map(x => x.name).join(', ')) : 'Filter the results by ' + one.toLowerCase()) + '">' +
+            esc(label) + ' ' + (open === dd ? '&#9652;' : '&#9662;') + '</button>' +
+          (picks.length ? '<button type="button" class="ssn-rf-x" data-rf-pick="" data-dd="' + dd + '" title="All ' + many + '">&#10005;</button>' : '');
+      };
+      let pop = '';
+      if (open) {
+        const picks = rfList(e, open);
+        const [one, many] = LBL[open];
+        const opts = counts[open].slice();
+        picks.forEach(pk => { if (!opts.some(o => o.k === pk.k)) opts.push({ k: pk.k, name: pk.name, n: 0 }); });
+        const isOn = (k) => picks.some(x => x.k === k);
+        opts.sort((a, b) => (isOn(b.k) ? 1 : 0) - (isOn(a.k) ? 1 : 0));
+        pop = '<div class="ssn-studio-pop">' +
+          '<div class="ssn-studio-how">' + (open === 'rfs' ? 'Pick several to see scenes from any of them'
+                                                         : 'Pick several to see scenes they&rsquo;re all in together') + '</div>' +
+          '<div class="ssn-dd-top"><input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
+            'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + ' in the results&hellip;" value="' + esc(e[DD[open].term] || '') + '">' +
+            doneBtn(open) + '</div>' +
+          '<div class="ssn-studio-list">' +
+            '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-dd="' + open + '" data-rf-pick="">All ' + many + '</button>' +
+            opts.map(o => '<button type="button" class="ssn-studio-opt' + (isOn(o.k) ? ' on' : '') + '" data-dd="' + open + '" ' +
+              'data-rf-pick="' + esc(o.name) + '" data-studio-name="' + esc(o.name) + '">' +
+              '<span>' + (isOn(o.k) ? '&#10003; ' : '') + esc(o.name) + '</span><small>' + o.n + '</small></button>').join('') +
+            '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
+          '</div>' +
+          doneBtn(open, true) +
+        '</div>';
+      }
+      // One wrapper, named after the open list, so paintStudioList narrows it
+      // and the repaint gives its box the keyboard back.
+      return '<div class="ssn-studio ssn-rfilter" data-dd="' + (open || 'rfs') + '">' +
+        '<div class="ssn-rf-row">' + btn('rfs') + btn('rfp') + '</div>' + pop + '</div>';
+    }
+
+    // The studio pills' menu (picker 15.27 / native 15.36), like a performer
+    // chip's in the Stash modal: on top of the modal, gone with the navigator.
+    function pillMenu(name) {
+      document.getElementById('ssnPillMenu')?.remove();
+      const e = top();
+      if (!e || e.type !== 'search' || !name) return;
+      const n = ((e.data && e.data.scenes) || []).filter(c => ck(c.studio) === ck(name)).length;
+      const filtering = rfHas(e, 'rfs', name);
+      const box = host.querySelector('input.ssn-term');
+      const inWords = !!(box && tagRe(name).test(box.value));
+      const m = document.createElement('div');
+      m.className = 'basket-json-modal';
+      m.id = 'ssnPillMenu';
+      m.style.cssText = 'transform:none;z-index:2147483647;';
+      m.innerHTML =
+        '<div class="basket-json-modal-content" style="transform:none;max-width:340px;">' +
+          '<h3 style="margin-top:0;">' + esc(name) + '</h3>' +
+          '<div class="ssn-pm-note">' + (e.data ? (n ? n + ' of these ' + e.data.scenes.length + ' results' : 'Not in these results') : 'No results yet') + '</div>' +
+          '<div style="display:flex;flex-direction:column;gap:8px;">' +
+            '<button type="button" class="modal-btn modal-btn-primary" data-pm="filter">' +
+              (filtering ? '&#10005; Stop filtering by it' : '&#8853; Filter these results') + '</button>' +
+            '<button type="button" class="modal-btn modal-btn-secondary" data-pm="page">&#128269; Open the studio&rsquo;s page</button>' +
+            '<button type="button" class="modal-btn modal-btn-secondary" data-pm="words">' +
+              (inWords ? '&#8722; Take out of the search &amp; search again' : '&#43; Add to the search &amp; search') + '</button>' +
+            '<button type="button" class="modal-btn modal-btn-cancel" data-pm="">Cancel</button>' +
+          '</div>' +
+        '</div>';
+      m.addEventListener('click', (ev) => {
+        if (ev.target === m) { m.remove(); return; }
+        const b = ev.target.closest('[data-pm]');
+        if (!b) return;
+        ev.stopPropagation();
+        m.remove();
+        if (finished || top() !== e) return;
+        if (b.dataset.pm === 'filter') { e.rfsOpen = e.rfpOpen = false; rfToggle(e, 'rfs', name); paint(false, true); }
+        else if (b.dataset.pm === 'page') push({ type: 'studio', id: '', name, sceneId: '' });
+        else if (b.dataset.pm === 'words') {
+          // In or out of the words, then the search runs with them.
+          toggleWord(name);
+          const bx = host.querySelector('input.ssn-term');
+          if (bx) search(bx.value);
+        }
+      });
+      document.body.appendChild(m);
+    }
 
     function searchHtml(e) {
-      const n = e.data ? e.data.scenes.length : 0;
-      const label = e.data ? (n ? n + ' result' + (n === 1 ? '' : 's') : '') : '';
-      const list = e.data && !n && !e.busy && !e.error
+      const all = e.data ? e.data.scenes.length : 0;
+      const shown = e.data ? sortedScenes(e).filter(x => rfPass(e, x.s)) : [];
+      const n = shown.length;
+      const sts = rfList(e, 'rfs'), pfs = rfList(e, 'rfp');
+      const filtered = !!(sts.length || pfs.length);
+      const label = e.data ? (all ? (filtered ? n + ' of ' + all : all) + ' result' + (all === 1 ? '' : 's') : '') : '';
+      let none = '';
+      if (e.data && all && !n && filtered) {
+        const b = (x) => '<b>' + esc(x.name) + '</b>';
+        const what = [sts.length ? 'from ' + sts.map(b).join(' or ') : '', pfs.length ? 'with ' + pfs.map(b).join(' and ') : '']
+          .filter(Boolean).join(' ');
+        const bits = ['<span>Nothing in these results ' + what + '.</span>'];
+        // A page to go to instead - three at most.
+        sts.map(x => ({ x, a: 'data-stpage' })).concat(pfs.map(x => ({ x, a: 'data-pfpage' }))).slice(0, 3).forEach(({ x, a }) =>
+          bits.push('<button type="button" class="ssn-go-page" ' + a + '="' + esc(x.name) + '">Open ' + esc(x.name) + '&rsquo;s page &rsaquo;</button>'));
+        bits.push('<button type="button" data-rfclear>Show all ' + all + '</button>');
+        none = '<div class="ssn-rf-none">' + bits.join('') + '</div>';
+      }
+      const list = e.data && !all && !e.busy && !e.error
         ? '<div class="ssn-empty">Nothing came back for those words.<br>' +
           'Try the performer&rsquo;s name, or the studio and a couple of words from the title.</div>'
-        : sortedScenes(e).map(x => cardHtml(x.s, x.i, null)).join('');
+        : none || shown.map(x => cardHtml(x.s, x.i, null)).join('');
       return '' +
         '<div class="ssn-refine">' +
           '<input class="ssn-term" type="search" enterkeyhint="search" spellcheck="false" autocomplete="off" ' +
                  'autocorrect="off" autocapitalize="off" placeholder="performer name, studio, title words&hellip;" ' +
                  'value="' + esc(e.term) + '">' +
-          ptagsHtml() +
+          ptagsHtml(e) +
           '<div class="ssn-btns">' +
             '<button type="button" data-go>Search</button>' +
-            '<button type="button" class="ssn-play" data-play title="Preview this file">&#9654;</button>' +
             '<button type="button" data-camel title="Split CamelCase and separators into words, drop resolution noise, then search">de-Camel</button>' +
             '<button type="button" data-fname title="Start again from this file&rsquo;s name">Filename</button>' +
-            unblurBtn() +
+            eyeBtn() +
           '</div>' +
         '</div>' +
         stateHtml(e, label +
@@ -849,8 +1067,33 @@
     // its own state on the entry.
     const DD = {
       main: { picks: 'picks',    open: 'studioOpen', term: 'studioTerm', focus: 'studioFocus' },
-      sub:  { picks: 'subPicks', open: 'subOpen',    term: 'subTerm',    focus: 'subFocus' }
+      sub:  { picks: 'subPicks', open: 'subOpen',    term: 'subTerm',    focus: 'subFocus' },
+      // The search view's result filters (picker 15.27 / native 15.36).
+      rfs:  { picks: 'rfStudios', open: 'rfsOpen', term: 'rfsTerm', focus: 'rfsFocus' },
+      rfp:  { picks: 'rfPerfs',   open: 'rfpOpen', term: 'rfpTerm', focus: 'rfpFocus' }
     };
+
+    // Done (picker 15.31 / native 15.40): closes the list it sits in - beside
+    // the search box, and again under the list, where the thumb is after
+    // scrolling through it.
+    const doneBtn = (dd, bottom) => '<button type="button" class="ssn-dd-done' + (bottom ? ' ssn-dd-done-bottom' : '') +
+      '" data-dd-done="' + dd + '" title="Close the list">' + (bottom ? '&#10003; Done' : 'Done') + '</button>';
+    function closeDd(dd) {
+      const e = top();
+      const K = DD[dd];
+      if (!e || !K) return;
+      e[K.open] = false;
+      e[K.focus] = false;
+      paint(false, true);
+      // Back up to the dropdown's own row when the list had scrolled it away,
+      // so what it filtered is straight underneath.
+      const row = host.querySelector('.ssn-studio[data-dd="' + dd + '"]') ||
+                  (/^rf/.test(dd) ? host.querySelector('.ssn-rfilter') : null);
+      if (row) {
+        const dy = row.getBoundingClientRect().top - host.getBoundingClientRect().top;
+        if (dy < 0) host.scrollTop += dy - 4;
+      }
+    }
 
     function ddOptions(e, dd) {
       if (dd === 'sub') {
@@ -907,8 +1150,9 @@
       if (e[K.open]) {
         pop = '<div class="ssn-studio-pop">' +
           '<div class="ssn-studio-how">' + how + '</div>' +
-          '<input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
+          '<div class="ssn-dd-top"><input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
             'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + '&hellip;" value="' + esc(e[K.term] || '') + '">' +
+            doneBtn(dd) + '</div>' +
           '<div class="ssn-studio-list">' +
             '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-dd="' + dd + '" data-studio-pick="">All ' + many + '</button>' +
             // Picked ones first, so they're easy to find and untick.
@@ -921,6 +1165,7 @@
               '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>').join('') +
             '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
           '</div>' +
+          doneBtn(dd, true) +
         '</div>';
       }
       return '<div class="ssn-studio" data-dd="' + dd + '">' +
@@ -1116,6 +1361,9 @@
         (moreBits ? '<details class="ssn-more"><summary>' + moreLabel + '</summary>' + moreBits + '</details>' : '') +
         '<div class="ssn-foot">' +
           (canAccept ? '<button type="button" class="ssn-accept" data-accept="' + i + '">Accept &amp; submit</button>' : '') +
+          (canAccept && typeof opts.onTake === 'function' && (c.studio || (c.cast || []).length)
+            ? '<button type="button" class="ssn-take" data-take="' + i + '" title="Put this scene&rsquo;s studio and/or performers into this file&rsquo;s details, without attaching the scene">Take studio/performers</button>'
+            : '') +
           (c.stash_url ? '<button type="button" class="ssn-ext" data-ext="' + esc(c.stash_url) + '">StashDB &#8599;</button>' : '') +
           (googleUrl(c) ? '<button type="button" class="ssn-google ssn-google-card" title="Search Google for this scene" data-ext="' +
                           esc(googleUrl(c)) + '">Google &#8599;</button>' : '') +
@@ -1215,6 +1463,74 @@
 
     // A two-tap confirm rather than confirm(): a native dialog in FLS lands
     // unrotated behind the player, and on iOS it can wedge the web view.
+    // Take studio/performers (picker 15.33 / native 15.42): pick which, then
+    // they go into this file's details and the navigator closes onto the
+    // lookup, the way Accept does.
+    function takeMenu(i) {
+      document.getElementById('ssnTakeMenu')?.remove();
+      const e = top();
+      const c = e && e.data && e.data.scenes[i];
+      if (!c || busyAccept || finished) return;
+      const cast = (c.cast || []).filter(p => p && p.name);
+      const m = document.createElement('div');
+      m.className = 'basket-json-modal';
+      m.id = 'ssnTakeMenu';
+      m.style.cssText = 'transform:none;z-index:2147483647;';
+      m.innerHTML =
+        '<div class="basket-json-modal-content" style="transform:none;max-width:380px;max-height:82vh;overflow-y:auto;">' +
+          '<h3 style="margin-top:0;">Take from this scene</h3>' +
+          '<div class="ssn-tk-note">Into this file&rsquo;s own details - the scene itself isn&rsquo;t attached. ' +
+            'Performers are added to any already there; the studio replaces.</div>' +
+          (c.studio ? '<div class="ssn-tk-head">Studio</div>' +
+            '<label><input type="checkbox" data-tk-studio checked><span>' + esc(c.studio) + '</span></label>' : '') +
+          (cast.length ? '<div class="ssn-tk-head">Performers</div>' + cast.map((p, k) =>
+            '<label><input type="checkbox" data-tk-p="' + k + '" checked><span>' + esc(p.name) +
+            (p.gender_short && p.gender_short !== '?' ? ' <small>' + esc(p.gender_short) + '</small>' : '') + '</span></label>').join('') : '') +
+          '<div class="ssn-tk-err"></div>' +
+          '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">' +
+            '<button type="button" class="modal-btn modal-btn-primary" data-tk="save">Save to this file&rsquo;s details</button>' +
+            '<button type="button" class="modal-btn modal-btn-cancel" data-tk="">Cancel</button>' +
+          '</div>' +
+        '</div>';
+      const saveB = () => m.querySelector('[data-tk="save"]');
+      const picked = () => ({
+        studio: m.querySelector('[data-tk-studio]:checked') ? c.studio : '',
+        performers: cast.filter((p, k) => m.querySelector('[data-tk-p="' + k + '"]:checked'))
+                        .map(p => ({ name: p.name, gender: p.gender_short || '' }))
+      });
+      m.addEventListener('change', () => {
+        const w = picked();
+        saveB().disabled = !w.studio && !w.performers.length;
+      });
+      m.addEventListener('click', async (ev) => {
+        if (ev.target === m && !busyAccept) { m.remove(); return; }
+        const b = ev.target.closest('[data-tk]');
+        if (!b || busyAccept) return;
+        ev.stopPropagation();
+        if (!b.dataset.tk) { m.remove(); return; }
+        const want = picked();
+        if (!want.studio && !want.performers.length) return;
+        busyAccept = true;
+        b.disabled = true;
+        b.textContent = 'Saving…';
+        backBtn.disabled = closeBtn.disabled = true;
+        try {
+          const taken = await opts.onTake(want, c);
+          busyAccept = false;
+          backBtn.disabled = closeBtn.disabled = false;
+          m.remove();
+          finish({ taken });
+        } catch (err) {
+          busyAccept = false;
+          backBtn.disabled = closeBtn.disabled = false;
+          b.disabled = false;
+          b.innerHTML = 'Save to this file&rsquo;s details';
+          m.querySelector('.ssn-tk-err').textContent = 'Could not save: ' + (err && err.message || err);
+        }
+      });
+      document.body.appendChild(m);
+    }
+
     async function accept(btn) {
       const e = top();
       const c = e && e.data && e.data.scenes[+btn.dataset.accept];
@@ -1313,6 +1629,39 @@
 
       if (btn.hasAttribute('data-go')) { search(box && box.value); box && box.blur(); return; }
       if (btn.dataset.ptag !== undefined) { togglePtag(+btn.dataset.ptag); return; }
+      if (btn.dataset.pstudio !== undefined) { pillMenu(btn.dataset.pstudio); return; }
+      if (btn.dataset.ddDone) { closeDd(btn.dataset.ddDone); return; }
+      if (btn.dataset.rfToggle) {
+        const e = top();
+        if (!e || e.type !== 'search') return;
+        const dd = btn.dataset.rfToggle, other = dd === 'rfs' ? 'rfp' : 'rfs';
+        e[DD[dd].open] = !e[DD[dd].open];
+        e[DD[dd].focus] = e[DD[dd].open];
+        e[DD[other].open] = false;
+        paint(false, true);
+        return;
+      }
+      if (btn.dataset.rfPick !== undefined) {
+        const e = top();
+        const dd = btn.dataset.dd;
+        if (!e || e.type !== 'search' || !DD[dd]) return;
+        // "All" or the x: clear that list and close it; a name toggles and
+        // the list stays open for the next one.
+        if (!btn.dataset.rfPick) { e[DD[dd].picks] = []; e[DD[dd].open] = false; e[DD[dd].term] = ''; }
+        else rfToggle(e, dd, btn.dataset.rfPick);
+        paint(false, true);
+        return;
+      }
+      if (btn.hasAttribute('data-rfclear')) {
+        const e = top();
+        if (!e) return;
+        e.rfStudios = []; e.rfPerfs = [];
+        e.rfsOpen = e.rfpOpen = false;
+        paint(false, true);
+        return;
+      }
+      if (btn.dataset.stpage !== undefined) { push({ type: 'studio', id: '', name: btn.dataset.stpage || '', sceneId: '' }); return; }
+      if (btn.dataset.pfpage !== undefined) { push({ type: 'performer', id: '', name: btn.dataset.pfpage || '', sceneId: '' }); return; }
       if (btn.hasAttribute('data-unblur')) {
         revealAll = !revealAll;
         host.querySelectorAll('.ssn-cover[data-cover]').forEach(c => {
@@ -1322,7 +1671,10 @@
           if (v) v.textContent = 'Tap 3 times';
         });
         host.querySelectorAll('[data-unblur]').forEach(b => {
-          b.innerHTML = revealAll ? '&#128584; Blur all' : '&#128065; Unblur all';
+          if (b.classList.contains('ssn-eye')) {
+            b.innerHTML = revealAll ? '&#128584;' : '&#128065;';
+            b.title = revealAll ? 'Blur all covers again' : 'Unblur all covers';
+          } else b.innerHTML = revealAll ? '&#128584; Blur all' : '&#128065; Unblur all';
         });
         return;
       }
@@ -1381,6 +1733,7 @@
       if (btn.dataset.ext) { openExternal(btn.dataset.ext); return; }
       if (btn.dataset.lib !== undefined) { openLibrary(+btn.dataset.lib); return; }
       if (btn.dataset.accept !== undefined) { accept(btn); return; }
+      if (btn.dataset.take !== undefined) { takeMenu(+btn.dataset.take); return; }
       if (btn.hasAttribute('data-more')) { const e = top(); if (e && !e.busy) load(e, true); return; }
       if (btn.hasAttribute('data-libonly')) { if (!(top() || {}).busy) toggleLibOnly(); return; }
       if (btn.hasAttribute('data-filter')) {

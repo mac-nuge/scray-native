@@ -23,6 +23,15 @@
 // (TinEye's Search, say). The handle is { mount(modal), loaded(matched, modal),
 // closed(modal) }.
 //
+// picker 15.30 / native 15.39: 📁 and 🏷 are icons only, the same width as ▶ and ✏️.
+// picker 15.29 / native 15.38: ✏️ in the bar opens the details form (enter or
+// correct the Stash details by hand) without going Back to the lookup first.
+// picker 15.28 / native 15.37: the scope sheet is a card clear of the
+// corner-button dock (and the gear), with 🎲 All files to go back to the
+// whole library in one tap.
+// picker 15.26 / native 15.35: the studio of the last match (any run, kept on
+// this device) is offered to the navigator as a pill - suggestStudio(video).
+//
 // Started from 🎯 Stash hunt on the Stash button's home view, or
 // window.scrayStashHunt.start(); in Picker also ?hunt=1.
 (function () {
@@ -32,6 +41,8 @@
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const api = (action, opts) => window.scrayApiCall(action, opts || {});
   const LS_SCOPE = 'scray.huntScope';
+  const LS_STUDIO = 'scray.huntLastStudio';
+  let lastStudio = (() => { try { return localStorage.getItem(LS_STUDIO) || ''; } catch (e) { return ''; } })();
   const ROW_CAP = 400;   // ⚙️ rows drawn per sheet tab before "type to narrow"
 
   // ---- small helpers -------------------------------------------------------
@@ -253,16 +264,19 @@
 #stashModal .sh-won-line { margin: 2px 2px 6px; font-weight: 700; color: #1e7e34; font-size: .85rem; }
 #stashModal .sh-acts { display: flex; gap: 5px; }
 #stashModal .sh-acts button { flex: 1 1 0; padding: 7px 3px; font-size: .78rem; }
-#stashModal .sh-acts button[data-h="play"] { flex: 0 0 38px; }
+#stashModal .sh-acts button[data-h="play"], #stashModal .sh-acts button[data-h="edit"],
+#stashModal .sh-acts button[data-h="folder"], #stashModal .sh-acts button[data-h="tag"] { flex: 0 0 38px; }
 #stashModal .sh-bar .sh-next { flex: 1.4 1 0; background: #6f42c1; border-color: #6f42c1; color: #fff; font-weight: 700; }
 #stashModal .sh-bar.sh-won .sh-next { background: #28a745; border-color: #28a745; }
 #stashModal .sh-bar button.sh-on { background: #6f42c1; border-color: #6f42c1; color: #fff; }
 #stashModal .sh-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
 #stashModal .sh-tags button { padding: 3px 9px; border-radius: 12px; border-color: #b9d4f5; background: #eaf3ff; color: #0b5ed7; font-size: .76rem; }
 #stashModal .sh-tags .sh-none { color: #888; font-size: .76rem; }
-#stashHuntSheet { position: fixed; inset: 0; z-index: 2147483647; background: rgba(0,0,0,.45); display: flex; align-items: flex-end; justify-content: center; }
-#stashHuntSheet .shs { width: 100%; max-width: 640px; max-height: 88vh; max-height: 88dvh; display: flex; flex-direction: column; background: #fff; color: #222; border-radius: 14px 14px 0 0; padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px)); box-sizing: border-box; font-size: .88rem; text-align: left; }
-@media (min-width: 700px) { #stashHuntSheet { align-items: center; } #stashHuntSheet .shs { border-radius: 14px; max-height: 80vh; } }
+#stashHuntSheet { position: fixed; inset: 0; z-index: 2147483647; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: calc(env(safe-area-inset-top, 0px) + 12px) 10px calc(env(safe-area-inset-bottom, 0px) + 12px); }
+#stashHuntSheet .shs { width: 100%; max-width: 640px; max-height: 100%; display: flex; flex-direction: column; background: #fff; color: #222; border-radius: 14px; padding: 12px; box-sizing: border-box; font-size: .88rem; text-align: left; }
+#stashHuntSheet h3 { padding-right: 56px; }
+#stashHuntSheet .shs-all { display: block; width: 100%; margin: 0 0 8px; padding: 9px 12px; text-align: left; border-color: #cbbef5; background: #f3efff; color: #5b3fd1; font-weight: 600; }
+#stashHuntSheet .shs-all.on { background: #6f42c1; border-color: #6f42c1; color: #fff; }
 #stashHuntSheet button { width: auto; min-width: 0; margin: 0; padding: 7px 12px; font-size: .82rem; line-height: 1.2; border: 1px solid #ccc; border-radius: 7px; background: #f4f4f6; color: #222; cursor: pointer; white-space: nowrap; }
 #stashHuntSheet h3 { margin: 0 0 8px; font-size: 1.05rem; }
 #stashHuntSheet .shs-note { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; background: #fff7e0; border-left: 3px solid #e0a800; font-size: .82rem; }
@@ -318,8 +332,9 @@
       (won ? '<div class="sh-won-line">' + (S.cur.auto ? '✅ Matched by fingerprint!' : '✅ Matched!') + ' On to the next one?</div>' : '') +
       '<div class="sh-acts">' +
         '<button type="button" data-h="play" title="Preview in the player">▶</button>' +
-        '<button type="button" data-h="folder" class="' + (inThisFolder ? 'sh-on' : '') + '" title="Next ones from this folder">📁 Folder</button>' +
-        '<button type="button" data-h="tag" class="' + (S.tagMenu ? 'sh-on' : '') + '" title="Next ones with one of this file’s tags">🏷 Tag</button>' +
+        '<button type="button" data-h="edit" title="Enter the Stash details by hand">✏️</button>' +
+        '<button type="button" data-h="folder" class="' + (inThisFolder ? 'sh-on' : '') + '" title="Next ones from this folder">📁</button>' +
+        '<button type="button" data-h="tag" class="' + (S.tagMenu ? 'sh-on' : '') + '" title="Next ones with one of this file’s tags">🏷</button>' +
         '<button type="button" data-h="never" title="Never show this file in the hunt again">🚫 Never</button>' +
         '<button type="button" data-h="next" class="sh-next">Next ⏭</button>' +
       '</div>' +
@@ -341,6 +356,9 @@
     }
     switch (b.dataset.h) {
       case 'scope': openSheet({}); break;
+      case 'edit':
+        if (S.modal && typeof S.modal.scrayOpenDetails === 'function') S.modal.scrayOpenDetails();
+        break;
       case 'play':
         if (window.scrayStashNav) window.scrayStashNav.preview(v, S.modal);
         break;
@@ -373,9 +391,14 @@
       S.bar = bar;
       paintBar();
     },
-    loaded(matched, modal) {
+    loaded(matched, modal, scene) {
       if (!S || !S.cur || modal !== S.modal) return;
       const c = S.cur;
+      // The studio it matched to: the next file is likely from it too.
+      if (matched && scene && scene.studio) {
+        lastStudio = String(scene.studio).trim();
+        try { localStorage.setItem(LS_STUDIO, lastStudio); } catch (e) { /* this page load only */ }
+      }
       if (matched && !c.matched) {
         c.matched = true;
         c.auto = !c.loaded;
@@ -453,6 +476,17 @@
     const sheet = document.createElement('div');
     sheet.id = 'stashHuntSheet';
     document.body.appendChild(sheet);
+    // The corner-button dock (disguise.js) always draws on top, so the card
+    // keeps clear of it rather than trying to cover it: its bottom stops above
+    // the dock when the dock sits in the lower half of the screen.
+    try {
+      const dock = document.getElementById('scrayDisguiseDock');
+      const r = dock && dock.offsetParent !== null ? dock.getBoundingClientRect() : null;
+      if (r && r.height && r.top > window.innerHeight / 2) {
+        const gap = Math.round(window.innerHeight - r.top + 8);
+        sheet.style.paddingBottom = 'max(' + gap + 'px, calc(env(safe-area-inset-bottom, 0px) + 12px))';
+      }
+    } catch (e) { /* the default padding will do */ }
 
     const draftCount = () => live.filter(v => inScope(v, draft)).length;
     const has = (arr, x) => arr.some(y => lower(y) === lower(x));
@@ -500,6 +534,9 @@
         '<div class="shs">' +
           '<h3>🎯 Stash hunt - what to look at</h3>' +
           (note ? '<div class="shs-note">' + note + '</div>' : '') +
+          // Back to the whole library in one tap, whatever is ticked below.
+          '<button type="button" data-sh="all" class="shs-all' + (!S.scope.folders.length && !S.scope.tags.length ? ' on' : '') + '">' +
+            '🎲 All files, at random · ' + live.length.toLocaleString() + ' unmatched</button>' +
           '<div class="shs-tabs">' +
             '<button type="button" data-tab="folders" class="' + (tab === 'folders' ? 'on' : '') + '">📁 Folders' + (draft.folders.length ? ' (' + draft.folders.length + ')' : '') + '</button>' +
             '<button type="button" data-tab="tags" class="' + (tab === 'tags' ? 'on' : '') + '">🏷 Tags' + (draft.tags.length ? ' (' + draft.tags.length + ')' : '') + '</button>' +
@@ -509,7 +546,7 @@
             (tab === 'hidden' ? 'find a hidden file…' : tab === 'tags' ? 'find a tag…' : 'find a folder…') + '" value="' + esc(findVal) + '">' +
           '<div class="shs-list">' + listHtml() + '</div>' +
           '<div class="shs-foot">' +
-            '<button type="button" data-sh="clear">Clear</button>' +
+            '<button type="button" data-sh="clear" title="Untick every folder and tag">Clear picks</button>' +
             '<button type="button" data-sh="end">End hunt</button>' +
             '<button type="button" data-sh="go" class="go">' + (n ? 'Hunt ' + plural(n, 'file') : 'Nothing unmatched here') + '</button>' +
           '</div>' +
@@ -573,6 +610,9 @@
           close();
           advance();
           break;
+        case 'all':
+          draft.folders = []; draft.tags = [];
+          // falls through: hunt with nothing ticked - every unmatched file
         case 'go': {
           const wasCur = S.cur;
           setScope(draft);
@@ -647,6 +687,8 @@
 
   window.scrayStashHunt = {
     start, stop, optsFor, openScope: () => openSheet({}),
+    /** The studio of the hunt's last match, for the hunt's own file only. */
+    suggestStudio: (video) => (optsFor(video) ? lastStudio : ''),
     isActive: () => !!S,
     _test: { inScope, scopeLabel, folderOf, tagsOf, keyOf, getSession: () => S, newSession, setSession: (s) => { S = s; }, buildPool, inScopeLeft }
   };

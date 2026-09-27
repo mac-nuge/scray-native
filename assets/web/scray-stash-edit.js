@@ -12,6 +12,12 @@
 // The stash_edit_* actions are one-file versions of the console's, open to
 // the app key, so Native can use them without the bulk actions being opened.
 //
+// take(videoKey, { studio, performers: [{ name, gender }] }, video) (picker
+// 15.33 / native 15.42): the Stash navigator's "Take studio/performers" - puts
+// another scene's studio and/or performers into this file's details without
+// the form. Hand-entered details for an unmatched file, corrections for a
+// StashDB match; performers are added to what is there, the studio replaces.
+//
 // Usage: const ctl = window.scrayStashEdit.open({ host, actions, overlay,
 //            video, videoKey, onDone(saved) });
 // host takes the form, actions takes Save/Cancel, overlay takes the dropdown.
@@ -1031,5 +1037,81 @@
     return res;
   }
 
-  window.scrayStashEdit = { open, unmatch, _rank: rank, _parseDur: parseDur, _vocab: VOCAB };
+  // ---- take studio / performers from another scene ------------------------
+  // (picker 15.33 / native 15.42) The same saves the form makes, for the two
+  // fields, with the file's other details carried back up untouched.
+  const longGender = (short) => {
+    const hit = GENDERS.find(x => x[1] === String(short || '').toUpperCase() && x[0]);
+    return hit ? hit[0] : '';
+  };
+  async function take(videoKey, want, video) {
+    const key = String(videoKey || '');
+    if (!key) throw new Error('no file to save to');
+    want = want || {};
+    const [got] = await Promise.all([
+      api('stash_edit_get', { method: 'POST', body: { video_key: key } }),
+      loadVocab(false)
+    ]);
+    const row = got.row || {};
+    const v = {};
+    FIELDS.forEach(f => {
+      const x = row[f];
+      v[f] = (f === 'performers' || f === 'tags') ? (Array.isArray(x) ? x.slice() : [])
+           : f === 'duration_sec' ? (x === null || x === undefined ? null : +x)
+           : String(x ?? '');
+    });
+    const changed = [];
+    const studio = String(want.studio || '').trim();
+    if (studio && nameKey(studio) !== nameKey(v.studio)) { v.studio = studio; changed.push('studio'); }
+    const added = [];
+    (want.performers || []).forEach(p => {
+      const n = String(p && p.name || '').trim();
+      if (!n || v.performers.some(x => nameKey(x) === nameKey(n))) return;
+      v.performers.push(n);
+      added.push({ name: n, gender: p.gender || '' });
+    });
+    if (added.length) changed.push('performers');
+    if (!changed.length) return { unchanged: true, matched: !!row.matched, summary: 'Already in this file’s details - nothing changed.' };
+
+    // Performers the list hasn't got go in first, with StashDB's gender, so
+    // the save credits them the way the form's dropdown would.
+    for (const p of added) {
+      if (vocabFind('performer', p.name)) continue;
+      const g = longGender(p.gender);
+      await api('stash_edit_vocab_add', { method: 'POST',
+        body: { kind: 'performer', name: p.name, meta: g ? { gender: g } : {} } });
+    }
+    let action, body;
+    if (row.matched) {
+      // A StashDB match: corrections - these two plus what was corrected before.
+      action = 'stash_edit_override_save';
+      body = { video_key: key };
+      const over = row.override_fields || [];
+      FIELDS.forEach(f => { if (over.includes(f) || changed.includes(f)) body[f] = v[f]; });
+    } else {
+      // Hand-entered (new or existing): the whole entry goes up.
+      action = 'stash_edit_manual_save';
+      body = Object.assign({ video_key: key }, v);
+      if (!body.title) body.title = titleFromFilename(row.filename || (video && video.filename) || '');
+    }
+    const res = await api(action, { method: 'POST', body: { rows: [body] } });
+    if (res.skipped) {
+      const why = (res.details && res.details[0] && res.details[0].why) || 'the server skipped it';
+      throw new Error(why);
+    }
+    vocabAt = 0;
+    try { if (window.scrayStashNames) await window.scrayStashNames.refresh(true); } catch (e) { /* lists catch up later */ }
+    try {
+      if (typeof window.scrayLoadStashState === 'function') await window.scrayLoadStashState(true);
+    } catch (e) { /* the S button catches up on the next poll */ }
+    const bits = [];
+    if (changed.includes('studio')) bits.push('studio ' + studio);
+    if (added.length) bits.push((added.length === 1 ? 'performer ' : 'performers ') + added.map(p => p.name).join(', '));
+    return {
+      matched: !!row.matched, changed,
+      summary: (row.matched ? 'Saved as corrections: ' : 'Saved as your details: ') + bits.join('; ') + '.'
+    };
+  }
+
+  window.scrayStashEdit = { open, unmatch, take, _rank: rank, _parseDur: parseDur, _vocab: VOCAB };
 })();

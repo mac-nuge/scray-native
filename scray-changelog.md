@@ -4,6 +4,129 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.33 / native 15.42 — test: Take studio/performers from a Stash result
+<!-- 2026-09-27T21:10Z -->
+
+**picker** — `staging - 15.33 test: Take studio/performers from a Stash result`: `scray-stash-nav.js`, `scray-stash-edit.js`, `file-operations.js`. **native** — `stg-native - 15.42 test: Take studio/performers from a Stash result`: the same three under `assets/web/`. `scray-stash-nav.js` and `scray-stash-edit.js` are the same in both apps. Web only.
+
+- **Asked for:** next to *Accept & submit* on each result, a *Take studio/performers* that copies that scene's studio and/or performers (picked in a confirmation) into the file's manual Stash details. It's for when StashDB hasn't got the video but has others from the same studio or with the same performers, and saves opening the details form and typing them in.
+- **The button** sits beside Accept on every card that has a studio or performers, wherever Accept is offered (the Stash modal's navigator, so hunts included).
+- **The confirmation** (*Take from this scene*) lists the studio and each performer, with gender, all ticked; untick what you don't want. *Save to this file's details* is disabled when nothing is ticked.
+- **The save** (`scrayStashEdit.take`, new) makes the same saves the details form does, without the form:
+  - **Not matched, or hand-entered:** `stash_edit_manual_save` with the file's other details carried back up, and the title from the filename when there isn't one. This makes it a hand-entered match (`manual:`).
+  - **A StashDB match:** `stash_edit_override_save`, as corrections, with any earlier corrections kept.
+  - The studio replaces; performers are added to any already there.
+  - Performers not yet in the list are added first with StashDB's gender (`stash_edit_vocab_add`).
+  - Nothing new gives *Already in this file's details - nothing changed*.
+- **Afterwards** the navigator closes onto the lookup the way Accept does: reload, names and S-button refresh, the note (*Saved as your details: studio …; performers …*), the rename offer for a newly matched file, and a green hunt bar in a hunt.
+- **Tested** in Chromium with the real `scray-stash-edit.js` and `file-operations.js` against a mocked server:
+  - an unmatched hunt file, with one performer unticked: a vocab add for the new performer, a manual save with studio + the ticked performer, then back on the lookup with the note and the hunt bar green;
+  - a StashDB-matched file: an override save carrying the earlier title correction, the new studio and the merged performers, with the new performer added as MALE;
+  - taking it again: *nothing changed*.
+
+### picker 15.32 / native 15.41 — test: Studio pill Add to search runs the search
+<!-- 2026-09-27T21:00Z -->
+
+**picker** — `staging - 15.32 test: Studio pill Add to search runs the search`: `scray-stash-nav.js`. **native** — `stg-native - 15.41 test: Studio pill Add to search runs the search`: `assets/web/scray-stash-nav.js`. The same file in both. Web only.
+
+- **Asked for:** on a studio pill's menu, *Add to the search words* should also run the search.
+- The menu's third choice is now *+ Add to the search & search*. When the name is already in the box it's *− Take out of the search & search again*. Either way the words change and the search runs with them. Folder-tag pills still only toggle their words, so several can be picked before searching.
+- **Tested** in Chromium: adding ran a new search for `clip one HotStudio`, and taking it out ran one for `clip one`.
+
+### picker 15.31 / native 15.40 — test: Done button on the Stash nav dropdowns
+<!-- 2026-09-27T20:55Z -->
+
+**picker** — `staging - 15.31 test: Done button on the Stash nav dropdowns`: `scray-stash-nav.js`. **native** — `stg-native - 15.40 test: Done button on the Stash nav dropdowns`: `assets/web/scray-stash-nav.js`. The same file in both. Web only.
+
+- **Reported:** in every searchable dropdown in the Stash navigator, once you had picked one or more names you couldn't close the list. The only way to close it was its own button (▴), which had scrolled away above, so you had to scroll past the whole list to get to the results.
+- **Done** now sits in every open dropdown twice: beside its search box, and full width (*✓ Done*) under the list, where your thumb ends up after scrolling. This covers the search view's studio and performer result filters and the profile views' Studio / Performer / network dropdowns.
+- Done closes the list. If the dropdown's own row had scrolled out of view above, it scrolls back up to that row, so the filtered results are straight underneath.
+- **Tested** in Chromium: the search view's studio filter closes from the bottom Done after a pick and scrolls back to the top; the performer filter closes from the top Done; a studio view's Performer dropdown closes from the bottom Done.
+
+### picker 15.30 / native 15.39 — test: Hunt bar folder and tag as icons
+<!-- 2026-09-27T20:50Z -->
+
+**picker** — `staging - 15.30 test: Hunt bar folder and tag as icons`: `scray-stash-hunt.js`. **native** — `stg-native - 15.39 test: Hunt bar folder and tag as icons`: `assets/web/scray-stash-hunt.js`. The same file in both. Web only.
+
+- **Asked for:** *Folder* and *Tag* in the Stash hunt bar as just their icons.
+- The bar now reads ▶ ✏️ 📁 🏷 🚫 Never, Next ⏭. The four icon buttons are the same 38 px width, which leaves Never and Next more room. Their titles still say what they do, and 📁 / 🏷 still light up when active.
+
+### picker 15.29 / native 15.38 — test: Details button in the Stash hunt bar
+<!-- 2026-09-27T20:45Z -->
+
+**picker** — `staging - 15.29 test: Details button in the Stash hunt bar`: `scray-stash-hunt.js`, `file-operations.js`. **native** — `stg-native - 15.38 test: Details button in the Stash hunt bar`: `assets/web/scray-stash-hunt.js`, `assets/web/file-operations.js`. Web only.
+
+- **Reported:** in a hunt the file opens straight onto the navigator's search, so the *enter details by hand* button (on the lookup panel, behind *Back to lookup*) couldn't be found. Mac asked for the button to be added.
+- **✏️ in the hunt bar**, next to ▶, opens the details form (`scrayStashEdit`, the same form as the lookup panel's button) for matching or correcting by hand.
+  - `showStashModal` exposes it as `modal.scrayOpenDetails()`. It closes the navigator first, if it's open and not in the middle of an Accept, so Cancel on the form returns to the lookup panel, as the form always has.
+  - Saving reloads the lookup as usual, so a hand-entered match turns the hunt bar green.
+- **Tested** in Chromium with both apps' `file-operations.js`: ✏️ from the search opens the form (heading *Stash details*, navigator gone, hunt bar still there); Cancel returns to *Stash lookup* with its own buttons; Save reloads the lookup.
+
+### picker 15.28 / native 15.37 — test: Hunt scope sheet clear of the corner buttons, All files option
+<!-- 2026-09-27T20:35Z -->
+
+**picker** — `staging - 15.28 test: Hunt scope sheet clear of the corner buttons, All files option`: `scray-stash-hunt.js`. **native** — `stg-native - 15.37 test: Hunt scope sheet clear of the corner buttons, All files option`: `assets/web/scray-stash-hunt.js`. The same file in both. Web only.
+
+- **Reported** (screenshot of the scope sheet, with *Nothing unmatched in the scope you used last time*):
+  - the corner buttons (the disguise dock: X R H Xⁿ Xb 🔍 BM 🌐 COL) covered the sheet's bottom buttons, and the ⚙ covered the heading's end;
+  - there was no obvious way back to all files - the saved scope was one folder with nothing unmatched left, so Go read *Nothing unmatched here*.
+- **Clear of the dock:** the dock always draws above the page, so the sheet now keeps out of its way instead of trying to cover it.
+  - It's a centred card, like the Stash modal, instead of a sheet from the bottom edge.
+  - When the dock is in the lower half of the screen, the backdrop's bottom padding is measured from it (the dock's top plus 8 px, never less than the safe area plus 12 px), so the card's buttons stop above it.
+  - The heading keeps 56 px free on the right for the ⚙.
+- **🎲 All files, at random · N unmatched:** a full-width button under the note, lit when the scope is already all files. One tap unticks everything and hunts the whole library, keeping the file on screen if there is one.
+- *Clear* is now *Clear picks* (it only unticks; the Hunt button then starts all files).
+- **Tested** in Chromium with a stand-in dock 40 px from the bottom and a saved scope with nothing in it: the card ends above the dock, the sheet opens with the note, and 🎲 starts the hunt on all files and saves the scope as empty.
+
+### picker 15.27 / native 15.36 — test: Searchable result filters, studio pill menu, play in the footer
+<!-- 2026-09-27T20:20Z -->
+
+**picker** — `staging - 15.27 test: Searchable result filters, studio pill menu, play in the footer`: `scray-stash-nav.js`. **native** — `stg-native - 15.36 test: Searchable result filters, studio pill menu, play in the footer`: `assets/web/scray-stash-nav.js`. The same file in both. Web only.
+
+- **Asked for:**
+  1. the result filters as searchable dropdowns like the profile views';
+  2. a studio suggestion pill to offer three choices instead of adding itself to the search: filter the results, go to the profile, or add to the search terms;
+  3. the ▶ preview between *Back to lookup* and *Close*.
+- **Result filters:** the two native selects from 15.26 are now the navigator's own dropdown style. Each has a button with the current pick(s), a ✕ to clear, and a panel with a search box and the names from the results, with counts and picked ones first. Several can be picked in each: studios mean *any of them*, performers mean *all together* (the same convention as the profile views). Only one panel is open at a time. The search box takes the keyboard on open and narrows the list without a repaint (`paintStudioList`, now keyed through `DD.rfs` / `DD.rfp`).
+  - Names are compared without spaces or punctuation, so a folder's "Teenfidelity" matches StashDB's "Teen Fidelity".
+  - The empty state reads *Nothing in these results from A or B with X and Y*, with *Open …'s page* for up to three of them, and *Show all*.
+- **Studio pills** (the manage-data studio names, and the hunt's 🎯 last-match studio) open a menu. The folder-tag pills still toggle their words. The menu shows how many of the results are from that studio, then:
+  - *Filter these results* (or *Stop filtering by it*);
+  - *Open the studio's page*;
+  - *Add to the search words* (or *Take out of…*).
+  
+  A pill that is filtering gets a purple outline, and one whose words are in the box is green as before. The 🎯 pill used to filter straight away; it now goes through the same menu.
+- **▶ Preview** is in the navigator's footer between Back and Close, on every view with a file (not the Stash button's own card). It's gone from the Search row everywhere, hunt or not.
+- **Tested** in Chromium with the real Stash modal and a mocked server:
+  - dropdown search narrows the list; picks toggle and stay open; opening one list closes the other;
+  - two studios (any of) and two performers (together) filter correctly; three performers give the empty state, which has the page links; Show all clears everything;
+  - pill menu: filter works across the spacing difference, words toggle, the page opens the studio view, and Back keeps the filter;
+  - the footer ▶ floats the player with *Back to Stash*.
+
+### picker 15.26 / native 15.35 — test: Hunt search filters, eye button, last-match studio pill
+<!-- 2026-09-27T20:05Z -->
+
+**picker** — `staging - 15.26 test: Hunt search filters, eye button, last-match studio pill`: `scray-stash-nav.js`, `scray-stash-hunt.js`, `file-operations.js`. **native** — `stg-native - 15.35 test: Hunt search filters, eye button, last-match studio pill`: the same three under `assets/web/`. `scray-stash-nav.js` and `scray-stash-hunt.js` are the same in both apps. Web only.
+
+- **Asked for** (from a Stash hunt screenshot):
+  1. a filter above "Find a studio…" for the studios and performers in the results;
+  2. Unblur all as just an eye, in the Search / de-Camel row, and the ▶ removed there (the hunt bar has one);
+  3. the studio of the hunt's last match as a pill with the tag suggestions. Tapping it filters these results to that studio, and when none of them are from it, gives a way to its studio page.
+- **Result filter** (the navigator's search view, everywhere it appears): two dropdowns above the find box, *All studios (n)* and *All performers (n)*, listing what's in the loaded results with counts, most frequent first. Both apply together, and the count line reads `n of N results`. When nothing is left, it says so, with *Open <name>'s page ›* (opens the studio or performer view) and *Show all N*. The filter is kept on the search entry, so it survives a refined search and Back from a profile. It's shown only once there are results.
+- **👁** in the Search row replaces the separate *Unblur all* button on the search view; it becomes 🙈 while covers are unblurred. The studio and performer views keep their labelled button.
+- **▶ in the Search row** is left out only in a hunt, since the hunt bar has ▶ Preview. Outside a hunt the Stash modal has no other ▶, so it stays.
+- **🎯 studio pill:** the hunt keeps the studio of its last match (from the scene the lookup returns after a match, any route, including fingerprint matches). It's stored on the device (`scray.huntLastStudio`), so a later run starts with it. The pill comes first among the tag pills, in green, and only on the hunt's own file.
+  - Tapping it filters the results to that studio, and tapping again shows all.
+  - When no result is from that studio, the empty state gives *Open <studio>'s page ›*.
+  - `showStashModal` now hands the hunt the scene from the last lookup: `hunt.loaded(matched, modal, scene)`.
+- **Tested** in Chromium with the real `file-operations.js` and navigator against a mocked server:
+  - outside a hunt: ▶ kept, no pill;
+  - in a hunt: ▶ gone, 👁 toggling;
+  - studio filter to 1 of 3, then studio + performer to none, the empty state, Show all;
+  - Accept → the match's studio becomes the next file's pill;
+  - pill → filtered to none → *Open …'s page* opens the studio view → Back keeps the filter and the pill lit;
+  - pill tapped again → all results.
+
 ### native 15.34 — stable: Rescue files the plain player refuses
 <!-- 2026-09-27T19:50Z -->
 

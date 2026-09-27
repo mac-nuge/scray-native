@@ -4396,6 +4396,8 @@ async function showStashModal(video, openOpts) {
     // Whether the last load() found a match. The rename offer below only
     // fires on the change from unmatched to matched.
     let matchedNow = false;
+    // The scene the last load() found - the hunt keeps its studio (picker 15.26 / native 15.35).
+    let huntScene = null;
     let matchedStashId = '';
     // A note from the step that caused the next load(), shown once at the
     // top of what it draws - a submit's "stored locally" otherwise vanished
@@ -4476,6 +4478,11 @@ async function showStashModal(video, openOpts) {
             start,
             openExternal: openNative,
             onAccept: (stashId) => attachScene(stashId),
+            // Take studio/performers (picker 15.33 / native 15.42): into this
+            // file's own details, no scene attached.
+            onTake: window.scrayStashEdit && typeof window.scrayStashEdit.take === 'function'
+                ? (want) => window.scrayStashEdit.take(video.videoKey || window.scrayVideoKey(video.filename), want, video)
+                : null,
             onClose: close,
             onDone: (result) => {
                 navCtl = null;
@@ -4484,10 +4491,27 @@ async function showStashModal(video, openOpts) {
                     afterAttach(result.response, wasUnmatched);
                     return;
                 }
+                if (result && result.taken) {
+                    // Same finish as a match: reload, names, S button, rename offer.
+                    afterAttach({ note: result.taken.summary || '' }, wasUnmatched);
+                    return;
+                }
                 body.replaceChildren(...kept);
                 body.scrollTop = scrollWas;
             }
         });
+    };
+
+    // The details form from wherever the modal is (picker 15.29 / native 15.38):
+    // the Stash hunt's ✏️ opens it straight over the navigator's search, which
+    // closes first so the lookup panel is what Cancel comes back to.
+    modal.scrayOpenDetails = () => {
+        if (editCtl) return;
+        if (navCtl) {
+            if (navCtl.busy) return;
+            navCtl.close();
+        }
+        openEditor();
     };
 
     // stash_submit for this file. Throws on failure, so each caller shows the
@@ -4584,7 +4608,7 @@ async function showStashModal(video, openOpts) {
                 if (h && !navCtl && !editCtl) h.textContent = 'Stash lookup';
             }
             lookupButtons(true);
-            if (hunt) { try { hunt.loaded(matchedNow, modal); } catch (e) { console.error('[stash] hunt:', e); } }
+            if (hunt) { try { hunt.loaded(matchedNow, modal, huntScene); } catch (e) { console.error('[stash] hunt:', e); } }
         }
     }
 
@@ -4606,6 +4630,7 @@ async function showStashModal(video, openOpts) {
 
         markers = r.markers || [];
         const sc = r.scene;
+        huntScene = sc || null;
         matchedNow = !!r.stash_id;
         matchedStashId = String(r.stash_id || '');
         const flash = flashNote;

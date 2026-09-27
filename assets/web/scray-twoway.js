@@ -54,6 +54,43 @@ console.log("scray-twoway.js loaded");
   const MSClass = window.ManagedMediaSource || window.MediaSource || null;
   const MANAGED = !!window.ManagedMediaSource;
 
+  // Native's IPA loads the page from file:// (native 15.33 / picker 15.24). WebKit
+  // won't play a blob: URL made on that page ("blob:null/…" - the load just
+  // fails, and the element falls through to the plain copy), so there the
+  // MediaSource goes straight onto the <video> as srcObject instead. Checked
+  // once per page load on a spare element; if that doesn't open either, the
+  // file:// page plays the plain way at once rather than after OPEN_TIMEOUT.
+  // The dev server (http://) and Picker keep the blob URL.
+  const OPAQUE = (() => {
+    try { return location.origin === "null" || location.protocol === "file:"; } catch { return false; }
+  })();
+  let objProbe = null;
+  function srcObjectWorks() {
+    if (!OPAQUE || !MSClass) return Promise.resolve(false);
+    if (objProbe) return objProbe;
+    objProbe = new Promise((resolve) => {
+      let v = null, done = false;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        try { if (v) v.srcObject = null; } catch {}
+        resolve(ok);
+      };
+      try {
+        if (!("srcObject" in HTMLMediaElement.prototype)) { finish(false); return; }
+        v = document.createElement("video");
+        v.muted = true;
+        try { v.disableRemotePlayback = true; } catch {}
+        const probe = new MSClass();
+        probe.addEventListener("sourceopen", () => finish(true), { once: true });
+        v.srcObject = probe;              // throws where srcObject only takes a MediaStream
+        setTimeout(() => finish(false), 2000);
+      } catch (e) { finish(false); }
+    });
+    objProbe.then(ok => log(`file:// page - MediaSource as srcObject ${ok ? "works" : "doesn't open"}`));
+    return objProbe;
+  }
+
   function cfg() {
     try {
       const raw = JSON.parse(localStorage.getItem(CFG_KEY) || "{}") || {};
@@ -188,12 +225,18 @@ console.log("scray-twoway.js loaded");
     attach(media) {
       this.media = media;
       try { media.disableRemotePlayback = true; } catch {}
+      // file:// page: onto the element directly, in the same turn as the
+      // source swap, so resource selection takes it over the <source>s.
+      if (this.useObj) {
+        try { media.srcObject = this.mms; }
+        catch (e) { this.later(() => this.fail("srcObject: " + e.message), 0); }
+      }
       this.h = {
         seeking: () => this.onSeeking(),
         timeupdate: () => { if (performance.now() - this.lastSchedule > 1000) this.schedule(); },
         // A fragment the decoder rejects: carry on from the plain URL.
         error: () => {
-          if (media.currentSrc !== this.url) return;
+          if (this.useObj ? media.srcObject !== this.mms : media.currentSrc !== this.url) return;
           const e = media.error;
           this.fail(`media error ${e ? e.code : "?"} ${(e && e.message) || ""}`.trim());
         },
@@ -203,7 +246,7 @@ console.log("scray-twoway.js loaded");
         if (this.sb || this.dead) return;
         // The element may already have moved on to the plain <source> after
         // this one - then it is playing fine and just needs leaving alone.
-        if (media.currentSrc && media.currentSrc !== this.url) {
+        if (!this.useObj && media.currentSrc && media.currentSrc !== this.url) {
           lastNote = "MediaSource refused - playing the plain copy";
           log(lastNote);
           stop();
@@ -519,6 +562,7 @@ console.log("scray-twoway.js loaded");
           if (!wasPaused) media.play().catch(() => {});
         }, { once: true });
         while (media.firstChild) media.removeChild(media.firstChild);
+        if (media.srcObject) media.srcObject = null;
         media.src = base;
         media.load();
       } catch (e) { log("fallback failed:", e.message); }
@@ -531,7 +575,18 @@ console.log("scray-twoway.js loaded");
       for (const id of this.timers) clearTimeout(id);
       this.timers.clear();
       if (this.media && this.h) for (const [ev, fn] of Object.entries(this.h)) this.media.removeEventListener(ev, fn);
-      try { URL.revokeObjectURL(this.url); } catch {}
+      if (this.url) { try { URL.revokeObjectURL(this.url); } catch {} }
+      // file:// page: let go of the MediaSource. The <source>s go first, or
+      // clearing srcObject would start the plain copy loading behind the reset.
+      // (fail() sets the plain URL itself straight after.)
+      const m = this.media;
+      if (this.useObj && m && m.srcObject === this.mms) {
+        try {
+          while (m.firstChild) m.removeChild(m.firstChild);
+          m.removeAttribute("src");
+          m.srcObject = null;
+        } catch {}
+      }
     }
 
     /** Numbers for the overlay. */
@@ -542,7 +597,7 @@ console.log("scray-twoway.js loaded");
       const behind = Math.max(0, t - sg[w.lo].start), ahead = Math.max(0, sg[w.hi].start + sg[w.hi].dur - t);
       return {
         budget: this.budget / MB,
-        mode: `2-way · ${MANAGED ? "MMS" : "MSE"} · ${this.kind}`,
+        mode: `2-way · ${MANAGED ? "MMS" : "MSE"} · ${this.kind}${this.useObj ? " · obj" : ""}`,
         frag: `${(this.pl.total / this.pl.segs.length).toFixed(1)}s × ${this.pl.segs.length}`,
         mb: bytes / 1048576,
         loading: this.inflight.size,
@@ -582,14 +637,18 @@ console.log("scray-twoway.js loaded");
       catch (e) { lastNote = "can't chunk: " + (e && e.message); log(lastNote, "-", video.filename); return null; }
       const mime = pickMime(src.initBuf);
       if (!mime) { lastNote = "codec not supported here"; return null; }
+      const useObj = await srcObjectWorks();
+      if (OPAQUE && !useObj) { lastNote = "MediaSource can't attach on a file:// page"; log(lastNote); return null; }
       if (stale()) return null;
       const mms = new MSClass();
-      const url = URL.createObjectURL(mms);
+      const url = useObj ? "" : URL.createObjectURL(mms);
       session = new Session({ video, base, kind: src.kind, pl: src.pl, initBuf: src.initBuf, load: src.load,
-                              mime, mms, url, cfg: c });
-      log(`ready in ${Math.round(performance.now() - t0)} ms · ${src.kind} · ${video.filename}`);
+                              mime, mms, url, useObj, cfg: c });
+      log(`ready in ${Math.round(performance.now() - t0)} ms · ${src.kind}${useObj ? " · srcObject" : ""} · ${video.filename}`);
       lastNote = "";
-      return { src: url, type: "video/mp4" };   // a Plyr source entry
+      // A Plyr source entry. With srcObject the entry is the plain URL - the
+      // element takes the MediaSource over it, and it's the fallback anyway.
+      return useObj ? { src: base, type: "video/mp4" } : { src: url, type: "video/mp4" };
     } catch (e) {
       lastNote = "prepare failed: " + (e && e.message);
       log(lastNote);

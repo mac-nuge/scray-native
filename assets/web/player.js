@@ -3542,7 +3542,8 @@ function scrayFrameToDataUrl(source, w, h) {
 async function scrayGrabFrameFromCopy(video) {
     let src = video.currentSrc || video.src;
     // Two-way buffer: a MediaSource blob can't be copied - use the signed URL.
-    if (/^blob:/.test(src) && window.scrayTwoWay?.originalUrl) src = window.scrayTwoWay.originalUrl;
+    // (Nothing at all when it's on as srcObject - native 15.33's file:// page.)
+    if ((!src || /^blob:/.test(src)) && window.scrayTwoWay?.originalUrl) src = window.scrayTwoWay.originalUrl;
     if (!src) throw new Error('no video source');
     const at = video.currentTime || 0;
 

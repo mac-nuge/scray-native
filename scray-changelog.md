@@ -4,6 +4,21 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.24 / native 15.33 — test: Two-way on the IPA's file:// page
+<!-- 2026-09-27T19:10Z -->
+
+**picker** — `staging - 15.24 test: Two-way on the IPA file page`: `scray-twoway.js`, `player.js`. **native** — `stg-native - 15.33 test: Two-way on the IPA file page`: `assets/web/scray-twoway.js`, `player.js`. `scray-twoway.js` is the same in both. Web only, but only a new IPA build can test it (see below).
+
+- **Reported:** `TAP_Zazie_Skymm.mp4` (Hetzner) won't play in the signed IPA, in both build 119 (web 15.22) and build 120 (web 15.31, two-way on or off). It plays in the unsigned dev app with two-way on, and in Picker. With two-way off it fails in the dev app too.
+- **Cause:** the IPA loads its web page from `file://`, so the MediaSource's blob URL is `blob:null/…`, and WebKit won't load that into a `<video>`. The build 120 report shows it as `failed to load nullnull/<uuid>` straight after `[twoway] ready`, then `MediaSource refused - playing the plain copy` about 6 s later. So **two-way has never actually run in the IPA**: every Hetzner video there has been playing the plain way after a failed MediaSource attempt, and most do so fine. This file is one that iOS's plain player can't play (it also fails plain in the dev app), so it's the one that showed up. The dev app loads from `http://` and Picker from `https://`, so both make normal blob URLs.
+- **Fix:** on a `file://` page the MediaSource goes straight onto the `<video>` as `srcObject`, which Safari/WebKit supports for MediaSource, instead of through a blob URL. It's set in `attach()`, in the same turn as the Plyr source swap, so resource selection takes it over the `<source>` elements. The Plyr source entry is the plain URL, which is the fallback anyway.
+  - Checked once per page load on a spare `<video>`. If `srcObject` doesn't open there either, the `file://` page plays plain straight away (logged `MediaSource can't attach on a file:// page`) rather than after the 6 s wait.
+  - `fail()` clears `srcObject` before switching to the plain URL. `close()` removes the `<source>` elements before letting go of the MediaSource, so a reset doesn't start the plain copy loading.
+  - buffer i shows `· obj` on the mode line when it's on this path. The log line reads `ready in N ms · chunked · srcObject · <file>`.
+  - `player.js` (both apps): TinEye's copy-frame grab also falls back to the signed URL when the element has no `src` at all, as it doesn't with `srcObject`.
+- Picker and the dev app (`http(s)://` pages) are unchanged: same blob URL path. That was re-run in Chromium against the stand-in gateway: chunked, playing, then a second video. The `file://` branch was run in Chromium as far as it can go (Chromium's `srcObject` only takes a MediaStream, so the check says no and it plays plain at once, with no errors). The `srcObject` path itself needs WebKit, so it can only be tested on the phone.
+- **To test:** build a new IPA (the web code is bundled), play `TAP_Zazie_Skymm.mp4`, and turn on buffer i. It should read `2-way · MMS · chunked · obj`. The report should have `file:// page - MediaSource as srcObject works` and no `nullnull` line.
+
 ### browse 15.80 / picker 15.23 / native 15.32 — test: Stash hunt
 <!-- 2026-09-27T18:37Z -->
 

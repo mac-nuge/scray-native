@@ -4,6 +4,45 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.22 / native 15.30 — test: Two-way window sized to what the player can hold
+<!-- 2026-09-27T16:18Z -->
+
+**picker** — `staging - 15.22 test: Two-way window sized to what the player can hold`: `scray-twoway.js`. **native** — `stg-native - 15.30 test: Two-way window sized to what the player can hold`: `assets/web/scray-twoway.js`. The same file in both. Web only.
+
+- **Reported:** on one video, in both apps, the progress bar's green was patchy and kept blinking, as if loading was inconsistent. The video was 4K, 15:43, 1.35 GB, about 12 Mbps. Mac wondered if the size mattered: it did.
+
+**Cause**
+- The window was sized in seconds only: 30 behind and 60 ahead.
+- At 12 Mbps that's about 1.5 MB a second, so ~135 MB, which is more than the player keeps. Chrome's MSE holds about 150 MB of video by default, and iOS less.
+- The player threw pieces away to make room, mostly the oldest ones behind the playhead. The loader saw them missing and fetched them again, the player threw others away, and so on. Paused, that was **~19 piece fetches a second, forever**, with the loaded ranges full of holes that moved every second: the blinking bar.
+- **A second bug on the same path:** when an append was refused outright (QuotaExceededError), the retry and the trimming called each other synchronously. That ended in "Maximum call stack size exceeded".
+
+**Fix: a byte budget for the window**
+- **`windowFor` stops at whichever comes first:** the Settings seconds, or the budget in bytes. It walks outwards from the playhead in the fetch order (the piece under it, then two ahead for each one behind), adding piece sizes. A 4K file therefore gets a shorter window than a 720p one instead of overflowing.
+- **The budget starts at 120 MB, or 60 MB on the iPhone (ManagedMediaSource), and learns downwards:**
+  - `checkDrops()` keeps a set of pieces we appended and never removed. Any that are no longer buffered were dropped by the player (Chrome's cleanup, iOS memory pressure).
+  - A refused append (QuotaExceededError), or a piece that vanishes as it goes in, counts the same way.
+  - Each of these cuts the budget to 90% of what was actually held (at most 80% of the old budget, never below 12 MB), at most once per 1.5 s.
+  - The lower budget holds for the rest of the page load, so the next video starts from what the player has shown it can hold.
+- **Eviction** now trims to the exact piece boundaries of that window. The old ±10 s margin was up to 15 MB at 4K.
+- **A refused append** puts the trims *in front of* the retry and pumps on the next tick, so there's no recursion. A piece that falls outside the smaller window is dropped rather than retried.
+- **"Appended but never showed up"** only falls back to the plain player when nothing at all is staying in. Pieces vanishing while others stay means the player is out of room, so it shrinks the window instead.
+- **buffer i:**
+  - the window line shows what's actually held, e.g. `window ◂ 10s ▸ 18s of 30/60 · 33/34 MB`;
+  - `iOS` is now `dropped`, since it counts drops from either browser.
+
+**Tested** (headless Chromium, real Plyr 3.7.8) on a 90 s 720p clip at 10 Mbps (113 MB, about the rate of Mac's 4K file), with the player's MSE limit set to 40 MB to stand in for a phone:
+- **15.29, paused at 45 s:** 19 fetches a second for 12 s straight (229 in all), with holes and the stack-overflow error.
+- **This version:**
+  - 14 fetches, then none: one steady range 36–64 s;
+  - the budget learned 34 MB after one refusal;
+  - playing 14 s took 4 fetches, the window sliding;
+  - backward jogs came from the buffer;
+  - `dropped 0`.
+- The jog times (~350 ms) are decoding a noisy VP9 in software; they were the same without the limit.
+- Without a limit, the same clip held 86 of 120 MB, 12 s behind and 60 s ahead.
+- All the earlier loader tests still pass: small clip, real Plyr twice, the buffer i toggle, `.mkv`, fragmented, broken index, the index cache.
+
 ### native 15.29 — stable: Played fill up to the loaded green, playhead line inside the bar
 <!-- 2026-09-27T15:50Z -->
 

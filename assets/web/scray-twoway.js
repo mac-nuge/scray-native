@@ -39,7 +39,15 @@ console.log("scray-twoway.js loaded");
   const PARALLEL      = 2;      // fragments fetched at once
   const SETTLE_MS     = 150;    // a scrub drag must pause this long before the window loads
   const MAX_RETRIES   = 3;      // per fragment, then it is left for the next pass
-  const EVICT_MARGIN  = 10;     // seconds kept past each edge of the window before removal
+  // How much the player can hold. The window is the seconds behind/ahead from
+  // Settings, but never more bytes than this: a 4K file at 12 Mbps is 1.5 MB a
+  // second, so 90 s would be ~135 MB - more than the player keeps, and it
+  // throws the oldest away as fast as they're loaded (native 15.30). Starts
+  // here and comes down whenever the browser or iOS drops pieces or refuses
+  // one, and stays down for the rest of this page load.
+  const MB = 1048576;
+  const BUDGET_START  = (window.ManagedMediaSource ? 60 : 120) * MB;
+  const BUDGET_MIN    = 12 * MB;
   const OPEN_TIMEOUT  = 6000;   // ms for the MediaSource to open before falling back
   const STATS_EVERY   = 500;    // ms between overlay repaints
 
@@ -139,6 +147,7 @@ console.log("scray-twoway.js loaded");
 
   // ----------------------------------------------------------------- session
   let session = null;       // the one loader, while a video plays two-way
+  let budgetCap = BUDGET_START;   // learned down this page load (see BUDGET_START)
   let prepSeq = 0;          // a newer prepare() makes an older one give up
   let lastNote = "";        // why the last play did or didn't go two-way
 
@@ -158,7 +167,10 @@ console.log("scray-twoway.js loaded");
       this.lastOwnRemoveAt = 0;
       this.lastSchedule = 0;
       this.refreshing = null;
-      this.n = { fetched: 0, bytes: 0, retries: 0, uaEvicted: 0, evicted: 0, refreshes: 0, aborted: 0 };
+      this.n = { fetched: 0, bytes: 0, retries: 0, uaEvicted: 0, evicted: 0, refreshes: 0, aborted: 0, shrinks: 0 };
+      this.budget = budgetCap;       // bytes the window may hold
+      this.held = new Set();         // pieces appended and not removed by us - to notice ones the player drops
+      this.lastShrink = 0;
       this.streaming = null;
       this.onOpen = this.onOpen.bind(this);
       this.mms.addEventListener("sourceopen", this.onOpen, { once: true });
@@ -223,12 +235,11 @@ console.log("scray-twoway.js loaded");
       if (MANAGED) {
         this.sb.addEventListener("bufferedchange", (e) => {
           const rr = e && e.removedRanges;
-          if (rr && rr.length && performance.now() - this.lastOwnRemoveAt > 500) {
-            this.n.uaEvicted++;
+          if (rr && rr.length) {
             const spans = [];
             for (let k = 0; k < rr.length; k++) spans.push(`${rr.start(k).toFixed(1)}-${rr.end(k).toFixed(1)}`);
-            log("iOS dropped buffered ranges", spans.join(" "));
-            this.schedule();
+            log("buffered ranges removed", spans.join(" "));
+            this.schedule();          // checkDrops tells ours from iOS's
           }
         });
       }
@@ -259,9 +270,55 @@ console.log("scray-twoway.js loaded");
       return false;
     }
     have(i) { return this.inflight.has(i) || this.queued.has(i) || this.isBuffered(i); }
+    /**
+     * The pieces to hold around time t, in the order to fetch them: the one
+     * under the playhead, then outwards, two ahead for each one behind. Stops
+     * at the seconds behind/ahead from Settings or when the bytes reach the
+     * budget, whichever comes first - so a 4K file gets a shorter window than
+     * a 720p one instead of overflowing the player.
+     */
     windowFor(t) {
-      const c = this.cfg;
-      return { lo: this.segAt(Math.max(0, t - c.behind)), hi: this.segAt(Math.min(this.pl.total - 0.01, t + c.ahead)) };
+      const c = this.cfg, s = this.pl.segs, n = s.length;
+      const i0 = this.segAt(t);
+      const tLo = t - c.behind, tHi = t + c.ahead;
+      const order = [i0];
+      let bytes = s[i0].len, f = i0 + 1, b = i0 - 1, fOk = true, bOk = true;
+      const take = i => { if (bytes + s[i].len > this.budget) return false; bytes += s[i].len; order.push(i); return true; };
+      while (fOk || bOk) {
+        for (let k = 0; k < 2 && fOk; k++) { if (f < n && s[f].start < tHi && take(f)) f++; else fOk = false; }
+        if (bOk) { if (b >= 0 && s[b].start + s[b].dur > tLo && take(b)) b--; else bOk = false; }
+      }
+      return { lo: b + 1, hi: f - 1, order, bytes };
+    }
+
+    bufferedBytes() {
+      let bytes = 0;
+      for (const s of this.pl.segs) if (this.isBuffered(s.i)) bytes += s.len;
+      return bytes;
+    }
+
+    /** The player ran out of room: hold less from now on (this page load). */
+    shrink(why) {
+      const now = performance.now();
+      if (now - this.lastShrink < 1500) return;          // one wave of drops, one shrink
+      this.lastShrink = now;
+      const held = this.bufferedBytes();
+      const next = Math.max(BUDGET_MIN, Math.min(this.budget * 0.8, held > 0 ? held * 0.9 : this.budget * 0.8));
+      if (next >= this.budget) return;
+      this.budget = next;
+      budgetCap = Math.min(budgetCap, next);
+      this.n.shrinks++;
+      log(`${why} - window now ${(next / MB).toFixed(0)} MB`);
+    }
+
+    /** Pieces we appended and never removed that aren't there any more: the player (Chrome's cleanup, iOS memory pressure) dropped them. */
+    checkDrops() {
+      const gone = [];
+      for (const i of this.held) if (!this.isBuffered(i) && !this.queued.has(i)) gone.push(i);
+      if (!gone.length) return;
+      for (const i of gone) this.held.delete(i);
+      this.n.uaEvicted += gone.length;
+      this.shrink(`the player dropped ${gone.length} piece${gone.length > 1 ? "s" : ""}`);
     }
 
     // --- SourceBuffer op queue: one append/remove at a time
@@ -281,10 +338,12 @@ console.log("scray-twoway.js loaded");
       } catch (e) {
         this.current = null;
         if (e.name === "QuotaExceededError" && op.append) {
-          log("buffer full - trimming the window and retrying");
-          this.ops.unshift(op);
-          this.evict(true);
-          this.later(() => this.pump(), 50);
+          this.shrink("the player is full");
+          const { lo, hi } = this.windowFor(this.media ? this.media.currentTime : 0);
+          if (op.seg != null && (op.seg < lo || op.seg > hi)) this.queued.delete(op.seg);   // outside the smaller window now
+          else this.ops.unshift(op);
+          this.evict(true);                            // removals go in FRONT of the retry
+          this.later(() => this.pump(), 0);            // not straight away: no recursion
         } else {
           this.fail(`${op.remove ? "remove" : "append"}: ${e.name} ${e.message}`);
         }
@@ -302,8 +361,13 @@ console.log("scray-twoway.js loaded");
         this.queued.delete(op.seg);
         if (!this.isBuffered(op.seg)) {
           this.misses = (this.misses || 0) + 1;
-          if (this.misses >= 3) { this.fail(`fragment ${op.seg} appended but never showed up`); return; }
-        } else this.misses = 0;
+          // Nothing sticking at all means the pieces are bad; pieces vanishing
+          // while others stay means the player is out of room.
+          if (this.misses >= 3 && this.bufferedBytes() < 2 * op.append.byteLength) {
+            this.fail(`fragment ${op.seg} appended but never showed up`); return;
+          }
+          this.shrink("a piece was dropped as it went in");
+        } else { this.misses = 0; this.held.add(op.seg); }
       }
       this.pump();
       if (op && op.seg != null) this.schedule();
@@ -317,20 +381,25 @@ console.log("scray-twoway.js loaded");
       }
     }
 
-    evict(hard = false) {
+    /** Queue removal of everything outside the window. front: ahead of anything already queued. Doesn't pump. */
+    evict(front = false) {
       if (!this.sb || !this.media) return;
-      const t = this.media.currentTime, c = this.cfg;
-      const margin = hard ? 0 : EVICT_MARGIN;
-      const keepLo = Math.max(0, t - c.behind - margin);
-      const keepHi = t + c.ahead + margin;
+      const s = this.pl.segs;
+      const { lo, hi } = this.windowFor(this.media.currentTime);
+      const keepLo = s[lo].start;
+      const keepHi = hi + 1 < s.length ? s[hi + 1].start : Infinity;
       let b;
       try { b = this.sb.buffered; } catch { return; }
+      const ops = [];
       for (let k = 0; k < b.length; k++) {
-        const s = b.start(k), e = b.end(k);
-        if (s < keepLo) { this.ops.push({ remove: [s, Math.min(e, keepLo)] }); this.n.evicted++; }
-        if (e > keepHi) { this.ops.push({ remove: [Math.max(s, keepHi), e] }); this.n.evicted++; }
+        const bs = b.start(k), be = b.end(k);
+        if (bs < keepLo - 0.05) ops.push({ remove: [bs, Math.min(be, keepLo)] });
+        if (be > keepHi + 0.05) ops.push({ remove: [Math.max(bs, keepHi), be] });
       }
-      this.pump();
+      if (!ops.length) return;
+      for (const i of [...this.held]) if (i < lo || i > hi) this.held.delete(i);
+      this.n.evicted += ops.length;
+      if (front) this.ops.unshift(...ops); else this.ops.push(...ops);
     }
 
     // --- what to load next
@@ -338,16 +407,9 @@ console.log("scray-twoway.js loaded");
       if (this.dead || !this.sb || !this.media) return;
       this.lastSchedule = performance.now();
       const t = this.media.currentTime;
-      const i0 = this.segAt(t);
-      const { lo, hi } = this.windowFor(t);
-      if (!this.ops.some(o => o.remove)) this.evict();
-      // 2 ahead : 1 behind, outwards from the playhead
-      const order = [i0];
-      let f = i0 + 1, b = i0 - 1;
-      while (f <= hi || b >= lo) {
-        for (let k = 0; k < 2 && f <= hi; k++) order.push(f++);
-        if (b >= lo) order.push(b--);
-      }
+      this.checkDrops();
+      if (!this.ops.some(o => o.remove)) { this.evict(); this.pump(); }
+      const { order } = this.windowFor(t);      // 2 ahead : 1 behind, outwards from the playhead
       for (const i of order) {
         if (this.inflight.size >= PARALLEL) break;
         if (!this.have(i)) this.fetchSeg(i);
@@ -475,9 +537,11 @@ console.log("scray-twoway.js loaded");
     /** Numbers for the overlay. */
     snapshot() {
       const t = this.media ? this.media.currentTime : 0;
-      let bytes = 0;
-      for (const s of this.pl.segs) if (this.isBuffered(s.i)) bytes += s.len;
+      const bytes = this.bufferedBytes();
+      const w = this.windowFor(t), sg = this.pl.segs;
+      const behind = Math.max(0, t - sg[w.lo].start), ahead = Math.max(0, sg[w.hi].start + sg[w.hi].dur - t);
       return {
+        budget: this.budget / MB,
         mode: `2-way · ${MANAGED ? "MMS" : "MSE"} · ${this.kind}`,
         frag: `${(this.pl.total / this.pl.segs.length).toFixed(1)}s × ${this.pl.segs.length}`,
         mb: bytes / 1048576,
@@ -485,7 +549,7 @@ console.log("scray-twoway.js loaded");
         queued: this.queued.size,
         n: this.n,
         streaming: this.streaming,
-        window: `${this.cfg.behind}s ◂ ▸ ${this.cfg.ahead}s`,
+        window: `◂ ${behind.toFixed(0)}s ▸ ${ahead.toFixed(0)}s of ${this.cfg.behind}/${this.cfg.ahead}`,
         t,
       };
     }
@@ -652,9 +716,9 @@ console.log("scray-twoway.js loaded");
     const snap = session && session.media === m ? session.snapshot() : null;
     if (snap) {
       lines.push(`${snap.mode} · ${snap.frag}`);
-      lines.push(`window ${snap.window} · ${snap.mb.toFixed(0)} MB`);
+      lines.push(`window ${snap.window} · ${snap.mb.toFixed(0)}/${snap.budget.toFixed(0)} MB`);
       lines.push(`loading ${snap.loading} · queued ${snap.queued} · done ${snap.n.fetched}`);
-      lines.push(`retry ${snap.n.retries} · cut ${snap.n.aborted} · evict ${snap.n.evicted} · iOS ${snap.n.uaEvicted}` +
+      lines.push(`retry ${snap.n.retries} · cut ${snap.n.aborted} · evict ${snap.n.evicted} · dropped ${snap.n.uaEvicted}` +
                  (snap.streaming === null ? "" : snap.streaming ? " · ▶" : " · ⏸"));
     } else {
       lines.push(`progressive${lastNote ? " · " + lastNote : ""}`);

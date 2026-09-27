@@ -4,6 +4,22 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.34 — stable: Rescue files the plain player refuses
+<!-- 2026-09-27T19:50Z -->
+
+Mac confirmed it works and marked it stable. This covers native 15.33 and 15.34, with no code change:
+- **15.33:** two-way works on the IPA's `file://` page, using `srcObject`. Confirmed in IPA build 121.
+- **15.34:** the rescue and the file description. In the dev app with two-way off, `TAP_Zazie_Skymm.mp4` logged `the plain player refused … - playing it chunked` and played. With two-way on it plays chunked as before.
+
+Picker 15.25 stays test until it has been tried in Picker.
+
+**What the file description showed:** `TAP_Zazie_Skymm.mp4` is 3.03 GB and laid out as `ftyp · free · mdat@40 B (3.03 GB) · moov@3.03 GB (2.5 MB)`, with 1 stray byte after the moov. So the index is at the end, behind a 3.03 GB media box. The tracks themselves are ordinary:
+- H.264 High 4.1 1080p at 29.97 fps, a keyframe about every second;
+- AAC 48 kHz stereo;
+- normal edit lists, and well interleaved (about 132 KB apart on average).
+
+To reach an index at the end, a player has to skip the whole media box using its 32-bit size. 3.03 GB is past 2 GiB, which is where a size read as a signed number turns negative. The leading suspect is that iOS's plain player trips on exactly that: an index after a media box bigger than 2 GiB (the stray byte may not help either). Files under 2 GB, or with the index first, never hit it. The chunked loader reads the size as unsigned and fetches the index by its own range, so it's unaffected. This isn't proven yet. Rewrapping the file with the index first (`-movflags +faststart`, no re-encode) would confirm it.
+
 ### picker 15.25 / native 15.34 — test: Rescue files the plain player refuses, file description in the log
 <!-- 2026-09-27T19:45Z -->
 

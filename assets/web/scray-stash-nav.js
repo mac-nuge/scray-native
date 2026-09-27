@@ -31,6 +31,7 @@
 // (counted server-side), then StashDB on request.
 // picker 14.24 / native 14.36 (browse 14.38): In library on every profile,
 // plus Indexxx and Eporner links.
+// picker 15.23 / native 15.32: 🎯 Stash hunt on the home view.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -548,7 +549,12 @@
 
       host.innerHTML = '<div class="ssn">' + finderHtml() +
         (e.type === 'home'
-          ? '<div class="ssn-home">Type a studio&rsquo;s or performer&rsquo;s name, then pick one to open their page.</div>'
+          ? '<div class="ssn-home">Type a studio&rsquo;s or performer&rsquo;s name, then pick one to open their page.</div>' +
+            // 🎯 Stash hunt (picker 15.23 / native 15.32, scray-stash-hunt.js).
+            (window.scrayStashHunt
+              ? '<div class="ssn-hunt-row"><button type="button" class="ssn-hunt-go">&#127919; Stash hunt</button>' +
+                '<span>Random unmatched files, one at a time</span></div>'
+              : '')
           : e.type === 'search' ? searchHtml(e) : e.type === 'studio' ? studioViewHtml(e) : performerHtml(e)) + '</div>';
       paintFind();
       // Started from the Stash button: the box is all there is, so it has the keyboard.

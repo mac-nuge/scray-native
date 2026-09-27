@@ -4360,6 +4360,15 @@ async function showStashModal(video, openOpts) {
         '</div>';
     document.body.appendChild(modal);
 
+    // 🎯 Stash hunt (picker 15.23 / native 15.32): its bar under the heading,
+    // told when a load finds a match and when the modal closes. Also when the
+    // modal is reopened for the hunt's file some other way (TinEye's Search).
+    const hunt = (openOpts && openOpts.hunt)
+        || (window.scrayStashHunt && window.scrayStashHunt.optsFor(video)) || null;
+    if (hunt) {
+        try { hunt.mount(modal); } catch (e) { console.error('[stash] hunt bar failed:', e); }
+    }
+
     const body      = modal.querySelector('#stashBody');
     const addBtn    = modal.querySelector('#stashAddBtn');
     const recheckBtn = modal.querySelector('#stashRecheckBtn');
@@ -4371,13 +4380,18 @@ async function showStashModal(video, openOpts) {
         addBtn.style.display = show ? '' : 'none';
         recheckBtn.style.display = show ? '' : 'none';
     };
-    const close     = () => { window.scrayStashUrlFromBrowser = null; modal.remove(); };
+    const close     = () => {
+        window.scrayStashUrlFromBrowser = null;
+        modal.remove();
+        if (hunt) { try { hunt.closed(modal); } catch (e) { /* hunt already over */ } }
+    };
     modal.querySelector('#stashCloseBtn').addEventListener('click', close);
     // While the details form is open a stray tap on the backdrop would throw
     // away everything typed, so only Cancel (or Save) leaves it.
     let editCtl = null;
     let navCtl = null;
-    modal.addEventListener('click', (e) => { if (e.target === modal && !editCtl && !navCtl) close(); });
+    // Not in a hunt either: a stray tap beside the card would end it.
+    modal.addEventListener('click', (e) => { if (e.target === modal && !editCtl && !navCtl && !hunt) close(); });
 
     // Whether the last load() found a match. The rename offer below only
     // fires on the change from unmatched to matched.
@@ -4570,6 +4584,7 @@ async function showStashModal(video, openOpts) {
                 if (h && !navCtl && !editCtl) h.textContent = 'Stash lookup';
             }
             lookupButtons(true);
+            if (hunt) { try { hunt.loaded(matchedNow, modal); } catch (e) { console.error('[stash] hunt:', e); } }
         }
     }
 
@@ -5272,7 +5287,9 @@ async function showStashModal(video, openOpts) {
             openNav({ type: 'performer', name: startPerformer, sceneId: matchedStashId, fromKey: startFromKey }, false);
         } else if (startStudio && document.body.contains(modal)) {
             openNav({ type: 'studio', name: startStudio, sceneId: matchedStashId, fromKey: startFromKey }, false);
-        } else if (startSearch && document.body.contains(modal)) {
+        } else if (startSearch && document.body.contains(modal) && !(hunt && matchedNow)) {
+            // (A hunt file the lookup has just matched by fingerprint stays on
+            // the lookup panel - there's nothing left to search for.)
             openNav({ type: 'search', term: startSearch }, true);
         }
     });

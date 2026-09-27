@@ -4,6 +4,27 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.80 / picker 15.23 / native 15.32 — test: Stash hunt
+<!-- 2026-09-27T18:37Z -->
+
+**browse** — `staging-browse - 15.80 test: Stash hunt never list`: `api.php`. **picker** — `staging - 15.23 test: Stash hunt`: `scray-stash-hunt.js` (new), `file-operations.js`, `scray-stash-nav.js`, `index.php`. **native** — `stg-native - 15.32 test: Stash hunt`: `assets/web/scray-stash-hunt.js` (new), `file-operations.js`, `scray-stash-nav.js`, `index.html`. `scray-stash-hunt.js` and `scray-stash-nav.js` are the same in both apps. Web only.
+
+- **Asked for:** a page that finds more Stash matches, game style: a random unmatched video, the leading filename results to refine, all the Stash nav helpers (path tags, suggested studio names, performer and studio views, manual details), Skip, more from the same folder or tag, a chosen set of folders and tags, the app's preview player with TinEye, mobile first. Mac chose to build it inside Picker and Native, and to have both Next and Never.
+- **Where:** 🎯 Stash hunt on the Stash button's home view (the one that says "Type a studio's or performer's name"). In Picker, `?hunt=1` also starts it.
+- **How it works:** each file opens in the normal Stash modal, straight onto a navigator search for its filename. Everything already in that modal works as usual: the refine box, path-tag and studio-name pills, de-Camel, Filename, performer and studio views, Accept, Back to the lookup panel (paste a URL, enter details by hand), and ▶ preview in the app's own player, with TinEye in its ... menu.
+- **The hunt bar** sits under the heading:
+  - the scope and how many unmatched files are left in it;
+  - this run's score (✅ matched, ⏭ skipped, 🚫 hidden, 🔥 streak);
+  - the file's folder and name;
+  - ▶ Preview, 📁 Folder (the next files come from this file's folder; tap again for all files), 🏷 Tag (pick one of this file's tags), 🚫 Never and Next ⏭.
+  - A match by any route (Accept, pasted URL, manual details, or the lookup finding it by fingerprint) turns the bar green, and Next goes on.
+- **Scope sheet** (tap the scope): Folders and Tags tabs with unmatched counts, search, and multi-select. The rule is any chosen folder (including its subfolders) AND any chosen tag. The scope is remembered on the device.
+- **Never** hides a file for good. The list is kept on the server (`stash_hunt_get` / `stash_hunt_never`, app_state row `stash_hunt_never`), so Picker and Native agree. The sheet's Hidden tab lists hidden files, each with Put back.
+- **Next** just moves on; the file can come up again in a later run. Within a run nothing comes up twice. When a scope runs out, the sheet offers to go round again.
+- Pool: every file the app has with a catalogue row, not already matched (the same stash state as the S button), not hidden. Native's phone-only files are left out, because there's no catalogue row to match onto.
+- A tap beside the card no longer closes the Stash modal during a hunt. Close (or End hunt in the sheet) ends it with a summary toast.
+- Tested in Chromium with the real `file-operations.js` from both apps and `scray-stash-nav.js` against a mocked server: start from the home view, filename search, Next, Folder and Tag scope, Accept (two taps) turning the bar green, a fingerprint match on open staying on the lookup panel, Never and Put back, the scope sheet, the backdrop tap, and Close ending the run. The two server actions were tested in PHP against SQLite; `php -l` is clean.
+
 ### browse 15.79 / native 15.31 — test: Native basket shared across Native installs
 <!-- 2026-09-27T18:05Z -->
 

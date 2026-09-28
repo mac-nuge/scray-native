@@ -4,6 +4,59 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.89 / picker 15.41 / native 15.52 — test: Hunt Next in the swipe options, compact result cards, names carried per folder, stronger length score
+<!-- 2026-09-28T10:55Z -->
+
+- **picker** — `staging - 15.41 test: Hunt Next in the swipe options, compact result cards, names carried per folder, stronger length score`: `scray-stash-hunt.js`, `scray-stash-nav.js`.
+- **native** — `stg-native - 15.52 test: Hunt Next in the swipe options, compact result cards, names carried per folder, stronger length score`: `assets/web/scray-stash-hunt.js`, `assets/web/scray-stash-nav.js` (web only, no IPA). Both files byte-identical to Picker's.
+- **browse** — `staging-browse - 15.89 test: Hunt Next in the swipe options, compact result cards, names carried per folder, stronger length score`: `api.php` (`scrayStashScore`).
+
+**Asked for:**
+- The quick swipe left to Next was too easy to set off. Drop it, keep the swipe for the options, and add Next to them, between folder and tag.
+- A more compact search result: confidence, file length, scene length, difference and cast shape in one row; Accept & submit bigger and in the top half; everything else below.
+- Confidence: lengths that match, or are within 0.2%, should count for much more (0.0% most, 0.1% and 0.2% close behind). With that and a word of the studio or a performer in the filename, 90+.
+- A studio or performer name added to a folder's search is put into the next card's search too, to take out by hand if not wanted.
+
+**Hunt swipes (`scray-stash-hunt.js`):**
+- No more flick: a swipe left of any speed past 45 px opens the options, as the slow swipe did. The velocity tracking and `SW.flickV` / `SW.flickMin` are gone.
+- The options are now ✏️ Details · 📁 folder · **⏭ Next** (purple) · 🏷 Tag · 🚫 Never. ⏭ sends the card off to the left and slides the next one in, as the flick did. The bar's own Next is unchanged.
+- The first-hunts tip reads *Swipe ← for options, ⏭ Next among them · → recent files*.
+
+**Names carried per folder (`scray-stash-hunt.js`, `scray-stash-nav.js`):**
+- After every search in a hunt, the navigator tells the hunt (`hunt.searched(video, term, names)`) which names could have been added. Those are the hunt's studio and performer pills, the mapped-studio pills, what's already carried, and every studio, performer and alias in the results.
+- The hunt keeps, per folder (`folderOf`), the ones that are in the searched words but not in the file's own words. It's per run (`S.carry`).
+- The next file from that folder starts its search with its own words plus those names (`huntWords`, now used by advance, resume and hunt-now). Other folders are unaffected.
+- On the card they're 📌 pills (amber, `hunt.carried(video)`). A tap takes the name out of the words (or puts it back). Search without it and it stops being carried. A name that's already a 🎯 pill isn't doubled.
+
+**Result cards (`scray-stash-nav.js`, everywhere the navigator shows scenes):**
+- Cover and title as before. The confidence moves out of the title into a row of five: **Conf · File · Scene · Diff · Cast**. The difference is shown as e.g. `0.1%`, and the full wording is in the tooltip.
+- Within 0.2% the three length cells turn pale green. A confidence of 70+ gets the same tint.
+- Then **Accept & submit**, full width and bold. Then the cast, tags / synopsis / why this score, and the other buttons (Take studio/performers, StashDB, Google, the tubes, In library).
+- Profile views' fact grids are unchanged.
+
+**Confidence (`api.php` `scrayStashScore`, used by the navigator, bulk-stash and the hunt's bulk check):**
+- Length, by how far apart to one decimal, as the apps show it: 0.0% **+45**, 0.1% **+40**, 0.2% **+35**, then 1% +20, 3% +14, 5% +8 as before (was 20 for anything within 1%).
+- **Words of names:** a performer whose whole name (or credited alias) isn't in the filename, but a word of it is (`riley`), now scores +10. The same goes for a studio at +8 (`brazzers` for Brazzers Exxtra). Words every studio shares (studio, media, films, video, xxx, teen, girls…) don't count, and neither do words under 3 letters.
+- **The 90+ rule:** lengths within 0.2% plus the studio or a performer (whole or a word) is at least 96 / 93 / 90 for 0.0 / 0.1 / 0.2%. It's 3 more when both the studio and a performer are there, capped at 100. It shows as a *length + name* line under *why this score*.
+- Scores already stored by bulk-stash (`stash_candidates.confidence`) keep their old figure until that file is searched again.
+
+**Tested:**
+- `php -l`; `node --check` on both JS files; Picker and Native copies `cmp`-identical.
+- The new scorer on its own:
+  - exact length + a performer word + a studio word → 99;
+  - 0.1% → 96; 0.2% → 93; 0.3% → 61;
+  - exact length with no names → 45;
+  - exact length + studio name → 96; 0.2% + studio → 90;
+  - no scene length → no floor.
+- Hunt carry in jsdom:
+  - names added in one folder start the next card's search in that folder, but not in another folder;
+  - taking one out and searching drops it; taking all out empties the carry.
+- The navigator in jsdom with the hunt:
+  - card order is facts row → Accept → cast → more → foot;
+  - the carried pill shows *on*, a tap takes it out, and a search then clears the carry.
+- A 375 px render of the new card checked by eye.
+- Not tried on the phone.
+
 ### native 15.51 — test: Hetzner pill shows the box total and what is on the phone
 <!-- 2026-09-28T06:45Z -->
 

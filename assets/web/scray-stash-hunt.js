@@ -23,6 +23,11 @@
 // (TinEye's Search, say). The handle is { mount(modal), loaded(matched, modal),
 // closed(modal) }.
 //
+// picker 15.41 / native 15.52: no more flick for Next - a swipe left only
+// opens the options, which now include ⏭ Next (between 📁 and 🏷). A studio
+// or performer name added to a file's search is carried to the next files
+// from the same folder (carried(video)); take it out of the search and it
+// stops.
 // picker 15.40 / native 15.49: every sheet the hunt opens, and the Stash
 // modal itself during a hunt, keeps clear of the corner-button dock
 // (clearOfDock). The bulk check takes extra words for every search, with the
@@ -174,7 +179,8 @@
       bar: null,
       tagMenu: false,
       run: Date.now(),          // which hunt a last match was made in
-      swipeIn: false            // the next card slides in (a flick sent us on)
+      swipeIn: false,           // the next card slides in (⏭ in the swipe options sent us on)
+      carry: new Map()          // folder -> studio / performer names added to its searches
     };
   }
 
@@ -237,8 +243,7 @@
     S.seen.add(k);
     S.cur = { video: v, key: k, matched: false, auto: false, loaded: false };
     S.tagMenu = false;
-    const words = window.scrayStashNav ? window.scrayStashNav.words(v.filename || '') : String(v.filename || '');
-    window.showStashModal(v, { search: words, hunt: handle });
+    window.showStashModal(v, { search: huntWords(v), hunt: handle });
   }
 
   function next() {
@@ -346,6 +351,7 @@
 #stashModal .sh-tray button .l { font-size: .7rem; font-weight: 600; line-height: 1.1; text-align: center; }
 #stashModal .sh-tray button.on { background: #6f42c1; color: #fff; }
 #stashModal .sh-tray button.bad { background: #dc3545; color: #fff; }
+#stashModal .sh-tray button.go { background: #6f42c1; color: #fff; }
 #stashModal .sh-lasthint { align-items: flex-start; justify-content: center; padding-left: 14px; color: #fff; gap: 4px; }
 #stashModal .sh-lasthint .i { font-size: 1.6rem; line-height: 1; }
 #stashModal .sh-lasthint .l { font-size: .78rem; font-weight: 700; }
@@ -568,9 +574,11 @@
   }
 
   // ---- swipes on the card (picker 15.35 / native 15.44) ---------------------
-  // Left, quick and long: Next - the card flies off and the next one slides in.
-  // Left, slower: the options come out from behind the card's right edge;
-  //   tap one, or tap the card / swipe it back to put them away.
+  // Left: the options come out from behind the card's right edge (✏️ 📁 ⏭ 🏷 🚫);
+  //   tap one, or tap the card / swipe it back to put them away. ⏭ Next sends
+  //   the card off to the left and the next one slides in. (picker 15.41 /
+  //   native 15.52: a quick flick no longer goes straight to Next - too easy
+  //   to do by accident.)
   // Right: the last match, with Unmatch.
   // Up and down still scroll: the swipe only takes over once the finger has
   // clearly gone sideways. Not from inside a text box, or anything that
@@ -578,9 +586,7 @@
   // ⚙️ Feel.
   const SW = {
     lock: 10,        // px the finger moves before it's a swipe or a scroll
-    flickV: 0.5,     // px/ms leftwards at the end that makes a flick (Next)
-    flickMin: 70,    // px a flick has to have covered
-    open: 45,        // px left a slower swipe needs to open the options
+    open: 45,        // px left a swipe needs to open the options
     last: 70,        // px right to open the last match
     tray: 84         // px the options take up
   };
@@ -638,6 +644,7 @@
       tray.innerHTML =
         b('edit', '✏️', 'Details') +
         b('folder', '📁', folderOn ? 'All files' : 'This folder', folderOn ? 'on' : '') +
+        b('next', '⏭', 'Next', 'go') +
         b('tag', '🏷', 'Tag', S && S.tagMenu ? 'on' : '') +
         b('never', '🚫', 'Never', 'bad');
     };
@@ -647,13 +654,25 @@
         : '<span class="i">·</span><span class="l">No match yet</span>';
     };
     const shut = () => { trayOpen = false; setX(0, 200); };
+    // ⏭ Next: off to the left, then the next file's card slides in.
+    const flyNext = () => {
+      trayOpen = false;
+      setX(-Math.max(window.innerWidth, 400), 160);
+      setTimeout(() => {
+        if (!S || S.modal !== modal) return;
+        S.swipeIn = true;
+        next();
+        // Nowhere to go (the scope sheet came up instead): this card comes back.
+        if (S && S.modal === modal && modal.isConnected) { S.swipeIn = false; shut(); }
+      }, 150);
+    };
 
     card.addEventListener('touchstart', (e) => {
       g = null;
       if (!S || S.modal !== modal || e.touches.length !== 1) return;
       if (swipeBlocked(e.target, card)) return;
       const t = e.touches[0];
-      g = { x0: t.clientX, y0: t.clientY, base: x, dir: '', dx: 0, pts: [{ t: performance.now(), x: t.clientX }] };
+      g = { x0: t.clientX, y0: t.clientY, base: x, dir: '', dx: 0 };
     }, { passive: true });
 
     card.addEventListener('touchmove', (e) => {
@@ -669,9 +688,6 @@
       }
       e.preventDefault();
       g.dx = dx;
-      const now = performance.now();
-      g.pts.push({ t: now, x: t.clientX });
-      while (g.pts.length > 2 && now - g.pts[0].t > 100) g.pts.shift();
       let nx = g.base + dx;
       if (nx > 0) nx = Math.min(nx, SW.last + (nx - SW.last) * 0.3);   // gives, past the mark
       setX(nx, 0);
@@ -681,21 +697,7 @@
       const gg = g;
       g = null;
       if (!gg || gg.dir !== 'x') return;
-      const a = gg.pts[0], z = gg.pts[gg.pts.length - 1];
-      // Held still before letting go: that's a slow swipe, whatever came before.
-      const v = performance.now() - z.t > 80 || z.t <= a.t ? 0 : (z.x - a.x) / (z.t - a.t);
-      if (gg.dx < 0 && v <= -SW.flickV && -gg.dx >= SW.flickMin) {
-        // Next: off to the left, then the next file's card slides in.
-        trayOpen = false;
-        setX(-Math.max(window.innerWidth, 400), 160);
-        setTimeout(() => {
-          if (!S || S.modal !== modal) return;
-          S.swipeIn = true;
-          next();
-          // Nowhere to go (the scope sheet came up instead): this card comes back.
-          if (S && S.modal === modal && modal.isConnected) { S.swipeIn = false; shut(); }
-        }, 150);
-      } else if (x <= -SW.open) {
+      if (x <= -SW.open) {
         trayOpen = true;
         setX(-SW.tray, 200);
       } else if (gg.base === 0 && x >= SW.last) {
@@ -720,6 +722,7 @@
       const b = e.target.closest('button[data-t]');
       if (!b || !S || !S.cur) return;
       e.stopPropagation();
+      if (b.dataset.t === 'next') { flyNext(); return; }
       shut();
       switch (b.dataset.t) {
         case 'edit': openDetails(); break;
@@ -899,7 +902,40 @@
     return v;
   }
 
-  const huntWords = (v) => window.scrayStashNav ? window.scrayStashNav.words(v.filename || '') : String(v.filename || '');
+  const baseWords = (v) => window.scrayStashNav ? window.scrayStashNav.words(v.filename || '') : String(v.filename || '');
+
+  // ---- names carried from file to file (picker 15.41 / native 15.52) --------
+  // A studio or performer name added to a file's search - one that isn't in
+  // its own filename - is added to the search of the next files from the same
+  // folder too. Take it out of the search (and search) and it stops. This run
+  // only.
+  const reEsc = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const hasWord = (text, name) => new RegExp('(^|\\s)' + reEsc(name) + '(?=\\s|$)', 'i').test(String(text || ''));
+  const carryOf = (v) => (S && S.carry && S.carry.get(folderOf(v))) || [];
+
+  /** The navigator's report of a search it ran for the hunt's file. */
+  function searched(video, term, names) {
+    if (!S || !optsFor(video)) return;
+    const base = baseWords(video);
+    const seen = new Set();
+    const added = [].concat(names || [], carryOf(video))
+      .map(n => String(n || '').replace(/\s+/g, ' ').trim())
+      .filter(n => {
+        const k = n.toLowerCase();
+        if (n.length < 2 || seen.has(k)) return false;
+        seen.add(k);
+        return hasWord(term, n) && !hasWord(base, n);
+      });
+    const folder = folderOf(video);
+    if (added.length) S.carry.set(folder, added); else S.carry.delete(folder);
+  }
+
+  /** The file's own words, and whatever its folder carries. */
+  const huntWords = (v) => {
+    const base = baseWords(v);
+    const extra = carryOf(v).filter(n => !hasWord(base, n));
+    return (base + ' ' + extra.join(' ')).trim();
+  };
 
   /** Back to the hunt's own file, as it was. */
   function resume() {
@@ -1788,7 +1824,7 @@
       const tips = +(readJson(LS_TIP, 0)) || 0;
       if (tips < 3) {
         writeJson(LS_TIP, tips + 1);
-        setTimeout(() => toast('👆 Swipe ← quick for Next, slow for options · → last match', '#6f42c1'), 1800);
+        setTimeout(() => toast('👆 Swipe ← for options, ⏭ Next among them · → recent files', '#6f42c1'), 1800);
       }
     } catch (err) {
       console.error('[hunt] start failed:', err);
@@ -1831,9 +1867,12 @@
     suggestStudio: (video) => (optsFor(video) ? lastStudio : ''),
     /** The female performer(s) of the hunt's last match, for its own file only. */
     suggestPerformers: (video) => (optsFor(video) ? lastPerfs.slice() : []),
+    /** Names this file's folder carries into its search (picker 15.41 / native 15.52). */
+    carried: (video) => (optsFor(video) ? carryOf(video).slice() : []),
+    searched,
     openMatches, openBulk,
     isActive: () => !!S,
     _test: { inScope, scopeLabel, folderOf, tagsOf, keyOf, getSession: () => S, newSession, setSession: (s) => { S = s; }, buildPool, inScopeLeft,
-             getMatches: () => matches.slice(), getBulk: () => bulk, bestOf, getLastPerformers: () => lastPerfs.slice(), SW }
+             getMatches: () => matches.slice(), getBulk: () => bulk, bestOf, getLastPerformers: () => lastPerfs.slice(), SW, huntWords }
   };
 })();

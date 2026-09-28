@@ -50,6 +50,12 @@
 // picker 15.35 / native 15.44: search results open in StashDB order (Best
 // match is one tap away), and in a hunt the female performer(s) of its last
 // match are pills too, with the same menu as a studio pill.
+// picker 15.41 / native 15.52 (browse 15.89's scoring): a compact card -
+// confidence, file and scene length, difference and cast shape in one row,
+// then a big Accept & submit; the cast, the more-details and the other
+// buttons under it. In a hunt, names carried from this folder's earlier
+// searches are 📌 pills (tap to take out), and every search tells the hunt
+// which studio / performer names were added to the words (hunt.searched).
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -192,6 +198,20 @@
 #stashModal .ssn-cover.none { display: flex; align-items: center; justify-content: center; background: #eee; color: #999; font-size: .7rem; cursor: default; }
 #stashModal .ssn .ssn-extsm { padding: 2px 8px; font-size: .72rem; }
 #stashModal .ssn-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0 0 8px; }
+/* picker 15.41 / native 15.52: a result card's five facts in one row. */
+#stashModal .ssn-facts.ssn-facts5 { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+#stashModal .ssn-facts5 .ssn-fact { padding: 4px 3px; text-align: center; }
+#stashModal .ssn-facts5 .ssn-fact span { font-size: .55rem; letter-spacing: .04em; }
+#stashModal .ssn-facts5 .ssn-fact b { font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#stashModal .ssn-facts5 .ssn-fact.gm b { white-space: normal; overflow-wrap: anywhere; font-size: .74rem; }
+#stashModal .ssn-fact.ssn-cf b { font-size: 1.05rem; color: #dc3545; }
+#stashModal .ssn-fact.ssn-cf.mid b { color: #b8860b; }
+#stashModal .ssn-fact.ssn-cf.good b { color: #1e7e34; }
+#stashModal .ssn-fact.ssn-cf.good { background: #eaf7ee; border-color: #9bd8a8; }
+#stashModal .ssn-fact.spot { background: #eaf7ee; border-color: #9bd8a8; }
+#stashModal .ssn .ssn-accept.ssn-accept-big { display: block; width: 100%; margin: 0 0 8px; padding: 11px 12px; font-size: 1rem; font-weight: 700; border-radius: 8px; box-shadow: 0 2px 6px rgba(40,167,69,.3); }
+#stashModal .ssn .ssn-ptag.ssn-ptag-carry:not(.on) { border-color: #f0c36d; background: #fff8e6; color: #8a6100; }
+#stashModal .ssn .ssn-ptag.ssn-ptag-carry.on { background: #e0a800; border-color: #e0a800; color: #fff; }
 #stashModal .ssn-fact { border: 1px solid #e6e6ec; border-radius: 6px; padding: 5px 7px; min-width: 0; }
 #stashModal .ssn-fact span { display: block; font-size: .6rem; letter-spacing: .06em; opacity: .6; text-transform: uppercase; }
 #stashModal .ssn-fact b { display: block; font-size: .85rem; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
@@ -306,6 +326,11 @@
     // ...and its female performer(s) (picker 15.35 / native 15.44).
     const huntPerfs = inHunt && typeof hunt.suggestPerformers === 'function'
       ? (hunt.suggestPerformers(video) || []).map(x => String(x || '').trim()).filter(Boolean) : [];
+    // ...and the names its folder's earlier searches added (picker 15.41 / native 15.52).
+    const huntCarry = inHunt && typeof hunt.carried === 'function'
+      ? (hunt.carried(video) || []).map(x => String(x || '').trim()).filter(n => n &&
+          ![huntStudio].concat(huntPerfs).some(h => h && h.toLowerCase() === n.toLowerCase()))
+      : [];
     const headingWas = heading ? heading.textContent : '';
 
     // The studio + performer box (picker 14.19 / native 14.31). Kept out here
@@ -588,6 +613,18 @@
           entry.name = res.performer.name || entry.name;
         }
         if (!entry.sort) entry.sort = (entry.type === 'search' && res.scored) ? SEARCH_SORT : 'order';
+        // The hunt carries studio / performer names added to the words on to
+        // the next files from this folder (picker 15.41 / native 15.52).
+        if (entry.type === 'search' && inHunt && typeof hunt.searched === 'function') {
+          try {
+            const names = [huntStudio].concat(huntPerfs, huntCarry, pathTags.slice(studioStart));
+            entry.data.scenes.forEach(c => {
+              if (c.studio) names.push(c.studio);
+              (c.cast || []).forEach(p => { if (p && p.name) names.push(p.name); if (p && p.as) names.push(p.as); });
+            });
+            hunt.searched(video, entry.term || '', names.filter(Boolean));
+          } catch (err) { console.warn('[stash nav] hunt carry:', err); }
+        }
       }
       paint(false, true);
     }
@@ -716,6 +753,9 @@
         : '') +
       huntPerfs.map(n => '<button type="button" class="ssn-ptag ssn-ptag-hunt ssn-ptag-perf" data-pperf="' + esc(n) + '" data-pname="' + esc(n) +
           '" title="Performer in the hunt&rsquo;s last match">&#127919; ' + esc(n) + '</button>').join('') +
+      huntCarry.filter(n => !pathTags.some(t => t.toLowerCase() === n.toLowerCase())).map(n =>
+        '<button type="button" class="ssn-ptag ssn-ptag-carry" data-pword="' + esc(n) + '" data-pname="' + esc(n) +
+          '" title="Added to this folder&rsquo;s searches - tap to take it out">&#128204; ' + esc(n) + '</button>').join('') +
       pathTags.map((t, i) => i >= studioStart
         ? '<button type="button" class="ssn-ptag ssn-ptag-studio" data-pstudio="' + esc(t) + '" data-pname="' + esc(t) +
           '" title="Studio name mapped in manage-data">' + esc(t) + '</button>'
@@ -1315,12 +1355,15 @@
     function cardHtml(c, i, herePid, hereSid) {
       const fileSec = Number(c.file_duration_sec) || 0;
       const sceneSec = Number(c.stash_duration_sec) || 0;
-      let durClass = '', durNote = sceneSec ? 'no file length' : 'no scene runtime';
+      let durClass = '', durNote = sceneSec ? 'no file length' : 'no scene runtime', durShort = '—';
       if (fileSec > 60 && sceneSec > 60) {
         const drift = Math.abs(fileSec - sceneSec) / Math.max(fileSec, sceneSec);
         // Same bands as bulk-stash: within 3% reads right, past 5% reads wrong.
+        // Within 0.2% (the score's top bands) it's picked out.
         durClass = drift <= 0.03 ? 'okv' : (drift <= 0.05 ? '' : 'warnv');
+        if (Number((drift * 100).toFixed(1)) <= 0.2) durClass += ' spot';
         durNote = (drift * 100).toFixed(1) + '% apart';
+        durShort = (drift * 100).toFixed(1) + '%';
       }
       const scored = c.confidence !== null && c.confidence !== undefined;
       const conf = Number(c.confidence) || 0;
@@ -1366,19 +1409,20 @@
             : '<div class="ssn-cover ssn-thumb none">no cover</div>') +
           '<div class="ssn-tt"><div class="ssn-title">' + esc(c.title || '(untitled scene)') + '</div>' +
             '<div class="ssn-sub">' + sub + '</div>' +
-            (scored ? '<div class="ssn-conf ' + confClass + '"><b>' + conf.toFixed(0) + '</b> <small>CONFIDENCE</small></div>' : '') +
           '</div>' +
         '</div>' +
-        '<div class="ssn-facts">' +
-          '<div class="ssn-fact ' + durClass + '"><span>File length</span><b>' + clock(fileSec) + '</b></div>' +
-          '<div class="ssn-fact ' + durClass + '"><span>Scene length</span><b>' + clock(sceneSec) + '</b></div>' +
-          '<div class="ssn-fact ' + durClass + '"><span>Difference</span><b>' + esc(durNote) + '</b></div>' +
-          '<div class="ssn-fact gm"><span>Cast shape</span><b>' + esc(c.gender_mix || '—') + '</b></div>' +
+        // picker 15.41 / native 15.52: one row, then Accept & submit.
+        '<div class="ssn-facts ssn-facts5">' +
+          '<div class="ssn-fact ssn-cf ' + confClass + '" title="Confidence"><span>Conf</span><b>' + (scored ? conf.toFixed(0) : '—') + '</b></div>' +
+          '<div class="ssn-fact ' + durClass + '" title="File length"><span>File</span><b>' + clock(fileSec) + '</b></div>' +
+          '<div class="ssn-fact ' + durClass + '" title="Scene length"><span>Scene</span><b>' + clock(sceneSec) + '</b></div>' +
+          '<div class="ssn-fact ' + durClass + '" title="Difference: ' + esc(durNote) + '"><span>Diff</span><b>' + esc(durShort) + '</b></div>' +
+          '<div class="ssn-fact gm" title="Cast shape"><span>Cast</span><b>' + esc(c.gender_mix || '—') + '</b></div>' +
         '</div>' +
+        (canAccept ? '<button type="button" class="ssn-accept ssn-accept-big" data-accept="' + i + '">Accept &amp; submit</button>' : '') +
         (cast ? '<div class="ssn-cast">' + cast + '</div>' : '<div class="ssn-sub" style="margin:0 0 8px;">no performers listed</div>') +
         (moreBits ? '<details class="ssn-more"><summary>' + moreLabel + '</summary>' + moreBits + '</details>' : '') +
         '<div class="ssn-foot">' +
-          (canAccept ? '<button type="button" class="ssn-accept" data-accept="' + i + '">Accept &amp; submit</button>' : '') +
           (canAccept && typeof opts.onTake === 'function' && (c.studio || (c.cast || []).length)
             ? '<button type="button" class="ssn-take" data-take="' + i + '" title="Put this scene&rsquo;s studio and/or performers into this file&rsquo;s details, without attaching the scene">Take studio/performers</button>'
             : '') +
@@ -1649,6 +1693,7 @@
       if (btn.dataset.ptag !== undefined) { togglePtag(+btn.dataset.ptag); return; }
       if (btn.dataset.pstudio !== undefined) { pillMenu(btn.dataset.pstudio); return; }
       if (btn.dataset.pperf !== undefined) { pillMenu(btn.dataset.pperf, 'performer'); return; }
+      if (btn.dataset.pword !== undefined) { toggleWord(btn.dataset.pword); return; }
       if (btn.dataset.ddDone) { closeDd(btn.dataset.ddDone); return; }
       if (btn.dataset.rfToggle) {
         const e = top();

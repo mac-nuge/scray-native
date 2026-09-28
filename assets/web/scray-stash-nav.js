@@ -1448,7 +1448,9 @@
     // is for counts too - it was left out as "already on screen", which made a
     // performer profile opened from a list row the one list missing a link.
     function libOthers(c) {
-      return (c.library || []).filter(l => l && l.video_key);
+      // 🔒 Not a file in a private folder while locked (picker 15.62 / native 15.73).
+      return (c.library || []).filter(l => l && l.video_key &&
+        !(window.scrayPrivate && window.scrayPrivate.hides({ path: l.path || '', filename: l.filename || '' })));
     }
     function libHtml(c, i) {
       const lib = libOthers(c);

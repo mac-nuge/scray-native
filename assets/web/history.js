@@ -132,7 +132,8 @@ const historyList = document.getElementById("historyList");
 if (!historyList) return;
 historyList.innerHTML = '';
 
-const totalSize = historyVideos.reduce((acc, v) => acc + (v.sizeBytes || 0), 0);
+// 🔒 Private folders stay out while locked (picker 15.62 / native 15.73).
+const totalSize = historyVideos.reduce((acc, v) => acc + ((window.scrayPrivate && window.scrayPrivate.hides(v)) ? 0 : (v.sizeBytes || 0)), 0);
 
 const totalDiv = document.createElement("div");
 totalDiv.className = "history-total-size";
@@ -148,6 +149,7 @@ if (typeof window.scrayBuildListHeader === 'function') {
 }
 
 historyVideos.forEach((video, idx) => {
+if (window.scrayPrivate && window.scrayPrivate.hides(video)) return;   // 🔒 (picker 15.62 / native 15.73)
 
 // ✅ Compact buttons with overflow menu
 const buttons = [

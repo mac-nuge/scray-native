@@ -1078,7 +1078,10 @@
       const chips = ['all', 'match', 'skip', 'unmatched', 'never'].filter(k => k === 'all' || counts[k]).map(k =>
         '<button type="button" data-f="' + k + '" class="' + (listFilter === k ? 'on' : '') + '">' +
           (k === 'all' ? 'All' : KIND[k][0] + ' ' + KIND[k][1]) + ' <b>' + counts[k] + '</b></button>').join('');
-      const rows = matches.map((m, i) => ({ m, i })).filter(x => listFilter === 'all' || kindOf(x.m) === listFilter).map(({ m, i }) => {
+      const rows = matches.map((m, i) => ({ m, i }))
+        // 🔒 Files in private folders stay out while locked (picker 15.62 / native 15.73).
+        .filter(x => !(window.scrayPrivate && window.scrayPrivate.hidesPath(x.m.dir)))
+        .filter(x => listFilter === 'all' || kindOf(x.m) === listFilter).map(({ m, i }) => {
         const k = kindOf(m);
         const onScreen = !!(S && S.cur && S.cur.key === m.key);
         const tags = [KIND[k][1] + (k === 'match' && m.how === 'bulk' ? ' in a bulk check' : k === 'match' && m.how === 'fingerprint' ? ' by fingerprint' : ''), ago(m.at)];

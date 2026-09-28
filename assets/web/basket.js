@@ -115,6 +115,7 @@ let basketLineNo = 0;
 const basketGroupLis = new Map();
 
 basketVideos.forEach((video, idx) => {
+    if (window.scrayPrivate && window.scrayPrivate.hides(video)) return;   // 🔒 private folders, while locked (picker 15.62 / native 15.73)
 
     // ✅ Create compact button group with overflow menu
 const buttons = [

@@ -4,6 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.101 / picker 15.62 / native 15.73 — test: Private folders hidden until the PIN
+<!-- 2026-09-28T15:27Z -->
+- 🔒 Private folders: chosen folders (and everything under them) are hidden until a PIN is entered. One PIN everywhere. A lock to stop someone who picks up the device, not encryption; nothing shows while locked (no placeholder).
+- api.php: new `private_get` (folders, has_pin, optional keys = video_keys with any copy in a private folder), `private_unlock` (PIN check, 0.9 s delay on a wrong PIN) and `private_save` (first save sets a 4–12 digit PIN; later saves need the current PIN; can change it). Stored in app_state (`private_folders`, `private_pin` as a password hash). Helpers sit above the switch.
+- api.php fix: `scrayPlaylistFind` moved above the switch; it was declared inside a case, so any case that jumped past it couldn't call it.
+- Picker + Native: new `scray-private.js` (loaded right after db.js; native index.html list updated). Wraps getAllVideos so lists, tags, views, wholesale and the hunt pool leave private files out; History and Basket skip them (history total too); hunt open-match rows and nav library copies filtered. Locks again every time the app opens and after 5 min in the background; locking stops a private file that's playing and closes the hunt/preview.
+- Settings ▸ 🔒 Private folders: status, Unlock/Lock, Manage… (pick folders from a searchable list with counts, remove with ✕, change PIN).
+- Browse: new `scray-private-page.js`; 🔒/🔓 button in the header of migrate.html and data-explorer.html (locked on every page load). Migrate hides private files, their folder destinations, dest-tree / dest-search folders and OneDrive dest folders; Data explorer hides their rows; the 📁 Folder dialog hides the folders.
+- Not covered yet: server-side counts/tiles may still include hidden files; the DB console's raw SQL; bulk-stash, stash-manual and manage-data pages.
+- Native deploy: web only (index.html + new scray-private.js), no IPA.
+
 ### picker 15.61 / native 15.72 — test: Hunt bulk check can add the next 60
 <!-- 2026-09-28T15:20Z -->
 

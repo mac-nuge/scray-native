@@ -56,6 +56,9 @@
 // buttons under it. In a hunt, names carried from this folder's earlier
 // searches are 📌 pills (tap to take out), and every search tells the hunt
 // which studio / performer names were added to the words (hunt.searched).
+// picker 15.58 / native 15.69 (browse 15.96): the studio's performer search
+// also finds a performer by what one of this studio's scenes credited them as
+// ("Leila Cove as Sylvie") - that's per scene, not one of their aliases.
 // picker 15.57 / native 15.68 (browse 15.95): the search view's Performer
 // filter shows and searches the credited-as names and aliases too (cards' cast
 // now carries aliases), and the Find box's library results say which
@@ -1166,6 +1169,8 @@
           if (!p || !p.id || !p.name) return null;
           const o = m.get(p.id) || { id: p.id, name: p.name, count: 0, as: [], aliases: [] };
           (p.aliases || []).forEach(a => { if (a && !o.aliases.includes(a)) o.aliases.push(a); });
+          // Credited-as names the StashDB search found (picker 15.58 / native 15.69).
+          (Array.isArray(p.as) ? p.as : []).forEach(a => { if (a && a !== o.name && !o.as.includes(a)) o.as.push(a); });
           if (count) o.count++;
           m.set(p.id, o);
           return o;
@@ -1869,12 +1874,12 @@
         e.perfFindNote = '';
         paintStudioList();
         const seq = loadSeq;
-        api('stash_nav', { method: 'POST', body: { op: 'studio_perf_find', id: e.id, term: q } })
+        api('stash_nav', { method: 'POST', body: { op: 'studio_perf_find', id: e.id, name: e.name || '', term: q } })
           .then(r => {
             const got = (r && r.performers) || [];
             e.perfFound = (e.perfFound || []).filter(x => !got.some(g => g.id === x.id))
               .concat(got.map(g => Object.assign({}, g, { foundBy: q })));
-            e.perfFindNote = got.length ? '' : 'Nobody at this studio goes by \u201c' + q + '\u201d on StashDB.';
+            e.perfFindNote = got.length ? '' : 'Nobody at this studio goes by \u201c' + q + '\u201d on StashDB - not as a name, an alias or a scene credit.';
           })
           .catch(err => { e.perfFindNote = 'StashDB: ' + (err.message || String(err)); })
           .finally(() => {

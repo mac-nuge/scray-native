@@ -4,6 +4,28 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.96 / picker 15.58 / native 15.69 — test: Studio performer search finds scene credits
+<!-- 2026-09-28T13:58Z -->
+
+- **picker** — `staging - 15.58 test: Studio performer search finds scene credits`: `scray-stash-nav.js`.
+- **native** — `stg-native - 15.69 test: Studio performer search finds scene credits`: `assets/web/scray-stash-nav.js` (web only, no IPA). Byte-identical to Picker's.
+- **browse** — `staging-browse - 15.96 test: Studio performer search finds scene credits`: `api.php`.
+
+- **Reported:** on Exploited College Girls' view, *Search this studio's performers for "sylvie"* said nobody. But one of the studio's scenes (*School Cheer Team Sweetheart*) credits **Leila Cove as Sylvie**.
+- **Cause:** 15.94's search asked StashDB for this studio's performers by name or *alias* (`queryPerformers` `names`). "Sylvie" isn't one of Leila Cove's aliases on StashDB. It's how that one scene credited her (the per-scene `as`), which that query doesn't look at.
+- **Fix (`studio_perf_find`):**
+  - Still the name / alias query first.
+  - Then StashDB's scene search (`searchScene`, which does index credited names), twice: *"<studio name> sylvie"* and *"sylvie"*, 40 scenes each.
+  - Only this studio's scenes, or those of studios under it, are kept. Every performer in them whose name, alias or credit matches is taken, with the credit, e.g. *Leila Cove as Sylvie*.
+  - The app sends the studio's name along; without it, the server looks it up.
+  - Nobody → *not as a name, an alias or a scene credit*. An error only when both parts fail.
+- **App:** credits from the search join the performer's *as …* in the list (`studioOptions`), so she shows as **Leila Cove as Sylvie**, ready to pick.
+- **Tested:** `php -l`; `node --check`. The op in a PHP harness with a stand-in StashDB:
+  - no alias hit, then the scene search → *Leila Cove*, `as: ["Sylvie"]`;
+  - another studio's "Sylvie" left out;
+  - the calls were queryPerformers, searchScene("Exploited College Girls sylvie"), searchScene("sylvie").
+  - Not run against StashDB itself. It depends on its scene search matching the credit, as the search view did in the screenshot.
+
 ### browse 15.95 / picker 15.57 / native 15.68 — test: Aliases in every performer search list
 <!-- 2026-09-28T13:40Z -->
 

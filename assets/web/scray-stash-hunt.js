@@ -23,6 +23,9 @@
 // (TinEye's Search, say). The handle is { mount(modal), loaded(matched, modal),
 // closed(modal) }.
 //
+// picker 15.43 / native 15.54: the search order picked on one file (StashDB
+// order or Best match) is where the next files' searches open, until the hunt
+// is closed - searchSort() / setSearchSort(v). StashDB order to start with.
 // picker 15.41 / native 15.52: no more flick for Next - a swipe left only
 // opens the options, which now include ⏭ Next (between 📁 and 🏷). A studio
 // or performer name added to a file's search is carried to the next files
@@ -180,7 +183,8 @@
       tagMenu: false,
       run: Date.now(),          // which hunt a last match was made in
       swipeIn: false,           // the next card slides in (⏭ in the swipe options sent us on)
-      carry: new Map()          // folder -> studio / performer names added to its searches
+      carry: new Map(),         // folder -> studio / performer names added to its searches
+      sort: ''                  // the search order picked this run: 'match' | 'order' | '' (StashDB order)
     };
   }
 
@@ -1869,6 +1873,9 @@
     suggestPerformers: (video) => (optsFor(video) ? lastPerfs.slice() : []),
     /** Names this file's folder carries into its search (picker 15.41 / native 15.52). */
     carried: (video) => (optsFor(video) ? carryOf(video).slice() : []),
+    /** The search order picked this run ('' until one is picked). */
+    searchSort: () => (S && S.sort) || '',
+    setSearchSort: (v) => { if (S && (v === 'match' || v === 'order')) S.sort = v; },
     searched,
     openMatches, openBulk,
     isActive: () => !!S,

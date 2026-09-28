@@ -56,6 +56,9 @@
 // buttons under it. In a hunt, names carried from this folder's earlier
 // searches are 📌 pills (tap to take out), and every search tells the hunt
 // which studio / performer names were added to the words (hunt.searched).
+// picker 15.43 / native 15.54: in a hunt, the search's order (StashDB order
+// or Best match) sticks from file to file until the hunt is closed
+// (hunt.searchSort / hunt.setSearchSort). StashDB order to start with.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -332,6 +335,13 @@
           ![huntStudio].concat(huntPerfs).some(h => h && h.toLowerCase() === n.toLowerCase()))
       : [];
     const headingWas = heading ? heading.textContent : '';
+    // A search's first order: the hunt's, once picked there (picker 15.43 / native 15.54).
+    const searchSort = () => {
+      try {
+        const v = inHunt && typeof hunt.searchSort === 'function' ? hunt.searchSort() : '';
+        return v === 'match' || v === 'order' ? v : SEARCH_SORT;
+      } catch (err) { return SEARCH_SORT; }
+    };
 
     // The studio + performer box (picker 14.19 / native 14.31). Kept out here
     // because every repaint rebuilds the box: the words and results survive.
@@ -612,7 +622,7 @@
           entry.id = res.performer.id;
           entry.name = res.performer.name || entry.name;
         }
-        if (!entry.sort) entry.sort = (entry.type === 'search' && res.scored) ? SEARCH_SORT : 'order';
+        if (!entry.sort) entry.sort = (entry.type === 'search' && res.scored) ? searchSort() : 'order';
         // The hunt carries studio / performer names added to the words on to
         // the next files from this folder (picker 15.41 / native 15.52).
         if (entry.type === 'search' && inHunt && typeof hunt.searched === 'function') {
@@ -1792,6 +1802,10 @@
       if (btn.dataset.sort) {
         const e = top();
         if (e && e.sort !== btn.dataset.sort) { e.sort = btn.dataset.sort; paint(false, true); }
+        // In a hunt, the next files' searches open in this order too (picker 15.43 / native 15.54).
+        if (e && e.type === 'search' && inHunt && typeof hunt.setSearchSort === 'function') {
+          try { hunt.setSearchSort(btn.dataset.sort); } catch (err) { /* this card only */ }
+        }
         return;
       }
       if (btn.dataset.ext) { openExternal(btn.dataset.ext); return; }

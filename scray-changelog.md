@@ -4,6 +4,23 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.43 / native 15.54 — test: Hunt keeps the search order picked until it is closed
+<!-- 2026-09-28T11:15Z -->
+
+- **picker** — `staging - 15.43 test: Hunt keeps the search order picked until it is closed`: `scray-stash-nav.js`, `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.54 test: Hunt keeps the search order picked until it is closed`: `assets/web/scray-stash-nav.js`, `assets/web/scray-stash-hunt.js` (web only, no IPA). Both byte-identical to Picker's.
+
+- **Asked for:** a hunt's searches start in StashDB order. Once Best match is picked, stay on it (or whichever was picked last) until the hunt is closed.
+- **What it does:**
+  - Tapping Best match or StashDB order on a hunt search tells the hunt (`setSearchSort`). It keeps the pick in the run (`S.sort`).
+  - Each later search opens in that order (`searchSort()` in the navigator): the next files' cards, and a new search on the same card.
+  - A new hunt starts on StashDB order again. Searches outside a hunt are unchanged (StashDB order, per card).
+- **Tested:** `node --check`; in jsdom with the hunt:
+  - card 1 opens in StashDB order; Best match reorders it;
+  - card 2 opens in Best match, and still does after searching again;
+  - picking StashDB order carries to card 3;
+  - a new hunt opens in StashDB order.
+
 ### picker 15.42 / native 15.53 — test: Hunt details form starts with the last studio
 <!-- 2026-09-28T11:05Z -->
 

@@ -905,10 +905,13 @@ window.scrayFoldNotes = function (rows) {
    and Native needs no bundle rebuild to pick it up.
    ========================================= */
 window.scrayStashNames = (function () {
-  const CACHE_KEY = "scray_stash_names_v1";
+  // v2 (picker 15.57 / native 15.68): the table carries `as` too - each
+  // performer's credited-as names - so a v1 copy is fetched afresh once.
+  const CACHE_KEY = "scray_stash_names_v2";
   const TTL_MS    = 10 * 60 * 1000;
 
   let rows     = {};
+  let asMap    = {};   // performer name (lower-case) -> names they were credited as
   let sig      = null;
   let loadedAt = 0;
   let inFlight = null;
@@ -917,6 +920,7 @@ window.scrayStashNames = (function () {
     const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
     if (cached && cached.rows) {
       rows     = cached.rows;
+      asMap    = cached.as || {};
       sig      = cached.sig || null;
       loadedAt = cached.at || 0;
     }
@@ -1036,9 +1040,10 @@ window.scrayStashNames = (function () {
         const r = await window.scrayApiCall("stash_names", { params: sig ? { sig } : {} });
         if (!r.unchanged) {
           rows     = r.rows || {};
+          asMap    = r.as || {};
           sig      = r.sig || null;
           try {
-            localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), sig, rows }));
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), sig, rows, as: asMap }));
           } catch { /* over quota - the in-memory copy still works this session */ }
           // Lists already on screen were drawn from the old copy. Repaint them
           // rather than leaving half the catalogue showing filenames until the
@@ -1072,12 +1077,18 @@ window.scrayStashNames = (function () {
     if (!from || !to || from === to || !rows[from] || rows[to]) return false;
     rows[to] = rows[from];
     try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ at: loadedAt, sig, rows }));
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ at: loadedAt, sig, rows, as: asMap }));
     } catch { /* in memory is enough for this session */ }
     return true;
   }
 
-  return { parts, text, has, keyFor, refresh, rekey, dump: () => rows };
+  /** The names a performer was credited as (picker 15.57 / native 15.68). */
+  function asFor(name) {
+    const a = asMap[String(name || "").trim().toLowerCase()];
+    return Array.isArray(a) ? a : [];
+  }
+
+  return { parts, text, has, keyFor, refresh, rekey, asFor, dump: () => rows };
 })();
 
 /**

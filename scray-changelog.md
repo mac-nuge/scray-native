@@ -4,6 +4,284 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.95 / picker 15.57 / native 15.68 — test: Aliases in every performer search list
+<!-- 2026-09-28T13:40Z -->
+
+- **picker** — `staging - 15.57 test: Aliases in every performer search list`: `scray-stash-nav.js`, `scray-stash-edit.js`, `scray-config.js`, `randomiser.js`.
+- **native** — `stg-native - 15.68 test: Aliases in every performer search list`: `assets/web/scray-stash-nav.js`, `assets/web/scray-stash-edit.js`, `assets/web/scray-config.js`, `assets/web/randomiser.js` (web only, no IPA). The nav and edit files are byte-identical to Picker's; the config and randomiser patches are the same in each.
+- **browse** — `staging-browse - 15.95 test: Aliases in every performer search list`: `api.php`, `data-explorer.html`, `migrate.html`, `stash-manual.html`, `scray-stash-profiles.js`.
+
+- **Reported:** in a hunt, the search results' Performer filter found nobody for *syl*: the scene credits her by a different name.
+  - Asked for: aliases in every performer search dropdown, the Scray pages included.
+- **Two kinds of alias, shown the way the cards do:**
+  - **as …**: what a scene credited them as (StashDB's per-scene `as`, kept in `stash_performers.as_name`).
+  - **aka …**: StashDB's alias list for the performer.
+  - Every list below matches on both as well as the name.
+
+**Where:**
+- **Stash navigator's search results, Performer filter** (`rfCounts`, `rfilterHtml`):
+  - each performer shows *as …* from these results' credits and *aka …* from StashDB;
+  - the list's search matches them. The server's scene cards now carry each cast member's `aliases`.
+- **A studio's Performer list:** since 15.94, and it now also gets aliases from the cast of loaded scenes.
+- **Find a studio or performer box:** library results found by a credited-as name say *as …* (op `local` matches `as_name`, ranked after name matches); StashDB results found by an alias say *aka …* (15.94).
+- **Stash details form, Performers** (`scray-stash-edit.js`, Picker and Native):
+  - your library's names show *as …* and are found by them (`stash_edit_vocab` now sends `as`);
+  - *Search StashDB* results found by an alias say *aka …*.
+- **data-explorer / migrate / stash-manual edit cells (`openCombo`):** the same. Library names show and match *as …*; data-explorer's and migrate's StashDB results show *aka …* (stash-manual has no StashDB search).
+- **Profiles page (`scray-stash-profiles.js`):** library results *as …*, StashDB results *aka …*.
+- **Picker / Native's Performers filter cloud** (`showTagCloudModal`, *Narrow this list*):
+  - a performer is found by a credited-as name, and the pill says *as …*;
+  - `stash_names` sends an `as` map (name → credited-as names, 6 at most);
+  - `scrayStashNames.asFor(name)`. Its cache key is now v2, so it's fetched afresh once.
+
+**api.php:**
+- `stash_nav` cards: `performers { as performer { … aliases } }` (falls back without), cast `aliases`.
+- `stash_edit_vocab` / `stash_vocab_list` performers: `as` (8 at most).
+- `local`: matches credited-as names, returns `as`.
+- `stash_names`: `as` map.
+
+**Tested:**
+- `php -l`; `node --check` on every JS file and every page's script. The vocab SQL on an in-memory table: *Riley Reid* → `Paige,Sylvia`, blanks ignored.
+- In jsdom:
+  - the navigator's Performer filter, "syl" → *Anna Blonde as Sylvia aka Anna B* and *Kara aka Sylvie K*;
+  - the details form, "syl" → *Anna Blonde as Sylvia*, then Search StashDB adds *Zed aka Sylvana*;
+  - data-explorer's and stash-manual's `openCombo`, "syl" → *Anna Blonde as Sylvia*, and data-explorer's StashDB *Zed aka Sylvana*.
+- Not run against StashDB or the live database.
+
+### browse 15.94 / picker 15.56 / native 15.67 — test: Studio performer list shows and searches aliases
+<!-- 2026-09-28T13:15Z -->
+
+- **picker** — `staging - 15.56 test: Studio performer list shows and searches aliases`: `scray-stash-nav.js`.
+- **native** — `stg-native - 15.67 test: Studio performer list shows and searches aliases`: `assets/web/scray-stash-nav.js` (web only, no IPA). Byte-identical to Picker's.
+- **browse** — `staging-browse - 15.94 test: Studio performer list shows and searches aliases`: `api.php`.
+
+- **Asked:** can the Stash modals' performer searches only find a performer's listed name, not an alias they used for a studio? Yes. A studio's Performer list only had StashDB's names, and only the 100 with the most scenes there, so an alias read off a video couldn't find anyone.
+  - Wanted: list performers the way scene cards credit them (*Performer A as Alias A*), and let the alias be searched.
+- **The studio view's Performer list (`studioOptions`, `studioHtml`, `paintStudioList`):**
+  - Each performer shows **as …**: the names they're credited as in this studio's scenes loaded so far (the cast's `as`, as on the cards).
+  - Also **aka …**: their StashDB aliases, the first 4, then +N.
+  - The list's search box matches the name, the as-credits and every alias. Typing *paige* finds *Riley Reid aka Paige Riley*.
+  - Performers in the loaded scenes who aren't among the server's 100 are added too.
+  - **🔍 Search this studio's performers for "…" (names and aliases)** sits under the list once 2+ letters are typed. It asks StashDB (`stash_nav` op `studio_perf_find`: `queryPerformers` with `studio_id` + `names`, which StashDB matches against names and aliases, 40 at most, most scenes first). Whoever comes back joins the list, ready to pick, with their aliases. If nobody comes back, it says so.
+- **api.php:**
+  - The studio profile's performer query also asks for `aliases` (falls back without).
+  - The new `studio_perf_find` op.
+  - `scrayStashNavAliases()` tidies alias lists: no repeat of the name, 12 at most.
+  - The Find box's performers carry `aliases`. StashDB's `searchPerformer` already matched aliases, but the list never said so.
+- **Find a studio or performer box:** a StashDB performer found by an alias now says which, e.g. *Candace Cage · aka Jade Cage*.
+- **Tested:**
+  - `php -l`; `node --check`.
+  - In jsdom with a stand-in server:
+    - the studio list shows *Riley Reid aka Paige Riley*, *Katie Jordin as Katie J* and a cast-only performer;
+    - "paige" and "katie j" narrow to the right one;
+    - "jade" finds none, then the StashDB button adds *Candace Cage aka Jade Cage, Candi*;
+    - the Find box shows *aka Jade Cage*.
+  - Not run against StashDB itself. If its schema lacked `names` on `PerformerQueryInput`, the button would say StashDB refused, and nothing else changes.
+
+### picker 15.55 / native 15.66 — test: Hunt bulk details open over bulk, preview over all, compact cards
+<!-- 2026-09-28T12:35Z -->
+
+- **picker** — `staging - 15.55 test: Hunt bulk details open over bulk, preview over all, compact cards`: `scray-stash-hunt.js`, `scray-stash-nav.js`.
+- **native** — `stg-native - 15.66 test: Hunt bulk details open over bulk, preview over all, compact cards`: `assets/web/scray-stash-hunt.js`, `assets/web/scray-stash-nav.js` (web only, no IPA). Both byte-identical to Picker's.
+
+**Reported after 15.54 / 15.65:**
+- Result cards should be more compact, with smaller titles.
+- ▶ in bulk didn't put the video on screen as ▶ does elsewhere.
+- 🔎's Back to bulk didn't come back to bulk. It should just open a module on top of the bulk one, with the full Stash results, and closing it goes back to bulk.
+
+**🔎 (`peekBulk`, rebuilt):**
+- **Cause:** 15.54 hid the sheet, and on close rebuilt the hunt's own card (`resume()`). The rebuilt card was appended after the sheet at the same z-index (2147483647), so it covered the sheet. Back to bulk looked like it went back to the hunt, not to bulk.
+- **Now:**
+  - The sheet stays as it is. The file's Stash modal opens on top of it (appended after it, same z-index): lookup, search with every card, Accept & submit, details.
+  - The hunt's own card is left alone rather than rebuilt. It steps out of the `#stashModal` id (`stashModalHuntAside`, hidden) so `showStashModal` doesn't remove it. It takes the id back when the look closes.
+  - Close, or ✕ Back to bulk, and the bulk sheet is simply there again: still checking, ticks, sort and scroll untouched.
+  - 🎯 Hunt it still leaves bulk for that file. Closing the bulk sheet also puts the hunt's card back if a look never closed the usual way.
+
+**▶ (`scrayStashNav.preview`):**
+- It takes one overlay or several. Bulk's ▶ hides the sheet *and* the hunt's card under it, so the player is what's on screen, as with ▶ elsewhere. *Back to Stash* brings both back.
+- While a bulk check is open, any preview (e.g. ▶ inside a 🔎 look) hides the sheet too, and brings it back after.
+
+**Compact cards:**
+- **The navigator's result cards (everywhere):** title .82rem (was .95), sub .72rem, less padding and gaps, cover 36% wide (was 40%), cast chips smaller, Accept & submit a touch smaller (.95rem).
+- **Bulk rows:** filename .7rem, scene title .76rem (was .84), sub .7rem, tighter padding, smaller 🔎 / ▶.
+
+**Tested:** `node --check`. In Chromium with a stand-in `showStashModal` that stacks like the real one:
+- bulk on top;
+- 🔎 → that file's modal on top, sheet still displayed;
+- Back to bulk → the sheet on top, the hunt's card back as `#stashModal` and visible underneath;
+- ▶ on a row → sheet and hunt card hidden; ended → sheet back on top;
+- ▶ inside a look → sheet and look hidden; ended → the look back on top.
+
+### picker 15.54 / native 15.65 — test: Hunt bulk magnifier opens full details and returns to bulk
+<!-- 2026-09-28T12:20Z -->
+
+- **picker** — `staging - 15.54 test: Hunt bulk magnifier opens full details and returns to bulk`: `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.65 test: Hunt bulk magnifier opens full details and returns to bulk`: `assets/web/scray-stash-hunt.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked for:** 🔎 in ⚡ Bulk left the bulk check (it ended it and hunted that file). It should show the file's full details and come back to bulk.
+- **What it does (`peekBulk`):**
+  - 🔎 hides the bulk sheet and opens that file in the ordinary Stash modal: fingerprint lookup, the search with every card, Accept & submit, details, preview.
+  - A bar on top: *⚡ From the bulk check · 2 of 12*, with **⚡ Back to bulk**, or just Close.
+  - The file gets the hunt's 🎯 pills, carried names and search order, as the hunt's own file does (`optsFor` knows it, `S.peek`).
+  - Back to bulk puts the hunt's own file back underneath and the sheet on top as it was: still checking in the background, with ticks, sort, tick mark and scroll kept.
+  - A match made in there shows on its row as *✅ Matched - in the Stash modal* and counts in the hunt. Unmatching it before going back puts the row back.
+  - A rename there follows the row.
+  - **🎯 Hunt it** in the bar does what 🔎 used to: ends the bulk check and makes that file the hunt's.
+- **Tested:** `node --check`. In jsdom, with a stand-in `showStashModal`:
+  - 🔎 on row 2 opens b.mp4 with the bulk bar, sheet hidden, hunt pills on;
+  - matched there, then Back to bulk: the hunt's a.mp4 underneath, sheet back, row 2 *Matched - in the Stash modal*, matched count 1;
+  - 🔎 then 🎯 Hunt it on row 3: bulk gone, c.mp4 is the hunt's file.
+
+### picker 15.53 / native 15.64 — test: Hunt bulk preview button on every row
+<!-- 2026-09-28T12:12Z -->
+
+- **picker** — `staging - 15.53 test: Hunt bulk preview button on every row, adjustable tick mark` (15.52 and 15.53 in one): `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.64 test: Hunt bulk preview button on every row, adjustable tick mark` (15.63 and 15.64 in one): `assets/web/scray-stash-hunt.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked for:** in ⚡ Bulk, a play button just below the 🔎 for previewing.
+- **What it does:**
+  - Every row has **▶** under 🔎. On matched rows, which have no 🔎, it's there on its own.
+  - It plays the file as the hunt bar's ▶ does (`scrayStashNav.preview`, from 30% in). The bulk sheet steps aside while it plays, and *Back to Stash* brings it back as it was: ticks, order and scroll.
+  - Tapping ▶ doesn't tick the row.
+- **Tested:** `node --check`. In jsdom:
+  - the row shows 🔎 / ▶;
+  - ▶ previews that row's file with the sheet as the overlay;
+  - the row stays unticked.
+
+### picker 15.52 / native 15.63 — test: Hunt bulk tick mark adjustable
+<!-- 2026-09-28T12:10Z -->
+
+(Shipped with 15.53 / 15.64 - the version files went straight on.)
+
+- **Asked for:** the Tick 90+ button's 90 should be adjustable: start at 90, dial up or down.
+- **What it does:**
+  - A row of its own: *Tick all at* **− 90 +** **☑ Tick 90+ (n)**.
+  - − and + go in steps of 5, onto the nearest 5 first (87 → 85 or 90). The number can also be typed (0–100). It's 16 px so iOS doesn't zoom.
+  - The button follows: *☑ Tick 85+ (3)*, or *☐ Untick 85+* once those are all ticked. It's kept for the rest of the hunt (`S.bulkMin`) and starts at 90.
+  - Changing the mark doesn't untick anything already ticked.
+- **Tested:** `node --check`. In jsdom, rows scoring 50 / 95 / 87 / 91 / 84:
+  - 90 → 2; − → 85 → 3, ticked;
+  - − → 80 → 4;
+  - typed 87 → 3; + → 90 → 2.
+
+### picker 15.51 / native 15.62 — test: Hunt bulk Match ticked shows its progress
+<!-- 2026-09-28T12:05Z -->
+
+- **picker** — `staging - 15.51 test: Hunt bulk Match ticked shows its progress`: `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.62 test: Hunt bulk Match ticked shows its progress`: `assets/web/scray-stash-hunt.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked for:** a % status once Match ticked is tapped.
+- **What it does:**
+  - While the ticked files are submitted (one at a time, as before), the button reads *Matching… 40%*.
+  - Above the buttons, a green bar and a line: *✓ Matching · 40% · 4 of 10*, with *· N failed* in red when any fail.
+  - At 100% it reads *Finishing… · updating names…* while the studio / performer names and the S button refresh. Then the bar goes and the rename question comes up as before.
+  - Renaming the matched files afterwards uses the same bar (*✎ Renaming · 50% · 2 of 4*), and the question line counts too.
+- **Tested:** `node --check`. In jsdom, four 90+ files, the third refused by the stub:
+  - 25%, 50%, then 75% · 1 failed;
+  - then the bar hides, and *Match ticked (1)* is left for the one that failed.
+
+### picker 15.50 / native 15.61 — test: Hunt bulk check sorts by confidence and ticks 90 plus
+<!-- 2026-09-28T11:58Z -->
+
+- **picker** — `staging - 15.50 test: Hunt bulk check sorts by confidence and ticks 90 plus`: `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.61 test: Hunt bulk check sorts by confidence and ticks 90 plus`: `assets/web/scray-stash-hunt.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked for:** in ⚡ Bulk, sort by confidence, and a "select all above 90" button.
+- **Sort: Files | Confidence ↓** (a second row under *Each file shows its*):
+  - Confidence puts the rows to decide on first, highest score first (of the scene each row shows, best match or StashDB #1). Then the ones still being checked, then nothing found, then those already matched. Ties keep the files' order.
+  - Rows move into place as their results arrive. The pick is kept for the rest of the hunt (`S.bulkSort`).
+  - Done with the CSS `order` of each row (`bulkRank`), so row indexes, ticks and taps are unchanged.
+- **☑ Tick 90+ (n):**
+  - Ticks every row still to decide whose shown scene scores 90 or more. With them all ticked, it reads *☐ Untick 90+* and takes them off again.
+  - It only ticks: *✓ Match ticked* is still a separate tap after looking, and nothing is ticked when the check opens.
+  - This relaxes the earlier "no tick-all" rule as asked, for 90+ only.
+- **Tested:** `node --check`. In jsdom, five files scoring 50 / 95 / none / 91 / 89.9:
+  - Files order as they came; Confidence → 95, 91, 89.9, 50, none;
+  - Tick 90+ (2) ticks the 95 and 91 (Match ticked (2)); again unticks them;
+  - back to Files order.
+
+### picker 15.49 / native 15.60 — test: Hunt bulk check toggles best match or StashDB order
+<!-- 2026-09-28T11:50Z -->
+
+- **picker** — `staging - 15.49 test: Hunt bulk check toggles best match or StashDB order`: `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.60 test: Hunt bulk check toggles best match or StashDB order`: `assets/web/scray-stash-hunt.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked for:** in ⚡ Bulk, a toggle between best match and StashDB order.
+- **What it does:**
+  - Above the list: *Each file shows its* **Best match | StashDB #1**.
+  - StashDB #1 shows StashDB's first result for each file. Its line says e.g. *StashDB's #1 of 3 · best match is #3 (93)*, or *also the best match*.
+  - Best match shows the highest-scoring result, as before: *best of 3 · #3 on StashDB*.
+  - Switching changes the scene shown on every row still to decide, without searching again (each row keeps all its results). A row whose scene changes loses its tick, so a tick is always on the scene you saw. Matched and matching rows aren't touched.
+  - It's the same setting as the search's Best match / StashDB order (15.43, `S.sort`). It starts on StashDB order, and a pick in either place carries to the other until the hunt is closed.
+- **Also fixed:** since 15.41 the bulk search was scored against the file's words plus the folder's carried names. It's scored against the file's own words again (`baseWords`), as the comment always said. The search itself still includes them.
+- **Tested:** `node --check`. In jsdom, a file whose three results score 20 / 40 / 93:
+  - opens on StashDB #1, *First*;
+  - ticked, then Best match → *Third*, unticked, `S.sort` = match;
+  - back to StashDB #1 → *First*;
+  - the search carried the folder's name, the score term didn't.
+
+### picker 15.48 / native 15.59 — test: Hunt scope button wraps instead of cutting off
+<!-- 2026-09-28T11:45Z -->
+
+- **picker** — `staging - 15.48 test: Hunt scope button wraps instead of cutting off`: `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.59 test: Hunt scope button wraps instead of cutting off`: `assets/web/scray-stash-hunt.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Reported:** the hunt bar's 🎯 scope button read *📁 fh18 · 3 …*: the count left was cut off (ellipsis) beside ⚡ Bulk and the score.
+- **Change:** the button's text is a size smaller (.72rem, was .8rem) and wraps onto a second line when it doesn't fit, instead of being cut off. The rest of the bar is unchanged.
+- **Tested:** `node --check`. Rendered in Chromium at 390 px (one folder: one line) and at 340 px (*📁 2 folders · 🏷 fh18 · 0 left*: two lines, nothing cut).
+
+### picker 15.47 / native 15.58 — test: Search pills re-run the search when tapped
+<!-- 2026-09-28T11:40Z -->
+
+- **picker** — `staging - 15.47 test: Search pills re-run the search when tapped`: `scray-stash-nav.js`.
+- **native** — `stg-native - 15.58 test: Search pills re-run the search when tapped`: `assets/web/scray-stash-nav.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked for:** tapping a pill under the search box, or anything else that changes the search words, should run the search again by itself. Search is only for words typed by hand.
+- **What it does (the Stash navigator's search view, hunt or not):**
+  - The folder-tag pills (7htz, classics, fh18…) and the mapped-studio pills that toggle words, and 15.41's 📌 carried names, put their words in or take them out as before. The search then runs 350 ms later (`searchSoon`), so a few quick taps make one search with all of them.
+  - Typing in the box cancels a search still to come from a pill, so it waits for Search / Enter as before.
+  - Already searching straight away, unchanged: de-Camel, Filename, and the 🎯 studio / performer pills' menu (*Add to the search & search* / *Take out & search again*). Those pills still open their menu, which also offers Filter these results and Open the page.
+  - Not changed: the lookup panel's word and tag pills (before the navigator opens). Those build a search term to start from, and Search there opens the navigator.
+- **Tested:** `node --check`; in jsdom:
+  - two folder-tag pills tapped in quick succession → one search, *Riley ray classics fh18*;
+  - a pill tapped and then the box typed in → no search until Search.
+
+### picker 15.46 / native 15.57 — test: Hunt swipe options with Never at the top and Details at the bottom
+<!-- 2026-09-28T11:32Z -->
+
+- **picker** — `staging - 15.46 test: Hunt swipe options with Never at the top and Details at the bottom`: `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.57 test: Hunt swipe options with Never at the top and Details at the bottom`: `assets/web/scray-stash-hunt.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked for:** swap Details and Never in the swipe options.
+- **Change:** the options now run, top to bottom: 🚫 Never · 📁 This folder / All files · ⏭ Next · 🏷 Tag · ✏️ Details. Each does what it did. The hunt bar's own buttons are unchanged.
+- **Tested:** `node --check`.
+
+### picker 15.45 / native 15.56 — test: Hunt swipe left for Next at 55 percent of the card
+<!-- 2026-09-28T11:30Z -->
+
+- **picker** — `staging - 15.45 test: Hunt swipe left for Next at 55 percent of the card`: `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.56 test: Hunt swipe left for Next at 55 percent of the card`: `assets/web/scray-stash-hunt.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked for:** after trying 15.44, 75% was too far. The point in the screenshot, where the card still said *Keep going for Next*, was about right. The card had moved about 58% of its width there.
+- **Change:** `SW.nextShare` goes from 0.75 to 0.55, so that point now reads *Let go: Next*. Everything else is as in 15.44.
+- **Tested:** `node --check`.
+
+### picker 15.44 / native 15.55 — test: Hunt swipe left across 75 percent of the card goes Next
+<!-- 2026-09-28T11:25Z -->
+
+- **picker** — `staging - 15.44 test: Hunt swipe left across 75 percent of the card goes Next`: `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.55 test: Hunt swipe left across 75 percent of the card goes Next`: `assets/web/scray-stash-hunt.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked for:** swipe left to go Next back, but only with a much wider swipe: the card dragged over 75% of the way left.
+- **What it does:**
+  - Past `SW.nextShare` (0.75) of the card's width at the moment of letting go, the card flies off and the next file slides in, as ⏭ does. Speed doesn't matter; no flick detection is back.
+  - Anything shorter (45 px or more) opens the options as in 15.41, ⏭ Next still among them.
+  - It also works from the options already open: keep dragging left.
+  - While dragging, once there's room between the card and the options, a dashed box says *⏭ Keep going for Next*. Past 75% it turns solid purple and says *⏭ Let go: Next*, so it's clear before letting go. Drag back under the mark and it's back to Keep going.
+- **Tested:** `node --check`. Touch events in jsdom on a 360 px card:
+  - 60 px and 200 px open the options;
+  - 280 px (78%) shows *Let go: Next* and goes Next.
+
 ### picker 15.43 / native 15.54 — test: Hunt keeps the search order picked until it is closed
 <!-- 2026-09-28T11:15Z -->
 

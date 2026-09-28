@@ -56,6 +56,23 @@
 // buttons under it. In a hunt, names carried from this folder's earlier
 // searches are 📌 pills (tap to take out), and every search tells the hunt
 // which studio / performer names were added to the words (hunt.searched).
+// picker 15.57 / native 15.68 (browse 15.95): the search view's Performer
+// filter shows and searches the credited-as names and aliases too (cards' cast
+// now carries aliases), and the Find box's library results say which
+// credited-as name matched.
+// picker 15.56 / native 15.67 (browse 15.94): on a studio's view the Performer
+// list shows who they were credited as there ("Name as Alias", from the scenes
+// loaded) and their StashDB aliases, and its search matches all of them. For
+// anyone not in the list, "Search this studio's performers for …" asks StashDB
+// by name OR alias (op studio_perf_find). The Find box names the alias a
+// StashDB performer was found by.
+// picker 15.55 / native 15.66: result cards are more compact - smaller titles,
+// less padding. preview() takes one overlay or several; and while a hunt's
+// bulk check is open, it steps aside for the player too.
+// picker 15.47 / native 15.58: tapping a pill that puts words in or takes them
+// out of the search box (folder tags, 📌 carried names) runs the search again
+// by itself - a short pause first, so a few quick taps make one search. Typing
+// in the box still waits for Search.
 // picker 15.43 / native 15.54: in a hunt, the search's order (StashDB order
 // or Best match) sticks from file to file until the hunt is closed
 // (hunt.searchSort / hunt.setSearchSort). StashDB order to start with.
@@ -181,12 +198,12 @@
 #stashModal .ssn .ssn-sort button { border: none; border-radius: 0; padding: 4px 9px; font-size: .74rem; background: transparent; }
 #stashModal .ssn .ssn-sort button.on { background: #6c5ce7; color: #fff; }
 #stashModal .ssn-empty { padding: 14px 4px; opacity: .7; text-align: center; }
-#stashModal .ssn-card { border: 1px solid #e1e1e8; border-radius: 8px; padding: 10px; margin: 0 0 10px; background: #fff; }
+#stashModal .ssn-card { border: 1px solid #e1e1e8; border-radius: 8px; padding: 8px; margin: 0 0 8px; background: #fff; }
 #stashModal .ssn-card.ssn-busy { opacity: .6; }
-#stashModal .ssn-top { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+#stashModal .ssn-top { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; }
 #stashModal .ssn-tt { flex: 1 1 auto; min-width: 0; }
-#stashModal .ssn-title { font-weight: 600; font-size: .95rem; line-height: 1.25; overflow-wrap: anywhere; }
-#stashModal .ssn-sub { font-size: .76rem; opacity: .7; margin-top: 2px; overflow-wrap: anywhere; }
+#stashModal .ssn-title { font-weight: 600; font-size: .82rem; line-height: 1.2; overflow-wrap: anywhere; }
+#stashModal .ssn-sub { font-size: .72rem; opacity: .7; margin-top: 2px; overflow-wrap: anywhere; }
 #stashModal .ssn-conf { color: #dc3545; line-height: 1; margin-top: 5px; }
 #stashModal .ssn-conf b { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
 #stashModal .ssn-conf small { font-size: .56rem; letter-spacing: .08em; opacity: .75; }
@@ -197,13 +214,13 @@
 #stashModal .ssn-cover.shown img { filter: none; transform: none; }
 #stashModal .ssn-veil { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: .75rem; background: rgba(0,0,0,.45); text-align: center; padding: 6px; }
 #stashModal .ssn-cover.shown .ssn-veil { display: none; }
-#stashModal .ssn-thumb { flex: 0 0 40%; width: 40%; margin: 0; }
+#stashModal .ssn-thumb { flex: 0 0 36%; width: 36%; margin: 0; }
 #stashModal .ssn-cover.none { display: flex; align-items: center; justify-content: center; background: #eee; color: #999; font-size: .7rem; cursor: default; }
 #stashModal .ssn .ssn-extsm { padding: 2px 8px; font-size: .72rem; }
 #stashModal .ssn-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0 0 8px; }
 /* picker 15.41 / native 15.52: a result card's five facts in one row. */
 #stashModal .ssn-facts.ssn-facts5 { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
-#stashModal .ssn-facts5 .ssn-fact { padding: 4px 3px; text-align: center; }
+#stashModal .ssn-facts5 .ssn-fact { padding: 3px 2px; text-align: center; }
 #stashModal .ssn-facts5 .ssn-fact span { font-size: .55rem; letter-spacing: .04em; }
 #stashModal .ssn-facts5 .ssn-fact b { font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #stashModal .ssn-facts5 .ssn-fact.gm b { white-space: normal; overflow-wrap: anywhere; font-size: .74rem; }
@@ -212,7 +229,7 @@
 #stashModal .ssn-fact.ssn-cf.good b { color: #1e7e34; }
 #stashModal .ssn-fact.ssn-cf.good { background: #eaf7ee; border-color: #9bd8a8; }
 #stashModal .ssn-fact.spot { background: #eaf7ee; border-color: #9bd8a8; }
-#stashModal .ssn .ssn-accept.ssn-accept-big { display: block; width: 100%; margin: 0 0 8px; padding: 11px 12px; font-size: 1rem; font-weight: 700; border-radius: 8px; box-shadow: 0 2px 6px rgba(40,167,69,.3); }
+#stashModal .ssn .ssn-accept.ssn-accept-big { display: block; width: 100%; margin: 0 0 6px; padding: 9px 12px; font-size: .95rem; font-weight: 700; border-radius: 8px; box-shadow: 0 2px 6px rgba(40,167,69,.3); }
 #stashModal .ssn .ssn-ptag.ssn-ptag-carry:not(.on) { border-color: #f0c36d; background: #fff8e6; color: #8a6100; }
 #stashModal .ssn .ssn-ptag.ssn-ptag-carry.on { background: #e0a800; border-color: #e0a800; color: #fff; }
 #stashModal .ssn-fact { border: 1px solid #e6e6ec; border-radius: 6px; padding: 5px 7px; min-width: 0; }
@@ -221,8 +238,8 @@
 #stashModal .ssn-fact.okv b { color: #1e7e34; }
 #stashModal .ssn-fact.warnv b { color: #dc3545; }
 #stashModal .ssn-fact.gm b { color: #b8860b; }
-#stashModal .ssn-cast { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 8px; }
-#stashModal .ssn .ssn-perf { padding: 3px 9px; border-radius: 12px; border: none; background: #efe9fb; font-size: .78rem; color: #3d2f9a; }
+#stashModal .ssn-cast { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }
+#stashModal .ssn .ssn-perf { padding: 2px 8px; border-radius: 12px; border: none; background: #efe9fb; font-size: .74rem; color: #3d2f9a; }
 #stashModal .ssn .ssn-perf.here { background: #6c5ce7; color: #fff; }
 #stashModal .ssn-perf small { opacity: .65; }
 #stashModal .ssn-more { font-size: .78rem; margin: 0 0 8px; }
@@ -273,6 +290,10 @@
    ever disappeared. */
 #stashModal .ssn .ssn-studio-opt[hidden], #stashModal .ssn-studio-none[hidden] { display: none; }
 #stashModal .ssn .ssn-studio-opt small { opacity: .6; flex: 0 0 auto; }
+#stashModal .ssn .ssn-studio-opt small.as { opacity: .8; color: #6c5ce7; font-weight: 600; }
+#stashModal .ssn .ssn-studio-opt small.aka { display: block; opacity: .55; font-weight: 400; }
+#stashModal .ssn .ssn-perf-find { display: block; width: 100%; margin: 6px 0 0; padding: 8px 6px; border: 1px dashed #b9a9f5; border-radius: 6px; background: #f6f3ff; color: #5b3fd1; font-size: .8rem; text-align: left; white-space: normal; }
+#stashModal .ssn .ssn-perf-find[hidden] { display: none; }
 #stashModal .ssn-studio-none { padding: 8px 6px; font-size: .8rem; opacity: .6; }
 #stashModal .ssn-studio-how { font-size: .72rem; opacity: .65; margin: 0 0 6px; }
 #stashModal .ssn-dd-top { display: flex; gap: 6px; align-items: center; margin: 0 0 6px; }
@@ -449,7 +470,7 @@
       (findLocal ? findLocal.results : []).forEach(x => {
         seen.add(x.kind + '|' + String(x.name).toLowerCase());
         hits.push({ kind: x.kind, name: x.name, key: x.key, n: x,
-                    sub: x.mapped ? '\u201c' + x.mapped + '\u201d' : '' });
+                    sub: x.mapped ? '\u201c' + x.mapped + '\u201d' : x.as ? 'as ' + x.as : '' });
       });
       if (findGlobal) {
         const q = findTerm.trim().toLowerCase();
@@ -457,7 +478,13 @@
           const n = String(name || '').toLowerCase();
           return n === q ? 0 : n.startsWith(q) ? 1 : (' ' + n).includes(' ' + q) ? 2 : 3;
         };
-        (findGlobal.performers || []).map((x, i) => ({ kind: 'performer', x, i, sub: x.disambiguation || '' }))
+        // Found by an alias (picker 15.56 / native 15.67): say which.
+        const akaOf = (x) => {
+          if (String(x.name || '').toLowerCase().includes(q)) return '';
+          const a = (x.aliases || []).find(y => String(y).toLowerCase().includes(q));
+          return a ? 'aka ' + a : '';
+        };
+        (findGlobal.performers || []).map((x, i) => ({ kind: 'performer', x, i, sub: [akaOf(x), x.disambiguation || ''].filter(Boolean).join(' · ') }))
           .concat((findGlobal.studios || []).map((x, i) => ({ kind: 'studio', x, i, sub: x.parent ? 'in ' + x.parent : '' })))
           .map(h => Object.assign(h, { r: rank(h.x.name) }))
           .sort((a, b) => a.r - b.r || a.i - b.i || (a.kind === 'performer' ? -1 : 1))
@@ -793,6 +820,17 @@
       paintPtags();
     }
     function togglePtag(i) { toggleWord(pathTags[i]); }
+    // The search again once the pills have been tapped (picker 15.47 / native 15.58).
+    let pillTimer = null;
+    function searchSoon() {
+      clearTimeout(pillTimer);
+      pillTimer = setTimeout(() => {
+        pillTimer = null;
+        if (finished) return;
+        const bx = host.querySelector('input.ssn-term');
+        if (bx) search(bx.value);
+      }, 350);
+    }
 
     // ---- filtering the search results (picker 15.26 / native 15.35) --------
     // By studio and by performer, from what is in the results. Searchable
@@ -825,7 +863,10 @@
           const k = ck(p.name);
           if (!k || seen.has(k)) return;
           seen.add(k);
-          const x = pf.get(k) || { k, name: p.name, n: 0 }; x.n++; pf.set(k, x);
+          const x = pf.get(k) || { k, name: p.name, n: 0, as: [], aliases: [] }; x.n++; pf.set(k, x);
+          // Credited as / aka (picker 15.57 / native 15.68).
+          if (p.as && p.as !== p.name && !x.as.includes(p.as)) x.as.push(p.as);
+          (p.aliases || []).forEach(a => { if (a && !x.aliases.includes(a)) x.aliases.push(a); });
         });
       });
       const order = (m) => [...m.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
@@ -864,9 +905,16 @@
             doneBtn(open) + '</div>' +
           '<div class="ssn-studio-list">' +
             '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-dd="' + open + '" data-rf-pick="">All ' + many + '</button>' +
-            opts.map(o => '<button type="button" class="ssn-studio-opt' + (isOn(o.k) ? ' on' : '') + '" data-dd="' + open + '" ' +
-              'data-rf-pick="' + esc(o.name) + '" data-studio-name="' + esc(o.name) + '">' +
-              '<span>' + (isOn(o.k) ? '&#10003; ' : '') + esc(o.name) + '</span><small>' + o.n + '</small></button>').join('') +
+            opts.map(o => {
+              // Performers: who they were credited as here, and aka (picker 15.57 / native 15.68).
+              const aka = (o.aliases || []).filter(a => !(o.as || []).includes(a));
+              const extra = ((o.as || []).length ? ' <small class="as">as ' + o.as.map(esc).join(', ') + '</small>' : '') +
+                (aka.length ? '<small class="aka">aka ' + aka.slice(0, 4).map(esc).join(', ') + (aka.length > 4 ? ' +' + (aka.length - 4) : '') + '</small>' : '');
+              const find = [o.name].concat(o.as || [], o.aliases || []).join(' | ');
+              return '<button type="button" class="ssn-studio-opt' + (isOn(o.k) ? ' on' : '') + '" data-dd="' + open + '" ' +
+                'data-rf-pick="' + esc(o.name) + '" data-studio-name="' + esc(o.name) + '" data-find="' + esc(find) + '">' +
+                '<span>' + (isOn(o.k) ? '&#10003; ' : '') + esc(o.name) + extra + '</span><small>' + o.n + '</small></button>';
+            }).join('') +
             '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
           '</div>' +
           doneBtn(open, true) +
@@ -1109,6 +1157,29 @@
     // Picking one re-asks StashDB for their scenes at that studio only, so
     // the count and Load more are for the filtered list.
     function studioOptions(e) {
+      // A studio's performers (picker 15.56 / native 15.67): the server's list,
+      // the ones found by name / alias, and everyone in the scenes loaded -
+      // each with the names they were credited as here and their aliases.
+      if (e.type === 'studio') {
+        const m = new Map();
+        const add = (p, count) => {
+          if (!p || !p.id || !p.name) return null;
+          const o = m.get(p.id) || { id: p.id, name: p.name, count: 0, as: [], aliases: [] };
+          (p.aliases || []).forEach(a => { if (a && !o.aliases.includes(a)) o.aliases.push(a); });
+          if (count) o.count++;
+          m.set(p.id, o);
+          return o;
+        };
+        (Array.isArray(e.studios) ? e.studios : []).forEach(p => add(p, false));
+        (e.perfFound || []).forEach(p => { const o = add(p, false); if (o) o.found = (o.found || '') + ' ' + p.foundBy; });
+        ((e.data && e.data.scenes) || []).forEach(sc => (sc.cast || []).forEach(p => {
+          const o = add(p, !(Array.isArray(e.studios) && e.studios.length));
+          if (o && p.as && p.as !== o.name && !o.as.includes(p.as)) o.as.push(p.as);
+        }));
+        const list = [...m.values()];
+        return Array.isArray(e.studios) && e.studios.length ? list
+          : list.sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
+      }
       if (Array.isArray(e.studios) && e.studios.length) return e.studios;
       const seen = new Map();
       if (e.type === 'studio') {
@@ -1226,12 +1297,24 @@
             // Picked ones first, so they're easy to find and untick.
             // A nested list keeps its order (a studio stays under its network);
             // a flat one puts the picked ones first.
-            (opts.some(o => o.group) ? opts : opts.slice().sort((a, b) => (isOn(b.id) ? 1 : 0) - (isOn(a.id) ? 1 : 0))).map(o =>
-              '<button type="button" class="ssn-studio-opt' + (isOn(o.id) ? ' on' : '') + (o.net ? ' net' : '') + (o.child ? ' child' : '') + '" data-dd="' + dd + '" ' +
-              (o.group ? 'data-group="' + esc(o.group) + '" ' : '') +
-              'data-studio-pick="' + esc(o.id) + '" data-studio-name="' + esc(o.name) + '">' +
-              '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>').join('') +
+            (opts.some(o => o.group) ? opts : opts.slice().sort((a, b) => (isOn(b.id) ? 1 : 0) - (isOn(a.id) ? 1 : 0))).map(o => {
+              // Credited as / aka (picker 15.56 / native 15.67), searched as well as the name.
+              const asTxt = (o.as || []).length ? ' <small class="as">as ' + o.as.map(esc).join(', ') + '</small>' : '';
+              const aka = (o.aliases || []).filter(a => !(o.as || []).includes(a));
+              const akaTxt = aka.length ? '<small class="aka">aka ' + aka.slice(0, 4).map(esc).join(', ') + (aka.length > 4 ? ' +' + (aka.length - 4) : '') + '</small>' : '';
+              const find = [o.name].concat(o.as || [], o.aliases || [], o.found ? [o.found] : []).join(' | ');
+              return '<button type="button" class="ssn-studio-opt' + (isOn(o.id) ? ' on' : '') + (o.net ? ' net' : '') + (o.child ? ' child' : '') + '" data-dd="' + dd + '" ' +
+                (o.group ? 'data-group="' + esc(o.group) + '" ' : '') +
+                'data-studio-pick="' + esc(o.id) + '" data-studio-name="' + esc(o.name) + '" data-find="' + esc(find) + '">' +
+                '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + asTxt + akaTxt + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>';
+            }).join('') +
             '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
+            // Anyone else at this studio, by name or alias (picker 15.56 / native 15.67).
+            (dd === 'main' && e.type === 'studio' && e.id
+              ? '<button type="button" class="ssn-perf-find" data-perf-find hidden>' +
+                  (e.perfFindBusy ? 'Searching StashDB&hellip;' : '&#128269; Search this studio&rsquo;s performers') + '</button>' +
+                (e.perfFindNote ? '<div class="ssn-studio-none">' + esc(e.perfFindNote) + '</div>' : '')
+              : '') +
           '</div>' +
           doneBtn(dd, true) +
         '</div>';
@@ -1260,7 +1343,7 @@
         let shown = 0;
         const hitGroups = new Set();
         wrap.querySelectorAll('.ssn-studio-opt[data-studio-name]').forEach(b => {
-          const hit = !q || b.dataset.studioName.toLowerCase().includes(q);
+          const hit = !q || (b.dataset.find || b.dataset.studioName).toLowerCase().includes(q);
           b.hidden = !hit;
           if (hit) { shown++; if (b.dataset.group) hitGroups.add(b.dataset.group); }
         });
@@ -1272,6 +1355,12 @@
         if (all) all.hidden = !!q;
         const none = wrap.querySelector('.ssn-studio-none');
         if (none) none.hidden = shown > 0 || !q;
+        // The StashDB search by name or alias, for what's typed (picker 15.56 / native 15.67).
+        const pf = wrap.querySelector('[data-perf-find]');
+        if (pf) {
+          pf.hidden = q.length < 2;
+          if (!e.perfFindBusy) pf.innerHTML = '&#128269; Search this studio&rsquo;s performers for \u201c' + esc(box.value.trim()) + '\u201d (names and aliases)';
+        }
       });
     }
 
@@ -1502,6 +1591,7 @@
 
     // ---- actions ---------------------------------------------------------
     const search = (term) => {
+      clearTimeout(pillTimer); pillTimer = null;
       const e = top();
       if (!e || e.type !== 'search') return;
       term = String(term ?? '').trim();
@@ -1681,7 +1771,8 @@
         else findTimer = setTimeout(runFind, 300);
         return;
       }
-      if (ev.target.closest && ev.target.closest('input.ssn-term')) paintPtags();
+      // Typing takes over from a pill's search still to come.
+      if (ev.target.closest && ev.target.closest('input.ssn-term')) { clearTimeout(pillTimer); pillTimer = null; paintPtags(); }
       if (ev.target.closest && ev.target.closest('input.ssn-studio-find')) paintStudioList();
     }
     function onClick(ev) {
@@ -1700,10 +1791,10 @@
       const box = host.querySelector('input.ssn-term');
 
       if (btn.hasAttribute('data-go')) { search(box && box.value); box && box.blur(); return; }
-      if (btn.dataset.ptag !== undefined) { togglePtag(+btn.dataset.ptag); return; }
+      if (btn.dataset.ptag !== undefined) { togglePtag(+btn.dataset.ptag); searchSoon(); return; }
       if (btn.dataset.pstudio !== undefined) { pillMenu(btn.dataset.pstudio); return; }
       if (btn.dataset.pperf !== undefined) { pillMenu(btn.dataset.pperf, 'performer'); return; }
-      if (btn.dataset.pword !== undefined) { toggleWord(btn.dataset.pword); return; }
+      if (btn.dataset.pword !== undefined) { toggleWord(btn.dataset.pword); searchSoon(); return; }
       if (btn.dataset.ddDone) { closeDd(btn.dataset.ddDone); return; }
       if (btn.dataset.rfToggle) {
         const e = top();
@@ -1766,6 +1857,33 @@
         const v = words(video.filename || '');
         if (box) box.value = v;
         search(v);
+        return;
+      }
+      if (btn.hasAttribute('data-perf-find')) {
+        // This studio's performers by name or alias (picker 15.56 / native 15.67).
+        const e = top();
+        if (!e || e.type !== 'studio' || !e.id || e.perfFindBusy) return;
+        const q = String(e[DD.main.term] || '').trim();
+        if (q.length < 2) return;
+        e.perfFindBusy = true;
+        e.perfFindNote = '';
+        paintStudioList();
+        const seq = loadSeq;
+        api('stash_nav', { method: 'POST', body: { op: 'studio_perf_find', id: e.id, term: q } })
+          .then(r => {
+            const got = (r && r.performers) || [];
+            e.perfFound = (e.perfFound || []).filter(x => !got.some(g => g.id === x.id))
+              .concat(got.map(g => Object.assign({}, g, { foundBy: q })));
+            e.perfFindNote = got.length ? '' : 'Nobody at this studio goes by \u201c' + q + '\u201d on StashDB.';
+          })
+          .catch(err => { e.perfFindNote = 'StashDB: ' + (err.message || String(err)); })
+          .finally(() => {
+            e.perfFindBusy = false;
+            if (finished || top() !== e || seq !== loadSeq) return;
+            e[DD.main.open] = true;
+            paint(false, true);
+            paintStudioList();
+          });
         return;
       }
       if (btn.hasAttribute('data-studio-toggle')) {
@@ -1895,7 +2013,7 @@
   // carries on from where it was.
   // ⚙️ How far in a preview opens. Wholesale uses the same quarter.
   const PREVIEW_START_FRACTION = 0.25;
-  let pv = null;   // { overlay, same, displayWas }
+  let pv = null;   // { overlay: [elements], same, displayWas: [displays] }
 
   function ensurePreviewCss() {
     if (document.getElementById('scrayStashPvCss')) return;
@@ -1999,8 +2117,13 @@ body.fullscreen-active #ssnPvBar { display: none; }
     if (pv) endPreview();
     const ch = pvChrome();
     const same = !!window.currentPlayingVideo && keyOf(window.currentPlayingVideo) === keyOf(video);
-    pv = { overlay, same, displayWas: overlay ? overlay.style.display : '' };
-    if (overlay) overlay.style.display = 'none';
+    // One overlay or several (picker 15.55 / native 15.66). A hunt's bulk
+    // check sits over everything, so it goes too while this plays.
+    const ovs = [].concat(overlay || []).filter(Boolean);
+    const bulkSheet = document.getElementById('stashHuntBulk');
+    if (bulkSheet && !ovs.includes(bulkSheet)) ovs.push(bulkSheet);
+    pv = { overlay: ovs, same, displayWas: ovs.map(o => o.style.display) };
+    ovs.forEach(o => { o.style.display = 'none'; });
 
     const container = document.getElementById('inlineVideoContainer');
     const floatable = !same && container && !document.body.classList.contains('fullscreen-active');
@@ -2094,7 +2217,7 @@ body.fullscreen-active #ssnPvBar { display: none; }
     } else {
       try { if (window.plyrPlayer && !window.plyrPlayer.paused) window.plyrPlayer.pause(); } catch (e) { /* fine */ }
     }
-    if (st.overlay && document.body.contains(st.overlay)) st.overlay.style.display = st.displayWas || '';
+    (st.overlay || []).forEach((o, i) => { if (document.body.contains(o)) o.style.display = st.displayWas[i] || ''; });
   }
 
   // ---- performer name in a list row (13.163 / 13.162) ----------------------

@@ -22,6 +22,9 @@
 // Search StashDB for what's typed (stash_nav op 'find'), for names not in
 // your library yet. A StashDB performer comes in with StashDB's gender.
 //
+// picker 15.57 / native 15.68 (browse 15.95): the Performers list finds a
+// performer by a name they were credited as (shown "as …"), and a StashDB
+// result found by an alias says "aka …".
 // picker 15.42 / native 15.53: in a Stash hunt, an empty Studio starts with
 // the studio of the hunt's last match (scrayStashHunt.suggestStudio), marked
 // as such - clear it if it's wrong.
@@ -102,9 +105,11 @@
     const kinds = ['studio', 'performer', 'tag'];
     const res = await Promise.all(kinds.map(k => api('stash_edit_vocab', { params: { kind: k } })));
     kinds.forEach((k, i) => {
-      VOCAB[k] = (res[i].names || []).map(n => ({
-        name: String(n.name), uses: +n.uses || 0, gender: n.gender || null, f: fold(n.name)
-      }));
+      VOCAB[k] = (res[i].names || []).map(n => {
+        // Credited as (picker 15.57 / native 15.68): performers only.
+        const as = Array.isArray(n.as) ? n.as.map(String).filter(Boolean) : [];
+        return { name: String(n.name), uses: +n.uses || 0, gender: n.gender || null, f: fold(n.name), as, af: as.map(fold) };
+      });
     });
     vocabAt = Date.now();
   }
@@ -125,6 +130,8 @@
       else if (n.f.startsWith(q)) s = 1;
       else if (n.f.split(/[^a-z0-9]+/).some(w => w && w.startsWith(q))) s = 2;
       else if (n.f.includes(q)) s = 3;
+      // A name they were credited as (picker 15.57 / native 15.68).
+      else if ((n.af || []).some(a => a.includes(q))) s = 3.5;
       else {
         const qq = q.replace(/\s+/g, '');
         let i = 0;
@@ -656,7 +663,7 @@
       const names = rank(kind, term, exclude);
       const exact = term && ((VOCAB[kind] || []).some(n => nameKey(n.name) === nameKey(term)) ||
                              (many && exclude.has(nameKey(term))));
-      ddItems = names.map(n => ({ type: 'pick', name: n.name, uses: n.uses, gender: n.gender }));
+      ddItems = names.map(n => ({ type: 'pick', name: n.name, uses: n.uses, gender: n.gender, as: n.as || [] }));
       // A single-value field showing exactly its own value has nothing to
       // offer but itself - leave the list closed rather than parroting it.
       let ownValue = false;
@@ -700,6 +707,7 @@
                 '<span class="nm">+ Add ' + KIND_LABEL[kind] + ' &ldquo;' + esc(it.name) + '&rdquo;</span></div>'
             : '<div class="sse-it' + (i === ddSel ? ' sel' : '') + '" data-i="' + i + '">' +
                 '<span class="nm">' + esc(it.name) + '</span>' +
+                ((it.as || []).length ? '<span class="sub">as ' + esc(it.as.slice(0, 3).join(', ')) + (it.as.length > 3 ? ' +' + (it.as.length - 3) : '') + '</span>' : '') +
                 (kind === 'performer' ? '<span class="g">' + esc(shortGender(it.gender)) + '</span>' : '') +
                 '<span class="ct">' + (it.uses ? Number(it.uses).toLocaleString() : '') + '</span></div>'
         )).join('') + (sdbNote ? '<div class="sse-none">' + esc(sdbNote) + '</div>' : '');
@@ -755,7 +763,12 @@
         .then(r => {
           mine.results = kind === 'studio'
             ? (r.studios || []).map(x => ({ name: String(x.name || ''), sub: x.parent ? 'in ' + x.parent : '' }))
-            : (r.performers || []).map(x => ({ name: String(x.name || ''), gender: x.gender || '', sub: x.disambiguation || '' }));
+            : (r.performers || []).map(x => {
+                // Found by an alias: say which (picker 15.57 / native 15.68).
+                const q = fold(term);
+                const aka = fold(x.name).includes(q) ? '' : ((x.aliases || []).find(a => fold(a).includes(q)) || '');
+                return { name: String(x.name || ''), gender: x.gender || '', sub: [aka ? 'aka ' + aka : '', x.disambiguation || ''].filter(Boolean).join(' · ') };
+              });
         })
         .catch(err => { mine.err = err.message || String(err); })
         .finally(() => {

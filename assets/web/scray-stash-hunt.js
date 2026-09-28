@@ -23,6 +23,39 @@
 // (TinEye's Search, say). The handle is { mount(modal), loaded(matched, modal),
 // closed(modal) }.
 //
+// picker 15.55 / native 15.66: 🔎 opens the file's Stash modal ON TOP of the
+// bulk sheet, which stays as it is underneath - close it and you're back.
+// (15.54 hid the sheet and rebuilt the hunt's card on close, which then sat
+// over the sheet: Back to bulk looked like it went nowhere.) The hunt's own
+// card is kept aside meanwhile, not rebuilt. ▶ on a row plays over the lot,
+// as ▶ does elsewhere, and bulk rows are more compact.
+// picker 15.54 / native 15.65: 🔎 on a bulk row opens that file's full Stash
+// modal - lookup, search, Accept - with ⚡ Back to bulk, and the bulk check
+// comes back as it was (still running, ticks and sort kept). A match made
+// there shows on its row. 🎯 Hunt it there does what 🔎 used to: leaves bulk
+// and hunts that file.
+// picker 15.53 / native 15.64: every bulk row has ▶ under 🔎 - a preview in
+// the player, the sheet hidden until Back to Stash, as the bar's ▶ does.
+// picker 15.52 / native 15.63: Tick 90+ has its own mark - − 90 + beside it
+// (steps of 5, or type one) - starting at 90 and kept for the rest of the
+// hunt (S.bulkMin).
+// picker 15.51 / native 15.62: Match ticked shows how far it has got - a bar
+// and "Matching… 40% · 4 of 10" - and the renaming after it does the same.
+// picker 15.50 / native 15.61: the bulk check sorts by confidence on request
+// (Sort: Files | Confidence), kept for the rest of the hunt (S.bulkSort), and
+// ☑ 90+ ticks every row whose shown scene scores 90 or more - asked for by
+// name; it only ticks, Match ticked is still a separate tap after looking.
+// picker 15.49 / native 15.60: the bulk check shows each file's best match or
+// StashDB's first result - Best match | StashDB order, the same setting as the
+// search's order (S.sort), so it carries both ways until the hunt is closed.
+// picker 15.48 / native 15.59: the 🎯 scope button in the bar wraps (a size
+// smaller) instead of cutting off the scope and the count left.
+// picker 15.46 / native 15.57: the swipe options run 🚫 Never, 📁, ⏭ Next, 🏷,
+// ✏️ Details - Never and Details swapped.
+// picker 15.45 / native 15.56: the mark for Next is 55% of the card's width.
+// picker 15.44 / native 15.55: a swipe left right across the card - past 75%
+// of its width - is Next again (any speed); anything shorter opens the
+// options as before. Past the mark the card says "Let go: Next".
 // picker 15.43 / native 15.54: the search order picked on one file (StashDB
 // order or Best match) is where the next files' searches open, until the hunt
 // is closed - searchSort() / setSearchSort(v). StashDB order to start with.
@@ -184,7 +217,9 @@
       run: Date.now(),          // which hunt a last match was made in
       swipeIn: false,           // the next card slides in (⏭ in the swipe options sent us on)
       carry: new Map(),         // folder -> studio / performer names added to its searches
-      sort: ''                  // the search order picked this run: 'match' | 'order' | '' (StashDB order)
+      sort: '',                 // the search order picked this run: 'match' | 'order' | '' (StashDB order)
+      bulkMin: 90,              // Tick N+ in the bulk check: the confidence it ticks from (picker 15.52 / native 15.63)
+      bulkSort: ''              // the bulk check's rows: 'conf' (highest confidence first) | '' (as the files come)
     };
   }
 
@@ -307,6 +342,8 @@
 #stashModal .sh-bar button { width: auto; min-width: 0; margin: 0; padding: 6px 10px; font-size: .8rem; line-height: 1.2; border: 1px solid #ccc; border-radius: 7px; background: #fff; color: #222; cursor: pointer; white-space: nowrap; }
 #stashModal .sh-top { display: flex; align-items: center; gap: 6px; }
 #stashModal .sh-bar .sh-scope { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; border-color: #cbbef5; color: #5b3fd1; font-weight: 600; }
+/* picker 15.48 / native 15.59: the scope and what's left wrap onto a second line, a size smaller, instead of being cut off. */
+#stashModal .sh-bar button.sh-scope { white-space: normal; overflow-wrap: anywhere; font-size: .72rem; line-height: 1.2; padding: 5px 8px; }
 #stashModal .sh-stats { flex: 0 0 auto; font-size: .74rem; color: #555; white-space: nowrap; }
 #stashModal .sh-file { margin: 6px 2px; font-size: .78rem; color: #444; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
 #stashModal .sh-file .sh-dir { color: #888; }
@@ -356,6 +393,10 @@
 #stashModal .sh-tray button.on { background: #6f42c1; color: #fff; }
 #stashModal .sh-tray button.bad { background: #dc3545; color: #fff; }
 #stashModal .sh-tray button.go { background: #6f42c1; color: #fff; }
+#stashModal .sh-nexthint { position: fixed; z-index: 1; opacity: 0; pointer-events: none; height: 68px; box-sizing: border-box; border-radius: 12px; border: 2px dashed rgba(255,255,255,.55); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; text-align: center; }
+#stashModal .sh-nexthint .i { font-size: 1.4rem; line-height: 1; }
+#stashModal .sh-nexthint .l { font-size: .78rem; font-weight: 700; }
+#stashModal .sh-nexthint.armed { background: #6f42c1; border-style: solid; border-color: #6f42c1; }
 #stashModal .sh-lasthint { align-items: flex-start; justify-content: center; padding-left: 14px; color: #fff; gap: 4px; }
 #stashModal .sh-lasthint .i { font-size: 1.6rem; line-height: 1; }
 #stashModal .sh-lasthint .l { font-size: .78rem; font-weight: 700; }
@@ -379,6 +420,8 @@
 #stashModal .sh-bar.sh-insp { background: linear-gradient(135deg, #fff8e1, #fff3d6); border-color: #f0d58a; }
 #stashModal .sh-insp-l { flex: 1 1 auto; font-weight: 700; color: #8a6d00; }
 #stashModal .sh-bar .sh-back { background: #6f42c1; border-color: #6f42c1; color: #fff; font-weight: 700; }
+#stashModal .sh-bar.sh-peek { background: linear-gradient(135deg, #fff8e1, #fdf1d0); }
+#stashModal .sh-bar.sh-peek .sh-back { background: #d39e00; border-color: #d39e00; }
 #stashHuntLast .shl { max-height: 100%; display: flex; flex-direction: column; }
 #stashHuntLast h3 small { font-size: .75rem; color: #888; font-weight: 400; }
 #stashHuntLast .shl-note { font-size: .76rem; color: #777; margin: 0 0 8px; }
@@ -405,19 +448,20 @@
 #stashHuntBulk .shb-note { font-size: .76rem; color: #666; margin-bottom: 6px; }
 #stashHuntBulk .shb-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; font-size: .76rem; color: #555; margin-bottom: 6px; min-height: 26px; }
 #stashHuntBulk button { width: auto; min-width: 0; margin: 0; padding: 7px 12px; font-size: .82rem; line-height: 1.2; border: 1px solid #ccc; border-radius: 8px; background: #f4f4f6; color: #222; cursor: pointer; }
-#stashHuntBulk .shb-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; border: 1px solid #eee; border-radius: 8px; }
-#stashHuntBulk .shb-row { display: flex; gap: 8px; align-items: flex-start; padding: 9px 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+#stashHuntBulk .shb-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; border: 1px solid #eee; border-radius: 8px; display: flex; flex-direction: column; }
+#stashHuntBulk .shb-list > .shb-row { flex: 0 0 auto; }
+#stashHuntBulk .shb-row { display: flex; gap: 6px; align-items: flex-start; padding: 6px 6px; border-bottom: 1px solid #f0f0f0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 #stashHuntBulk .shb-row.on { background: #eaf7ee; }
 #stashHuntBulk .shb-row.st-done, #stashHuntBulk .shb-row.st-fpmatch { background: #f3fbf5; cursor: default; }
 #stashHuntBulk .shb-row.st-wait, #stashHuntBulk .shb-row.st-fp, #stashHuntBulk .shb-row.st-search, #stashHuntBulk .shb-row.st-none, #stashHuntBulk .shb-row.st-err { cursor: default; }
 #stashHuntBulk .shb-tick { flex: 0 0 22px; font-size: 1.2rem; line-height: 1.1; text-align: center; color: #28a745; }
 #stashHuntBulk .shb-main { flex: 1 1 auto; min-width: 0; }
-#stashHuntBulk .shb-file { font-size: .76rem; color: #444; word-break: break-word; }
+#stashHuntBulk .shb-file { font-size: .7rem; color: #444; word-break: break-word; line-height: 1.25; }
 #stashHuntBulk .shb-file .sh-dir { color: #999; }
-#stashHuntBulk .shb-scene { margin-top: 3px; font-size: .84rem; }
-#stashHuntBulk .shb-sub { font-size: .76rem; color: #555; }
+#stashHuntBulk .shb-scene { margin-top: 2px; font-size: .76rem; line-height: 1.25; }
+#stashHuntBulk .shb-sub { font-size: .7rem; color: #555; line-height: 1.25; }
 #stashHuntBulk .shb-sub small { color: #999; }
-#stashHuntBulk .shb-facts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+#stashHuntBulk .shb-facts { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 3px; }
 #stashHuntBulk .shb-conf { display: inline-block; min-width: 26px; padding: 1px 6px; border-radius: 9px; text-align: center; font-weight: 800; font-size: .78rem; background: #eee; color: #555; }
 #stashHuntBulk .shb-conf.good { background: #d4f4dc; color: #1e7e34; }
 #stashHuntBulk .shb-conf.mid { background: #fff3cd; color: #8a6d00; }
@@ -429,8 +473,21 @@
 #stashHuntBulk .shb-st { display: block; margin-top: 3px; font-size: .76rem; color: #777; }
 #stashHuntBulk .shb-st.good { color: #1e7e34; font-weight: 600; }
 #stashHuntBulk .shb-st.bad { color: #b02a37; }
-#stashHuntBulk .shb-hunt { flex: 0 0 auto; padding: 5px 8px; }
+#stashHuntBulk .shb-hunt { flex: 0 0 auto; padding: 4px 7px; font-size: .78rem; }
+#stashHuntBulk .shb-btns { flex: 0 0 auto; display: flex; flex-direction: column; gap: 4px; }
+#stashHuntBulk .shb-btns .shb-pv { font-size: .8rem; }
 #stashHuntBulk .shb-terms { margin: 0 0 6px; }
+#stashHuntBulk .shb-order { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px; font-size: .76rem; color: #555; }
+#stashHuntBulk .shb-seg { display: inline-flex; border: 1px solid #ccc; border-radius: 7px; overflow: hidden; }
+#stashHuntBulk .shb-seg button { border: none; border-radius: 0; margin: 0; padding: 5px 10px; font-size: .76rem; background: #fff; color: #222; }
+#stashHuntBulk .shb-seg button.on { background: #6c5ce7; color: #fff; }
+#stashHuntBulk .shb-order .shb-t90 { margin-left: auto; padding: 5px 10px; font-size: .76rem; background: #eaf7ee; border-color: #9bd8a8; color: #1e7e34; font-weight: 700; }
+#stashHuntBulk .shb-order .shb-t90:disabled { opacity: .45; }
+#stashHuntBulk .shb-thr { display: inline-flex; align-items: center; border: 1px solid #ccc; border-radius: 7px; overflow: hidden; background: #fff; }
+#stashHuntBulk .shb-thr button { border: none; border-radius: 0; margin: 0; padding: 4px 11px; font-size: .95rem; line-height: 1.2; background: #f4f4f6; }
+/* 16px: iOS zooms the page into any smaller box it focuses. */
+#stashHuntBulk input.shb-min { width: 3.2em; margin: 0; padding: 3px 2px; border: none; border-left: 1px solid #ddd; border-right: 1px solid #ddd; border-radius: 0; text-align: center; font-size: 16px; font-weight: 700; background: #fff; color: inherit; -moz-appearance: textfield; appearance: textfield; }
+#stashHuntBulk input.shb-min::-webkit-outer-spin-button, #stashHuntBulk input.shb-min::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 #stashHuntBulk .shb-trow { display: flex; gap: 6px; }
 #stashHuntBulk input.shb-add { flex: 1 1 auto; min-width: 0; box-sizing: border-box; margin: 0; padding: 7px 9px; font-size: 15px; border: 1px solid #ccc; border-radius: 8px; background: #fff; color: inherit; -webkit-appearance: none; appearance: none; }
 #stashHuntBulk .shb-trow .again { flex: 0 0 auto; background: #6c5ce7; border-color: #6c5ce7; color: #fff; font-weight: 700; }
@@ -453,6 +510,11 @@
 #stashHuntBulk .shb-ask .go { background: #6f42c1; border-color: #6f42c1; color: #fff; font-weight: 700; }
 #stashHuntBulk .shb-ask .go:disabled { opacity: .5; }
 #stashHuntBulk .shb-foot { display: flex; gap: 8px; margin-top: 10px; }
+#stashHuntBulk .shb-prog { margin: 8px 0 0; }
+#stashHuntBulk .shb-prog-bar { height: 8px; border-radius: 4px; background: #e8e8ee; overflow: hidden; }
+#stashHuntBulk .shb-prog-bar i { display: block; height: 100%; background: #28a745; transition: width .25s ease-out; }
+#stashHuntBulk .shb-prog-t { margin-top: 4px; font-size: .76rem; color: #444; }
+#stashHuntBulk .shb-prog-t .bad { color: #b02a37; }
 #stashHuntBulk .shb-foot button { flex: 1 1 0; }
 #stashHuntBulk .shb-foot .go { flex: 1.6 1 0; background: #28a745; border-color: #28a745; color: #fff; font-weight: 700; }
 #stashHuntBulk .shb-foot .go:disabled { opacity: .5; }
@@ -578,11 +640,13 @@
   }
 
   // ---- swipes on the card (picker 15.35 / native 15.44) ---------------------
-  // Left: the options come out from behind the card's right edge (✏️ 📁 ⏭ 🏷 🚫);
+  // Left: the options come out from behind the card's right edge (🚫 📁 ⏭ 🏷 ✏️);
   //   tap one, or tap the card / swipe it back to put them away. ⏭ Next sends
   //   the card off to the left and the next one slides in. (picker 15.41 /
   //   native 15.52: a quick flick no longer goes straight to Next - too easy
   //   to do by accident.)
+  // Left, well across - past SW.nextShare (55%) of the card's width, any
+  //   speed: Next, as ⏭ does (picker 15.44 / native 15.55; 55% from 15.45 / 15.56).
   // Right: the last match, with Unmatch.
   // Up and down still scroll: the swipe only takes over once the finger has
   // clearly gone sideways. Not from inside a text box, or anything that
@@ -591,6 +655,7 @@
   const SW = {
     lock: 10,        // px the finger moves before it's a swipe or a scroll
     open: 45,        // px left a swipe needs to open the options
+    nextShare: 0.55, // share of the card's width a swipe left must cover to go Next (picker 15.44 / native 15.55; 0.75 until 15.45 / 15.56)
     last: 70,        // px right to open the last match
     tray: 84         // px the options take up
   };
@@ -615,7 +680,11 @@
     tray.className = 'sh-tray';
     const hint = document.createElement('div');
     hint.className = 'sh-lasthint';
-    modal.append(tray, hint);
+    // "Keep going" / "Let go: Next" in the gap a long swipe left opens (picker 15.44 / native 15.55).
+    const nextHint = document.createElement('div');
+    nextHint.className = 'sh-nexthint';
+    modal.append(tray, hint, nextHint);
+    let cardW = 0, cardRight = 0, cardMid = 0;
     let g = null;          // the gesture under way
     let trayOpen = false;
     let x = 0;
@@ -628,11 +697,27 @@
       tray.style.opacity = nx < 0 ? String(Math.min(1, -nx / SW.tray)) : '0';
       hint.style.opacity = nx > 0 ? String(Math.min(1, nx / SW.last)) : '0';
       tray.style.pointerEvents = nx < 0 ? 'auto' : 'none';
+      paintNext(nx, ms);
+    };
+    const nextArmed = (nx) => cardW > 0 && -nx >= cardW * SW.nextShare;
+    const paintNext = (nx, ms) => {
+      const gap = -nx - SW.tray;             // the room between the card and the options
+      if (ms || !g || gap < 120) { nextHint.style.opacity = '0'; nextHint.classList.remove('armed'); return; }
+      const armed = nextArmed(nx);
+      nextHint.classList.toggle('armed', armed);
+      nextHint.innerHTML = armed ? '<span class="i">⏭</span><span class="l">Let go: Next</span>'
+                                 : '<span class="i">⏭</span><span class="l">Keep going for Next</span>';
+      const w = Math.min(150, gap - 16);
+      nextHint.style.width = w + 'px';
+      nextHint.style.left = (cardRight + nx + (gap - w) / 2) + 'px';
+      nextHint.style.top = (cardMid - 34) + 'px';
+      nextHint.style.opacity = '1';
     };
     // Tray and hint sit where the card will uncover them.
     const place = () => {
       const r = card.getBoundingClientRect();
       const left = r.left - x, right = r.right - x;
+      cardW = r.width; cardRight = right; cardMid = r.top + r.height / 2;
       tray.style.top = hint.style.top = r.top + 'px';
       tray.style.height = hint.style.height = r.height + 'px';
       tray.style.left = (right - SW.tray) + 'px';
@@ -645,12 +730,13 @@
       const folderOn = !!(v && inThisFolderScope(v));
       const b = (h, icon, label, cls) => '<button type="button" data-t="' + h + '" class="' + (cls || '') + '">' +
         '<span class="i">' + icon + '</span><span class="l">' + label + '</span></button>';
+      // Never at the top, Details at the bottom (picker 15.46 / native 15.57).
       tray.innerHTML =
-        b('edit', '✏️', 'Details') +
+        b('never', '🚫', 'Never', 'bad') +
         b('folder', '📁', folderOn ? 'All files' : 'This folder', folderOn ? 'on' : '') +
         b('next', '⏭', 'Next', 'go') +
         b('tag', '🏷', 'Tag', S && S.tagMenu ? 'on' : '') +
-        b('never', '🚫', 'Never', 'bad');
+        b('edit', '✏️', 'Details');
     };
     const paintHint = () => {
       hint.innerHTML = matches.length
@@ -701,7 +787,9 @@
       const gg = g;
       g = null;
       if (!gg || gg.dir !== 'x') return;
-      if (x <= -SW.open) {
+      if (nextArmed(x)) {
+        flyNext();
+      } else if (x <= -SW.open) {
         trayOpen = true;
         setX(-SW.tray, 200);
       } else if (gg.base === 0 && x >= SW.last) {
@@ -1121,6 +1209,48 @@
     });
     return best ? Object.assign({ rank: bi + 1 }, best) : null;
   }
+  /** StashDB's own first result. */
+  function firstOf(scenes) {
+    const i = (scenes || []).findIndex(c => c && c.stash_id);
+    return i < 0 ? null : Object.assign({ rank: i + 1 }, scenes[i]);
+  }
+  // Which scene a bulk row shows (picker 15.49 / native 15.60): the hunt's
+  // search order - StashDB order unless Best match has been picked.
+  const bulkOrder = () => (S && S.sort === 'match') ? 'match' : 'order';
+  const pickCard = (scenes) => bulkOrder() === 'match' ? bestOf(scenes) : firstOf(scenes);
+  function setBulkOrder(B, v) {
+    if (!S || (v !== 'match' && v !== 'order')) return;
+    S.sort = v;
+    B.rows.forEach(r => {
+      if (!r.scenes || !(r.st === 'found' || r.st === 'fail')) return;
+      const c = pickCard(r.scenes);
+      // A different scene isn't the one that was ticked.
+      if (!c || !r.card || c.stash_id !== r.card.stash_id) r.tick = false;
+      r.card = c;
+      r.how = v;
+    });
+    B.rows.forEach(r => paintBulkRow(r));
+    paintBulk();
+  }
+  /**
+   * Where a row sits when sorted by confidence (picker 15.50 / native 15.61):
+   * scenes to decide on, highest confidence first; then the ones still being
+   * checked; then nothing found; then the ones already matched. Ties keep the
+   * files' own order. Applied as the CSS order, so the rows keep their indexes.
+   */
+  function bulkRank(r) {
+    if (!S || S.bulkSort !== 'conf') return 0;
+    if (r.card && (r.st === 'found' || r.st === 'fail' || r.st === 'sub')) {
+      const c = Number(r.card.confidence);
+      return Math.round((100 - (Number.isFinite(c) ? Math.max(0, Math.min(100, c)) : -1)) * 10);
+    }
+    if (r.st === 'wait' || r.st === 'fp' || r.st === 'search') return 3000;
+    if (r.st === 'none' || r.st === 'err') return 4000;
+    return 5000;
+  }
+  /** Rows to decide on whose shown scene scores 90 or more (picker 15.50 / native 15.61). */
+  const bulkMin = () => { const n = Number(S && S.bulkMin); return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 90; };
+  const bulkHigh = (B) => B.rows.filter(r => r.card && (r.st === 'found' || r.st === 'fail') && Number(r.card.confidence) >= bulkMin());
   const cardScene = (c) => ({ id: c.stash_id, title: c.title, studio: c.studio, cast: c.cast || [],
                               performers: (c.cast || []).map(p => p.name) });
 
@@ -1153,7 +1283,11 @@
         '<div class="shb-sub">' + [c.studio ? esc(c.studio) : 'no studio', c.release_date ? esc(c.release_date) : ''].filter(Boolean).join(' · ') +
           (cast ? ' · ' + cast : '') + '</div>' +
         '<div class="shb-facts">' + confHtml + dur +
-          (r.count > 1 ? '<span class="shb-of">best of ' + r.count + (c.rank > 1 ? ' · #' + c.rank + ' on StashDB' : '') + '</span>' : '') + '</div>';
+          (r.count > 1 ? '<span class="shb-of">' + (r.how === 'order'
+            ? 'StashDB’s #' + c.rank + ' of ' + r.count + (r.best && r.best.stash_id !== c.stash_id
+                ? ' · best match is #' + r.best.rank + (Number.isFinite(Number(r.best.confidence)) ? ' (' + Number(r.best.confidence).toFixed(0) + ')' : '')
+                : ' · also the best match')
+            : 'best of ' + r.count + (c.rank > 1 ? ' · #' + c.rank + ' on StashDB' : '')) + '</span>' : '') + '</div>';
     }
     // After matching (picker 15.38 / native 15.47): the suggested name.
     let ren = '';
@@ -1175,11 +1309,14 @@
       fail: '<span class="shb-st bad">⚠️ Couldn’t submit: ' + esc(r.note) + '</span>',
       found: ''
     }[r.st] || '';
-    return '<div class="shb-row st-' + r.st + (r.tick || (renPick && r.ren) ? ' on' : '') + (renPick ? ' pick' : '') + '" data-r="' + i + '">' +
+    return '<div class="shb-row st-' + r.st + (r.tick || (renPick && r.ren) ? ' on' : '') + (renPick ? ' pick' : '') + '" data-r="' + i + '" style="order:' + bulkRank(r) + '">' +
       '<span class="shb-tick">' + (renPick ? (r.ren ? '☑' : '☐') : tickable ? (r.tick ? '☑' : '☐') : (r.st === 'done' || r.st === 'fpmatch' ? '✅' : '')) + '</span>' +
       '<div class="shb-main">' + file + body + status + ren + '</div>' +
-      (r.st !== 'done' && r.st !== 'fpmatch' && r.st !== 'sub'
-        ? '<button type="button" class="shb-hunt" data-hunt="' + i + '" title="Hunt this one now, in the Stash modal">🔎</button>' : '') +
+      '<div class="shb-btns">' +
+        (r.st !== 'done' && r.st !== 'fpmatch' && r.st !== 'sub'
+          ? '<button type="button" class="shb-hunt" data-hunt="' + i + '" title="Its full Stash details - then back to the bulk check">🔎</button>' : '') +
+        '<button type="button" class="shb-hunt shb-pv" data-pv="' + i + '" title="Preview in the player">▶</button>' +
+      '</div>' +
     '</div>';
   }
 
@@ -1196,8 +1333,36 @@
         ' · ' + found + ' with a likely scene' + (fp ? ' · ' + fp + ' matched by fingerprint' : '') +
         (B.extra ? ' · searched with + <b>' + esc(B.extra) + '</b>' : '') + '</span>' +
       (B.running ? '<button type="button" data-b="stop">Stop</button>' : '');
+    sheet.querySelectorAll('.shb-seg button').forEach(x => {
+      const k = x.dataset.b;
+      x.classList.toggle('on', k === 'omatch' || k === 'oorder'
+        ? (k === 'omatch') === (bulkOrder() === 'match')
+        : (k === 'sconf') === (!!S && S.bulkSort === 'conf'));
+    });
+    const t90 = sheet.querySelector('[data-b="t90"]');
+    if (t90) {
+      const hi = bulkHigh(B);
+      const all = hi.length && hi.every(r => r.tick);
+      t90.textContent = (all ? '☐ Untick ' : '☑ Tick ') + bulkMin() + '+ (' + hi.length + ')';
+      t90.disabled = !hi.length || B.submitting || B.renaming;
+    }
     const go = sheet.querySelector('[data-b="match"]');
-    go.textContent = B.submitting ? 'Matching…' : '✓ Match ticked' + (ticked ? ' (' + ticked + ')' : '');
+    const P = B.prog;
+    const pct = P && P.total ? Math.round(100 * P.done / P.total) : 0;
+    go.textContent = B.submitting
+      ? (P && P.finishing ? 'Finishing…' : 'Matching… ' + pct + '%')
+      : '✓ Match ticked' + (ticked ? ' (' + ticked + ')' : '');
+    // How far Match ticked / the renaming has got (picker 15.51 / native 15.62).
+    const bar = sheet.querySelector('.shb-prog');
+    if (bar) {
+      bar.hidden = !P;
+      if (P) {
+        bar.innerHTML = '<div class="shb-prog-bar"><i style="width:' + (P.finishing ? 100 : pct) + '%"></i></div>' +
+          '<div class="shb-prog-t">' + (P.what === 'rename' ? '✎ Renaming' : '✓ Matching') + ' · <b>' + (P.finishing ? 100 : pct) + '%</b> · ' +
+            P.done + ' of ' + P.total + (P.fail ? ' · <span class="bad">' + P.fail + ' failed</span>' : '') +
+            (P.finishing ? ' · updating names…' : '') + '</div>';
+      }
+    }
     go.disabled = !ticked || B.submitting || B.renaming;
     sheet.querySelector('[data-b="close"]').disabled = B.submitting || B.renaming;
     const again = sheet.querySelector('[data-b="again"]');
@@ -1210,7 +1375,7 @@
       if (B.ask && !B.renaming) B.ask = null;
     } else if (B.renaming) {
       ask.hidden = false;
-      ask.innerHTML = '<span>✎ Renaming…</span>';
+      ask.innerHTML = '<span>✎ Renaming…' + (B.prog ? ' ' + B.prog.done + ' of ' + B.prog.total : '') + '</span>';
     } else if (B.ask === 'pick') {
       const n = can.filter(r => r.ren).length;
       ask.hidden = false;
@@ -1261,11 +1426,15 @@
     const own = huntWords(r.v);
     const term = B.extra ? (own + ' ' + B.extra).trim() : own;
     try {
-      const res = await api('stash_nav', { method: 'POST', body: { op: 'search', term, video_key: r.key, score_term: own } });
+      // Scored against the file's own words - not names carried from the folder (picker 15.49 / native 15.60).
+      const res = await api('stash_nav', { method: 'POST', body: { op: 'search', term, video_key: r.key, score_term: baseWords(r.v) } });
       if (bulk !== B) return;
       const scenes = (res && res.scenes) || [];
       r.count = scenes.length;
-      r.card = bestOf(scenes);
+      r.scenes = scenes;
+      r.best = bestOf(scenes);
+      r.how = bulkOrder();
+      r.card = pickCard(scenes);
       r.st = r.card ? 'found' : 'none';
     } catch (e) {
       if (bulk !== B) return;
@@ -1300,6 +1469,7 @@
     const list = B.rows.filter(r => r.tick && r.card && (r.st === 'found' || r.st === 'fail'));
     if (!list.length) return;
     B.submitting = true;
+    B.prog = { what: 'match', done: 0, total: list.length, fail: 0 };
     list.forEach(r => paintBulkRow(r));
     let ok = 0;
     // One at a time, each exactly what Accept & submit sends for that file.
@@ -1316,13 +1486,19 @@
       } catch (e) {
         r.st = 'fail';
         r.note = (e && e.message) || String(e);
+        B.prog.fail++;
       }
+      B.prog.done++;
       paintBulkRow(r);
     }
-    B.submitting = false;
+    // Names and the S button next: a moment more, and it says so.
+    B.prog.finishing = true;
+    paintBulk();
     // Names and the S button, once for the lot.
     try { if (window.scrayStashNames) await window.scrayStashNames.refresh(true); } catch (e) { /* lists catch up */ }
     try { if (typeof window.scrayLoadStashState === 'function') await window.scrayLoadStashState(true); } catch (e) { /* S catches up */ }
+    B.submitting = false;
+    B.prog = null;
     // The names are fresh now, so the suggestions are: ask about renaming.
     if (bulk === B) {
       B.rows.forEach(r => {
@@ -1345,6 +1521,7 @@
     if (typeof window.showRenameModal !== 'function') { toast('⚠️ Renaming isn’t available here', '#b8860b'); return; }
     B.renaming = true;
     B.ask = 'ask';
+    B.prog = { what: 'rename', done: 0, total: list.length, fail: 0 };
     paintBulk();
     let ok = 0;
     for (const r of list) {
@@ -1368,9 +1545,12 @@
         r.rst = 'rfail';
         r.rnote = (e && e.message) || String(e);
       }
+      if (r.rst === 'rfail') B.prog.fail++;
+      B.prog.done++;
       paintBulkRow(r);
     }
     B.renaming = false;
+    B.prog = null;
     B.ask = null;
     if (bulk === B) B.rows.forEach(r => { r.ren = false; if (r.st === 'done') paintBulkRow(r); });
     paintBulk();
@@ -1435,6 +1615,13 @@
     if (B) B.stop = true;
     bulk = null;
     document.getElementById('stashHuntBulk')?.remove();
+    // A 🔎 look that never came back the usual way: the hunt's card returns.
+    const aside = document.getElementById('stashModalHuntAside');
+    if (aside) {
+      aside.style.visibility = aside.dataset.shVis || '';
+      if (!document.getElementById('stashModal')) aside.id = 'stashModal'; else aside.remove();
+    }
+    if (S) S.peek = null;
     if (!S) return;
     paintBar();
     // Carry on with the file on screen if it's still one to hunt; else the next.
@@ -1473,8 +1660,18 @@
                         : x.kind === 'studio' ? 'Studio name mapped in manage-data' : 'A tag these files carry') + '">' +
               (x.hunted ? '🎯 ' : '') + esc(x.name) + '</button>').join('') + '</div>' : '') +
         '</div>' +
+        '<div class="shb-order"><span>Each file shows its</span><div class="shb-seg">' +
+          '<button type="button" data-b="omatch">Best match</button><button type="button" data-b="oorder">StashDB #1</button></div></div>' +
+        '<div class="shb-order"><span>Sort</span><div class="shb-seg">' +
+          '<button type="button" data-b="sfile">Files</button><button type="button" data-b="sconf">Confidence ↓</button></div></div>' +
+        '<div class="shb-order"><span>Tick all at</span><div class="shb-thr">' +
+          '<button type="button" data-b="tdown" title="5 lower">−</button>' +
+          '<input class="shb-min" type="number" inputmode="numeric" min="0" max="100" step="1" value="' + bulkMin() + '" aria-label="Confidence to tick from">' +
+          '<button type="button" data-b="tup" title="5 higher">+</button></div>' +
+          '<button type="button" data-b="t90" class="shb-t90">☑ Tick ' + bulkMin() + '+</button></div>' +
         '<div class="shb-head"></div>' +
         '<div class="shb-list">' + B.rows.map(bulkRowHtml).join('') + '</div>' +
+        '<div class="shb-prog" hidden></div>' +
         '<div class="shb-ask" hidden></div>' +
         '<div class="shb-foot">' +
           '<button type="button" data-b="close">Close</button>' +
@@ -1485,18 +1682,39 @@
     clearOfDock(sheet, SHEET_PAD);
     const addBox = sheet.querySelector('.shb-add');
     addBox.addEventListener('input', () => paintBulkPills(sheet));
+    // A mark typed in (picker 15.52 / native 15.63).
+    const minBox = sheet.querySelector('.shb-min');
+    if (minBox) {
+      minBox.addEventListener('input', () => {
+        const n = parseInt(minBox.value, 10);
+        if (!Number.isFinite(n) || !S) return;
+        S.bulkMin = Math.max(0, Math.min(100, n));
+        paintBulk();
+      });
+      minBox.addEventListener('change', () => { minBox.value = String(bulkMin()); });
+      minBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); minBox.blur(); } });
+    }
     addBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); bulkAgain(); } });
     sheet.addEventListener('click', (e) => {
       if (bulk !== B) return;
       const b = e.target.closest('button');
       if (b && b.dataset.hunt != null) {
+        // A look at the whole thing, then back here (picker 15.54 / native 15.65).
         e.stopPropagation();
         const r = B.rows[+b.dataset.hunt];
         if (!r || B.submitting || B.renaming) return;
-        B.stop = true;
-        bulk = null;
-        sheet.remove();
-        huntNow(r.v);
+        peekBulk(B, r, sheet);
+        return;
+      }
+      if (b && b.dataset.pv != null) {
+        // ▶ (picker 15.53 / native 15.64): the sheet steps aside while it plays.
+        e.stopPropagation();
+        const r = B.rows[+b.dataset.pv];
+        // The sheet AND the hunt's card under it step aside (picker 15.55 / native 15.66),
+        // so the player is what's on screen, as ▶ is elsewhere; Back to Stash brings both back.
+        if (r && window.scrayStashNav && typeof window.scrayStashNav.preview === 'function') {
+          window.scrayStashNav.preview(r.v, [sheet, S && S.modal].filter(Boolean));
+        }
         return;
       }
       if (b && b.dataset.pill != null) {
@@ -1512,6 +1730,36 @@
       if (b && b.dataset.b) {
         e.stopPropagation();
         if (b.dataset.b === 'again') { bulkAgain(); return; }
+        if (b.dataset.b === 'tdown' || b.dataset.b === 'tup') {
+          // Steps of 5, onto the nearest 5 first (87 → 85 / 90).
+          const m = bulkMin();
+          S.bulkMin = b.dataset.b === 'tup' ? Math.min(100, Math.floor(m / 5) * 5 + 5) : Math.max(0, Math.ceil(m / 5) * 5 - 5);
+          const inp = sheet.querySelector('.shb-min');
+          if (inp) inp.value = String(S.bulkMin);
+          paintBulk();
+          return;
+        }
+        if (b.dataset.b === 't90') {
+          // Every row to decide on whose shown scene scores 90+ - or, when
+          // they all are already, untick them again.
+          if (B.submitting || B.renaming) return;
+          const hi = bulkHigh(B);
+          const all = hi.length && hi.every(r => r.tick);
+          hi.forEach(r => { r.tick = !all; paintBulkRow(r); });
+          paintBulk();
+          return;
+        }
+        if (b.dataset.b === 'sfile' || b.dataset.b === 'sconf') {
+          S.bulkSort = b.dataset.b === 'sconf' ? 'conf' : '';
+          B.rows.forEach(r => paintBulkRow(r));
+          const list = sheet.querySelector('.shb-list');
+          if (list) list.scrollTop = 0;
+          return;
+        }
+        if (b.dataset.b === 'omatch' || b.dataset.b === 'oorder') {
+          if (!B.submitting && !B.renaming) setBulkOrder(B, b.dataset.b === 'omatch' ? 'match' : 'order');
+          return;
+        }
         if (b.dataset.b === 'stop') { B.stop = true; B.running = false; paintBulk(); }
         if (b.dataset.b === 'close') closeBulk();
         if (b.dataset.b === 'match') submitBulk();
@@ -1596,8 +1844,106 @@
   };
 
   function optsFor(video) {
-    if (!S || !S.cur || !video) return null;
+    if (!S || !video) return null;
+    // A bulk row opened with 🔎 (picker 15.54 / native 15.65) gets the hunt's pills and order too.
+    if (S.peek && (video === S.peek.video || keyOf(video) === S.peek.key)) return S.peek.handle;
+    if (!S.cur) return null;
     return (video === S.cur.video || keyOf(video) === S.cur.key) ? handle : null;
+  }
+
+  // ---- 🔎 from the bulk check (picker 15.54 / native 15.65) -----------------
+  // The row's file in the ordinary Stash modal - fingerprint lookup, the
+  // search with every card, Accept & submit, details - while the bulk sheet
+  // waits, hidden, still checking. Close or ⚡ Back to bulk brings it back.
+  function peekBulk(B, r, sheet) {
+    if (!S || bulk !== B) return;
+    endPreview();
+    // The hunt's own card stays where it is, under the sheet, out of the way:
+    // showStashModal replaces whatever is #stashModal, so it steps out of that
+    // name until the look is over (picker 15.55 / native 15.66).
+    const main = document.getElementById('stashModal');
+    if (main) {
+      main.id = 'stashModalHuntAside';
+      main.dataset.shVis = main.style.visibility || '';
+      main.style.visibility = 'hidden';
+    }
+    const unAside = () => {
+      const m = document.getElementById('stashModalHuntAside');
+      if (!m) return;
+      m.style.visibility = m.dataset.shVis || '';
+      if (!document.getElementById('stashModal')) m.id = 'stashModal';
+      else m.remove();   // something else took its place meanwhile
+    };
+    let leaving = false;
+    const back = () => {
+      if (S) S.peek = null;
+      if (leaving) return;
+      unAside();
+      // The sheet never went anywhere; its rows catch up with the look.
+      if (S && bulk === B && sheet.isConnected) B.rows.forEach(x => paintBulkRow(x));
+    };
+    const h = {
+      mount(modal) {
+        ensureCss();
+        const i = B.rows.indexOf(r);
+        const dir = r.v.__huntFolder || folderOf(r.v);
+        const bar = document.createElement('div');
+        bar.className = 'sh-bar sh-insp sh-peek';
+        bar.innerHTML =
+          '<div class="sh-top"><span class="sh-insp-l">⚡ From the bulk check · ' + (i + 1) + ' of ' + B.rows.length + '</span>' +
+            '<button type="button" data-h="hunt" title="Leave the bulk check and hunt this file">🎯 Hunt it</button>' +
+            '<button type="button" class="sh-back" data-h="back">✕ Back to bulk</button></div>' +
+          '<div class="sh-file">' + (dir ? '<span class="sh-dir">' + esc(dir) + '/</span>' : '') + esc(r.v.filename || '') + '</div>';
+        bar.addEventListener('click', (e) => {
+          const t = e.target.closest('[data-h]');
+          if (!t) return;
+          e.stopPropagation();
+          if (t.dataset.h === 'back') {
+            const cb = modal.querySelector('#stashCloseBtn');
+            if (cb) cb.click();
+          } else if (t.dataset.h === 'hunt') {
+            // What 🔎 did before: the bulk check ends, and this file is the hunt's.
+            leaving = true;
+            S.peek = null;
+            B.stop = true;
+            bulk = null;
+            sheet.remove();
+            document.getElementById('stashModalHuntAside')?.remove();
+            huntNow(r.v);
+          }
+        });
+        const hh = modal.querySelector('h3');
+        if (hh && hh.parentNode) hh.after(bar); else modal.firstElementChild.prepend(bar);
+        modalClearOfDock(modal);
+      },
+      loaded(matched, modal, scene) {
+        if (!S || bulk !== B) return;
+        if (matched && scene && r.st !== 'done' && r.st !== 'fpmatch') {
+          // Matched in there: the row says so, and the hunt counts it.
+          r.st = 'done';
+          r.tick = false;
+          r.note = 'in the Stash modal';
+          r.scene = scene;
+          tookMatch(r.v, r.key, scene, 'modal');
+        } else if (!matched && (r.st === 'done' || r.st === 'fpmatch') && r.note === 'in the Stash modal') {
+          // ...and unmatched again before leaving.
+          r.st = r.card ? 'found' : 'none';
+          r.note = '';
+          forgetMatch(r.key);
+          S.stats.matched = Math.max(0, S.stats.matched - 1);
+          if (!S.pool.includes(r.v)) S.pool.push(r.v);
+        }
+      },
+      closed() { back(); },
+      renamed(video, oldKey) {
+        renamedFile(video, oldKey);
+        r.key = keyOf(video);
+        if (S && S.peek && S.peek.handle === h) S.peek.key = r.key;
+      }
+    };
+    S.peek = { video: r.v, key: r.key, handle: h };
+    // Opened after the sheet, at the same z-index, so it lands on top of it.
+    window.showStashModal(r.v, { search: huntWords(r.v), hunt: h });
   }
 
   function stop() {

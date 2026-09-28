@@ -1758,11 +1758,15 @@ async function showTagCloudModal(kind) {
        const keywordsDef = searchesKeywords ? attrDefs.find(d => d.key === 'keywords') : null;
        // Once keywords are picked, the notes shown are the ones under them; the
        // box is then only for finding more keywords, so it leaves the grid be.
+       // A performer is found by a name they were credited as too (picker 15.57 / native 15.68).
+       const asOf = (n) => kind === 'performer' && window.scrayStashNames && typeof window.scrayStashNames.asFor === 'function'
+           ? window.scrayStashNames.asFor(n) : [];
+       const asHitOf = (n) => term && !n.toLowerCase().includes(term) ? (asOf(n).find(a => String(a).toLowerCase().includes(term)) || '') : '';
        if (term && !(keywordsDef && keywordPicks().size)) names = names.filter(n =>
            (keywordsDef
                ? scrayCloudAttrValues(kind, n, keywordsDef).some(v =>
                      v !== SCRAY_CLOUD_UNSET && termHit(v))
-               : n.toLowerCase().includes(term))
+               : n.toLowerCase().includes(term) || !!asHitOf(n))
            || set.has(n) || scrayIsExcluded(kind, n));
 
        names.sort(scrayCloudSort === 'alpha'
@@ -1799,6 +1803,14 @@ async function showTagCloudModal(kind) {
            btn.type = 'button';
            btn.className = 'tag-selection-item scray-cloud-item scray-cloud-' + kind;
            btn.textContent = name;
+           // Found by a credited-as name: say which (picker 15.57 / native 15.68).
+           const asHit = asHitOf(name);
+           if (asHit) {
+               const a = document.createElement('span');
+               a.className = 'scray-cloud-count';
+               a.textContent = ' as ' + asHit + ' ';
+               btn.appendChild(a);
+           }
 
            const c = document.createElement('span');
            c.className = 'scray-cloud-count';

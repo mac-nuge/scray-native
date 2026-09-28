@@ -4,6 +4,47 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.86 / picker 15.36 / native 15.45 — test: Search StashDB in the Stash details dropdowns
+<!-- 2026-09-28T05:10Z -->
+
+**browse** — `staging-browse - 15.86 test: Search StashDB in the Stash details dropdowns`: `data-explorer.html`, `migrate.html`. **picker** — `staging - 15.36 test: Search StashDB in the Stash details dropdowns`: `scray-stash-edit.js`. **native** — `stg-native - 15.45 test: Search StashDB in the Stash details dropdowns`: `assets/web/scray-stash-edit.js`. `scray-stash-edit.js` is the same in both apps. No server change - it uses `stash_nav` op `find`, which the navigator's find box already uses.
+
+- **Asked for:** Mac asked if the Studio and Performer dropdowns in the manual Stash details form only search his own library (they did - `stash_edit_vocab` / `stash_vocab_list` are your names only). He wanted a *Search StashDB* option that opens the search up to StashDB, in the apps' form and in every manual-edit dropdown in data-explorer and migrate.
+- **The option:** once two letters are typed in a Studio or Performers box, the list ends with *🔍 Search StashDB for "…"*. Tap or click it (or arrow down to it and press Enter) and StashDB's studios or performers for that term come in under a *From StashDB* heading. Names already in the list above are left out. Studios show their parent network, and performers show their disambiguation and gender. The answer is kept for that term, so the next performer from the same search doesn't ask again. Typing something else brings the option back. Tags are unchanged - the search only covers studios and performers.
+- **Picking a StashDB name:**
+  - **apps:** a studio is taken like a new one you'd typed. A performer becomes a *new* chip with StashDB's gender, added to your list with that gender on Save (the same `stash_edit_vocab_add` a hand-added one gets). If StashDB has no gender for them, the usual gender question comes up.
+  - **data-explorer / migrate:** the name goes into your list straight away (`stash_vocab_add`, with StashDB's gender for a performer), just as *+ New* does, then into the cell. The status line says *added … from StashDB*.
+  - Anywhere, a StashDB name that's already in your list under the same name is an ordinary pick.
+- **Fixed on the way (browse):** the StashDB row redraws the list the moment it's clicked, which would have detached the row under the mouse and let the page's click-outside handler shut the list. The search now starts a tick later.
+- **Tested:**
+  - **apps, in Chromium with the real modal and form, mocked server:** studio search → pick *Brazzers Exxtra*; performer search → *Jana Cova* chip as F/new; the same term again uses the kept answer without her; a performer with no gender asks; Save sends the two vocab adds with genders, then the manual save with both.
+  - **browse, the combo code from data-explorer (identical in migrate) on its own:** by mouse and by keyboard; the vocab add goes up with the gender, and the cell gets the name.
+
+### picker 15.35 / native 15.44 — test: Hunt swipes, last match and performer pill
+<!-- 2026-09-28T04:55Z -->
+
+**picker** — `staging - 15.35 test: Hunt swipes, last match and performer pill`: `scray-stash-hunt.js`, `scray-stash-nav.js`. **native** — `stg-native - 15.44 test: Hunt swipes, last match and performer pill`: the same two under `assets/web/`. Both files are the same in both apps. Web only, no server change.
+
+- **Asked for:** in the Stash hunt, swipe left on the whole card for Next (quick long swipe) or the options (slow swipe: edit, folder, tag, never); swipe right for the last match with the option to unmatch; search results defaulting to StashDB; and the last female performer offered alongside the last studio.
+- **Swipe left, quick:** the card flies off and the next file's card slides in - the same as Next ⏭ (counts as a skip if it wasn't matched). A flick is at least 70 px at 0.5 px/ms or faster at the moment you let go.
+- **Swipe left, slow:** the card moves aside and uncovers four options behind its right edge - ✏️ Details, 📁 This folder (All files when already on it), 🏷 Tag (opens the bar's tag pills) and 🚫 Never. Tap one, or tap the card or swipe it back to put them away. Holding still before letting go always counts as slow.
+- **Swipe right:** opens *Last match* - the file, when, and the scene's title, studio and performers - with ✕ Unmatch (two taps, as in the lookup panel). A hand-entered match gets *Remove my details* instead. Afterwards the file is back in the hunt pool, the ✅ count drops if the match was made in this hunt, and *Hunt it again now* opens it straight away. If the last match is the file on screen, it just reopens unmatched. The last match is kept on the device, so it works in a later hunt too.
+- **Up/down still scrolls:** a swipe only takes over once the finger has clearly gone sideways, and never from a text box or anything that scrolls sideways itself. The buttons in the hunt bar are all still there.
+- **StashDB order by default:** a search's results now open in StashDB order; Best match is one tap away. ⚙️ `SEARCH_SORT` in `scray-stash-nav.js`.
+- **Last female performer:** the female performer(s) of the hunt's last match are pink 🎯 pills next to the green studio one, with the same menu - filter these results by her, open her page, or add her to the search. A match with no women keeps the previous ones. `suggestPerformers(video)` in the hunt, the counterpart of `suggestStudio`.
+- **Tip:** the first three hunts on a device show a one-line swipe tip.
+- **Tested** in Chromium (touch emulation, phone size) with the real `file-operations.js`, `scray-stash-edit.js` and both files, against a mocked server: a fingerprint match on opening becomes the last match with its woman as a pill; a flick moves on; a slow swipe opens the options, a tap on the card puts them away, 🏷 opens the tag pills; a vertical drag does nothing; the performer pill filters the results (1 of 2); results open on StashDB order; swipe right → Unmatch → count back to 0 → Hunt it again opens that file.
+
+### picker 15.34 / native 15.43 — test: Now playing bar under the Stash preview
+<!-- 2026-09-28T04:20Z -->
+
+**picker** — `staging - 15.34 test: Now playing bar under the Stash preview`: `scray-stash-nav.js`. **native** — `stg-native - 15.43 test: Now playing bar under the Stash preview`: `assets/web/scray-stash-nav.js`. The same file in both. Web only.
+
+- **Asked for:** the now-playing bar underneath the video in the Stash preview (▶ in the Stash modal and the hunt bar).
+- **What changed:** while the preview floats, the now-playing strip (`#currentVideoInfo` - folders, name, score, size and its P D ★ B S BM buttons) is moved into the floated player, straight under the video, with rounded bottom corners to match. It used to be hidden for the preview. Moved rather than copied, as FLS does, so its buttons keep working and rebuilds still find it by id. It goes back under the player when the preview ends (×, the backdrop, or Back to Stash).
+- **Limits:** capped at 22% of the screen height and scrolls past that, so a long name can't push the video off screen. If FLS borrows the strip mid-preview, an observer puts it back in the float when FLS hands it back. Previews of the file already playing (not floated) are unchanged - the strip is already under the player there.
+- **Tested** in jsdom: the strip lands under the video showing the preview's file, comes back into the float after an FLS round trip, and returns under the player (with the player stopped and the Stash modal back) when the preview ends.
+
 ### picker 15.33 / native 15.42 — test: Take studio/performers from a Stash result
 <!-- 2026-09-27T21:10Z -->
 

@@ -18,6 +18,10 @@
 // the form. Hand-entered details for an unmatched file, corrections for a
 // StashDB match; performers are added to what is there, the studio replaces.
 //
+// picker 15.36 / native 15.45: the Studio and Performers lists end with
+// Search StashDB for what's typed (stash_nav op 'find'), for names not in
+// your library yet. A StashDB performer comes in with StashDB's gender.
+//
 // Usage: const ctl = window.scrayStashEdit.open({ host, actions, overlay,
 //            video, videoKey, onDone(saved) });
 // host takes the form, actions takes Save/Cancel, overlay takes the dropdown.
@@ -180,6 +184,10 @@
 #stashModal .sse-it .g { flex: 0 0 auto; font-size: .7rem; opacity: .65; }
 #stashModal .sse-it .ct { flex: 0 0 auto; font-size: .7rem; opacity: .5; font-variant-numeric: tabular-nums; }
 #stashModal .sse-it.new .nm { color: #1e7e34; font-weight: 600; }
+#stashModal .sse-it.sdbgo { justify-content: center; color: #5b4bc4; background: #fafafa; border-top: 1px dashed #ccc; }
+#stashModal .sse-it.sdb .nm { color: #5b4bc4; }
+#stashModal .sse-it .sub { flex: 0 1 auto; min-width: 0; font-size: .7rem; opacity: .6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#stashModal .sse-hd { padding: 5px 10px; font-size: .66rem; letter-spacing: .07em; text-transform: uppercase; color: #777; background: #f6f6f8; border-bottom: 1px solid rgba(128,128,128,.12); }
 #stashModal .sse-none { padding: 9px 10px; opacity: .6; }
 #stashModal .sse-gpick { padding: 8px 10px; }
 #stashModal .sse-gpick div { margin-bottom: 6px; }
@@ -558,6 +566,8 @@
 
     // ---- dropdown ----------------------------------------------------------
     let ddInput = null, ddItems = [], ddSel = -1, ddBlurTimer = null, ddGender = null;
+    // StashDB's answer for one term (picker 15.36 / native 15.45).
+    let sdb = null;   // { kind, term, busy, err, results: [{ name, gender, sub }] }
 
     function wireInput(inp) {
       inp.addEventListener('input', () => {
@@ -625,24 +635,50 @@
       ddItems = names.map(n => ({ type: 'pick', name: n.name, uses: n.uses, gender: n.gender }));
       // A single-value field showing exactly its own value has nothing to
       // offer but itself - leave the list closed rather than parroting it.
-      if (!many && term && ddItems.length === 1 && nameKey(ddItems[0].name) === nameKey(term)) ddItems = [];
+      let ownValue = false;
+      if (!many && term && ddItems.length === 1 && nameKey(ddItems[0].name) === nameKey(term)) { ddItems = []; ownValue = true; }
       if (term && !exact) ddItems.push({ type: 'new', name: term });
+      // Last: StashDB, on request - then what it found, minus names listed above.
+      let sdbNote = '';
+      if ((kind === 'studio' || kind === 'performer') && term.length >= 2 && !ownValue) {
+        const hit = sdb && sdb.kind === kind && nameKey(sdb.term) === nameKey(term) ? sdb : null;
+        if (hit && hit.results) {
+          const have = new Set(ddItems.filter(x => x.type === 'pick').map(x => nameKey(x.name)));
+          const extra = hit.results.filter(r => r.name && !have.has(nameKey(r.name)) && !(many && exclude.has(nameKey(r.name))));
+          extra.forEach(r => ddItems.push({ type: 'sdb', name: r.name, gender: r.gender || '', sub: r.sub || '' }));
+          if (!extra.length) sdbNote = hit.results.length ? 'Nothing more on StashDB.' : 'StashDB has nothing for that.';
+        } else {
+          ddItems.push({ type: 'sdbgo', busy: !!(hit && hit.busy), err: (hit && hit.err) || '' });
+        }
+      }
       ddSel = term && ddItems.length ? 0 : -1;
 
       const wasShut = dd.hidden || dd.previousElementSibling !== inp;
       if (dd.previousElementSibling !== inp) inp.insertAdjacentElement('afterend', dd);
       if (!ddItems.length) {
-        dd.innerHTML = '<div class="sse-none">No ' + KIND_LABEL[kind] + ' matches.</div>';
+        dd.innerHTML = '<div class="sse-none">' + esc(sdbNote || 'No ' + KIND_LABEL[kind] + ' matches.') + '</div>';
       } else {
+        const firstSdb = ddItems.findIndex(x => x.type === 'sdb');
         dd.innerHTML = ddItems.map((it, i) =>
-          it.type === 'new'
+          (i === firstSdb ? '<div class="sse-hd">From StashDB</div>' : '') + (
+          it.type === 'sdbgo'
+            ? '<div class="sse-it sdbgo' + (i === ddSel ? ' sel' : '') + '" data-i="' + i + '"><span>' +
+                (it.busy ? 'Searching StashDB&hellip;'
+                  : (it.err ? 'StashDB: ' + esc(it.err) + ' &mdash; tap to try again'
+                            : '&#128269; Search StashDB for &ldquo;' + esc(term) + '&rdquo;')) + '</span></div>'
+          : it.type === 'sdb'
+            ? '<div class="sse-it sdb' + (i === ddSel ? ' sel' : '') + '" data-i="' + i + '">' +
+                '<span class="nm">' + esc(it.name) + '</span>' +
+                (it.sub ? '<span class="sub">' + esc(it.sub) + '</span>' : '') +
+                (kind === 'performer' ? '<span class="g">' + esc(shortGender(it.gender)) + '</span>' : '') + '</div>'
+          : it.type === 'new'
             ? '<div class="sse-it new' + (i === ddSel ? ' sel' : '') + '" data-i="' + i + '">' +
                 '<span class="nm">+ Add ' + KIND_LABEL[kind] + ' &ldquo;' + esc(it.name) + '&rdquo;</span></div>'
             : '<div class="sse-it' + (i === ddSel ? ' sel' : '') + '" data-i="' + i + '">' +
                 '<span class="nm">' + esc(it.name) + '</span>' +
                 (kind === 'performer' ? '<span class="g">' + esc(shortGender(it.gender)) + '</span>' : '') +
                 '<span class="ct">' + (it.uses ? Number(it.uses).toLocaleString() : '') + '</span></div>'
-        ).join('');
+        )).join('') + (sdbNote ? '<div class="sse-none">' + esc(sdbNote) + '</div>' : '');
       }
       dd.hidden = false;
       place(wasShut);
@@ -685,12 +721,52 @@
       if (Math.abs(delta) > 2) host.scrollTop += delta;
     }
 
+    /** Search StashDB for what's in the box; the list redraws when it answers. */
+    function runSdb(inp) {
+      const kind = inp.dataset.kind, term = inp.value.trim();
+      if (term.length < 2 || (sdb && sdb.busy && sdb.kind === kind && nameKey(sdb.term) === nameKey(term))) return;
+      const mine = sdb = { kind, term, busy: true, err: '', results: null };
+      openDD(inp);
+      api('stash_nav', { method: 'POST', body: { op: 'find', term } })
+        .then(r => {
+          mine.results = kind === 'studio'
+            ? (r.studios || []).map(x => ({ name: String(x.name || ''), sub: x.parent ? 'in ' + x.parent : '' }))
+            : (r.performers || []).map(x => ({ name: String(x.name || ''), gender: x.gender || '', sub: x.disambiguation || '' }));
+        })
+        .catch(err => { mine.err = err.message || String(err); })
+        .finally(() => {
+          mine.busy = false;
+          if (!finished && sdb === mine && ddInput === inp && nameKey(inp.value.trim()) === nameKey(term)) openDD(inp);
+        });
+    }
+
     function pick(it) {
       const inp = ddInput;
       if (!inp) return;
       const kind = inp.dataset.kind;
       const f = inp.dataset.f;
       const many = !!inp.dataset.many;
+      if (it.type === 'sdbgo') { runSdb(inp); return; }
+      if (it.type === 'sdb') {
+        // Already in your list under that name: an ordinary pick.
+        const known = vocabFind(kind, it.name);
+        if (known) { pick({ type: 'pick', name: known.name }); return; }
+        if (kind === 'performer') {
+          const g = String(it.gender || '').toUpperCase();
+          // StashDB's gender, as if it had been picked by hand; none, ask.
+          if (!g || !GENDERS.some(x => x[0] === g)) { askGender(inp, it.name); return; }
+          newPerformers.set(nameKey(it.name), g);
+          if (!cur[f].some(n => nameKey(n) === nameKey(it.name))) cur[f].push(it.name);
+          inp.value = '';
+          paintChips(f);
+          paintSaid(f);
+          closeDD();
+          inp.focus();
+          return;
+        }
+        pick({ type: 'new', name: it.name });
+        return;
+      }
       if (it.type === 'new' && kind === 'performer') { askGender(inp, it.name); return; }
       if (many) {
         if (!cur[f].some(n => nameKey(n) === nameKey(it.name))) cur[f].push(it.name);

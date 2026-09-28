@@ -47,6 +47,9 @@
 // studio and/or performers you tick go into this file's details
 // (opts.onTake -> scrayStashEdit.take), for when StashDB hasn't got the video
 // but has others from the same studio or with the same people.
+// picker 15.35 / native 15.44: search results open in StashDB order (Best
+// match is one tap away), and in a hunt the female performer(s) of its last
+// match are pills too, with the same menu as a studio pill.
 // Identical in Picker and Native.
 //
 // stashdb.org is hard work on a phone, so searching and browsing happen inside
@@ -154,6 +157,7 @@
 #stashModal .ssn .ssn-ptag.filt { box-shadow: 0 0 0 2px #6c5ce7; }
 #ssnPillMenu .ssn-pm-note { margin: -4px 0 10px; font-size: .8rem; color: #777; }
 #stashModal .ssn .ssn-ptag.ssn-ptag-hunt:not(.on) { border-color: #9bd8a8; background: #eaf7ee; color: #1e7e34; font-weight: 600; }
+#stashModal .ssn .ssn-ptag.ssn-ptag-perf:not(.on) { border-color: #f1a7c9; background: #fdf0f6; color: #b0246a; }
 #stashModal .ssn-rf-none { padding: 10px 4px; font-size: .84rem; color: #666; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 #stashModal .ssn .ssn-google.ssn-google-card { margin-left: 0; padding: 6px 12px; font-size: .8rem; }
 #stashModal .ssn .ssn-lib { background: #28a745; border-color: #28a745; color: #fff; }
@@ -266,6 +270,10 @@
     document.head.appendChild(css);
   }
 
+  // ⚙️ How a search's results are ordered at first: 'order' is StashDB's own
+  // order (picker 15.35 / native 15.44), 'match' is Best match against this file.
+  const SEARCH_SORT = 'order';
+
   // ---- the navigator ---------------------------------------------------------
   function open(opts) {
     ensureCss();
@@ -295,6 +303,9 @@
     const inHunt = !!(hunt && typeof hunt.optsFor === 'function' && hunt.optsFor(video));
     const huntStudio = inHunt && typeof hunt.suggestStudio === 'function'
       ? String(hunt.suggestStudio(video) || '').trim() : '';
+    // ...and its female performer(s) (picker 15.35 / native 15.44).
+    const huntPerfs = inHunt && typeof hunt.suggestPerformers === 'function'
+      ? (hunt.suggestPerformers(video) || []).map(x => String(x || '').trim()).filter(Boolean) : [];
     const headingWas = heading ? heading.textContent : '';
 
     // The studio + performer box (picker 14.19 / native 14.31). Kept out here
@@ -576,7 +587,7 @@
           entry.id = res.performer.id;
           entry.name = res.performer.name || entry.name;
         }
-        if (!entry.sort) entry.sort = (entry.type === 'search' && res.scored) ? 'match' : 'order';
+        if (!entry.sort) entry.sort = (entry.type === 'search' && res.scored) ? SEARCH_SORT : 'order';
       }
       paint(false, true);
     }
@@ -703,6 +714,8 @@
         ? '<button type="button" class="ssn-ptag ssn-ptag-hunt" data-pstudio="' + esc(huntStudio) + '" data-pname="' + esc(huntStudio) +
           '" title="Studio of the hunt&rsquo;s last match">&#127919; ' + esc(huntStudio) + '</button>'
         : '') +
+      huntPerfs.map(n => '<button type="button" class="ssn-ptag ssn-ptag-hunt ssn-ptag-perf" data-pperf="' + esc(n) + '" data-pname="' + esc(n) +
+          '" title="Performer in the hunt&rsquo;s last match">&#127919; ' + esc(n) + '</button>').join('') +
       pathTags.map((t, i) => i >= studioStart
         ? '<button type="button" class="ssn-ptag ssn-ptag-studio" data-pstudio="' + esc(t) + '" data-pname="' + esc(t) +
           '" title="Studio name mapped in manage-data">' + esc(t) + '</button>'
@@ -718,7 +731,7 @@
         const t = b.dataset.pname;
         b.classList.toggle('on', !!t && tagRe(t).test(box.value));
         // A studio pill that is filtering the results gets an outline.
-        b.classList.toggle('filt', !!(e && b.dataset.pstudio && rfHas(e, 'rfs', t)));
+        b.classList.toggle('filt', !!(e && ((b.dataset.pstudio && rfHas(e, 'rfs', t)) || (b.dataset.pperf && rfHas(e, 'rfp', t)))));
       });
     }
     function toggleWord(t) {
@@ -817,12 +830,17 @@
 
     // The studio pills' menu (picker 15.27 / native 15.36), like a performer
     // chip's in the Stash modal: on top of the modal, gone with the navigator.
-    function pillMenu(name) {
+    function pillMenu(name, kind) {
       document.getElementById('ssnPillMenu')?.remove();
       const e = top();
       if (!e || e.type !== 'search' || !name) return;
-      const n = ((e.data && e.data.scenes) || []).filter(c => ck(c.studio) === ck(name)).length;
-      const filtering = rfHas(e, 'rfs', name);
+      // A performer pill (the hunt's last match) filters on the cast instead.
+      const perf = kind === 'performer';
+      const dd = perf ? 'rfp' : 'rfs';
+      const n = ((e.data && e.data.scenes) || []).filter(c => perf
+        ? (c.cast || []).some(p => ck(p && p.name) === ck(name))
+        : ck(c.studio) === ck(name)).length;
+      const filtering = rfHas(e, dd, name);
       const box = host.querySelector('input.ssn-term');
       const inWords = !!(box && tagRe(name).test(box.value));
       const m = document.createElement('div');
@@ -836,7 +854,7 @@
           '<div style="display:flex;flex-direction:column;gap:8px;">' +
             '<button type="button" class="modal-btn modal-btn-primary" data-pm="filter">' +
               (filtering ? '&#10005; Stop filtering by it' : '&#8853; Filter these results') + '</button>' +
-            '<button type="button" class="modal-btn modal-btn-secondary" data-pm="page">&#128269; Open the studio&rsquo;s page</button>' +
+            '<button type="button" class="modal-btn modal-btn-secondary" data-pm="page">&#128269; Open ' + (perf ? 'her' : 'the studio&rsquo;s') + ' page</button>' +
             '<button type="button" class="modal-btn modal-btn-secondary" data-pm="words">' +
               (inWords ? '&#8722; Take out of the search &amp; search again' : '&#43; Add to the search &amp; search') + '</button>' +
             '<button type="button" class="modal-btn modal-btn-cancel" data-pm="">Cancel</button>' +
@@ -849,8 +867,8 @@
         ev.stopPropagation();
         m.remove();
         if (finished || top() !== e) return;
-        if (b.dataset.pm === 'filter') { e.rfsOpen = e.rfpOpen = false; rfToggle(e, 'rfs', name); paint(false, true); }
-        else if (b.dataset.pm === 'page') push({ type: 'studio', id: '', name, sceneId: '' });
+        if (b.dataset.pm === 'filter') { e.rfsOpen = e.rfpOpen = false; rfToggle(e, dd, name); paint(false, true); }
+        else if (b.dataset.pm === 'page') push({ type: perf ? 'performer' : 'studio', id: '', name, sceneId: '' });
         else if (b.dataset.pm === 'words') {
           // In or out of the words, then the search runs with them.
           toggleWord(name);
@@ -1630,6 +1648,7 @@
       if (btn.hasAttribute('data-go')) { search(box && box.value); box && box.blur(); return; }
       if (btn.dataset.ptag !== undefined) { togglePtag(+btn.dataset.ptag); return; }
       if (btn.dataset.pstudio !== undefined) { pillMenu(btn.dataset.pstudio); return; }
+      if (btn.dataset.pperf !== undefined) { pillMenu(btn.dataset.pperf, 'performer'); return; }
       if (btn.dataset.ddDone) { closeDd(btn.dataset.ddDone); return; }
       if (btn.dataset.rfToggle) {
         const e = top();
@@ -1840,6 +1859,12 @@ body.ssn-pv-open:not(.fullscreen-active) #inlineVideoContainer.float-player {
 body.ssn-pv-open:not(.fullscreen-active) #inlineVideoContainer.float-player video,
 body.ssn-pv-open:not(.fullscreen-active) #inlineVideoContainer.float-player .plyr { max-height: 68vh; }
 body.ssn-pv-open:not(.fullscreen-active) #currentVideoInfo { display: none !important; }
+body.ssn-pv-open:not(.fullscreen-active) #inlineVideoContainer.float-player > #currentVideoInfo:not(:empty) {
+  display: block !important; position: static !important; left: auto !important; right: auto !important; bottom: auto !important;
+  width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box;
+  border: none !important; border-radius: 0 0 6px 6px !important; z-index: auto !important;
+  max-height: 22vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
 #ssnPvPill.on { display: block; position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 10px); z-index: 2147483647; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
 body.fullscreen-active #ssnPvBar { display: none; }
 `;
@@ -1876,6 +1901,35 @@ body.fullscreen-active #ssnPvBar { display: none; }
     return { scrim, bar, pill };
   }
 
+  // The now-playing strip under the preview (picker 15.34 / native 15.43).
+  // #currentVideoInfo - folders, name, score, size and its P D ★ B S BM
+  // buttons - is MOVED into the floated player, after the video, so it sits
+  // right underneath it. Moved rather than copied, the way FLS moves it into
+  // the title, so its listeners stay put and everything that rebuilds it
+  // (they find it by id) still does. It goes back under the player when the
+  // preview ends. If FLS borrows it mid-preview and hands it back to the page,
+  // the observer brings it back into the float.
+  let pvStripObs = null;
+  function pvPlaceStrip() {
+    if (!pv || !pv.floated) return;
+    const container = document.getElementById('inlineVideoContainer');
+    const strip = document.getElementById('currentVideoInfo');
+    if (!container || !strip || strip.closest('.fls-video-title')) return;
+    if (strip.parentElement !== container) container.appendChild(strip);
+  }
+  function pvHoldStrip() {
+    pvPlaceStrip();
+    if (pvStripObs || typeof MutationObserver !== 'function') return;
+    pvStripObs = new MutationObserver(pvPlaceStrip);
+    pvStripObs.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  }
+  function pvReleaseStrip() {
+    if (pvStripObs) { pvStripObs.disconnect(); pvStripObs = null; }
+    const container = document.getElementById('inlineVideoContainer');
+    const strip = document.getElementById('currentVideoInfo');
+    if (container && strip && strip.parentElement === container) container.insertAdjacentElement('afterend', strip);
+  }
+
   function preview(video, overlay) {
     const player = window.inlineVideoPlayer;
     if (!player || typeof player.play !== 'function') {
@@ -1897,6 +1951,7 @@ body.fullscreen-active #ssnPvBar { display: none; }
       document.body.classList.add('ssn-pv-open');
       container.classList.add('float-player');
       pv.floated = true;
+      pvHoldStrip();
       if (typeof window.computeBottomDock === 'function') window.computeBottomDock();
     } else {
       ch.pill.classList.add('on');
@@ -1968,6 +2023,7 @@ body.fullscreen-active #ssnPvBar { display: none; }
     const pill = document.getElementById('ssnPvPill');
     if (pill) { pill.classList.remove('on'); pill.style.top = ''; pill.style.left = ''; }
     if (st.floated) {
+      pvReleaseStrip();
       if (bar && bar.parentNode !== document.body) document.body.appendChild(bar);
       document.body.classList.remove('ssn-pv-open');
       document.getElementById('inlineVideoContainer')?.classList.remove('float-player');

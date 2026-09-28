@@ -110,11 +110,16 @@
   const LIST_PAGE = 1000;
   async function listAll(onProgress) {
     const out = [];
-    let after = "";
+    let after = "", total = 0;
     for (;;) {
       const res = await window.scrayApiCall("hetzner_list", { params: { after, limit: LIST_PAGE } });
       out.push(...(res.videos || []));
-      onProgress?.(`Listing the box… ${out.length.toLocaleString()}${res.more ? "" : " videos"}`);
+      // native 15.74: the first page carries the whole count (browse 15.112);
+      // before that server, the count from the last fetch stands in.
+      if (res.total != null) total = +res.total || 0;
+      const of = total || boxTotal();
+      onProgress?.(`Listing the box… ${out.length.toLocaleString()}${res.more ? "" : " videos"}`,
+                   { stage: 1, done: out.length, total: res.more ? Math.max(of, out.length) : out.length });
       if (!res.more || !res.next) break;
       after = res.next;
     }
@@ -163,10 +168,10 @@
     // native 15.22: the server re-reads the box too, in the background - see
     // kickBoxRescan. This listing doesn't wait for it.
     if (rescan) kickBoxRescan();
-    onProgress?.("Listing the box…");
+    onProgress?.("Listing the box…", { stage: 1, done: 0, total: boxTotal() });
     let listed;
     try { listed = await listAll(onProgress); } catch (err) { throw stepError("listing", err); }
-    onProgress?.(`Saving ${listed.length.toLocaleString()} to the library…`);
+    onProgress?.(`Saving ${listed.length.toLocaleString()} to the library…`, { stage: 2, done: 0, total: listed.length });
     try {
       return await saveAndSync(listed, onProgress);
     } catch (err) {
@@ -217,7 +222,8 @@
     setBoxTotal(listed.length);
     console.log(`[hetzner] ${listed.length} listed: ${added} added, ${updated} updated, ${removed} removed, ${skipped} already on the phone`);
     const tally = [added ? `+${added.toLocaleString()} new` : "", removed ? `−${removed.toLocaleString()} gone` : ""].filter(Boolean).join(" · ");
-    onProgress?.(`${(added + updated).toLocaleString()} in the library${tally ? " · " + tally : ""}`);
+    onProgress?.(`${(added + updated).toLocaleString()} in the library${tally ? " · " + tally : ""}`,
+                 { stage: 2, done: listed.length, total: listed.length, added, removed, skipped });
 
     let checkError = null;
     if (typeof window.scraySyncLibrary === "function") {
@@ -294,6 +300,8 @@
         console.log(`[hetzner] box rescanned: ${x.moved || 0} moved, ${x.added || 0} new, ${x.gone || 0} gone, details read for ${x.probed || 0}`);
         // Details read (duration, size) are worth a re-list too: they're what the rows show.
         if ((x.moved || 0) + (x.added || 0) + (x.gone || 0) + (x.probed || 0) > 0) {
+          // native 15.74: not on top of a fetch the pill is showing - after it.
+          for (let w = 0; PROG && w < 600; w++) await new Promise(r => setTimeout(r, 1000));
           try { await fetchHetzner({ rescan: false }); }
           catch (err) { console.warn("[hetzner] re-list after the rescan failed:", err); }
         }
@@ -827,6 +835,109 @@
   // arm, tap again to re-fetch; the cross arms, a tap on the pill removes -
   // the two-tap pattern the folder pills use, since confirm() is unreliable
   // in WKWebView.
+  // ---- fetch progress in the pill (native 15.74) -----------------------------
+  // A first add or a re-fetch draws the pill at once and shows the fetch in it:
+  // which of the three steps (list the box, save to the library, sync scores),
+  // how far through it, the whole thing as a bar behind the text, and the time
+  // so far. The top-row Hetzner button just disappears.
+  const STEP_NAMES = ["", "Listing the box", "Saving to the library", "Syncing scores & bookmarks"];
+  // ⚙️ How much of the bar each step fills: listing is the long one.
+  const STEP_SPAN = [null, [0, 0.45], [0.45, 0.55], [0.55, 1]];
+  let PROG = null;          // { t0, stage, done, total, extra, doneText, tick }
+  const fmtClock = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+  function progStart() {
+    clearInterval(PROG && PROG.tick);
+    PROG = { t0: Date.now(), stage: 1, done: 0, total: boxTotal(), extra: "", doneText: null, tick: null };
+    PROG.tick = setInterval(progPaint, 1000);
+  }
+  /** onProgress(text, info) - info from this file; the sync step's text is read for its "x of y". */
+  function progSet(text, info) {
+    if (!PROG) return;
+    if (info && info.stage) {
+      PROG.stage = info.stage;
+      PROG.done = info.done || 0;
+      PROG.total = info.total || 0;
+      if (info.stage === 2 && info.done && info.done === info.total) {
+        const bits = [];
+        if (info.added) bits.push(`+${info.added.toLocaleString()} new`);
+        if (info.removed) bits.push(`−${info.removed.toLocaleString()} gone`);
+        if (info.skipped) bits.push(`${info.skipped.toLocaleString()} on phone`);
+        PROG.extra = bits.join(" · ");
+      }
+    } else {
+      const t = String(text || "");
+      PROG.stage = 3;
+      const m = /([\d,]+) of ([\d,]+)/.exec(t), only = /Syncing scores… ([\d,]+) videos/.exec(t);
+      if (m) { PROG.done = +m[1].replace(/,/g, ""); PROG.total = +m[2].replace(/,/g, ""); }
+      else if (only) { PROG.done = 0; PROG.total = +only[1].replace(/,/g, ""); }
+      else if (/Finishing/.test(t)) { PROG.done = PROG.total = PROG.total || 1; PROG.note = "finishing…"; }
+      else PROG.note = t.replace(/…$/, "");
+      if (/Checking the catalogue/.test(t)) PROG.note = "checking this phone's own files";
+    }
+    progPaint();
+  }
+  function progLabel() {
+    const P = PROG, n = x => (x || 0).toLocaleString();
+    if (P.doneText) return { top: P.doneText, sub: `done in ${fmtClock(Date.now() - P.t0)}`, frac: 1 };
+    const span = STEP_SPAN[P.stage] || [0, 1];
+    const f = P.total ? Math.min(1, P.done / P.total) : 0;
+    const frac = span[0] + (span[1] - span[0]) * f;
+    const count = P.stage === 2 && !P.done ? `${n(P.total)} videos`
+      : P.total ? `${n(P.done)} of ${n(P.total)} · ${Math.round(f * 100)}%` : `${n(P.done)}`;
+    const top = `☁ ${NAME} · ${Math.round(frac * 100)}% · ${fmtClock(Date.now() - P.t0)}`;
+    const sub = `${P.stage}/3 ${STEP_NAMES[P.stage]}: ${count}` + (P.extra ? ` · ${P.extra}` : "") +
+                (P.stage === 3 && P.note ? ` · ${P.note}` : "");
+    return { top, sub, frac };
+  }
+  function paintProgBtn(btn) {
+    const { top, sub, frac } = progLabel();
+    btn.innerHTML = "";
+    const a = document.createElement("span"), b = document.createElement("small");
+    a.textContent = top; b.textContent = sub;
+    b.style.cssText = "display:block;font-size:0.68rem;opacity:.8;white-space:normal;text-align:left";
+    btn.append(a, b);
+    const pct = Math.round(frac * 1000) / 10;
+    btn.style.background = `linear-gradient(to right, rgba(0,123,255,.38) ${pct}%, rgb(255,216,222) ${pct}%)`;
+    btn.style.textAlign = "left";
+  }
+  function progPaint() {
+    if (!PROG) return;
+    const btn = document.querySelector('#accountLoadButtons .account-pill[data-source="hetzner"] .account-load-btn');
+    if (btn && btn.dataset.prog === "1") paintProgBtn(btn); else renderPill().catch(() => {});
+  }
+  /** The fetch is over: a short "done" in the pill, then the usual label. */
+  function progEnd(r) {
+    if (!PROG) return;
+    clearInterval(PROG.tick);
+    if (r) {
+      const bits = [`✅ ${(r.listed - r.skipped).toLocaleString()} videos`];
+      if (r.added) bits.push(`+${r.added.toLocaleString()} new`);
+      if (r.removed) bits.push(`−${r.removed.toLocaleString()} gone`);
+      PROG.doneText = bits.join(" · ");
+      progPaint();
+      setTimeout(() => { PROG = null; renderPill().catch(() => {}); }, 2500);
+    } else {
+      PROG = null;
+      renderPill().catch(() => {});
+    }
+  }
+  /** One fetch at a time, drawn in the pill. */
+  async function fetchWithPill() {
+    if (PROG && !PROG.doneText) return null;
+    progStart();
+    await renderPill();
+    let r = null;
+    try {
+      r = await fetchHetzner({ onProgress: progSet });
+      reportFetch(r);
+    } catch (err) {
+      reportFetchError(err);
+    } finally {
+      progEnd(r);
+    }
+    return r;
+  }
+
   async function renderPill() {
     const container = document.getElementById("accountLoadButtons");
     if (!container) return;
@@ -836,7 +947,24 @@
     // The top-row button is only the way in; once the box is part of the
     // library the pill does re-fetch and remove.
     const topBtn = document.getElementById("hetznerFetchBtn");
-    if (topBtn) topBtn.style.display = (count || enabled()) ? "none" : "";
+    if (topBtn) topBtn.style.display = (count || enabled() || PROG) ? "none" : "";
+    // Removed twice over: the await above let another redraw in first.
+    container.querySelector('.account-pill[data-source="hetzner"]')?.remove();
+    if (PROG) {
+      // A fetch is running (native 15.74): the pill is its progress, and does nothing when tapped.
+      const pill = document.createElement("div");
+      pill.className = "account-pill";
+      pill.dataset.source = "hetzner";
+      const btn = document.createElement("button");
+      btn.className = "account-load-btn";
+      btn.dataset.prog = "1";
+      btn.title = "Fetching the Hetzner Storage Box";
+      btn.addEventListener("click", e => e.stopPropagation());
+      paintProgBtn(btn);
+      pill.appendChild(btn);
+      container.appendChild(pill);
+      return;
+    }
     if (!count && !enabled()) return;
 
     const pill = document.createElement("div");
@@ -878,17 +1006,9 @@
         return;
       }
       if (armed !== "fetch") { arm("fetch", "Re-fetch?", "#007bff"); return; }
-      disarm(); btn.disabled = true;
-      try {
-        const r = await fetchHetzner({ onProgress: m => { btn.textContent = `☁ ${m}`; } });
-        if (r.added || r.removed) console.log(`[hetzner] +${r.added} −${r.removed}`);
-        reportFetch(r);
-      } catch (err) {
-        reportFetchError(err);
-      } finally {
-        btn.disabled = false;
-        await renderPill();
-      }
+      disarm();
+      const r = await fetchWithPill();
+      if (r && (r.added || r.removed)) console.log(`[hetzner] +${r.added} −${r.removed}`);
     });
     cross.addEventListener("click", (e) => {
       e.stopPropagation(); e.preventDefault();
@@ -920,20 +1040,11 @@
   document.addEventListener("DOMContentLoaded", () => {
     wrapPills();
     const btn = document.getElementById("hetznerFetchBtn");
-    btn?.addEventListener("click", async () => {
-      const orig = btn.textContent;
-      btn.disabled = true;
-      try {
-        const r = await fetchHetzner({ onProgress: m => { btn.textContent = m; } });
-        btn.textContent = `✅ ${r.added + r.updated}`;
-        setTimeout(() => { btn.textContent = orig; }, 1500);
-        reportFetch(r);
-      } catch (err) {
-        reportFetchError(err);
-        btn.textContent = orig;
-      } finally {
-        btn.disabled = false;
-      }
+    // native 15.74: the button goes as soon as it's tapped; the pill takes
+    // its place at once and shows the fetch.
+    btn?.addEventListener("click", () => {
+      btn.style.display = "none";
+      fetchWithPill();
     });
     renderPill().catch(() => {});
   });

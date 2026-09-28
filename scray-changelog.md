@@ -4,6 +4,11 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.112 / native 15.74 — test: Hetzner pill shows the fetch progress
+<!-- 2026-09-28T20:50Z -->
+- Native: tapping Hetzner (next to Add) hides the button at once and draws the Hetzner pill straight away; the fetch runs in the pill, not on the button. The pill shows the overall % with a bar filling behind the text and the time so far, then the step and its count: 1/3 Listing the box (1,000 of 6,429 · 15%), 2/3 Saving to the library (then +new · −gone · on phone), 3/3 Syncing scores & bookmarks (x of y, then checking this phone's own files, finishing). At the end: ✅ N videos · +new · done in m:ss for a moment, then the usual label. A re-fetch from the pill shows the same. Taps on the pill do nothing while it runs, and only one fetch runs at a time; the quiet re-list after a box rescan now waits for a running fetch instead of overlapping it.
+- api.php: hetzner_list's first page also returns total, the box's whole count, for the pill's "of".
+
 ### browse 15.101 / picker 15.62 / native 15.73 — test: Private folders hidden until the PIN
 <!-- 2026-09-28T15:27Z -->
 - 🔒 Private folders: chosen folders (and everything under them) are hidden until a PIN is entered. One PIN everywhere. A lock to stop someone who picks up the device, not encryption; nothing shows while locked (no placeholder).

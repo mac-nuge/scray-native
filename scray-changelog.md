@@ -4,6 +4,28 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.97 / picker 15.59 / native 15.70 — test: Studio performer list asks StashDB as you type
+<!-- 2026-09-28T14:10Z -->
+
+- **picker** — `staging - 15.59 test: Studio performer list asks StashDB as you type`: `scray-stash-nav.js`.
+- **native** — `stg-native - 15.70 test: Studio performer list asks StashDB as you type`: `assets/web/scray-stash-nav.js` (web only, no IPA). Byte-identical to Picker's.
+- **browse** — `staging-browse - 15.97 test: Studio performer list asks StashDB as you type`: `api.php`.
+
+- **Asked for:**
+  - The name should just show up, without tapping *Search this studio's performers*.
+  - And *Sylvie* is one of Leila Cove's aliases on StashDB, so she should have been found by that alone, whatever the studio credited her as.
+- **As you type (`runPerfFind`):**
+  - No button. 450 ms after typing stops (2+ letters), the studio's Performer list asks StashDB (`studio_perf_find`), once per term.
+  - Whoever comes back is added to the list in place. Only the list under the box is redrawn (`ddListInner`, split out of `studioHtml`), so the box keeps the keyboard.
+  - A line under the list says *Looking on StashDB for more…* while it asks, or *Nobody else at this studio goes by "…" on StashDB*.
+- **Aliases on the server (`studio_perf_find`, a third step):**
+  - 15.94's `queryPerformers` with `studio_id` + `names` evidently didn't return her for "sylvie", although the alias is on her profile.
+  - Now also StashDB's own `searchPerformer`, the one the Find box uses, which does match aliases (12 at most). Each one not already found is checked for a scene at this studio: one request, a scene count per candidate via `queryScenes` with the studio and performer. Those with any are kept.
+  - Steps 1 (names/aliases query) and 2 (scene credits, 15.96) are unchanged. It fails only if all three do.
+- **Tested:** `php -l`; `node --check`.
+  - The op in a PHP harness where steps 1 and 2 find nothing: `searchPerformer` gives Leila Cove (aliases …Sylvie…) and *Sylvie Other*; the counts are 3 and 0 → only Leila Cove comes back.
+  - In jsdom, typing *s … sylvie* quickly: one request (*sylvie*); after the pause the list shows *Leila Cove aka Behautti Bangz, Sylvie, Sylvie Sterling*; the same box still focused. *zzz* → the "nobody else" line.
+
 ### browse 15.96 / picker 15.58 / native 15.69 — test: Studio performer search finds scene credits
 <!-- 2026-09-28T13:58Z -->
 

@@ -56,6 +56,10 @@
 // buttons under it. In a hunt, names carried from this folder's earlier
 // searches are 📌 pills (tap to take out), and every search tells the hunt
 // which studio / performer names were added to the words (hunt.searched).
+// picker 15.59 / native 15.70 (browse 15.97): no button - the studio's
+// performer list asks StashDB as you type (a moment after you stop) and adds
+// who it finds in place, keyboard untouched. The server also checks StashDB's
+// own performer search, which matches aliases, against this studio.
 // picker 15.58 / native 15.69 (browse 15.96): the studio's performer search
 // also finds a performer by what one of this studio's scenes credited them as
 // ("Leila Cove as Sylvie") - that's per scene, not one of their aliases.
@@ -295,8 +299,8 @@
 #stashModal .ssn .ssn-studio-opt small { opacity: .6; flex: 0 0 auto; }
 #stashModal .ssn .ssn-studio-opt small.as { opacity: .8; color: #6c5ce7; font-weight: 600; }
 #stashModal .ssn .ssn-studio-opt small.aka { display: block; opacity: .55; font-weight: 400; }
-#stashModal .ssn .ssn-perf-find { display: block; width: 100%; margin: 6px 0 0; padding: 8px 6px; border: 1px dashed #b9a9f5; border-radius: 6px; background: #f6f3ff; color: #5b3fd1; font-size: .8rem; text-align: left; white-space: normal; }
-#stashModal .ssn .ssn-perf-find[hidden] { display: none; }
+#stashModal .ssn-perf-status { padding: 8px 6px; font-size: .78rem; color: #6c5ce7; }
+#stashModal .ssn-perf-status[hidden] { display: none; }
 #stashModal .ssn-studio-none { padding: 8px 6px; font-size: .8rem; opacity: .6; }
 #stashModal .ssn-studio-how { font-size: .72rem; opacity: .65; margin: 0 0 6px; }
 #stashModal .ssn-dd-top { display: flex; gap: 6px; align-items: center; margin: 0 0 6px; }
@@ -1268,6 +1272,40 @@
       return list;
     }
 
+    // The inside of a dropdown's list (picker 15.59 / native 15.70): its own
+    // function so the list can be redrawn under the search box without
+    // touching the box - or the keyboard.
+    function ddListInner(e, dd) {
+      const K = DD[dd];
+      const one = dd === 'sub' ? 'Studio' : e.type === 'studio' ? 'Performer' : 'Studio';
+      const many = dd === 'sub' ? 'studios in this network' : e.type === 'studio' ? 'performers' : 'studios';
+      const opts = ddOptions(e, dd);
+      const picks = e[K.picks] || [];
+      const isOn = (id) => picks.some(x => x.id === id);
+      return '' +
+            '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-dd="' + dd + '" data-studio-pick="">All ' + many + '</button>' +
+            // Picked ones first, so they're easy to find and untick.
+            // A nested list keeps its order (a studio stays under its network);
+            // a flat one puts the picked ones first.
+            (opts.some(o => o.group) ? opts : opts.slice().sort((a, b) => (isOn(b.id) ? 1 : 0) - (isOn(a.id) ? 1 : 0))).map(o => {
+              // Credited as / aka (picker 15.56 / native 15.67), searched as well as the name.
+              const asTxt = (o.as || []).length ? ' <small class="as">as ' + o.as.map(esc).join(', ') + '</small>' : '';
+              const aka = (o.aliases || []).filter(a => !(o.as || []).includes(a));
+              const akaTxt = aka.length ? '<small class="aka">aka ' + aka.slice(0, 4).map(esc).join(', ') + (aka.length > 4 ? ' +' + (aka.length - 4) : '') + '</small>' : '';
+              const find = [o.name].concat(o.as || [], o.aliases || [], o.found ? [o.found] : []).join(' | ');
+              return '<button type="button" class="ssn-studio-opt' + (isOn(o.id) ? ' on' : '') + (o.net ? ' net' : '') + (o.child ? ' child' : '') + '" data-dd="' + dd + '" ' +
+                (o.group ? 'data-group="' + esc(o.group) + '" ' : '') +
+                'data-studio-pick="' + esc(o.id) + '" data-studio-name="' + esc(o.name) + '" data-find="' + esc(find) + '">' +
+                '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + asTxt + akaTxt + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>';
+            }).join('') +
+            '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
+            // Anyone else at this studio, asked of StashDB as you type (picker 15.59 / native 15.70).
+            (dd === 'main' && e.type === 'studio' && e.id
+              ? '<div class="ssn-perf-status" data-perf-status hidden>' +
+                  (e.perfFindBusy ? 'Looking on StashDB for more&hellip;' : esc(e.perfFindNote || '')) + '</div>'
+              : '');
+    }
+
     function studioHtml(e, dd) {
       dd = dd || 'main';
       const K = DD[dd];
@@ -1297,30 +1335,7 @@
           '<div class="ssn-dd-top"><input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
             'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + '&hellip;" value="' + esc(e[K.term] || '') + '">' +
             doneBtn(dd) + '</div>' +
-          '<div class="ssn-studio-list">' +
-            '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-dd="' + dd + '" data-studio-pick="">All ' + many + '</button>' +
-            // Picked ones first, so they're easy to find and untick.
-            // A nested list keeps its order (a studio stays under its network);
-            // a flat one puts the picked ones first.
-            (opts.some(o => o.group) ? opts : opts.slice().sort((a, b) => (isOn(b.id) ? 1 : 0) - (isOn(a.id) ? 1 : 0))).map(o => {
-              // Credited as / aka (picker 15.56 / native 15.67), searched as well as the name.
-              const asTxt = (o.as || []).length ? ' <small class="as">as ' + o.as.map(esc).join(', ') + '</small>' : '';
-              const aka = (o.aliases || []).filter(a => !(o.as || []).includes(a));
-              const akaTxt = aka.length ? '<small class="aka">aka ' + aka.slice(0, 4).map(esc).join(', ') + (aka.length > 4 ? ' +' + (aka.length - 4) : '') + '</small>' : '';
-              const find = [o.name].concat(o.as || [], o.aliases || [], o.found ? [o.found] : []).join(' | ');
-              return '<button type="button" class="ssn-studio-opt' + (isOn(o.id) ? ' on' : '') + (o.net ? ' net' : '') + (o.child ? ' child' : '') + '" data-dd="' + dd + '" ' +
-                (o.group ? 'data-group="' + esc(o.group) + '" ' : '') +
-                'data-studio-pick="' + esc(o.id) + '" data-studio-name="' + esc(o.name) + '" data-find="' + esc(find) + '">' +
-                '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + asTxt + akaTxt + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>';
-            }).join('') +
-            '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
-            // Anyone else at this studio, by name or alias (picker 15.56 / native 15.67).
-            (dd === 'main' && e.type === 'studio' && e.id
-              ? '<button type="button" class="ssn-perf-find" data-perf-find hidden>' +
-                  (e.perfFindBusy ? 'Searching StashDB&hellip;' : '&#128269; Search this studio&rsquo;s performers') + '</button>' +
-                (e.perfFindNote ? '<div class="ssn-studio-none">' + esc(e.perfFindNote) + '</div>' : '')
-              : '') +
-          '</div>' +
+          '<div class="ssn-studio-list">' + ddListInner(e, dd) + '</div>' +
           doneBtn(dd, true) +
         '</div>';
       }
@@ -1331,6 +1346,37 @@
           (picks.length ? '<button type="button" data-dd="' + dd + '" data-studio-pick="" title="Show all ' + many + '">&#10005;</button>' : '') +
         '</div>' + pop +
       '</div>';
+    }
+
+    // A studio's performers by name, alias or scene credit (op studio_perf_find),
+    // asked as you type (picker 15.59 / native 15.70). What comes back joins
+    // the list in place: only the list is redrawn, never the box.
+    let perfTimer = null;
+    function runPerfFind(e, q) {
+      if (!e || e.type !== 'studio' || !e.id || finished) return;
+      e.perfAsked = e.perfAsked || new Set();
+      if (e.perfAsked.has(q)) return;
+      e.perfAsked.add(q);
+      e.perfFindBusy = (e.perfFindBusy || 0) + 1;
+      e.perfFindNote = '';
+      const redraw = () => {
+        if (finished || top() !== e) return;
+        const list = host.querySelector('.ssn-studio[data-dd="main"] .ssn-studio-list');
+        if (!list) return;
+        list.innerHTML = ddListInner(e, 'main');
+        paintStudioList();
+      };
+      redraw();
+      api('stash_nav', { method: 'POST', body: { op: 'studio_perf_find', id: e.id, name: e.name || '', term: q } })
+        .then(r => {
+          const got = (r && r.performers) || [];
+          e.perfFound = (e.perfFound || []).filter(x => !got.some(g => g.id === x.id))
+            .concat(got.map(g => Object.assign({}, g, { foundBy: q })));
+          const now = String(e[DD.main.term] || '').trim().toLowerCase();
+          e.perfFindNote = got.length || now !== q ? '' : 'Nobody else at this studio goes by \u201c' + q + '\u201d on StashDB.';
+        })
+        .catch(err => { e.perfAsked.delete(q); e.perfFindNote = 'StashDB: ' + (err.message || String(err)); })
+        .finally(() => { e.perfFindBusy = Math.max(0, e.perfFindBusy - 1); redraw(); });
     }
 
     // Narrows the open list to what's typed, without a repaint (which would
@@ -1361,10 +1407,12 @@
         const none = wrap.querySelector('.ssn-studio-none');
         if (none) none.hidden = shown > 0 || !q;
         // The StashDB search by name or alias, for what's typed (picker 15.56 / native 15.67).
-        const pf = wrap.querySelector('[data-perf-find]');
+        const pf = wrap.querySelector('[data-perf-status]');
         if (pf) {
-          pf.hidden = q.length < 2;
-          if (!e.perfFindBusy) pf.innerHTML = '&#128269; Search this studio&rsquo;s performers for \u201c' + esc(box.value.trim()) + '\u201d (names and aliases)';
+          pf.hidden = q.length < 2 || !(e.perfFindBusy || e.perfFindNote);
+          // StashDB for the rest, a moment after typing stops (picker 15.59 / native 15.70).
+          clearTimeout(perfTimer);
+          if (q.length >= 2 && !(e.perfAsked && e.perfAsked.has(q))) perfTimer = setTimeout(() => runPerfFind(e, q), 450);
         }
       });
     }
@@ -1862,33 +1910,6 @@
         const v = words(video.filename || '');
         if (box) box.value = v;
         search(v);
-        return;
-      }
-      if (btn.hasAttribute('data-perf-find')) {
-        // This studio's performers by name or alias (picker 15.56 / native 15.67).
-        const e = top();
-        if (!e || e.type !== 'studio' || !e.id || e.perfFindBusy) return;
-        const q = String(e[DD.main.term] || '').trim();
-        if (q.length < 2) return;
-        e.perfFindBusy = true;
-        e.perfFindNote = '';
-        paintStudioList();
-        const seq = loadSeq;
-        api('stash_nav', { method: 'POST', body: { op: 'studio_perf_find', id: e.id, name: e.name || '', term: q } })
-          .then(r => {
-            const got = (r && r.performers) || [];
-            e.perfFound = (e.perfFound || []).filter(x => !got.some(g => g.id === x.id))
-              .concat(got.map(g => Object.assign({}, g, { foundBy: q })));
-            e.perfFindNote = got.length ? '' : 'Nobody at this studio goes by \u201c' + q + '\u201d on StashDB - not as a name, an alias or a scene credit.';
-          })
-          .catch(err => { e.perfFindNote = 'StashDB: ' + (err.message || String(err)); })
-          .finally(() => {
-            e.perfFindBusy = false;
-            if (finished || top() !== e || seq !== loadSeq) return;
-            e[DD.main.open] = true;
-            paint(false, true);
-            paintStudioList();
-          });
         return;
       }
       if (btn.hasAttribute('data-studio-toggle')) {

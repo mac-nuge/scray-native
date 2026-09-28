@@ -22,6 +22,10 @@
 // Search StashDB for what's typed (stash_nav op 'find'), for names not in
 // your library yet. A StashDB performer comes in with StashDB's gender.
 //
+// picker 15.42 / native 15.53: in a Stash hunt, an empty Studio starts with
+// the studio of the hunt's last match (scrayStashHunt.suggestStudio), marked
+// as such - clear it if it's wrong.
+//
 // Usage: const ctl = window.scrayStashEdit.open({ host, actions, overlay,
 //            video, videoKey, onDone(saved) });
 // host takes the form, actions takes Save/Cancel, overlay takes the dropdown.
@@ -318,7 +322,27 @@
           });
         }
         cur = JSON.parse(JSON.stringify(orig));
+        // In a hunt, an empty studio starts as the last match's (picker 15.42 / native 15.53).
+        let huntStudio = '';
+        try {
+          const hunt = window.scrayStashHunt;
+          if (!String(cur.studio || '').trim() && hunt && typeof hunt.suggestStudio === 'function') {
+            huntStudio = String(hunt.suggestStudio(video) || '').trim();
+          }
+        } catch (e) { huntStudio = ''; }
+        if (huntStudio) cur.studio = huntStudio;
         render();
+        if (huntStudio) {
+          const inp = host.querySelector('input.sse-in[data-f="studio"]');
+          if (inp) {
+            const note = document.createElement('div');
+            note.className = 'sse-hunthint';
+            note.style.cssText = 'font-size:.74rem;color:#1e7e34;margin-top:3px;';
+            note.textContent = '🎯 The hunt’s last studio - clear it if it’s not this one';
+            inp.after(note);
+            inp.addEventListener('input', () => note.remove(), { once: true });
+          }
+        }
         saveBtn.disabled = false;
       } catch (err) {
         if (finished) return;

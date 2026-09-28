@@ -4,6 +4,22 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.42 / native 15.53 — test: Hunt details form starts with the last studio
+<!-- 2026-09-28T11:05Z -->
+
+- **picker** — `staging - 15.42 test: Hunt details form starts with the last studio`: `scray-stash-edit.js`.
+- **native** — `stg-native - 15.53 test: Hunt details form starts with the last studio`: `assets/web/scray-stash-edit.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked for:** as the search is pre-filled, the hunt's ✏️ details form should start with the last studio.
+- **What it does:**
+  - Opening the details form (✏️ in the hunt bar or the swipe options, or Enter details by hand) on the hunt's current file, with no studio yet, puts the studio of the hunt's last match in Studio (`scrayStashHunt.suggestStudio`, the same studio as the 🎯 search pill).
+  - Underneath it: *🎯 The hunt's last studio - clear it if it's not this one*. The note goes as soon as the box is typed in.
+  - A file that already has a studio, a bulk edit, and anything outside a hunt are unchanged. Nothing is saved until Save.
+- **Tested:** `node --check`; the form in jsdom:
+  - hunt with an empty studio → pre-filled, with the note;
+  - hunt with a studio already set → left alone, no note;
+  - no hunt → empty.
+
 ### browse 15.89 / picker 15.41 / native 15.52 — test: Hunt Next in the swipe options, compact result cards, names carried per folder, stronger length score
 <!-- 2026-09-28T10:55Z -->
 

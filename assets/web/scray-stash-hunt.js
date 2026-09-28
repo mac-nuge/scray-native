@@ -29,6 +29,9 @@
 // over the sheet: Back to bulk looked like it went nowhere.) The hunt's own
 // card is kept aside meanwhile, not rebuilt. ▶ on a row plays over the lot,
 // as ▶ does elsewhere, and bulk rows are more compact.
+// picker 15.61 / native 15.72: a bulk check over more than 60 files has
+// "+ Next 60": the next files in the scope join the list below the others and
+// are checked, ticks and results above kept (moreBulk).
 // picker 15.60 / native 15.71: the swipe-left options fill only the lower 60%
 // of the card - from where the third used to start down to the foot - so they
 // are all in thumb reach (SW.trayFrom).
@@ -480,6 +483,8 @@
 #stashHuntBulk .shb-btns { flex: 0 0 auto; display: flex; flex-direction: column; gap: 4px; }
 #stashHuntBulk .shb-btns .shb-pv { font-size: .8rem; }
 #stashHuntBulk .shb-terms { margin: 0 0 6px; }
+#stashHuntBulk .shb-head .more { background: #6c5ce7; border-color: #6c5ce7; color: #fff; font-weight: 700; padding: 5px 10px; font-size: .78rem; white-space: nowrap; }
+#stashHuntBulk .shb-head .more small { font-weight: 400; opacity: .85; }
 #stashHuntBulk .shb-order { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px; font-size: .76rem; color: #555; }
 #stashHuntBulk .shb-seg { display: inline-flex; border: 1px solid #ccc; border-radius: 7px; overflow: hidden; }
 #stashHuntBulk .shb-seg button { border: none; border-radius: 0; margin: 0; padding: 5px 10px; font-size: .76rem; background: #fff; color: #222; }
@@ -1339,7 +1344,11 @@
       '<span>' + (B.running ? 'Checked ' + done + ' of ' + B.rows.length : 'Checked ' + done + ' of ' + B.rows.length) +
         ' · ' + found + ' with a likely scene' + (fp ? ' · ' + fp + ' matched by fingerprint' : '') +
         (B.extra ? ' · searched with + <b>' + esc(B.extra) + '</b>' : '') + '</span>' +
-      (B.running ? '<button type="button" data-b="stop">Stop</button>' : '');
+      (B.running ? '<button type="button" data-b="stop">Stop</button>' : '') +
+      // The rest of the scope, 60 at a time (picker 15.61 / native 15.72).
+      (bulkRest(B).length && !B.running && !B.submitting && !B.renaming
+        ? '<button type="button" data-b="more" class="more">+ Next ' + Math.min(BULK_MAX, bulkRest(B).length) +
+          ' <small>(' + bulkRest(B).length.toLocaleString() + ' more)</small></button>' : '');
     sheet.querySelectorAll('.shb-seg button').forEach(x => {
       const k = x.dataset.b;
       x.classList.toggle('on', k === 'omatch' || k === 'oorder'
@@ -1603,6 +1612,28 @@
     sheet.querySelectorAll('.shb-pill').forEach(b => b.classList.toggle('on', wordRe(b.dataset.pill).test(box.value)));
   }
   /** Search all again with the words in the box: every row not already matched. */
+  /** The scope's files not in the list yet, still unmatched (picker 15.61 / native 15.72). */
+  function bulkRest(B) {
+    if (!B || !B.all) return [];
+    const have = new Set(B.rows.map(r => r.key));
+    return B.all.filter(v => !have.has(keyOf(v)) && !matchedNow(v) && !(S && S.never.has(keyOf(v))));
+  }
+  /** The next 60 join the list and are checked; what's above stays as it is. */
+  function moreBulk() {
+    const B = bulk;
+    const sheet = document.getElementById('stashHuntBulk');
+    if (!B || !sheet || B.running || B.submitting || B.renaming) return;
+    const add = bulkRest(B).slice(0, BULK_MAX).map(v => ({ v, key: keyOf(v), st: 'wait', card: null, note: '', tick: false, count: 0 }));
+    if (!add.length) return;
+    const start = B.rows.length;
+    B.rows.push(...add);
+    const list = sheet.querySelector('.shb-list');
+    if (list) list.insertAdjacentHTML('beforeend', add.map((r, k) => bulkRowHtml(r, start + k)).join(''));
+    const first = list && list.querySelector('.shb-row[data-r="' + start + '"]');
+    if (first && !(S && S.bulkSort === 'conf')) { try { first.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) { /* fine */ } }
+    runBulk(B, add);
+  }
+
   function bulkAgain() {
     const B = bulk;
     const sheet = document.getElementById('stashHuntBulk');
@@ -1647,6 +1678,7 @@
     document.getElementById('stashHuntBulk')?.remove();
     const B = bulk = {
       rows: all.slice(0, BULK_MAX).map(v => ({ v, key: keyOf(v), st: 'wait', card: null, note: '', tick: false, count: 0 })),
+      all,   // the whole scope, for + Next 60 (picker 15.61 / native 15.72)
       running: true, stop: false, submitting: false, extra: ''
     };
     const sugg = bulkSuggestions(B);
@@ -1655,7 +1687,7 @@
     sheet.innerHTML =
       '<div class="shb">' +
         '<h3>⚡ Bulk check · ' + esc(scopeLabel(S.scope)) + '</h3>' +
-        '<div class="shb-note">' + (all.length > BULK_MAX ? 'The first ' + BULK_MAX + ' of ' + all.length.toLocaleString() + ' - check again for more. ' : '') +
+        '<div class="shb-note">' + (all.length > BULK_MAX ? 'The first ' + BULK_MAX + ' of ' + all.length.toLocaleString() + ' - + Next ' + BULK_MAX + ' adds more. ' : '') +
           'Tick the ones that are right, then Match ticked. The rest stay in the hunt.</div>' +
         '<div class="shb-terms">' +
           '<div class="shb-trow"><input class="shb-add" type="search" enterkeyhint="search" spellcheck="false" autocomplete="off" ' +
@@ -1737,6 +1769,7 @@
       if (b && b.dataset.b) {
         e.stopPropagation();
         if (b.dataset.b === 'again') { bulkAgain(); return; }
+        if (b.dataset.b === 'more') { moreBulk(); return; }
         if (b.dataset.b === 'tdown' || b.dataset.b === 'tup') {
           // Steps of 5, onto the nearest 5 first (87 → 85 / 90).
           const m = bulkMin();

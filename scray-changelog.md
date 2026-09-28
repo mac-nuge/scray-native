@@ -4,6 +4,23 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.61 / native 15.72 — test: Hunt bulk check can add the next 60
+<!-- 2026-09-28T15:20Z -->
+
+- **picker** — `staging - 15.61 test: Hunt bulk check can add the next 60`: `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.72 test: Hunt bulk check can add the next 60`: `assets/web/scray-stash-hunt.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked:** ⚡ Bulk said *The first 60 of 155 - check again for more*, but there was no way to reach the rest. Opening it again started from the same 60, since the unmatched ones stay first in the scope.
+- **Now:**
+  - Once a check has finished, its header has **+ Next 60 (95 more)** (`moreBulk`).
+  - The next files in the scope that still aren't matched or hidden join the list under the others and are checked the same way. The list scrolls to them, unless sorted by confidence.
+  - Everything above stays as it was: results, ticks, the order and tick-mark settings. *Search all again* and *Match ticked* take in the whole list.
+  - Repeat until the scope is done; the button goes when nothing's left. The note now says *+ Next 60 adds more*.
+- **Tested:** `node --check`. In jsdom, a 155-file scope:
+  - 60 rows, *+ Next 60 (95 more)*;
+  - with row 4 ticked, + Next → 120 rows, row 4 still ticked, *+ Next 35 (35 more)*;
+  - again → 155 rows, no button.
+
 ### picker 15.60 / native 15.71 — test: Hunt swipe options fill the lower part of the card
 <!-- 2026-09-28T14:15Z -->
 

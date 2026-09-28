@@ -4,6 +4,16 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.60 / native 15.71 — test: Hunt swipe options fill the lower part of the card
+<!-- 2026-09-28T14:15Z -->
+
+- **picker** — `staging - 15.60 test: Hunt swipe options fill the lower part of the card`: `scray-stash-hunt.js`.
+- **native** — `stg-native - 15.71 test: Hunt swipe options fill the lower part of the card`: `assets/web/scray-stash-hunt.js` (web only, no IPA). Byte-identical to Picker's.
+
+- **Asked for:** the five swipe-left buttons should all fit between the card's foot and where the third one started, so they're all within thumb reach.
+- **Change:** the options column now starts 40% of the way down the card and runs to its foot (`SW.trayFrom = 0.4`; before, it ran the full height). Five buttons at 40%–100% of the card, in the same order: 🚫 Never · 📁 · ⏭ Next · 🏷 · ✏️ Details. The swipe-right *Recent files* hint still spans the whole card.
+- **Tested:** `node --check`. Rendered in Chromium with a real touch swipe on a 664 px card: the column runs from 40% (y 326) to the foot (y 724), all five buttons in it.
+
 ### browse 15.97 / picker 15.59 / native 15.70 — test: Studio performer list asks StashDB as you type
 <!-- 2026-09-28T14:10Z -->
 

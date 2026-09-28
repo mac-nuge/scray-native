@@ -29,6 +29,9 @@
 // over the sheet: Back to bulk looked like it went nowhere.) The hunt's own
 // card is kept aside meanwhile, not rebuilt. ▶ on a row plays over the lot,
 // as ▶ does elsewhere, and bulk rows are more compact.
+// picker 15.60 / native 15.71: the swipe-left options fill only the lower 60%
+// of the card - from where the third used to start down to the foot - so they
+// are all in thumb reach (SW.trayFrom).
 // picker 15.54 / native 15.65: 🔎 on a bulk row opens that file's full Stash
 // modal - lookup, search, Accept - with ⚡ Back to bulk, and the bulk check
 // comes back as it was (still running, ticks and sort kept). A match made
@@ -657,7 +660,8 @@
     open: 45,        // px left a swipe needs to open the options
     nextShare: 0.55, // share of the card's width a swipe left must cover to go Next (picker 15.44 / native 15.55; 0.75 until 15.45 / 15.56)
     last: 70,        // px right to open the last match
-    tray: 84         // px the options take up
+    tray: 84,        // px the options take up
+    trayFrom: 0.4    // the options start this far down the card and run to its foot - in thumb reach (picker 15.60 / native 15.71)
   };
 
   function swipeBlocked(t, card) {
@@ -718,8 +722,11 @@
       const r = card.getBoundingClientRect();
       const left = r.left - x, right = r.right - x;
       cardW = r.width; cardRight = right; cardMid = r.top + r.height / 2;
-      tray.style.top = hint.style.top = r.top + 'px';
-      tray.style.height = hint.style.height = r.height + 'px';
+      hint.style.top = r.top + 'px';
+      hint.style.height = r.height + 'px';
+      // The options fill the lower part only (picker 15.60 / native 15.71).
+      tray.style.top = (r.top + r.height * SW.trayFrom) + 'px';
+      tray.style.height = (r.height * (1 - SW.trayFrom)) + 'px';
       tray.style.left = (right - SW.tray) + 'px';
       tray.style.width = SW.tray + 'px';
       hint.style.left = left + 'px';

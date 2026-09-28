@@ -23,6 +23,22 @@
 // (TinEye's Search, say). The handle is { mount(modal), loaded(matched, modal),
 // closed(modal) }.
 //
+// picker 15.40 / native 15.49: every sheet the hunt opens, and the Stash
+// modal itself during a hunt, keeps clear of the corner-button dock
+// (clearOfDock). The bulk check takes extra words for every search, with the
+// usual suggestions as pills, and Search all again.
+// picker 15.39 / native 15.48: the swipe-right list is every file the hunt has
+// shown - matched, skipped, never, unmatched - with filter chips; a match
+// opens its details, anything else goes back into the hunt. A file renamed
+// since is still found (file id, size + length, or its scene's title).
+// picker 15.38 / native 15.47: Rename too is two taps straight to the
+// suggested name (file-operations.js, handle.renamed keeps the list in step),
+// and after Match ticked the bulk check asks: rename them all, none, or choose.
+// picker 15.37 / native 15.46: a swipe right lists the recent matches (not
+// just the last); tap one to check its Stash details, unmatch there if it's
+// wrong, and Back to the hunt. ⚡ Bulk (a folder or tag picked) checks the
+// rest of the scope at once - fingerprint, then the best-scoring name match
+// with confidence and lengths - and matches the ones you tick.
 // picker 15.35 / native 15.44: swipes on the whole card. A quick long swipe
 // left is Next; a slower one opens the options (✏️ 📁 🏷 🚫) from behind the
 // card's right edge. A swipe right opens the last match, with Unmatch. The
@@ -51,13 +67,19 @@
   // picker 15.35 / native 15.44: the last match's female performer(s), and
   // the last match itself (for a swipe right). Kept on this device, any run.
   const LS_PERFS = 'scray.huntLastPerformers';
-  const LS_LAST = 'scray.huntLastMatch';
+  const LS_LAST = 'scray.huntLastMatch';       // picker 15.35 / native 15.44 - read once, below
+  const LS_MATCHES = 'scray.huntMatches';
   const LS_TIP = 'scray.huntSwipeTip';
   const readJson = (k, dflt) => { try { const j = JSON.parse(localStorage.getItem(k) || 'null'); return j == null ? dflt : j; } catch (e) { return dflt; } };
   const writeJson = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* this page load only */ } };
   let lastPerfs = (() => { const a = readJson(LS_PERFS, []); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; })();
-  let lastMatch = (() => { const m = readJson(LS_LAST, null); return m && typeof m.key === 'string' ? m : null; })();
-  let lastMatchVideo = null;   // the file itself, when it was matched this page load
+  // Newest first (picker 15.37 / native 15.46); starts from 15.35's single last match.
+  let matches = (() => {
+    const a = readJson(LS_MATCHES, null);
+    if (Array.isArray(a)) return a.filter(m => m && typeof m.key === 'string');
+    const one = readJson(LS_LAST, null);
+    return one && typeof one.key === 'string' ? [one] : [];
+  })();
   const ROW_CAP = 400;   // ⚙️ rows drawn per sheet tab before "type to narrow"
 
   // ---- small helpers -------------------------------------------------------
@@ -221,7 +243,7 @@
 
   function next() {
     if (!S || !S.cur) return advance();
-    if (!S.cur.matched) { S.stats.skipped++; S.stats.streak = 0; }
+    if (!S.cur.matched) { S.stats.skipped++; S.stats.streak = 0; noteSeen(S.cur.video, 'skip'); }
     advance();
   }
 
@@ -233,6 +255,7 @@
     S.pool = S.pool.filter(v => keyOf(v) !== cur.key);
     S.stats.never++;
     S.stats.streak = 0;
+    noteSeen(cur.video, 'never');
     const device = window.SCRAY_SYNC && window.SCRAY_SYNC.DEVICE_ID;
     api('stash_hunt_never', { method: 'POST', body: { add: [{ key: item.key, name: item.name }], device } })
       .then(() => toast('🚫 Won’t come up again - undo under the scope’s Hidden tab'))
@@ -342,6 +365,87 @@
 #stashHuntLast .shl-un { background: transparent; color: #dc3545; border-color: #dc3545; font-weight: 600; }
 #stashHuntLast .shl-un.armed { background: #dc3545; color: #fff; }
 #stashHuntLast .shl-go { background: #6f42c1; border-color: #6f42c1; color: #fff; font-weight: 700; }
+#stashModal .sh-bar .sh-bulk { flex: 0 0 auto; border-color: #e0a800; background: #fff8e1; color: #8a6d00; font-weight: 700; }
+#stashModal .sh-bar.sh-insp { background: linear-gradient(135deg, #fff8e1, #fff3d6); border-color: #f0d58a; }
+#stashModal .sh-insp-l { flex: 1 1 auto; font-weight: 700; color: #8a6d00; }
+#stashModal .sh-bar .sh-back { background: #6f42c1; border-color: #6f42c1; color: #fff; font-weight: 700; }
+#stashHuntLast .shl { max-height: 100%; display: flex; flex-direction: column; }
+#stashHuntLast h3 small { font-size: .75rem; color: #888; font-weight: 400; }
+#stashHuntLast .shl-note { font-size: .76rem; color: #777; margin: 0 0 8px; }
+#stashHuntLast .shl-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; border: 1px solid #eee; border-radius: 8px; }
+#stashHuntLast .shl-chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 8px; }
+#stashHuntLast .shl-chips button { flex: 0 0 auto; width: auto; padding: 4px 10px; border-radius: 14px; font-size: .76rem; border-color: #ddd; background: #f6f6f8; color: #333; }
+#stashHuntLast .shl-chips button.on { background: #6f42c1; border-color: #6f42c1; color: #fff; }
+#stashHuntLast .shl-k { flex: 0 0 22px; font-size: 1rem; line-height: 1.3; text-align: center; }
+#stashHuntLast .shl-b { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+#stashHuntLast .shl-row.k-skip .shl-f, #stashHuntLast .shl-row.k-never .shl-f, #stashHuntLast .shl-row.k-unmatched .shl-f { font-size: .8rem; color: #222; font-weight: 600; }
+#stashHuntLast .shl-row.k-never { opacity: .75; }
+#stashHuntLast button.shl-row { display: flex; flex-direction: row; align-items: flex-start; gap: 6px; width: 100%; margin: 0; padding: 9px 10px; border: none; border-bottom: 1px solid #f0f0f0; border-radius: 0; background: #fff; text-align: left; font-size: .82rem; }
+#stashHuntLast .shl-row:active { background: #f3efff; }
+#stashHuntLast .shl-t { font-weight: 700; color: #222; }
+#stashHuntLast .shl-w { color: #555; font-size: .78rem; }
+#stashHuntLast .shl-f { color: #444; font-size: .74rem; word-break: break-word; }
+#stashHuntLast .shl-f .sh-dir { color: #999; }
+#stashHuntLast .shl-when { color: #999; font-size: .7rem; }
+#stashHuntSheet .shs-foot .bulk { border-color: #e0a800; background: #fff8e1; color: #8a6d00; font-weight: 700; }
+#stashHuntSheet .shs-foot [hidden] { display: none; }
+#stashHuntBulk { position: fixed; inset: 0; z-index: 2147483647; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: calc(env(safe-area-inset-top, 0px) + 10px) 8px calc(env(safe-area-inset-bottom, 0px) + 10px); }
+#stashHuntBulk .shb { width: 100%; max-width: 720px; max-height: 100%; display: flex; flex-direction: column; background: #fff; color: #222; border-radius: 14px; padding: 12px; box-sizing: border-box; font-size: .84rem; text-align: left; }
+#stashHuntBulk h3 { margin: 0 0 4px; font-size: 1.02rem; }
+#stashHuntBulk .shb-note { font-size: .76rem; color: #666; margin-bottom: 6px; }
+#stashHuntBulk .shb-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; font-size: .76rem; color: #555; margin-bottom: 6px; min-height: 26px; }
+#stashHuntBulk button { width: auto; min-width: 0; margin: 0; padding: 7px 12px; font-size: .82rem; line-height: 1.2; border: 1px solid #ccc; border-radius: 8px; background: #f4f4f6; color: #222; cursor: pointer; }
+#stashHuntBulk .shb-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; border: 1px solid #eee; border-radius: 8px; }
+#stashHuntBulk .shb-row { display: flex; gap: 8px; align-items: flex-start; padding: 9px 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+#stashHuntBulk .shb-row.on { background: #eaf7ee; }
+#stashHuntBulk .shb-row.st-done, #stashHuntBulk .shb-row.st-fpmatch { background: #f3fbf5; cursor: default; }
+#stashHuntBulk .shb-row.st-wait, #stashHuntBulk .shb-row.st-fp, #stashHuntBulk .shb-row.st-search, #stashHuntBulk .shb-row.st-none, #stashHuntBulk .shb-row.st-err { cursor: default; }
+#stashHuntBulk .shb-tick { flex: 0 0 22px; font-size: 1.2rem; line-height: 1.1; text-align: center; color: #28a745; }
+#stashHuntBulk .shb-main { flex: 1 1 auto; min-width: 0; }
+#stashHuntBulk .shb-file { font-size: .76rem; color: #444; word-break: break-word; }
+#stashHuntBulk .shb-file .sh-dir { color: #999; }
+#stashHuntBulk .shb-scene { margin-top: 3px; font-size: .84rem; }
+#stashHuntBulk .shb-sub { font-size: .76rem; color: #555; }
+#stashHuntBulk .shb-sub small { color: #999; }
+#stashHuntBulk .shb-facts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+#stashHuntBulk .shb-conf { display: inline-block; min-width: 26px; padding: 1px 6px; border-radius: 9px; text-align: center; font-weight: 800; font-size: .78rem; background: #eee; color: #555; }
+#stashHuntBulk .shb-conf.good { background: #d4f4dc; color: #1e7e34; }
+#stashHuntBulk .shb-conf.mid { background: #fff3cd; color: #8a6d00; }
+#stashHuntBulk .shb-conf.low { background: #fbe0e3; color: #b02a37; }
+#stashHuntBulk .shb-dur { font-size: .72rem; color: #666; }
+#stashHuntBulk .shb-dur.ok { color: #1e7e34; font-weight: 600; }
+#stashHuntBulk .shb-dur.bad { color: #b02a37; font-weight: 600; }
+#stashHuntBulk .shb-of { font-size: .68rem; color: #999; }
+#stashHuntBulk .shb-st { display: block; margin-top: 3px; font-size: .76rem; color: #777; }
+#stashHuntBulk .shb-st.good { color: #1e7e34; font-weight: 600; }
+#stashHuntBulk .shb-st.bad { color: #b02a37; }
+#stashHuntBulk .shb-hunt { flex: 0 0 auto; padding: 5px 8px; }
+#stashHuntBulk .shb-terms { margin: 0 0 6px; }
+#stashHuntBulk .shb-trow { display: flex; gap: 6px; }
+#stashHuntBulk input.shb-add { flex: 1 1 auto; min-width: 0; box-sizing: border-box; margin: 0; padding: 7px 9px; font-size: 15px; border: 1px solid #ccc; border-radius: 8px; background: #fff; color: inherit; -webkit-appearance: none; appearance: none; }
+#stashHuntBulk .shb-trow .again { flex: 0 0 auto; background: #6c5ce7; border-color: #6c5ce7; color: #fff; font-weight: 700; }
+#stashHuntBulk .shb-trow .again:disabled { opacity: .5; }
+#stashHuntBulk .shb-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+#stashHuntBulk .shb-pill { padding: 3px 9px; border-radius: 12px; border-color: #b9d4f5; background: #eaf3ff; color: #0b5ed7; font-size: .76rem; }
+#stashHuntBulk .shb-pill.k-studio { border-color: #cbbef5; background: #f3efff; color: #5b3fd1; }
+#stashHuntBulk .shb-pill.k-perf { border-color: #f1a7c9; background: #fdf0f6; color: #b0246a; }
+#stashHuntBulk .shb-pill.on { background: #28a745; border-color: #28a745; color: #fff; }
+#stashHuntBulk .shb-ren { display: block; margin-top: 3px; font-size: .74rem; color: #5b3fd1; word-break: break-word; }
+#stashHuntBulk .shb-ren.ok { color: #1e7e34; font-weight: 600; }
+#stashHuntBulk .shb-ren.bad { color: #b02a37; }
+#stashHuntBulk .shb-row.pick { cursor: pointer; background: #fff; }
+#stashHuntBulk .shb-row.pick.on { background: #f3efff; }
+#stashHuntBulk .shb-row.pick .shb-tick { color: #6f42c1; }
+#stashHuntBulk .shb-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #f3efff; border-left: 3px solid #6f42c1; font-size: .8rem; }
+#stashHuntBulk .shb-ask[hidden] { display: none; }
+#stashHuntBulk .shb-ask span { flex: 1 1 100%; }
+#stashHuntBulk .shb-ask button { flex: 1 1 0; }
+#stashHuntBulk .shb-ask .go { background: #6f42c1; border-color: #6f42c1; color: #fff; font-weight: 700; }
+#stashHuntBulk .shb-ask .go:disabled { opacity: .5; }
+#stashHuntBulk .shb-foot { display: flex; gap: 8px; margin-top: 10px; }
+#stashHuntBulk .shb-foot button { flex: 1 1 0; }
+#stashHuntBulk .shb-foot .go { flex: 1.6 1 0; background: #28a745; border-color: #28a745; color: #fff; font-weight: 700; }
+#stashHuntBulk .shb-foot .go:disabled { opacity: .5; }
 #stashModal .ssn-hunt-row { display: flex; align-items: center; gap: 10px; margin: 4px 4px 12px; font-size: .8rem; color: #777; }
 #stashModal .ssn .ssn-hunt-go { background: #6f42c1; border-color: #6f42c1; color: #fff; font-weight: 700; padding: 8px 14px; font-size: .88rem; }
 `;
@@ -370,6 +474,7 @@
       '<div class="sh-top">' +
         '<button type="button" class="sh-scope" data-h="scope" title="Choose folders and tags">🎯 ' +
           esc(scopeLabel(S.scope)) + ' · ' + left.toLocaleString() + ' left ▾</button>' +
+        (bulkable() && left ? '<button type="button" class="sh-bulk" data-h="bulk" title="Check the rest of this folder / tag at once">⚡ Bulk</button>' : '') +
         '<span class="sh-stats" title="Matched · skipped · hidden this run">✅ ' + st.matched +
           ' · ⏭ ' + st.skipped + ' · 🚫 ' + st.never + (st.streak > 1 ? ' · 🔥' + st.streak : '') + '</span>' +
       '</div>' +
@@ -402,6 +507,7 @@
     }
     switch (b.dataset.h) {
       case 'scope': openSheet({}); break;
+      case 'bulk': openBulk(); break;
       case 'edit': openDetails(); break;
       case 'play':
         if (window.scrayStashNav) window.scrayStashNav.preview(v, S.modal);
@@ -429,6 +535,36 @@
     } else {
       setScope({ folders: dir ? [dir] : [], tags: [] }, dir ? 'Next ones from ' + lastSeg(dir) : 'All files');
     }
+  }
+
+  // ---- clear of the corner-button dock (picker 15.40 / native 15.49) --------
+  // The dock (disguise.js) always draws on top of everything, so anything
+  // full-screen keeps clear of it rather than trying to cover it: its bottom
+  // padding stops above the dock whenever the dock sits in the lower half of
+  // the screen. Re-measured on resize while it's up. Use this for every new
+  // sheet or modal: the dock covering a footer is an easy thing to miss.
+  // cap: an inner card whose max-height must fit the space that's left.
+  function clearOfDock(el, basePad, cap) {
+    const apply = () => {
+      if (!el.isConnected) { window.removeEventListener('resize', apply); return; }
+      let gap = 0;
+      try {
+        const dock = document.getElementById('scrayDisguiseDock');
+        const r = dock && dock.offsetParent !== null ? dock.getBoundingClientRect() : null;
+        if (r && r.height && r.top > window.innerHeight / 2) gap = Math.round(window.innerHeight - r.top + 8);
+      } catch (e) { /* no dock: the default padding will do */ }
+      el.style.paddingBottom = gap ? 'max(' + gap + 'px, ' + basePad + ')' : '';
+      if (cap) cap.style.maxHeight = gap ? 'min(' + (cap.dataset.shMax || '100%') + ', 100%)' : (cap.dataset.shMax || '');
+    };
+    apply();
+    window.addEventListener('resize', apply);
+  }
+  const SHEET_PAD = 'calc(env(safe-area-inset-bottom, 0px) + 12px)';
+  /** The Stash modal: its card is 82vh tall, so it's capped to what's left too. */
+  function modalClearOfDock(modal) {
+    const card = modal.querySelector('.basket-json-modal-content');
+    if (card && !card.dataset.shMax) card.dataset.shMax = card.style.maxHeight || '82vh';
+    clearOfDock(modal, '20px', card);
   }
 
   // ---- swipes on the card (picker 15.35 / native 15.44) ---------------------
@@ -506,8 +642,8 @@
         b('never', '🚫', 'Never', 'bad');
     };
     const paintHint = () => {
-      hint.innerHTML = lastMatch
-        ? '<span class="i">↩︎</span><span class="l">Last match</span>'
+      hint.innerHTML = matches.length
+        ? '<span class="i">↩︎</span><span class="l">Recent files</span>'
         : '<span class="i">·</span><span class="l">No match yet</span>';
     };
     const shut = () => { trayOpen = false; setX(0, 200); };
@@ -564,7 +700,7 @@
         setX(-SW.tray, 200);
       } else if (gg.base === 0 && x >= SW.last) {
         shut();
-        openLast();
+        openMatches();
       } else {
         shut();
       }
@@ -604,31 +740,112 @@
     }
   }
 
-  // ---- the last match (swipe right) ------------------------------------------
-  function noteLastMatch(c, scene) {
+  // ---- recent matches (swipe right) -----------------------------------------
+  // picker 15.37 / native 15.46: every match the hunt makes - one at a time,
+  // by fingerprint, or from a bulk check - newest first, kept on this device.
+  // A swipe right lists them; tap one to open its Stash details (Unmatch is
+  // there as usual) and the hunt carries on where it was when that closes.
+  // ⚙️ How many are kept.
+  const MATCHES_KEPT = 100;
+  // picker 15.39 / native 15.48: every file the hunt has shown, not only the
+  // matches - kind 'match' | 'skip' | 'never' | 'unmatched' (none = match).
+  const KIND = { match: ['✅', 'Matched'], skip: ['⏭', 'Skipped'], unmatched: ['↩︎', 'Unmatched'], never: ['🚫', 'Never'] };
+  let listFilter = 'all';
+  /** What finds a file again after a rename moves its key. */
+  const idsOf = (v) => ({
+    oid: String((v && (v.oneDriveId || v.idFromAPI)) || ''),
+    size: +(v && (v.sizeBytes || v.size)) || 0,
+    dur: +(v && v.durationMs) || 0
+  });
+  const matchVideos = new Map();   // key -> the file, for matches made this page load
+
+  const castOf = (scene) => (Array.isArray(scene.cast) && scene.cast.length)
+    ? scene.cast.filter(Boolean)
+    : (scene.performers || []).map(n => ({ name: n }));
+
+  /** Studio and women of a match, offered to the navigator for the next files. */
+  function rememberScene(scene) {
     if (!scene) return;
-    const id = String(scene.id || '');
-    const names = (Array.isArray(scene.cast) && scene.cast.length ? scene.cast.map(p => p && p.name) : (scene.performers || []))
-      .map(n => String(n ?? '').trim()).filter(Boolean);
-    lastMatch = {
-      key: c.key,
-      name: c.video.filename || c.key,
-      dir: c.video.__huntFolder || folderOf(c.video),
+    if (scene.studio) {
+      lastStudio = String(scene.studio).trim();
+      try { localStorage.setItem(LS_STUDIO, lastStudio); } catch (e) { /* this page load only */ }
+    }
+    // A match with no women leaves the last ones standing.
+    const women = castOf(scene)
+      .filter(p => String(p.gender || '').toUpperCase() === 'FEMALE' || String(p.gender_short || '').toUpperCase() === 'F')
+      .map(p => String(p.name || '').trim()).filter(Boolean);
+    if (women.length) { lastPerfs = women.slice(0, 3); writeJson(LS_PERFS, lastPerfs); }
+  }
+
+  function noteMatch(key, video, scene, how) {
+    if (!scene || !key) return;
+    const id = String(scene.id || scene.stash_id || '');
+    const m = {
+      key,
+      name: (video && video.filename) || key,
+      dir: video ? (video.__huntFolder || folderOf(video)) : '',
       id,
       manual: !!scene.manual || id.startsWith('manual:'),
       title: String(scene.title || ''),
       studio: String(scene.studio || ''),
-      performers: names.slice(0, 8),
+      performers: castOf(scene).map(p => String(p.name || '').trim()).filter(Boolean).slice(0, 8),
+      how: how || '',
+      kind: 'match',
       at: new Date().toISOString(),
       run: S ? S.run : 0
     };
-    lastMatchVideo = c.video;
-    writeJson(LS_LAST, lastMatch);
+    Object.assign(m, idsOf(video));
+    matches = [m].concat(matches.filter(x => x.key !== key)).slice(0, MATCHES_KEPT);
+    if (video) matchVideos.set(key, video);
+    writeJson(LS_MATCHES, matches);
   }
-  function forgetLastMatch() {
-    lastMatch = null;
-    lastMatchVideo = null;
-    writeJson(LS_LAST, null);
+  /** A file left without a match: skipped (Next, or another file opened) or Never. */
+  function noteSeen(video, kind) {
+    if (!video) return;
+    const key = keyOf(video);
+    if (!key) return;
+    const m = Object.assign({
+      key, name: video.filename || key, dir: video.__huntFolder || folderOf(video),
+      kind, at: new Date().toISOString(), run: S ? S.run : 0
+    }, idsOf(video));
+    matches = [m].concat(matches.filter(x => x.key !== key)).slice(0, MATCHES_KEPT);
+    matchVideos.set(key, video);
+    writeJson(LS_MATCHES, matches);
+  }
+  /** Unmatched: it stays on the list, as unmatched, at the top. */
+  function forgetMatch(key) {
+    const m = matches.find(x => x.key === key);
+    if (!m) return;
+    ['id', 'title', 'studio', 'performers', 'manual', 'how'].forEach(f => delete m[f]);
+    m.kind = 'unmatched';
+    m.at = new Date().toISOString();
+    matches = [m].concat(matches.filter(x => x !== m));
+    writeJson(LS_MATCHES, matches);
+  }
+
+  /** A renamed file keeps its place in the hunt and the list (its key moves). */
+  function renamedFile(video, oldKey) {
+    if (!video) return;
+    const newKey = (video.videoKey && video.videoKey !== oldKey) ? video.videoKey
+      : (typeof window.scrayVideoKey === 'function' ? window.scrayVideoKey(video.filename || '') : lower(video.filename));
+    matches.forEach(m => { if (m.key === oldKey) { m.key = newKey; m.name = video.filename || m.name; } });
+    writeJson(LS_MATCHES, matches);
+    if (matchVideos.has(oldKey)) { matchVideos.delete(oldKey); matchVideos.set(newKey, video); }
+    if (!S) return;
+    S.seen.add(newKey);
+    if (S.cur && (S.cur.video === video || S.cur.key === oldKey)) S.cur.key = newKey;
+  }
+
+  /** A match made outside the modal (bulk check): counted, and out of the pool. */
+  function tookMatch(video, key, scene, how) {
+    rememberScene(scene);
+    noteMatch(key, video, scene, how);
+    if (!S) return;
+    S.stats.matched++;
+    S.pool = S.pool.filter(v => keyOf(v) !== key);
+    if (typeof window.scrayNoteStashMatch === 'function') {
+      try { window.scrayNoteStashMatch(video, true, false); } catch (e) { /* colour catches up */ }
+    }
   }
 
   const ago = (iso) => {
@@ -643,138 +860,642 @@
     return d + ' day' + (d === 1 ? '' : 's') + ' ago';
   };
 
-  async function findVideo(key) {
-    if (lastMatchVideo && keyOf(lastMatchVideo) === key) return lastMatchVideo;
+  async function findVideo(m) {
+    const rec = typeof m === 'string' ? { key: m } : (m || {});
+    const key = rec.key;
+    if (matchVideos.has(key)) return matchVideos.get(key);
     if (S) {
       if (S.cur && S.cur.key === key) return S.cur.video;
       const hit = S.pool.find(v => keyOf(v) === key);
       if (hit) return hit;
     }
-    try {
-      const all = typeof window.getAllVideos === 'function' ? await window.getAllVideos() : [];
-      return (all || []).find(v => v && keyOf(v) === key) || null;
-    } catch (e) { return null; }
+    let all = [];
+    try { all = ((typeof window.getAllVideos === 'function' ? await window.getAllVideos() : []) || []).filter(Boolean); } catch (e) { all = []; }
+    let v = all.find(x => keyOf(x) === key) || null;
+    // Renamed since (picker 15.39 / native 15.48) - the key moves with the
+    // name - so: its file id (a OneDrive rename keeps it), then its size and
+    // length together, then for a match the scene's title (and studio).
+    if (!v && rec.oid) v = all.find(x => x.oneDriveId === rec.oid || x.idFromAPI === rec.oid) || null;
+    if (!v && rec.size && rec.dur) {
+      const c = all.filter(x => (+x.sizeBytes || +x.size || 0) === rec.size && Math.abs((+x.durationMs || 0) - rec.dur) < 1500);
+      if (c.length === 1) v = c[0];
+    }
+    if (!v && rec.title && window.scrayStashNames && typeof window.scrayStashNames.parts === 'function') {
+      const t = lower(rec.title), st = lower(rec.studio);
+      const c = all.filter(x => { const p = window.scrayStashNames.parts(x); return !!(p && p.title === t); });
+      if (c.length === 1) v = c[0];
+      else if (c.length > 1) {
+        const d = c.filter(x => { const p = window.scrayStashNames.parts(x); return p && p.studio === st; });
+        if (d.length === 1) v = d[0];
+      }
+    }
+    // Found under another key: the entry learns it, so next time is direct.
+    if (v && typeof m === 'object' && keyOf(v) !== key) {
+      const nk = keyOf(v);
+      matches.forEach(x => { if (x.key === key) { x.key = nk; x.name = v.filename || x.name; } });
+      writeJson(LS_MATCHES, matches);
+    }
+    if (v) matchVideos.set(keyOf(v), v);
+    return v;
   }
 
-  async function unmatchLast(m) {
-    if (m.manual) {
-      const res = await api('stash_edit_manual_delete', { method: 'POST', body: { video_keys: [m.key] } });
-      if (res.refused) throw new Error('it is matched to StashDB, not entered by hand');
-      try { if (window.scrayStashNames) await window.scrayStashNames.refresh(true); } catch (e) { /* lists catch up */ }
-      try { if (typeof window.scrayLoadStashState === 'function') await window.scrayLoadStashState(true); } catch (e) { /* S catches up */ }
-      return 'Your details for it were removed.';
-    }
-    if (!window.scrayStashEdit || typeof window.scrayStashEdit.unmatch !== 'function') {
-      throw new Error('scray-stash-edit.js is not loaded');
-    }
-    const res = await window.scrayStashEdit.unmatch(m.key, await findVideo(m.key));
-    return res.summary || 'Unmatched.';
+  const huntWords = (v) => window.scrayStashNav ? window.scrayStashNav.words(v.filename || '') : String(v.filename || '');
+
+  /** Back to the hunt's own file, as it was. */
+  function resume() {
+    if (!S) return;
+    if (!S.cur) { advance(); return; }
+    window.showStashModal(S.cur.video, { search: huntWords(S.cur.video), hunt: handle });
   }
 
-  function openLast() {
-    if (!lastMatch) { toast('No match yet to look back at'); return; }
+  /** Make this file the hunt's current one, straight away. */
+  function huntNow(video) {
+    if (!S || !video) return;
+    const key = keyOf(video);
+    endPreview();
+    // The one being left, unmatched, goes on the list as skipped.
+    if (S.cur && S.cur.video !== video && S.cur.key !== key && !S.cur.matched) noteSeen(S.cur.video, 'skip');
+    S.seen.add(key);
+    S.cur = { video, key, matched: false, auto: false, loaded: false };
+    S.tagMenu = false;
+    window.showStashModal(video, { search: huntWords(video), hunt: handle });
+  }
+
+  function openMatches() {
+    if (!matches.length) { toast('Nothing yet to look back at'); return; }
     ensureCss();
     document.getElementById('stashHuntLast')?.remove();
-    const m = lastMatch;
     const sheet = document.createElement('div');
     sheet.id = 'stashHuntLast';
-    const who = [m.studio, (m.performers || []).join(', ')].filter(Boolean).join(' · ');
-    sheet.innerHTML =
-      '<div class="shl">' +
-        '<h3>↩︎ Last match</h3>' +
-        '<div class="shl-when">' + esc(ago(m.at)) + (S && m.run === S.run ? ' · this hunt' : '') +
-          (m.manual ? ' · details entered by hand' : '') + '</div>' +
-        '<div class="shl-file">' + (m.dir ? '<span class="sh-dir">' + esc(m.dir) + '/</span>' : '') + esc(m.name) + '</div>' +
-        '<div class="shl-scene">' + (m.title ? '<b>' + esc(m.title) + '</b>' : '<i>No title</i>') +
-          (who ? '<div>' + esc(who) + '</div>' : '') + '</div>' +
-        '<div class="shl-msg"></div>' +
-        '<div class="shl-foot">' +
-          '<button type="button" class="shl-un" data-l="unmatch">✕ ' + (m.manual ? 'Remove my details' : 'Unmatch') + '</button>' +
-          '<button type="button" data-l="close">Close</button>' +
-        '</div>' +
-      '</div>';
     document.body.appendChild(sheet);
-    const msg = sheet.querySelector('.shl-msg');
-    const foot = sheet.querySelector('.shl-foot');
-    let armT = null;
+    clearOfDock(sheet, SHEET_PAD);
+    listFilter = 'all';     // chips are for this look only
+    const kindOf = (m) => KIND[m.kind] ? m.kind : 'match';
+    const paint = () => {
+      const counts = { all: matches.length };
+      matches.forEach(m => { const k = kindOf(m); counts[k] = (counts[k] || 0) + 1; });
+      if (listFilter !== 'all' && !counts[listFilter]) listFilter = 'all';
+      const chips = ['all', 'match', 'skip', 'unmatched', 'never'].filter(k => k === 'all' || counts[k]).map(k =>
+        '<button type="button" data-f="' + k + '" class="' + (listFilter === k ? 'on' : '') + '">' +
+          (k === 'all' ? 'All' : KIND[k][0] + ' ' + KIND[k][1]) + ' <b>' + counts[k] + '</b></button>').join('');
+      const rows = matches.map((m, i) => ({ m, i })).filter(x => listFilter === 'all' || kindOf(x.m) === listFilter).map(({ m, i }) => {
+        const k = kindOf(m);
+        const onScreen = !!(S && S.cur && S.cur.key === m.key);
+        const tags = [KIND[k][1] + (k === 'match' && m.how === 'bulk' ? ' in a bulk check' : k === 'match' && m.how === 'fingerprint' ? ' by fingerprint' : ''), ago(m.at)];
+        if (S && m.run === S.run) tags.push('this hunt');
+        if (k === 'match' && m.manual) tags.push('entered by hand');
+        if (onScreen) tags.push('on screen now');
+        const who = [m.studio, (m.performers || []).join(', ')].filter(Boolean).join(' · ');
+        const file = '<span class="shl-f">' + (m.dir ? '<span class="sh-dir">' + esc(m.dir) + '/</span>' : '') + esc(m.name) + '</span>';
+        return '<button type="button" class="shl-row k-' + k + '" data-i="' + i + '">' +
+          '<span class="shl-k">' + KIND[k][0] + '</span><span class="shl-b">' +
+          (k === 'match'
+            ? '<span class="shl-t">' + (m.title ? esc(m.title) : '<i>No title</i>') + '</span>' + (who ? '<span class="shl-w">' + esc(who) + '</span>' : '') + file
+            : file) +
+          '<span class="shl-when">' + esc(tags.filter(Boolean).join(' · ')) + '</span></span>' +
+        '</button>';
+      }).join('');
+      sheet.innerHTML =
+        '<div class="shl">' +
+          '<h3>↩︎ Recent files <small>' + matches.length + '</small></h3>' +
+          '<div class="shl-note">A match opens its Stash details (unmatch there if it’s wrong); anything else goes back into the hunt.</div>' +
+          '<div class="shl-chips">' + chips + '</div>' +
+          '<div class="shl-list">' + rows + '</div>' +
+          '<div class="shl-foot"><button type="button" class="shl-go" data-l="resume">▶ Resume the hunt</button></div>' +
+        '</div>';
+    };
+    paint();
+    sheet.addEventListener('click', (e) => {
+      if (e.target === sheet) { sheet.remove(); return; }
+      const chip = e.target.closest('[data-f]');
+      if (chip) { e.stopPropagation(); listFilter = chip.dataset.f; paint(); return; }
+      const row = e.target.closest('[data-i]');
+      if (row) {
+        e.stopPropagation();
+        const m = matches[+row.dataset.i];
+        sheet.remove();
+        if (!m) return;
+        if (kindOf(m) === 'match') inspect(m); else reopen(m);
+        return;
+      }
+      if (e.target.closest('[data-l]')) { e.stopPropagation(); sheet.remove(); }
+    });
+  }
 
-    sheet.addEventListener('click', async (e) => {
-      if (e.target === sheet) { clearTimeout(armT); sheet.remove(); return; }
-      const b = e.target.closest('button[data-l]');
-      if (!b || b.disabled) return;
-      e.stopPropagation();
-      switch (b.dataset.l) {
-        case 'close': clearTimeout(armT); sheet.remove(); break;
-        case 'unmatch': {
-          // Two taps, as in the lookup panel - no native confirm().
-          if (!armT) {
-            b.textContent = 'Tap again to ' + (m.manual ? 'remove' : 'unmatch');
-            b.classList.add('armed');
-            armT = setTimeout(() => {
-              armT = null;
-              b.classList.remove('armed');
-              b.textContent = '✕ ' + (m.manual ? 'Remove my details' : 'Unmatch');
-            }, 3000);
-            return;
-          }
-          clearTimeout(armT); armT = null;
-          b.disabled = true;
-          b.textContent = m.manual ? 'Removing…' : 'Unmatching…';
-          msg.textContent = '';
-          let summary;
-          try {
-            summary = await unmatchLast(m);
-          } catch (err) {
-            b.disabled = false;
-            b.classList.remove('armed');
-            b.textContent = '✕ ' + (m.manual ? 'Remove my details' : 'Unmatch');
-            msg.textContent = 'Couldn’t ' + (m.manual ? 'remove' : 'unmatch') + ': ' + (err.message || err);
-            msg.classList.add('err');
-            return;
-          }
-          const video = await findVideo(m.key);
-          forgetLastMatch();
-          toast('↩︎ ' + summary);
-          if (!S) { sheet.remove(); return; }
-          if (S.cur && S.cur.key === m.key) {
-            // The file on screen: reopen it, and loaded() puts it back in
-            // the pool and takes it off the score.
-            sheet.remove();
-            const words = window.scrayStashNav ? window.scrayStashNav.words(video ? video.filename || '' : m.name) : m.name;
-            window.showStashModal(S.cur.video, { search: words, hunt: handle });
-            return;
-          }
-          if (m.run === S.run) {
-            S.stats.matched = Math.max(0, S.stats.matched - 1);
-            S.stats.streak = 0;
-          }
-          if (video && !S.pool.some(v => keyOf(v) === m.key)) {
+  /** A file that wasn't matched: back into the hunt as the one on screen. */
+  async function reopen(m) {
+    if (!S) return;
+    if (S.cur && S.cur.key === m.key && S.modal && S.modal.isConnected) { toast('That’s the file on screen'); return; }
+    const video = await findVideo(m);
+    if (!video) { toast('⚠️ Can’t find that file in the library here any more', '#b8860b'); return; }
+    if (m.kind === 'never') toast('🚫 It’s on the never list - the scope’s Hidden tab puts it back', '#6f42c1');
+    huntNow(video);
+  }
+
+  async function inspect(m) {
+    if (!S) return;
+    if (S.cur && S.cur.key === m.key && S.modal && S.modal.isConnected) { toast('That’s the file on screen'); return; }
+    const video = await findVideo(m);
+    if (!video) { toast('⚠️ Can’t find that file in the library here any more', '#b8860b'); return; }
+    endPreview();
+    window.showStashModal(video, { hunt: inspectHandle(m, video) });
+  }
+
+  // The Stash modal on a past match: a slim bar with Back to the hunt, and
+  // an unmatch there puts the file back in the hunt.
+  function inspectHandle(m0, video) {
+    let m = m0, gone = false;
+    return {
+      mount(modal) {
+        ensureCss();
+        const bar = document.createElement('div');
+        bar.className = 'sh-bar sh-insp';
+        bar.innerHTML =
+          '<div class="sh-top"><span class="sh-insp-l">↩︎ Checking a past match</span>' +
+            '<button type="button" class="sh-back" data-h="back">🎯 Back to the hunt</button></div>' +
+          '<div class="sh-file">' + (m.dir ? '<span class="sh-dir">' + esc(m.dir) + '/</span>' : '') + esc(m.name) + '</div>';
+        bar.addEventListener('click', (e) => {
+          if (!e.target.closest('[data-h="back"]')) return;
+          e.stopPropagation();
+          const cb = modal.querySelector('#stashCloseBtn');
+          if (cb) cb.click();
+        });
+        const h = modal.querySelector('h3');
+        if (h && h.parentNode) h.after(bar); else modal.firstElementChild.prepend(bar);
+        modalClearOfDock(modal);
+      },
+      loaded(matched, modal, scene) {
+        if (!S) return;
+        if (!matched) {
+          if (gone) return;
+          // Unmatched here: off the list, and back in the hunt.
+          gone = true;
+          forgetMatch(m.key);
+          if (m.run === S.run) { S.stats.matched = Math.max(0, S.stats.matched - 1); S.stats.streak = 0; }
+          if (!S.pool.some(v => keyOf(v) === m.key)) {
             video.__huntFolder = folderOf(video);
             video.__huntTags = tagsOf(video);
             S.pool.push(video);
           }
-          paintBar();
-          msg.classList.remove('err');
-          msg.textContent = summary;
-          foot.innerHTML = video
-            ? '<button type="button" class="shl-go" data-l="again">🔎 Hunt it again now</button><button type="button" data-l="close">Carry on</button>'
-            : '<button type="button" data-l="close">Close</button>';
-          break;
+          return;
         }
-        case 'again': {
-          sheet.remove();
-          const video = await findVideo(m.key);
-          if (!video || !S) return;
-          endPreview();
-          S.seen.add(m.key);
-          S.cur = { video, key: m.key, matched: false, auto: false, loaded: false };
-          S.tagMenu = false;
-          const words = window.scrayStashNav ? window.scrayStashNav.words(video.filename || '') : String(video.filename || '');
-          window.showStashModal(video, { search: words, hunt: handle });
-          break;
+        if (scene && (gone || String(scene.id || '') !== m.id)) {
+          // Matched again, or to another scene: a fresh entry at the top.
+          if (gone) { S.stats.matched++; S.pool = S.pool.filter(v => keyOf(v) !== m.key); }
+          gone = false;
+          rememberScene(scene);
+          noteMatch(m.key, video, scene, 'modal');
+          m = matches[0];
         }
-      }
+      },
+      closed() { resume(); }
+    };
+  }
+
+  // ---- bulk check (picker 15.37 / native 15.46) ------------------------------
+  // With a folder or tag picked: the rest of that scope at once. Each file
+  // gets the fingerprint lookup opening it would (a fingerprint match is kept
+  // there and then, exactly as when the modal opens), then a StashDB search
+  // on its name scored against the file - the best-scoring scene comes back
+  // with its confidence and the file vs scene length. Tick the right ones and
+  // Match ticked submits them one at a time, as Accept & submit does. Nothing
+  // is ticked for you. What's left stays in the hunt, one by one.
+  // ⚙️
+  const BULK_MAX = 60;     // files in one bulk check
+  const BULK_PAR = 2;      // lookups at once
+  let bulk = null;         // the check in progress / on screen
+  const bulkable = () => !!(S && (S.scope.folders.length || S.scope.tags.length));
+
+  const clock = (sec) => {
+    sec = Math.max(0, Math.round(+sec || 0));
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), x = sec % 60;
+    return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(x).padStart(2, '0');
+  };
+  /** Best confidence; StashDB's own order breaks ties (and decides when unscored). */
+  function bestOf(scenes) {
+    let best = null, bi = -1;
+    (scenes || []).forEach((c, i) => {
+      if (!c || !c.stash_id) return;
+      const a = Number(c.confidence), b = best ? Number(best.confidence) : NaN;
+      if (!best || (Number.isFinite(a) && (!Number.isFinite(b) || a > b))) { best = c; bi = i; }
     });
+    return best ? Object.assign({ rank: bi + 1 }, best) : null;
+  }
+  const cardScene = (c) => ({ id: c.stash_id, title: c.title, studio: c.studio, cast: c.cast || [],
+                              performers: (c.cast || []).map(p => p.name) });
+
+  function bulkRowHtml(r, i) {
+    const v = r.v;
+    const dir = v.__huntFolder || folderOf(v);
+    const file = '<div class="shb-file">' + (dir ? '<span class="sh-dir">' + esc(dir) + '/</span>' : '') + esc(v.filename || '') + '</div>';
+    const tickable = (r.st === 'found' || r.st === 'fail') && !(bulk && bulk.submitting);
+    const renPick = !!(bulk && bulk.ask === 'pick' && r.st === 'done' && r.sug && !r.rst);
+    let body = '';
+    if (r.card && (r.st === 'found' || r.st === 'sub' || r.st === 'done' || r.st === 'fail')) {
+      const c = r.card;
+      const conf = Number(c.confidence);
+      const confHtml = c.confidence != null && Number.isFinite(conf)
+        ? '<span class="shb-conf ' + (conf >= 70 ? 'good' : conf >= 40 ? 'mid' : 'low') + '">' + conf.toFixed(0) + '</span>'
+        : '<span class="shb-conf">?</span>';
+      const fs = Number(c.file_duration_sec) || 0, ss = Number(c.stash_duration_sec) || 0;
+      let dur;
+      if (fs > 60 && ss > 60) {
+        const drift = Math.abs(fs - ss) / Math.max(fs, ss);
+        // The navigator's bands: within 3% reads right, past 5% reads wrong.
+        dur = '<span class="shb-dur ' + (drift <= 0.03 ? 'ok' : drift <= 0.05 ? '' : 'bad') + '">File ' + clock(fs) +
+              ' · Scene ' + clock(ss) + ' · ' + (drift * 100).toFixed(1) + '% apart</span>';
+      } else {
+        dur = '<span class="shb-dur">' + (fs ? 'File ' + clock(fs) + ' · ' : '') + (ss ? 'Scene ' + clock(ss) : 'no scene runtime') + '</span>';
+      }
+      const cast = (c.cast || []).map(p => esc(p.name) + (p.gender_short && p.gender_short !== '?' ? ' <small>' + esc(p.gender_short) + '</small>' : '')).join(', ');
+      body =
+        '<div class="shb-scene"><b>' + (c.title ? esc(c.title) : '<i>No title</i>') + '</b></div>' +
+        '<div class="shb-sub">' + [c.studio ? esc(c.studio) : 'no studio', c.release_date ? esc(c.release_date) : ''].filter(Boolean).join(' · ') +
+          (cast ? ' · ' + cast : '') + '</div>' +
+        '<div class="shb-facts">' + confHtml + dur +
+          (r.count > 1 ? '<span class="shb-of">best of ' + r.count + (c.rank > 1 ? ' · #' + c.rank + ' on StashDB' : '') + '</span>' : '') + '</div>';
+    }
+    // After matching (picker 15.38 / native 15.47): the suggested name.
+    let ren = '';
+    if (r.st === 'done') {
+      if (r.rst === 'renamed') ren = '<span class="shb-ren ok">✎ Renamed to ' + esc(r.newName || '') + '</span>';
+      else if (r.rst === 'renaming') ren = '<span class="shb-ren">✎ Renaming…</span>';
+      else if (r.rst === 'rfail') ren = '<span class="shb-ren bad">✎ Rename failed' + (r.rnote ? ': ' + esc(r.rnote) : '') + '</span>';
+      else if (r.sug) ren = '<span class="shb-ren">✎ → ' + esc(r.sug) + '</span>';
+    }
+    const status = {
+      wait: '<span class="shb-st">Waiting…</span>',
+      fp: '<span class="shb-st">Checking the fingerprint…</span>',
+      search: '<span class="shb-st">Searching StashDB by name…</span>',
+      none: '<span class="shb-st">Nothing on StashDB for its name.</span>',
+      err: '<span class="shb-st bad">⚠️ ' + esc(r.note) + '</span>',
+      fpmatch: '<span class="shb-st good">✅ Matched by fingerprint' + (r.scene && r.scene.title ? ': ' + esc(r.scene.title) : '') + '</span>',
+      sub: '<span class="shb-st">Submitting…</span>',
+      done: '<span class="shb-st good">✅ Matched' + (r.note ? ' - ' + esc(r.note) : '') + '</span>',
+      fail: '<span class="shb-st bad">⚠️ Couldn’t submit: ' + esc(r.note) + '</span>',
+      found: ''
+    }[r.st] || '';
+    return '<div class="shb-row st-' + r.st + (r.tick || (renPick && r.ren) ? ' on' : '') + (renPick ? ' pick' : '') + '" data-r="' + i + '">' +
+      '<span class="shb-tick">' + (renPick ? (r.ren ? '☑' : '☐') : tickable ? (r.tick ? '☑' : '☐') : (r.st === 'done' || r.st === 'fpmatch' ? '✅' : '')) + '</span>' +
+      '<div class="shb-main">' + file + body + status + ren + '</div>' +
+      (r.st !== 'done' && r.st !== 'fpmatch' && r.st !== 'sub'
+        ? '<button type="button" class="shb-hunt" data-hunt="' + i + '" title="Hunt this one now, in the Stash modal">🔎</button>' : '') +
+    '</div>';
+  }
+
+  function paintBulk() {
+    const B = bulk;
+    const sheet = document.getElementById('stashHuntBulk');
+    if (!B || !sheet) return;
+    const done = B.rows.filter(r => !['wait', 'fp', 'search'].includes(r.st)).length;
+    const found = B.rows.filter(r => r.card).length;
+    const fp = B.rows.filter(r => r.st === 'fpmatch').length;
+    const ticked = B.rows.filter(r => r.tick && (r.st === 'found' || r.st === 'fail')).length;
+    sheet.querySelector('.shb-head').innerHTML =
+      '<span>' + (B.running ? 'Checked ' + done + ' of ' + B.rows.length : 'Checked ' + done + ' of ' + B.rows.length) +
+        ' · ' + found + ' with a likely scene' + (fp ? ' · ' + fp + ' matched by fingerprint' : '') +
+        (B.extra ? ' · searched with + <b>' + esc(B.extra) + '</b>' : '') + '</span>' +
+      (B.running ? '<button type="button" data-b="stop">Stop</button>' : '');
+    const go = sheet.querySelector('[data-b="match"]');
+    go.textContent = B.submitting ? 'Matching…' : '✓ Match ticked' + (ticked ? ' (' + ticked + ')' : '');
+    go.disabled = !ticked || B.submitting || B.renaming;
+    sheet.querySelector('[data-b="close"]').disabled = B.submitting || B.renaming;
+    const again = sheet.querySelector('[data-b="again"]');
+    if (again) again.disabled = !!(B.running || B.submitting || B.renaming);
+    // Rename the ones just matched? (picker 15.38 / native 15.47)
+    const ask = sheet.querySelector('.shb-ask');
+    const can = B.rows.filter(r => r.st === 'done' && r.sug && !r.rst);
+    if (!B.ask || (!can.length && !B.renaming)) {
+      ask.hidden = true;
+      if (B.ask && !B.renaming) B.ask = null;
+    } else if (B.renaming) {
+      ask.hidden = false;
+      ask.innerHTML = '<span>✎ Renaming…</span>';
+    } else if (B.ask === 'pick') {
+      const n = can.filter(r => r.ren).length;
+      ask.hidden = false;
+      ask.innerHTML = '<span>Tap the ones to rename to their suggested names.</span>' +
+        '<button type="button" data-b="rnone">Skip</button>' +
+        '<button type="button" data-b="rgo" class="go"' + (n ? '' : ' disabled') + '>✎ Rename ' + (n ? n : '') + '</button>';
+    } else {
+      ask.hidden = false;
+      ask.innerHTML = '<span>Rename the ' + plural(can.length, 'file') + ' just matched to ' + (can.length === 1 ? 'its' : 'their') + ' suggested name' + (can.length === 1 ? '' : 's') + '?</span>' +
+        '<button type="button" data-b="rall" class="go">All</button>' +
+        '<button type="button" data-b="rpick">Choose</button>' +
+        '<button type="button" data-b="rnone">None</button>';
+    }
+  }
+  function paintBulkRow(r) {
+    const B = bulk;
+    const i = B ? B.rows.indexOf(r) : -1;
+    const el = i >= 0 && document.querySelector('#stashHuntBulk .shb-row[data-r="' + i + '"]');
+    if (el) el.outerHTML = bulkRowHtml(r, i);
+    paintBulk();
+  }
+
+  async function bulkOne(B, r) {
+    if (r.fpDone) return bulkName(B, r);
+    r.st = 'fp'; paintBulkRow(r);
+    // 1. The fingerprint, as opening the modal would ask it.
+    try {
+      const res = await api('stash_scene', { method: 'POST', body: { video_key: r.key, force: false } });
+      if (bulk !== B) return;
+      if (res && res.stash_id) {
+        r.st = 'fpmatch';
+        r.scene = res.scene || { id: res.stash_id };
+        tookMatch(r.v, r.key, r.scene, 'fingerprint');
+        paintBulkRow(r);
+        return;
+      }
+    } catch (e) { /* the name can still find it */ }
+    r.fpDone = true;
+    if (bulk !== B || B.stop) { r.st = 'wait'; paintBulkRow(r); return; }
+    return bulkName(B, r);
+  }
+
+  async function bulkName(B, r) {
+    // 2. Its name, scored against the file.
+    r.st = 'search'; paintBulkRow(r);
+    // The file's own words, plus any added for every search (15.40); the
+    // score is still measured against the file's words alone.
+    const own = huntWords(r.v);
+    const term = B.extra ? (own + ' ' + B.extra).trim() : own;
+    try {
+      const res = await api('stash_nav', { method: 'POST', body: { op: 'search', term, video_key: r.key, score_term: own } });
+      if (bulk !== B) return;
+      const scenes = (res && res.scenes) || [];
+      r.count = scenes.length;
+      r.card = bestOf(scenes);
+      r.st = r.card ? 'found' : 'none';
+    } catch (e) {
+      if (bulk !== B) return;
+      r.st = 'err';
+      r.note = (e && e.message) || String(e);
+    }
+    paintBulkRow(r);
+  }
+
+  async function runBulk(B, rows) {
+    const list = rows || B.rows;
+    let next = 0;
+    B.running = true;
+    B.stop = false;
+    paintBulk();
+    const worker = async () => {
+      while (bulk === B && !B.stop && S && next < list.length) {
+        const r = list[next++];
+        await bulkOne(B, r);
+      }
+    };
+    await Promise.all(Array.from({ length: BULK_PAR }, worker));
+    if (bulk !== B) return;
+    B.running = false;
+    paintBulk();
+    if (S) paintBar();
+  }
+
+  async function submitBulk() {
+    const B = bulk;
+    if (!B || B.submitting) return;
+    const list = B.rows.filter(r => r.tick && r.card && (r.st === 'found' || r.st === 'fail'));
+    if (!list.length) return;
+    B.submitting = true;
+    list.forEach(r => paintBulkRow(r));
+    let ok = 0;
+    // One at a time, each exactly what Accept & submit sends for that file.
+    for (const r of list) {
+      if (bulk !== B || !S) break;
+      r.st = 'sub'; paintBulkRow(r);
+      try {
+        const res = await api('stash_submit', { method: 'POST', body: { video_key: r.key, stash_id: r.card.stash_id } });
+        r.st = 'done';
+        r.tick = false;
+        r.note = res && res.note && /refused|could not|locally/i.test(res.note) ? 'stored locally' : '';
+        tookMatch(r.v, r.key, cardScene(r.card), 'bulk');
+        ok++;
+      } catch (e) {
+        r.st = 'fail';
+        r.note = (e && e.message) || String(e);
+      }
+      paintBulkRow(r);
+    }
+    B.submitting = false;
+    // Names and the S button, once for the lot.
+    try { if (window.scrayStashNames) await window.scrayStashNames.refresh(true); } catch (e) { /* lists catch up */ }
+    try { if (typeof window.scrayLoadStashState === 'function') await window.scrayLoadStashState(true); } catch (e) { /* S catches up */ }
+    // The names are fresh now, so the suggestions are: ask about renaming.
+    if (bulk === B) {
+      B.rows.forEach(r => {
+        if (r.st === 'done' && !r.rst && r.sug === undefined) {
+          try { r.sug = window.scrayCleanNameSuggestion ? window.scrayCleanNameSuggestion(r.v) : null; } catch (e) { r.sug = null; }
+        }
+      });
+      if (B.rows.some(r => r.st === 'done' && r.sug && !r.rst)) B.ask = 'ask';
+      B.rows.forEach(r => paintBulkRow(r));
+    }
+    paintBulk();
+    if (S) paintBar();
+    if (ok) toast('✅ ' + plural(ok, 'file') + ' matched');
+  }
+
+  /** The suggested names, one file at a time, each as the rename modal would. */
+  async function renameBulk(list) {
+    const B = bulk;
+    if (!B || B.renaming || !list.length) return;
+    if (typeof window.showRenameModal !== 'function') { toast('⚠️ Renaming isn’t available here', '#b8860b'); return; }
+    B.renaming = true;
+    B.ask = 'ask';
+    paintBulk();
+    let ok = 0;
+    for (const r of list) {
+      if (bulk !== B) break;
+      r.rst = 'renaming';
+      paintBulkRow(r);
+      const oldKey = r.key;
+      try {
+        const res = await window.showRenameModal(r.v, { auto: 'suggested' });
+        if (res && res.ok) {
+          r.rst = 'renamed';
+          r.newName = res.name || r.v.filename;
+          renamedFile(r.v, oldKey);
+          r.key = keyOf(r.v);
+          ok++;
+        } else {
+          r.rst = 'rfail';
+          r.rnote = (res && res.why) || '';
+        }
+      } catch (e) {
+        r.rst = 'rfail';
+        r.rnote = (e && e.message) || String(e);
+      }
+      paintBulkRow(r);
+    }
+    B.renaming = false;
+    B.ask = null;
+    if (bulk === B) B.rows.forEach(r => { r.ren = false; if (r.st === 'done') paintBulkRow(r); });
+    paintBulk();
+    if (ok) toast('✎ ' + plural(ok, 'file') + ' renamed');
+  }
+
+  // ---- words for every search (picker 15.40 / native 15.49) --------------
+  // The same suggestions the navigator offers one file at a time: the studio
+  // and women of the hunt's last match, studio names the folder tags stand for
+  // (manage-data's mapping), and the tags these files carry, commonest first.
+  function bulkSuggestions(B) {
+    const out = [], seen = new Set();
+    const add = (name, kind, hunted) => {
+      const n = String(name || '').trim(), k = lower(n);
+      if (!n || seen.has(k)) return;
+      seen.add(k);
+      out.push({ name: n, kind, hunted });
+    };
+    if (lastStudio) add(lastStudio, 'studio', true);
+    lastPerfs.forEach(n => add(n, 'perf', true));
+    const counts = new Map();
+    B.rows.forEach(r => {
+      const v = r.v;
+      [].concat(v.__huntTags || tagsOf(v), v.bracketTags || []).forEach(t => {
+        const n = String(t || '').trim();
+        if (n) counts.set(n, (counts.get(n) || 0) + 1);
+      });
+    });
+    const tags = [...counts.keys()];
+    try {
+      if (window.scrayStashNav && typeof window.scrayStashNav.studioSuggestions === 'function') {
+        window.scrayStashNav.studioSuggestions(tags).forEach(n => add(n, 'studio', false));
+      }
+    } catch (e) { /* no name map yet */ }
+    // ⚙️ How many of the files' own tags are offered.
+    [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).forEach(([t]) => add(t, 'tag', false));
+    return out;
+  }
+  const wordRe = (t) => new RegExp('(^|\\s)' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=\\s|$)', 'i');
+  function paintBulkPills(sheet) {
+    const box = sheet.querySelector('.shb-add');
+    if (!box) return;
+    sheet.querySelectorAll('.shb-pill').forEach(b => b.classList.toggle('on', wordRe(b.dataset.pill).test(box.value)));
+  }
+  /** Search all again with the words in the box: every row not already matched. */
+  function bulkAgain() {
+    const B = bulk;
+    const sheet = document.getElementById('stashHuntBulk');
+    if (!B || !sheet || B.running || B.submitting || B.renaming) return;
+    const box = sheet.querySelector('.shb-add');
+    B.extra = box ? box.value.replace(/\s+/g, ' ').trim() : '';
+    const rows = B.rows.filter(r => ['found', 'none', 'err', 'fail', 'wait'].includes(r.st));
+    if (!rows.length) { toast('Nothing left to search again'); return; }
+    rows.forEach(r => { r.card = null; r.tick = false; r.count = 0; r.note = ''; r.st = 'wait'; paintBulkRow(r); });
+    try { box && box.blur(); } catch (e) { /* no keyboard */ }
+    runBulk(B, rows);
+  }
+
+  function closeBulk() {
+    const B = bulk;
+    if (B && (B.submitting || B.renaming)) return;
+    if (B) B.stop = true;
+    bulk = null;
+    document.getElementById('stashHuntBulk')?.remove();
+    if (!S) return;
+    paintBar();
+    // Carry on with the file on screen if it's still one to hunt; else the next.
+    const c = S.cur;
+    if (!c || !S.modal || !S.modal.isConnected || c.matched || matchedNow(c.video) || !inScope(c.video, S.scope)) advance();
+  }
+
+  function openBulk() {
+    if (!S) return;
+    if (!bulkable()) { toast('Pick a folder or a tag first - bulk check works on one of those'); return; }
+    ensureCss();
+    endPreview();
+    const all = inScopeLeft();
+    if (!all.length) { toast('Nothing unmatched left in this scope'); return; }
+    if (bulk) bulk.stop = true;
+    document.getElementById('stashHuntBulk')?.remove();
+    const B = bulk = {
+      rows: all.slice(0, BULK_MAX).map(v => ({ v, key: keyOf(v), st: 'wait', card: null, note: '', tick: false, count: 0 })),
+      running: true, stop: false, submitting: false, extra: ''
+    };
+    const sugg = bulkSuggestions(B);
+    const sheet = document.createElement('div');
+    sheet.id = 'stashHuntBulk';
+    sheet.innerHTML =
+      '<div class="shb">' +
+        '<h3>⚡ Bulk check · ' + esc(scopeLabel(S.scope)) + '</h3>' +
+        '<div class="shb-note">' + (all.length > BULK_MAX ? 'The first ' + BULK_MAX + ' of ' + all.length.toLocaleString() + ' - check again for more. ' : '') +
+          'Tick the ones that are right, then Match ticked. The rest stay in the hunt.</div>' +
+        '<div class="shb-terms">' +
+          '<div class="shb-trow"><input class="shb-add" type="search" enterkeyhint="search" spellcheck="false" autocomplete="off" ' +
+            'autocorrect="off" autocapitalize="off" placeholder="Add words to every search…">' +
+            '<button type="button" data-b="again" class="again">Search all again</button></div>' +
+          (sugg.length ? '<div class="shb-pills">' + sugg.map(x =>
+            '<button type="button" class="shb-pill k-' + x.kind + '" data-pill="' + esc(x.name) + '" title="' +
+              (x.hunted ? (x.kind === 'perf' ? 'In the hunt’s last match' : 'Studio of the hunt’s last match')
+                        : x.kind === 'studio' ? 'Studio name mapped in manage-data' : 'A tag these files carry') + '">' +
+              (x.hunted ? '🎯 ' : '') + esc(x.name) + '</button>').join('') + '</div>' : '') +
+        '</div>' +
+        '<div class="shb-head"></div>' +
+        '<div class="shb-list">' + B.rows.map(bulkRowHtml).join('') + '</div>' +
+        '<div class="shb-ask" hidden></div>' +
+        '<div class="shb-foot">' +
+          '<button type="button" data-b="close">Close</button>' +
+          '<button type="button" data-b="match" class="go">✓ Match ticked</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(sheet);
+    clearOfDock(sheet, SHEET_PAD);
+    const addBox = sheet.querySelector('.shb-add');
+    addBox.addEventListener('input', () => paintBulkPills(sheet));
+    addBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); bulkAgain(); } });
+    sheet.addEventListener('click', (e) => {
+      if (bulk !== B) return;
+      const b = e.target.closest('button');
+      if (b && b.dataset.hunt != null) {
+        e.stopPropagation();
+        const r = B.rows[+b.dataset.hunt];
+        if (!r || B.submitting || B.renaming) return;
+        B.stop = true;
+        bulk = null;
+        sheet.remove();
+        huntNow(r.v);
+        return;
+      }
+      if (b && b.dataset.pill != null) {
+        // A pill puts its words in the box, or takes them back out.
+        e.stopPropagation();
+        const t = b.dataset.pill;
+        addBox.value = wordRe(t).test(addBox.value)
+          ? addBox.value.replace(wordRe(t), ' ').replace(/\s+/g, ' ').trim()
+          : (addBox.value.trim() + ' ' + t).trim();
+        paintBulkPills(sheet);
+        return;
+      }
+      if (b && b.dataset.b) {
+        e.stopPropagation();
+        if (b.dataset.b === 'again') { bulkAgain(); return; }
+        if (b.dataset.b === 'stop') { B.stop = true; B.running = false; paintBulk(); }
+        if (b.dataset.b === 'close') closeBulk();
+        if (b.dataset.b === 'match') submitBulk();
+        const can = () => B.rows.filter(r => r.st === 'done' && r.sug && !r.rst);
+        if (b.dataset.b === 'rall') renameBulk(can());
+        if (b.dataset.b === 'rpick') { B.ask = 'pick'; B.rows.forEach(r => paintBulkRow(r)); }
+        if (b.dataset.b === 'rgo') renameBulk(can().filter(r => r.ren));
+        if (b.dataset.b === 'rnone') { B.ask = null; B.rows.forEach(r => { r.ren = false; paintBulkRow(r); }); }
+        return;
+      }
+      const row = e.target.closest('.shb-row');
+      if (!row || B.submitting || B.renaming) return;
+      const r = B.rows[+row.dataset.r];
+      if (r && B.ask === 'pick' && r.st === 'done' && r.sug && !r.rst) {
+        r.ren = !r.ren;
+        paintBulkRow(r);
+        return;
+      }
+      if (!r || !(r.st === 'found' || r.st === 'fail') || !r.card) return;
+      r.tick = !r.tick;
+      paintBulkRow(r);
+    });
+    paintBulk();
+    runBulk(B);
   }
 
   // ---- the handle showStashModal calls ---------------------------------------
@@ -790,27 +1511,21 @@
       if (h && h.parentNode) h.after(bar); else modal.firstElementChild.prepend(bar);
       S.bar = bar;
       paintBar();
+      modalClearOfDock(modal);
       try { attachSwipe(modal); } catch (e) { console.error('[hunt] swipe:', e); }
     },
     loaded(matched, modal, scene) {
       if (!S || !S.cur || modal !== S.modal) return;
       const c = S.cur;
-      // The studio it matched to: the next file is likely from it too.
-      if (matched && scene && scene.studio) {
-        lastStudio = String(scene.studio).trim();
-        try { localStorage.setItem(LS_STUDIO, lastStudio); } catch (e) { /* this page load only */ }
+      // The studio it matched to, and its women: the next file is likely
+      // from them too (picker 15.26 / 15.35).
+      if (matched && scene) rememberScene(scene);
+      // Into the recent matches: a new one, or this one again with other
+      // details (a different scene accepted, say).
+      if (matched && scene) {
+        const had = matches.find(m => m.key === c.key);
+        if (!c.matched || !had || had.id !== String(scene.id || '')) noteMatch(c.key, c.video, scene, c.loaded ? 'modal' : 'fingerprint');
       }
-      // ...and its women (picker 15.35 / native 15.44). A match with none
-      // leaves the last ones standing.
-      if (matched && scene && Array.isArray(scene.cast)) {
-        const women = scene.cast
-          .filter(p => p && (String(p.gender || '').toUpperCase() === 'FEMALE' || String(p.gender_short || '').toUpperCase() === 'F'))
-          .map(p => String(p.name || '').trim()).filter(Boolean);
-        if (women.length) { lastPerfs = women.slice(0, 3); writeJson(LS_PERFS, lastPerfs); }
-      }
-      // The last match, for a swipe right: a new one, or this one again with
-      // different details (a different scene accepted, say).
-      if (matched && scene && (!c.matched || (lastMatch && lastMatch.key === c.key))) noteLastMatch(c, scene);
       if (matched && !c.matched) {
         c.matched = true;
         c.auto = !c.loaded;
@@ -825,7 +1540,7 @@
       } else if (!matched && c.matched && c.loaded) {
         // Unmatched again from inside the modal: it goes back in the pool.
         c.matched = false;
-        if (lastMatch && lastMatch.key === c.key) forgetLastMatch();
+        forgetMatch(c.key);
         S.stats.matched = Math.max(0, S.stats.matched - 1);
         S.stats.streak = 0;
         if (!S.pool.includes(c.video)) S.pool.push(c.video);
@@ -836,7 +1551,8 @@
     closed(modal) {
       if (!S || modal !== S.modal) return;
       stop();
-    }
+    },
+    renamed(video, oldKey) { renamedFile(video, oldKey); }
   };
 
   function optsFor(video) {
@@ -853,6 +1569,9 @@
     }
     document.getElementById('stashHuntSheet')?.remove();
     document.getElementById('stashHuntLast')?.remove();
+    if (bulk) bulk.stop = true;
+    bulk = null;
+    document.getElementById('stashHuntBulk')?.remove();
     S = null;
   }
 
@@ -890,17 +1609,8 @@
     const sheet = document.createElement('div');
     sheet.id = 'stashHuntSheet';
     document.body.appendChild(sheet);
-    // The corner-button dock (disguise.js) always draws on top, so the card
-    // keeps clear of it rather than trying to cover it: its bottom stops above
-    // the dock when the dock sits in the lower half of the screen.
-    try {
-      const dock = document.getElementById('scrayDisguiseDock');
-      const r = dock && dock.offsetParent !== null ? dock.getBoundingClientRect() : null;
-      if (r && r.height && r.top > window.innerHeight / 2) {
-        const gap = Math.round(window.innerHeight - r.top + 8);
-        sheet.style.paddingBottom = 'max(' + gap + 'px, calc(env(safe-area-inset-bottom, 0px) + 12px))';
-      }
-    } catch (e) { /* the default padding will do */ }
+    // Clear of the corner-button dock, like every hunt sheet.
+    clearOfDock(sheet, SHEET_PAD);
 
     const draftCount = () => live.filter(v => inScope(v, draft)).length;
     const has = (arr, x) => arr.some(y => lower(y) === lower(x));
@@ -962,6 +1672,8 @@
           '<div class="shs-foot">' +
             '<button type="button" data-sh="clear" title="Untick every folder and tag">Clear picks</button>' +
             '<button type="button" data-sh="end">End hunt</button>' +
+            '<button type="button" data-sh="bulk" class="bulk"' + ((draft.folders.length || draft.tags.length) && n ? '' : ' hidden') +
+              ' title="Check all of them at once">⚡ Bulk</button>' +
             '<button type="button" data-sh="go" class="go">' + (n ? 'Hunt ' + plural(n, 'file') : 'Nothing unmatched here') + '</button>' +
           '</div>' +
         '</div>';
@@ -977,6 +1689,8 @@
 
     function refreshCounts() {
       const n = draftCount();
+      const bb = sheet.querySelector('[data-sh="bulk"]');
+      if (bb) bb.hidden = !(draft.folders.length || draft.tags.length) || !n;
       const go = sheet.querySelector('[data-sh="go"]');
       go.textContent = n ? 'Hunt ' + plural(n, 'file') : 'Nothing unmatched here';
       go.disabled = !n;
@@ -1023,6 +1737,12 @@
           S.seen = new Set([...S.seen].filter(k => !live.some(v => keyOf(v) === k && inScope(v, S.scope))));
           close();
           advance();
+          break;
+        case 'bulk':
+          if (!(draft.folders.length || draft.tags.length)) break;
+          setScope(draft);
+          close();
+          openBulk();
           break;
         case 'all':
           draft.folders = []; draft.tags = [];
@@ -1111,9 +1831,9 @@
     suggestStudio: (video) => (optsFor(video) ? lastStudio : ''),
     /** The female performer(s) of the hunt's last match, for its own file only. */
     suggestPerformers: (video) => (optsFor(video) ? lastPerfs.slice() : []),
-    openLast,
+    openMatches, openBulk,
     isActive: () => !!S,
     _test: { inScope, scopeLabel, folderOf, tagsOf, keyOf, getSession: () => S, newSession, setSession: (s) => { S = s; }, buildPool, inScopeLeft,
-             getLastMatch: () => lastMatch, getLastPerformers: () => lastPerfs.slice(), SW }
+             getMatches: () => matches.slice(), getBulk: () => bulk, bestOf, getLastPerformers: () => lastPerfs.slice(), SW }
   };
 })();

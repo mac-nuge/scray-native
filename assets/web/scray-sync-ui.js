@@ -179,7 +179,11 @@ document.addEventListener("visibilitychange", async () => {
  * every scan, so a rescan always re-asks for full history, and a video added
  * to the catalogue later is picked up regardless of where the cursor sits.
  */
-async function scraySyncLibrary({ quiet = false } = {}) {
+// native 15.50: onProgress(text) is told each step as it happens (the Hetzner
+// pill shows it), and a failed catalogue check no longer sinks the whole sync
+// - the pull it follows has already landed. It comes back as `checkError`.
+async function scraySyncLibrary({ quiet = false, onProgress = null } = {}) {
+  const say = (t) => { try { onProgress?.(t); } catch { /* the pill went away */ } };
   // A phone file and a Hetzner row under the same key would list it twice;
   // the phone copy wins (native 15.10, as in 14.51).
   if (typeof window.scrayHetznerDedupe === "function") {
@@ -214,12 +218,16 @@ async function scraySyncLibrary({ quiet = false } = {}) {
   let pulled = 0;
   window._scrayTombstonesIgnored = 0;
 
+  const toPull = freshKeys.size + deltaKeys.size;
+  const pullSay = (n) => say(`Syncing scores… ${n.toLocaleString()} of ${toPull.toLocaleString()}`);
+  say(`Syncing scores… ${toPull.toLocaleString()} videos`);
   if (freshKeys.size) {
-    pulled += await pullScoped([...freshKeys], 0);
+    pulled += await pullScoped([...freshKeys], 0, null, (n) => pullSay(pulled + n));
     if (!quiet) console.log(`[sync] full pull for ${freshKeys.size} unmatched key(s)`);
   }
   if (deltaKeys.size) {
-    pulled += await pullScoped([...deltaKeys], cursor?.seq ?? 0);
+    const before = pulled;
+    pulled += await pullScoped([...deltaKeys], cursor?.seq ?? 0, null, (n) => pullSay(before + n));
   }
 
   const stats = await window.scrayApiCall("stats");
@@ -229,10 +237,26 @@ async function scraySyncLibrary({ quiet = false } = {}) {
   if (window._scrayTombstonesIgnored) {
     console.log(`[sync] ${window._scrayTombstonesIgnored} catalogue tombstone(s) ignored — those files are on this device`);
   }
-  const flagged = await flagUncatalogued([...freshKeys, ...deltaKeys]);
+  // The catalogue check is for files on THIS phone - is each one catalogued,
+  // renamed elsewhere, uploaded? A Hetzner row came from the catalogue, so it
+  // is catalogued by definition: asking about ~5,000 of them only turned one
+  // or two requests into a burst of twenty-odd, which the host refused
+  // ("Load failed" in 60 ms, nothing in the PHP log). native 15.50.
+  const phoneKeys = new Set(locals
+    .filter(v => !(typeof window.scrayIsHetznerVideo === "function" && window.scrayIsHetznerVideo(v)))
+    .map(v => v.videoKey || window.scrayVideoKey(v.filename)).filter(Boolean));
+  const checkKeys = [...freshKeys, ...deltaKeys].filter(k => phoneKeys.has(k));
+  let flagged = 0, checkError = null;
+  try {
+    flagged = await flagUncatalogued(checkKeys, say);
+  } catch (err) {
+    checkError = err;
+    console.warn("[sync] catalogue check failed (the scores were synced):", err.message);
+  }
+  say("Finishing…");
   await pushOfflineFlags();
   if (typeof refreshAllLists === "function") refreshAllLists();
-  return { pulled, flagged };
+  return { pulled, flagged, checkError, checked: checkKeys.length };
 }
 window.scraySyncLibrary = scraySyncLibrary;
 
@@ -284,7 +308,7 @@ async function pushOfflineFlags() {
 }
 window.scrayPushOfflineFlags = pushOfflineFlags;
 
-async function pullScoped(keys, since, received = null) {
+async function pullScoped(keys, since, received = null, onRow = null) {
   let total = 0, from = since;
   for (;;) {
     const res = await window.scrayApiCall("pull", {
@@ -303,7 +327,10 @@ async function pullScoped(keys, since, received = null) {
       await window.scrayApplyPulledRow(window.scrayDbRowToApp(row), row, bmByKey);
       received?.add(row.video_key);
       total++;
+      // How far it's got, for whoever's showing it (native 15.50).
+      if (onRow && total % 100 === 0) { try { onRow(total); } catch { /* display only */ } }
     }
+    if (onRow) { try { onRow(total); } catch { /* display only */ } }
     from = res.seq;
     if (!res.more) break;
   }
@@ -313,7 +340,7 @@ async function pullScoped(keys, since, received = null) {
 /**
  * Anything on this device with no server row is usable but flagged.
  */
-async function flagUncatalogued(allKeys) {
+async function flagUncatalogued(allKeys, say = () => {}) {
   const missing = new Set();
   // Catalogue rows with no OneDrive copy on record (13.52, browse 13.30). A
   // file whose row is one of these is in the catalogue but still has to be
@@ -325,18 +352,60 @@ async function flagUncatalogued(allKeys) {
   // scray-rename.js. Both empty from an older api.php.
   const renamedTo = {};
   const catalogueNames = {};
+  // native 15.50: a batch that fails is tried again after a pause, then split
+  // in half and each half tried, down to single keys - so one name the host
+  // won't pass costs only itself, and the log names it. A key that fails even
+  // alone is left as it was (not flagged missing). If nothing gets through at
+  // all, or the extra tries run out, it stops with a message saying which.
+  const refused = [];
+  let spare = 30;             // ⚙️ extra requests allowed for retries and halving
+  let answered = 0;
+  const pause = (ms) => new Promise(r => setTimeout(r, ms));
+  const take = (res) => {
+    answered++;
+    (res.missing || []).forEach(k => missing.add(k));
+    (res.no_onedrive || []).forEach(k => noOneDrive.add(k));
+    Object.assign(renamedTo, res.renamed || {});
+    Object.assign(catalogueNames, res.filenames || {});
+  };
+  const ask = (keys) => window.scrayApiCall("keycheck", { method: "POST", body: { keys } });
+  const giveUp = (err, n) => Object.assign(new Error(
+    `Catalogue check stopped: ${err.message}` +
+    (answered ? ` (${answered} batch${answered === 1 ? "" : "es"} got through, ${n.toLocaleString()} name${n === 1 ? "" : "s"} still unchecked)` : "")),
+    { cause: err, refused });
+  const check = async (keys) => {
+    try { take(await ask(keys)); return; } catch (err) {
+      if (spare <= 0) throw giveUp(err, keys.length);
+      spare--;
+      await pause(800);
+      try { take(await ask(keys)); return; } catch (err2) {
+        // Nothing has got through yet: is the server there at all?
+        if (!answered && typeof window.scrayIsServerReachable === "function" && !(await window.scrayIsServerReachable())) {
+          throw giveUp(new Error("the server isn't answering at all right now"), keys.length);
+        }
+        if (keys.length === 1) {
+          refused.push(keys[0]);
+          console.warn("[sync] keycheck refused even on its own - left as it was:", keys[0], "-", err2.message);
+          return;
+        }
+        if (spare <= 0) throw giveUp(err2, keys.length);
+        const mid = Math.ceil(keys.length / 2);
+        await check(keys.slice(0, mid));
+        await check(keys.slice(mid));
+      }
+    }
+  };
   const keycheck = async (keys) => {
     for (let i = 0; i < keys.length; i += 400) {
-      const res = await window.scrayApiCall("keycheck", {
-        method: "POST", body: { keys: keys.slice(i, i + 400) }
-      });
-      (res.missing || []).forEach(k => missing.add(k));
-      (res.no_onedrive || []).forEach(k => noOneDrive.add(k));
-      Object.assign(renamedTo, res.renamed || {});
-      Object.assign(catalogueNames, res.filenames || {});
+      say(`Checking the catalogue… ${Math.min(i + 400, keys.length).toLocaleString()} of ${keys.length.toLocaleString()}`);
+      await check(keys.slice(i, i + 400));
     }
   };
   await keycheck(allKeys);
+  if (refused.length) {
+    console.warn(`[sync] ${refused.length} name(s) the server wouldn't check:`, refused);
+    window._scrayKeycheckRefused = refused.slice();
+  }
 
   const adoptions = new Map();   // local row id -> catalogue video_key
 
@@ -471,6 +540,7 @@ setTimeout(async () => {
   try {
     const res = await window.scraySyncLibrary({ quiet: true });
     console.log(`[sync] ${res.pulled} row(s) applied, ${res.flagged} not in catalogue`);
+    if (res.checkError) console.warn("[sync] catalogue check didn't finish (the scores did sync):", res.checkError.message);
     if (res.pulled) {
       // The grid reads the in-memory caches, not videoMeta, so a pull is
       // invisible until they are rebuilt.

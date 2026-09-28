@@ -158,6 +158,8 @@ ${scopeAsk ? `
 document.body.appendChild(modal);
 
 const input = document.getElementById('renameInput');
+// opts.auto (picker 15.38 / native 15.47): built but never shown - see the end.
+if (opts && opts.auto) modal.style.display = 'none';
 const wordSelectorContainer = document.getElementById('wordSelectorContainer');
 const addBracketsBtn = document.getElementById('addBracketsBtn');
 const removeWordsBtn = document.getElementById('removeWordsBtn');
@@ -661,7 +663,8 @@ modal.remove();
 });
 
 // Confirm rename
-document.getElementById('confirmRenameBtn').addEventListener('click', async () => {
+// A named function (picker 15.38 / native 15.47) so opts.auto can run it too.
+const scrayDoRename = async () => {
 const newName = input.value.trim();
 if (!newName) {
     alert('Filename cannot be empty');
@@ -774,7 +777,8 @@ if (err && err.cancelled) return;
 console.error('Rename failed:', err);
 alert(`Rename failed: ${err.message}`);
 }
-});
+};
+document.getElementById('confirmRenameBtn').addEventListener('click', () => { scrayDoRename(); });
 
 // Enter key to confirm, ESC to cancel
 input.addEventListener('keydown', (e) => {
@@ -784,6 +788,23 @@ if (e.key === 'Enter') {
   modal.remove();
 }
 });
+
+// Straight to the suggested name, no modal (picker 15.38 / native 15.47): the
+// Stash hunt's Rename too and its bulk check. Exactly the rename the button
+// does, run with the suggestion in the box - the modal is built so every
+// rule it applies still does, but it is never shown. Resolves with whether
+// the rename happened.
+if (opts && opts.auto === 'suggested') {
+    if (!cleanSuggestionBase || cleanSuggestionBase + extension === currentName) {
+        modal.remove();
+        return { ok: false, why: 'no suggested name' };
+    }
+    input.value = cleanSuggestionBase;
+    await scrayDoRename();
+    const ok = !document.body.contains(modal);
+    modal.remove();
+    return { ok, name: cleanSuggestionBase + extension };
+}
 }
 
 /**
@@ -4574,8 +4595,46 @@ async function showStashModal(video, openOpts) {
             'style="flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;">&#9998; Rename too?</button>';
         body.prepend(offer);
         body.scrollTop = 0;
-        offer.querySelector('#stashRenameNow').addEventListener('click', () => {
+        // In a Stash hunt (picker 15.38 / native 15.47): two taps, and the file
+        // takes its suggested name there and then - no rename modal. Without a
+        // suggestion it opens the modal as before.
+        const huntSug = hunt && window.scrayCleanNameSuggestion ? window.scrayCleanNameSuggestion(video) : null;
+        let renArm = null;
+        const renIdle = (b) => { b.innerHTML = '&#9998; Rename too?'; b.style.background = ''; b.style.color = ''; };
+        offer.querySelector('#stashRenameNow').addEventListener('click', async () => {
             if (typeof window.showRenameModal !== 'function') return;
+            const rb = offer.querySelector('#stashRenameNow');
+            if (huntSug && rb) {
+                if (rb.disabled) return;
+                if (!renArm) {
+                    rb.textContent = 'Tap again to rename: ' + huntSug;
+                    rb.style.whiteSpace = 'normal';
+                    rb.style.background = '#6f42c1';
+                    rb.style.color = '#fff';
+                    renArm = setTimeout(() => { renArm = null; renIdle(rb); }, 3000);
+                    return;
+                }
+                clearTimeout(renArm);
+                renArm = null;
+                rb.disabled = true;
+                rb.textContent = 'Renaming…';
+                const keyBefore = video.videoKey || window.scrayVideoKey(video.filename);
+                try {
+                    const res = await window.showRenameModal(video, { auto: 'suggested' });
+                    if (res && res.ok) {
+                        offer.remove();
+                        if (typeof hunt.renamed === 'function') {
+                            try { hunt.renamed(video, keyBefore); } catch (e) { /* the list keeps the old name */ }
+                        }
+                        return;
+                    }
+                } catch (e) {
+                    console.error('[stash] rename to the suggestion failed:', e);
+                }
+                rb.disabled = false;
+                renIdle(rb);
+                return;
+            }
             try {
                 // On top of this modal, which stays open underneath.
                 window.showRenameModal(video, { zIndex: 2147483647 });

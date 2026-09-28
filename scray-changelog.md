@@ -4,6 +4,141 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.51 — test: Hetzner pill shows the box total and what is on the phone
+<!-- 2026-09-28T06:45Z -->
+
+**native** — `stg-native - 15.51 test: Hetzner pill shows the box total and what is on the phone`: `assets/web/scray-hetzner.js`. Web only.
+
+- **Asked for:** Picker's Hetzner pill says 5349, Native's said 4925. That difference is the files already on the phone, which Native shows as phone files rather than twice (since 15.10). Mac wanted the pill to show the actual total, with what's on the phone in brackets.
+- **The pill:** *☁ Hetzner 5,348 (423 on phone)*.
+  - Each fetch stores the box's count (`scray.hetzner.boxTotal`).
+  - The pill shows that total, and in brackets however many aren't Hetzner rows here now - the ones on the phone.
+  - So a file saved to the phone later, and dropped as a Hetzner row by the next sync's dedupe, moves into the brackets without the total changing.
+  - Until a fetch has recorded the total, or when nothing is on the phone, it reads *☁ Hetzner (4,925)* as before.
+  - *Remove* clears the stored total.
+- **Picker's one more (5,349 vs 5,348):** most likely a file added by the background box rescan between the two counts. If a re-fetch still gives 5,348, compare the two lists.
+- **Tested:** `node --check`. Not run on the phone.
+
+### native 15.50 — test: Hetzner fetch - lighter catalogue check, progress on the pill, clearer errors
+<!-- 2026-09-28T06:45Z -->
+
+**native** — `stg-native - 15.50 test: Hetzner fetch - lighter catalogue check, progress on the pill, clearer errors`: `assets/web/scray-sync.js`, `assets/web/scray-sync-ui.js`, `assets/web/scray-hetzner.js`. Web only - but the phone's prd app (IPA b123) runs its bundled web code (15.45), so it needs an IPA build to get this.
+
+- **Reported (two diagnostics reports + screenshot, b123):** *Hetzner fetch failed: Load failed*. **Asked for:** fix it; more detail on the pill while loading (counts going up, as in Picker); more helpful errors if it happens again.
+- **What the reports showed:**
+  - The Hetzner part worked: *5348 listed: 3 added, 4922 updated, 3 removed*, and a Hetzner file streamed.
+  - What failed was the catalogue sync that follows (`scraySyncLibrary`), at `keycheck`: *Load failed* after 58-72 ms, with nothing in the PHP error log. The boot sync failed at the same call (*catalogue sync failed - using local data*).
+  - The `pull` just before it - one request carrying every key - succeeded. `keycheck` asks in batches of 400, and was asking about all ~5,900 rows, the ~4,925 Hetzner ones included, so it sent about 15 requests back to back.
+  - An answer that fast, which never reached `api.php`, is the host refusing the request (its firewall or rate limit) or the connection dropping. The app can't tell which, because WebKit reports all of them as *Load failed*.
+- **The fix:**
+  1. **The catalogue check only asks about this phone's own files.** `flagUncatalogued` exists to find phone files that aren't catalogued, were renamed elsewhere, or aren't uploaded yet. A Hetzner row came *from* the catalogue, so asking about it told us nothing and turned one or two requests into ~15. In the test library, 900 phone files + 5,000 Hetzner rows now take 3 requests, not ~15.
+  2. **A failed batch is retried, then narrowed down.** After a 0.8 s pause it's tried again, then halved, down to single names. One file name the host won't pass costs only itself: it's left as it was (not flagged missing) and logged by name (`[sync] N name(s) the server wouldn't check`, also `window._scrayKeycheckRefused`). If nothing gets through and `ping` fails too, it stops at once with *the server isn't answering at all right now*. Extra tries are capped at 30 (⚙️ `spare`).
+  3. **A failed check no longer sinks the sync.** The pull has already landed by then, so `scraySyncLibrary` returns `checkError` instead of throwing. The Hetzner fetch still completes, and says the check didn't finish.
+- **Errors that say what happened (`scrayApiCall`):**
+  - No answer: *keycheck: no answer from the server (failed after 58 ms) - refused before Scray saw it: usually the host's firewall or rate limit, or the connection dropping*. Or *…the connection dropped* if it took longer, or *…in 30 s* on a timeout.
+  - An HTTP error whose body isn't JSON gives the page's title: *HTTP 403: host page: 403 Forbidden (answered by the host, not by Scray)*. 429 adds *the host is rate-limiting*; a non-HTML body is shown as *not JSON: …*.
+  - Every error names its action (`[keycheck]`) and carries `kind` / `status` / `action`. *HTTP 404* still appears where it did, for the player's checks.
+- **Hetzner fetch errors say which step failed:**
+  - *Couldn't list the Hetzner box - … Nothing on the phone changed.*
+  - *Listed the box, but couldn't save it to the phone's library - …*
+  - *5,348 Hetzner videos are in the library, but syncing their scores, bookmarks and tags failed - … Tap the pill twice to try again.*
+  The underlying error goes to the console as well.
+- **Progress on the pill** (and the top Hetzner button):
+  - *☁ Listing the box… 1,000 → 2,000 → … 5,348 videos* - pages of 1,000 now, not 2,000, so it moves more often;
+  - *Saving 5,348 to the library…*, then *5,348 in the library · +3 new · −3 gone*;
+  - *Syncing scores… 1,200 of 5,900* (every 100 rows);
+  - *Checking the catalogue… 400 of 900*;
+  - *Finishing…*;
+  - then a toast: *✅ ☁ 4,925 Hetzner videos · +3 new*, or the ⚠️ version if the check didn't finish.
+- **Tested:**
+  - In jsdom with the real `scray-sync-ui.js` and a mocked API (900 phone + 5,000 Hetzner rows):
+    - normal: 3 keycheck requests, and the progress steps above;
+    - one name the host refuses: it's isolated and named, and the other 899 are still checked;
+    - server down: it stops after 2 tries with the plain message, and the sync still returns.
+  - `scrayApiCall` against mocked responses: a fast network failure, a 403 host page, a 429, a JSON 404 (still contains *HTTP 404*) and a non-JSON 500.
+  - Not run on the phone.
+- **Not confirmed:** which of the firewall or rate limit it was. The Hostinger access log for `action=keycheck` around 06:15-06:20 UTC would say (403 = firewall rule, 429 = rate limit). If it's a firewall rule tripped by a particular file name, the phone's console will now name the file.
+
+### picker 15.40 / native 15.49 — test: Hunt sheets clear the dock, bulk extra search words
+<!-- 2026-09-28T06:10Z -->
+
+**picker** — `staging - 15.40 test: Hunt sheets clear the dock, bulk extra search words`: `scray-stash-hunt.js`. **native** — `stg-native - 15.49 test: Hunt sheets clear the dock, bulk extra search words`: `assets/web/scray-stash-hunt.js`. The same file in both. Web only.
+
+- **Reported (screenshot):** the bulk check's footer (Close / Match ticked) sat under the corner-button dock. Mac says this happens a lot, so every new modal needs to keep clear of the dock. **Also asked for:** the bulk check should be able to add a search term to every file's search, with the usual suggestions (the last match's studio and performer, studio names from the path, and so on).
+- **Clear of the dock:** `clearOfDock(el, basePad, cap)` is one helper for this - the scope sheet's own inline version, generalised. The dock (disguise.js) always draws on top, so while it sits in the lower half of the screen a sheet's bottom padding stops 8 px above it. It's re-measured on resize while the sheet is up. `cap` also caps an inner card's max-height to the space that's left. It's now used on:
+  - the scope sheet;
+  - the bulk check;
+  - the recent-files list;
+  - **the Stash modal itself** during a hunt and when checking a past match (its 82vh card is capped to fit), as its footer was under the dock in an earlier screenshot too.
+  Rule for new modals: call it (or the same measurement) on anything full-screen.
+- **Words for every search:** a box at the top of the bulk check, *Add words to every search…*, with *Search all again* (or Enter). The pills under it toggle their words in and out of the box, as in the navigator:
+  - 🎯 the studio of the hunt's last match (green-outlined purple) and 🎯 its women (pink);
+  - studio names the files' folder tags stand for (manage-data's mapping - the navigator's `studioSuggestions`);
+  - the files' own tags, the commonest ten.
+- **Search all again:**
+  - It re-searches every row that isn't matched (found, nothing found, error, failed submit, not yet checked) with *the file's words + the box*. Ticks on those rows are cleared.
+  - The fingerprint isn't asked again for rows that already had it, and matched rows are left alone.
+  - The score is still measured against the file's own words, so confidence stays comparable.
+  - The header says *searched with + …*.
+- **Tested** in Chromium (390×700, with a stand-in dock 60 px off the bottom):
+  - the Stash modal, bulk check, recent-files list and scope sheet all end above the dock;
+  - the pills (last studio, last woman, tag) toggle in and out of the box;
+  - Search all again searched only the two unmatched rows as *d Studio B* / *e Studio B*, scored against *d* / *e*, with no second fingerprint lookup.
+
+### picker 15.39 / native 15.48 — test: Hunt list shows every file and finds renamed ones
+<!-- 2026-09-28T05:55Z -->
+
+**picker** — `staging - 15.39 test: Hunt list shows every file and finds renamed ones`: `scray-stash-hunt.js`. **native** — `stg-native - 15.48 test: Hunt list shows every file and finds renamed ones`: `assets/web/scray-stash-hunt.js`. The same file in both. Web only.
+
+- **Reported (native 15.46, screenshot):** opening a file from the swipe-right list after it had been matched and renamed gave *That file isn't in the library here any more*. The list remembered a file by its key, which is made from the filename, so a rename moved it. The in-memory link to the file was also gone after a reload. **Also asked for:** the list should include every file, not just matches - skipped, never and so on.
+- **Finding a file again:** each entry now also keeps the file's id (`oneDriveId`), size and length. A lookup tries, in order:
+  1. the key;
+  2. the file id - a OneDrive rename keeps it;
+  3. size and length together, when exactly one file has both;
+  4. for a match, the scene's title (and the studio if the title isn't unique), from the Stash names - this is what finds a renamed Hetzner file, whose id changes with its name.
+  A file found under a new key has its entry updated, so the next look is direct. Entries written before this carry no id/size, so for those it's the key or the title.
+- **Every file on the list:** ⏭ *Skipped* (Next, or leaving an unmatched file for another one, e.g. from the list or a bulk check's 🔎), 🚫 *Never*, ✅ *Matched* (in the modal, by fingerprint, or in a bulk check), and ↩︎ *Unmatched* (a match later undone - it stays on the list, at the top, instead of dropping off). One entry per file, newest state at the top, up to 100.
+- **Using it:** filter chips at the top (All / Matched / Skipped / Unmatched / Never, with counts, only the ones present; back to All each time the list opens). A match opens its Stash details with *Back to the hunt* as before. Anything else goes back into the hunt as the file on screen, with the one you were on noted as skipped. A never file says it's still on the never list, and the scope sheet's Hidden tab puts it back. Tapping the file already on screen just says so. The swipe hint reads *Recent files*.
+- **Tested** in Chromium with the real `file-operations.js`, mocked server:
+  - a hunt of fingerprint match → skip → fingerprint match → never gives 4 entries with the right chips;
+  - the Skipped filter; reopening the skipped file makes it current and notes the one being left;
+  - after a reload with a matched file renamed, it's found by file id, and with no id or size (Hetzner-style) by its scene title; either way its entry is updated to the new key.
+
+### picker 15.38 / native 15.47 — test: Hunt renames straight to the suggested name
+<!-- 2026-09-28T05:40Z -->
+
+**picker** — `staging - 15.38 test: Hunt renames straight to the suggested name`: `file-operations.js`, `scray-stash-hunt.js`. **native** — `stg-native - 15.47 test: Hunt renames straight to the suggested name`: the same two under `assets/web/`. `scray-stash-hunt.js` is the same in both apps; the `file-operations.js` changes are the same edit in each app's own copy. Web only.
+
+- **Asked for:** in the Stash hunt, *Rename too?* becomes a double tap that renames to the suggested name straight away, without the rename modal. And in the bulk check, after matching the ticked files, ask whether to rename all, none or a selection.
+- **Rename too? in a hunt:**
+  - The first tap arms it and shows the name: *Tap again to rename: …*. It disarms after 3 s.
+  - The second tap renames the file to the suggested name, with the rename modal's usual ✅ *Renamed to* confirmation.
+  - The recent-matches list and the hunt follow the file's new key.
+  - With no suggestion (already named that, say), it opens the rename modal as before. Outside a hunt, Rename too? is unchanged.
+- **How (file-operations.js):** `showRenameModal(video, { auto: 'suggested' })` builds the rename modal hidden, puts the suggestion (the *Use suggested* name) in the box, and runs the Rename button's own code - now a named function, `scrayDoRename`. So each app keeps its own rename rules: Native's everywhere / this-phone scope (everywhere when online, the modal's default), the stash-name rekey, the list refreshes. It resolves `{ ok, name }`. Picker's `showRenameModal` now takes `opts` too.
+- **Bulk check, after Match ticked:** each newly matched row shows *✎ → suggested name*, and a strip asks *Rename the N files just matched to their suggested names?*
+  - **All:** renames them one at a time.
+  - **Choose:** turns the matched rows into tick boxes, then *✎ Rename n*.
+  - **None:** dismisses it.
+  - Each row then shows *Renamed to …* or *Rename failed*. Rows without a suggestion aren't offered. Close waits while a rename is running.
+- **Tested** in Chromium with each app's real `file-operations.js` (only the server-side rename mocked):
+  - Accept a scene in a hunt → *Rename too?* → the first tap shows the name → the second renames with no modal shown, and the hunt's current key and the match list move to the new name.
+  - Bulk check with two matched: *Choose* one → only that one renamed; *All* → both renamed.
+  - A rename that fails (tried in Picker before its rename path was mocked) leaves the button / row as it was and says so.
+
+### picker 15.37 / native 15.46 — test: Hunt recent matches list and bulk check
+<!-- 2026-09-28T05:25Z -->
+
+**picker** — `staging - 15.37 test: Hunt recent matches list and bulk check`: `scray-stash-hunt.js`. **native** — `stg-native - 15.46 test: Hunt recent matches list and bulk check`: `assets/web/scray-stash-hunt.js`. The same file in both. Web only; no server change - it uses `stash_scene`, `stash_nav` op `search` and `stash_submit` exactly as the modal does.
+
+- **Asked for:** a swipe right lists all the recent matches, not just the last. Pick any of them to re-inspect its Stash details (and unmatch if needed), or resume the hunt. And a *bulk check* when a folder or tag is picked: search the rest of that scope, show the first result for each with its confidence and file length comparison, bulk-select the right ones to match, and carry on hunting the rest one by one.
+- **Recent matches (swipe right):** every match the hunt makes - in the modal, by fingerprint on opening, or from a bulk check - newest first, up to 60, kept on the device (15.35's single last match carries over). Each row shows the scene title, studio and performers, the file, and when and how it was matched. Tap one and its Stash modal opens with a yellow *Checking a past match* bar and *🎯 Back to the hunt*. Unmatch there (the lookup panel's usual button) takes it off the list, puts the file back in the hunt pool and takes it off this hunt's ✅ count. Matching it again, or to another scene, puts it back at the top. Back to the hunt (or Close) reopens the file you were on. *▶ Resume the hunt* closes the list.
+- **⚡ Bulk:** in the hunt bar whenever the scope has a folder or tag, and in the scope sheet's footer once one is ticked (it sets that scope and starts the check). It takes the files in the scope not yet seen this hunt - up to 60 (⚙️ `BULK_MAX`), 2 at a time (⚙️ `BULK_PAR`):
+  1. **Fingerprint first**, the same `stash_scene` lookup opening the file does. A match there is kept on the spot, as it would be in the modal (✅ *Matched by fingerprint*).
+  2. **Otherwise a StashDB search on its name**, scored against the file. The row shows the best-scoring scene: title, studio, date, cast, the confidence (green 70+, amber 40+, red below) and *File m:ss · Scene m:ss · x% apart* (green within 3%, red past 5% - the navigator's bands), plus *best of N · #k on StashDB* when it wasn't StashDB's first. I took the best-scoring rather than StashDB's first, since that's what the confidence is for - noted in case you'd rather have the first.
+- **Matching:** tap a row to tick it. *✓ Match ticked (n)* submits them one at a time, each exactly what Accept & submit sends. Nothing is ticked for you and there is no tick-all, so every submission is one you looked at (the no-bulk-accept rule). A failure stays tickable to try again. Names and the S button refresh once at the end. 🔎 on a row closes the check and hunts that file straight away. *Stop* halts the lookups; *Close* goes back to the hunt, which moves on if the file on screen is no longer in scope. Unticked files stay in the pool for one-by-one hunting.
+- **Tested** in Chromium (phone size, touch) with the real `file-operations.js`, against a mocked server: a fingerprint match on opening; flick to the next; 📁 → ⚡ Bulk shows 3 rows (one fingerprint match, two scored at 90 and 45 with lengths); tick one → Match ticked → stash_submit → ✅ and the count goes to 3; the swipe right lists the three with how each was matched; open the oldest → Unmatch → it's off the list, back in the pool, count 2 → Back to the hunt reopens the file you were on. Also the scope sheet's ⚡ Bulk: hidden until a folder is ticked, then opens the check.
+
 ### browse 15.86 / picker 15.36 / native 15.45 — test: Search StashDB in the Stash details dropdowns
 <!-- 2026-09-28T05:10Z -->
 

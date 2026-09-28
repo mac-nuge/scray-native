@@ -250,26 +250,57 @@ async function apiCall(action, { method = "GET", body = null, params = {} } = {}
 
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 30000);
+  const t0 = Date.now();
+  // native 15.50: errors that say what happened. WebKit reports every
+  // transport failure as a bare "Load failed" - a dropped connection, a
+  // refused request and an answer the host sent without CORS headers (a
+  // firewall or rate-limit page, which never reaches api.php) all look the
+  // same. How fast it failed is the best clue there is, so it's in the text,
+  // with the action. err.kind / err.status / err.action for code that asks.
+  const fail = (msg, extra) => Object.assign(new Error(msg), { action }, extra || {});
   try {
-    const res = await fetch(url.toString(), {
-      method,
-      headers: {
-        "X-Scray-Key": window.SCRAY_SYNC.API_KEY,
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: ctl.signal,
-    });
+    let res;
+    try {
+      res = await fetch(url.toString(), {
+        method,
+        headers: {
+          "X-Scray-Key": window.SCRAY_SYNC.API_KEY,
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: ctl.signal,
+      });
+    } catch (err) {
+      const ms = Date.now() - t0;
+      if (err && err.name === "AbortError") {
+        throw fail(`${action}: no answer from the server in 30 s`, { kind: "timeout", ms, cause: err });
+      }
+      throw fail(`${action}: no answer from the server (failed after ${ms} ms) - ` + (ms < 1500
+          ? "refused before Scray saw it: usually the host's firewall or rate limit, or the connection dropping"
+          : "the connection dropped"), { kind: "network", ms, cause: err });
+    }
     if (!res.ok) {
       // Every fail() in api.php puts a plain-English reason in `error`. Throwing
       // the bare status discarded all of it and left genuinely different faults
       // - a missing row, a bad payload, an unknown action - looking identical.
-      let reason = "";
-      try { reason = (await res.json()).error || ""; } catch { /* not JSON */ }
-      throw new Error(reason ? `HTTP ${res.status}: ${reason}` : `HTTP ${res.status}`);
+      // Not JSON: a host page (firewall, rate limit, 5xx) - its title says which.
+      let reason = "", text = "";
+      try { text = await res.text(); } catch { /* no body */ }
+      try { reason = JSON.parse(text).error || ""; } catch {
+        const t = text.match(/<title[^>]*>([^<]{1,120})<\/title>/i);
+        reason = t ? t[1].trim() : text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+        if (reason) reason = (/<(html|title|body)\b/i.test(text) ? "host page: " : "not JSON: ") + reason;
+      }
+      const hint = res.status === 429 ? " (too many requests - the host is rate-limiting)"
+                 : reason.startsWith("host page") ? " (answered by the host, not by Scray)" : "";
+      throw fail((reason ? `HTTP ${res.status}: ${reason}` : `HTTP ${res.status}`) + hint + ` [${action}]`,
+                 { kind: "http", status: res.status });
     }
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || "api error");
+    let json;
+    try { json = await res.json(); } catch {
+      throw fail(`${action}: the server's answer wasn't JSON (a PHP error or a host page?)`, { kind: "parse" });
+    }
+    if (!json.ok) throw fail(json.error || "api error", { kind: "api" });
     return json;
   } finally {
     clearTimeout(timer);

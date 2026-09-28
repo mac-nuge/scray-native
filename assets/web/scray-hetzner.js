@@ -50,6 +50,11 @@
 
   function enabled() { try { return localStorage.getItem(FLAG) === "1"; } catch { return false; } }
   function setEnabled(on) { try { on ? localStorage.setItem(FLAG, "1") : localStorage.removeItem(FLAG); } catch {} }
+  // native 15.51: how many videos the box held at the last fetch, for the pill's
+  // "5,348 (423 on phone)". Whatever isn't a Hetzner row now is on the phone.
+  const BOX_TOTAL = "scray.hetzner.boxTotal";
+  function boxTotal() { try { return +localStorage.getItem(BOX_TOTAL) || 0; } catch { return 0; } }
+  function setBoxTotal(n) { try { n ? localStorage.setItem(BOX_TOTAL, String(n)) : localStorage.removeItem(BOX_TOTAL); } catch {} }
 
   function splitList(s) { return typeof s === "string" && s ? s.split(";").filter(Boolean) : []; }
 
@@ -100,13 +105,16 @@
     return row;
   }
 
+  // ⚙️ Videos per page of the listing (native 15.50: 1000 rather than 2000, so
+  // the count on the pill moves in more, smaller steps).
+  const LIST_PAGE = 1000;
   async function listAll(onProgress) {
     const out = [];
     let after = "";
     for (;;) {
-      const res = await window.scrayApiCall("hetzner_list", { params: { after, limit: 2000 } });
+      const res = await window.scrayApiCall("hetzner_list", { params: { after, limit: LIST_PAGE } });
       out.push(...(res.videos || []));
-      onProgress?.(`Listing Hetzner… ${out.length}`);
+      onProgress?.(`Listing the box… ${out.length.toLocaleString()}${res.more ? "" : " videos"}`);
       if (!res.more || !res.next) break;
       after = res.next;
     }
@@ -138,14 +146,35 @@
    * now has a phone copy under the same key. Then a catalogue sync brings their
    * scores, bookmarks and variant links down, as it does after a folder scan.
    */
+  // native 15.50: each step says what it's doing on the pill, and a failure
+  // says which step failed and what that means for the library.
+  function stepError(step, err, extra) {
+    const why = (err && err.message) || String(err);
+    const text = {
+      listing: `Couldn't list the Hetzner box - ${why}. Nothing on the phone changed.`,
+      saving:  `Listed the box, but couldn't save it to the phone's library - ${why}.`,
+      syncing: `${extra || "The videos are in the library"}, but syncing their scores, bookmarks and tags failed - ${why}. Tap the pill twice to try again.`
+    }[step] || why;
+    return Object.assign(new Error(text), { step, cause: err });
+  }
+
   async function fetchHetzner({ onProgress, rescan = true } = {}) {
-    if (typeof window.scrayApiCall !== "function") throw new Error("sync layer not loaded");
+    if (typeof window.scrayApiCall !== "function") throw new Error("the sync layer isn't loaded");
     // native 15.22: the server re-reads the box too, in the background - see
     // kickBoxRescan. This listing doesn't wait for it.
     if (rescan) kickBoxRescan();
-    onProgress?.("Listing Hetzner…");
-    const listed = await listAll(onProgress);
+    onProgress?.("Listing the box…");
+    let listed;
+    try { listed = await listAll(onProgress); } catch (err) { throw stepError("listing", err); }
+    onProgress?.(`Saving ${listed.length.toLocaleString()} to the library…`);
+    try {
+      return await saveAndSync(listed, onProgress);
+    } catch (err) {
+      throw err && err.step ? err : stepError("saving", err);
+    }
+  }
 
+  async function saveAndSync(listed, onProgress) {
     const db = await openDB();
     const tx = db.transaction([STORE_NAME, META_STORE_NAME], "readwrite");
     const src = tx.objectStore(STORE_NAME);
@@ -185,16 +214,48 @@
     }
     await done(tx);
     setEnabled(true);
+    setBoxTotal(listed.length);
     console.log(`[hetzner] ${listed.length} listed: ${added} added, ${updated} updated, ${removed} removed, ${skipped} already on the phone`);
+    const tally = [added ? `+${added.toLocaleString()} new` : "", removed ? `−${removed.toLocaleString()} gone` : ""].filter(Boolean).join(" · ");
+    onProgress?.(`${(added + updated).toLocaleString()} in the library${tally ? " · " + tally : ""}`);
 
-    onProgress?.("Syncing scores…");
+    let checkError = null;
     if (typeof window.scraySyncLibrary === "function") {
-      await window.scraySyncLibrary({ quiet: true });
+      let res;
+      try {
+        res = await window.scraySyncLibrary({ quiet: true, onProgress });
+      } catch (err) {
+        throw stepError("syncing", err, `${(added + updated).toLocaleString()} Hetzner videos are in the library`);
+      }
+      checkError = (res && res.checkError) || null;
       await stampSynced();
     }
     if (typeof refreshAllLists === "function") refreshAllLists();
     if (typeof window.renderFolderPills === "function") await window.renderFolderPills();
-    return { listed: listed.length, added, updated, removed, skipped };
+    return { listed: listed.length, added, updated, removed, skipped, checkError };
+  }
+
+  /** What the user sees once a fetch is done (native 15.50). */
+  function reportFetch(r) {
+    const toast = (msg, colour) => {
+      if (typeof window.showScoreConfirmation === "function") { try { window.showScoreConfirmation(msg, colour); return; } catch { /* below */ } }
+      console.log("[hetzner]", msg);
+    };
+    const bits = [`☁ ${(r.listed - r.skipped).toLocaleString()} Hetzner videos`];
+    if (r.added) bits.push(`+${r.added.toLocaleString()} new`);
+    if (r.removed) bits.push(`−${r.removed.toLocaleString()} gone`);
+    if (r.checkError) {
+      // The pull landed; only the check of this phone's own files didn't.
+      console.warn("[hetzner] catalogue check:", r.checkError.message);
+      toast(`⚠️ ${bits.join(" · ")} - synced, but the check of this phone's own files didn't finish: ${r.checkError.message}`, "#b8860b");
+    } else {
+      toast(`✅ ${bits.join(" · ")}`);
+    }
+  }
+  /** A failed fetch, said plainly - and in the console with the underlying error. */
+  function reportFetchError(err) {
+    console.error("[hetzner] fetch failed:", err, err && err.cause);
+    alert(`Hetzner: ${(err && err.message) || err}`);
   }
 
   /**
@@ -267,6 +328,7 @@
     rows.filter(isHetznerRow).forEach(v => { src.delete(v.oneDriveId); meta.delete(v.oneDriveId); n++; });
     await done(tx);
     setEnabled(false);
+    setBoxTotal(0);
     console.log(`[hetzner] removed ${n} video(s) from this device's library`);
     if (typeof refreshAllLists === "function") refreshAllLists();
     if (typeof window.renderFolderPills === "function") await window.renderFolderPills();
@@ -780,7 +842,14 @@
     const pill = document.createElement("div");
     pill.className = "account-pill";
     pill.dataset.source = "hetzner";
-    const label = `☁ ${NAME} (${count})`;
+    // The box's whole count, with the part on this phone in brackets (native
+    // 15.51) - those play from the phone, so they have no Hetzner row. Until a
+    // fetch has recorded the total, just the rows.
+    const total = boxTotal();
+    const onPhone = total > count ? total - count : 0;
+    const label = total && onPhone
+      ? `☁ ${NAME} ${total.toLocaleString()} (${onPhone.toLocaleString()} on phone)`
+      : `☁ ${NAME} (${count.toLocaleString()})`;
     const btn = document.createElement("button");
     btn.className = "account-load-btn";
     btn.textContent = label;
@@ -811,11 +880,11 @@
       if (armed !== "fetch") { arm("fetch", "Re-fetch?", "#007bff"); return; }
       disarm(); btn.disabled = true;
       try {
-        const r = await fetchHetzner({ onProgress: m => { btn.textContent = m; } });
+        const r = await fetchHetzner({ onProgress: m => { btn.textContent = `☁ ${m}`; } });
         if (r.added || r.removed) console.log(`[hetzner] +${r.added} −${r.removed}`);
+        reportFetch(r);
       } catch (err) {
-        console.error("[hetzner] fetch failed:", err);
-        alert(`Hetzner fetch failed: ${err.message}`);
+        reportFetchError(err);
       } finally {
         btn.disabled = false;
         await renderPill();
@@ -858,9 +927,9 @@
         const r = await fetchHetzner({ onProgress: m => { btn.textContent = m; } });
         btn.textContent = `✅ ${r.added + r.updated}`;
         setTimeout(() => { btn.textContent = orig; }, 1500);
+        reportFetch(r);
       } catch (err) {
-        console.error("[hetzner] fetch failed:", err);
-        alert(`Hetzner fetch failed: ${err.message}`);
+        reportFetchError(err);
         btn.textContent = orig;
       } finally {
         btn.disabled = false;

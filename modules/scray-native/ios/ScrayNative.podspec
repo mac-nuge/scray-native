@@ -13,6 +13,8 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
+  # native 15.77: VLC plays the formats AVFoundation can't (ScrayVLCPlayer.swift).
+  s.ios.dependency 'MobileVLCKit', '~> 3.6'
 
   # Swift/Objective-C compatibility
   s.pod_target_xcconfig = {

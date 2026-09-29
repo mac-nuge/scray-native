@@ -410,6 +410,35 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
                 ScrayOffline.shared.forget(id: jobId)
             }
             resolve(id: id, result: ["success": true])
+        // ---- VLC for the formats AVFoundation can't play (native 15.77) - see ScrayVLCPlayer.swift ----
+        // { url } for OneDrive / Hetzner, or { localPath } for a file in the
+        // linked video folder (VLC can't read scray-video://). Resolves when
+        // the player closes: { position, duration, watched, ended, next }.
+        case "vlcPlay":
+            #if canImport(MobileVLCKit)
+            guard let d = payload as? [String: Any] else {
+                reject(id: id, error: "Invalid VLC payload")
+                return
+            }
+            var target: URL? = nil
+            if let rel = d["localPath"] as? String, !rel.isEmpty {
+                target = BookmarkStore.shared.resolveFile(forId: rel)
+            } else if let s = d["url"] as? String, !s.isEmpty {
+                target = URL(string: s)
+                    ?? s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed).flatMap { URL(string: $0) }
+            }
+            guard let vlcURL = target else {
+                reject(id: id, error: "No address to play")
+                return
+            }
+            ScrayVLCPlayer.shared.present(url: vlcURL,
+                                          title: d["title"] as? String ?? vlcURL.lastPathComponent,
+                                          startSeconds: (d["start"] as? NSNumber)?.doubleValue ?? 0) { [weak self] result in
+                self?.resolve(id: id, result: result)
+            }
+            #else
+            reject(id: id, error: "Unknown action: vlcPlay")
+            #endif
         case "memoryStats":
             // Performance monitor by the console (13.180).
             resolve(id: id, result: ScrayMemoryStats.shared.snapshot())

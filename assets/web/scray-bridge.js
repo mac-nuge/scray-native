@@ -55,6 +55,11 @@ window.ScrayBridge = {
   offlineStatus: (ids) => callNative('offlineStatus', { ids: ids || null }),
   offlineCancel: (id) => callNative('offlineCancel', { id }),
   offlineForget: (id) => callNative('offlineForget', { id }),
+  // ✅ VLC player for what the <video> element can't play (native 15.77) -
+  // ScrayVLCPlayer.swift. { url } or { localPath }, plus title and start
+  // (seconds). Resolves on close with { position, duration, watched, ended,
+  // next }. "Unknown action" on an older IPA.
+  vlcPlay: (job) => callNative('vlcPlay', job),
   // ✅ In-app browser. Pass nothing to resume where it was left.
   openBrowser: (url) => callNative('openBrowser', {
     url: url || null,

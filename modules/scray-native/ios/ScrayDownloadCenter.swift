@@ -590,7 +590,7 @@ final class ScrayDownloadsViewController: UITableViewController {
     // ---- Playing a download (native 13.195) --------------------------------
 
     /// What BookmarkStore.listVideoFiles counts as a video.
-    private static let libraryExtensions: Set<String> = ["mp4", "mkv", "mov", "m4v", "avi"]
+    private static let libraryExtensions: Set<String> = BookmarkStore.videoExtensions
     /// What AVPlayer can open on its own.
     private static let systemPlayerExtensions: Set<String> = ["mp4", "mov", "m4v"]
 

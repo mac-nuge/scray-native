@@ -2,6 +2,13 @@ import Foundation
 
 class BookmarkStore {
     static let shared = BookmarkStore()
+
+    /// What the library scan counts as a video. Widened in native 15.77 now
+    /// that VLC plays what AVFoundation can't (ScrayVLCPlayer.swift).
+    static let videoExtensions: Set<String> = [
+        "mp4", "mkv", "mov", "m4v", "avi",
+        "wmv", "asf", "flv", "mpg", "mpeg", "rm", "rmvb", "webm"
+    ]
     private var resolvedRoot: URL?
     private var didAttemptResolve = false
 
@@ -121,7 +128,7 @@ class BookmarkStore {
     func listVideoFilesDetailed() -> [[String: Any]] {
         ensureResolved()
         guard let root = resolvedRoot else { return [] }
-        let exts = ["mp4", "mkv", "mov", "m4v", "avi"]
+        let exts = BookmarkStore.videoExtensions
         let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
         guard let enumerator = FileManager.default.enumerator(
             at: root, includingPropertiesForKeys: keys) else { return [] }
@@ -147,7 +154,7 @@ class BookmarkStore {
     func listVideoFiles() -> [String] {
         ensureResolved()
         guard let root = resolvedRoot else { return [] }
-        let exts = ["mp4", "mkv", "mov", "m4v", "avi"]
+        let exts = BookmarkStore.videoExtensions
         guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { return [] }
         var results: [String] = []
         for case let fileURL as URL in enumerator {

@@ -8559,6 +8559,14 @@ window.plyrPlayer.on('error', () => {
         const v = window.currentPlayingVideo;
         const isLocal = v && (v.driveId === "local" || (v.accountKey || "").startsWith("local::"));
         const code = window.plyrPlayer?.media?.error?.code;
+        // native 15.77: a real file the decoder can't handle (an .mp4 / .mov /
+        // .webm with a codec iOS doesn't do) - hand it to VLC. Once per file.
+        if (code === 3 && v && window.scrayPlayInVlc && window.scrayVlcRetried !== v.oneDriveId) {
+            window.scrayVlcRetried = v.oneDriveId;
+            console.warn(`[player] decoder refused ${v.filename} - trying VLC`);
+            window.scrayPlayInVlc(v, null, false, () => {});
+            return;
+        }
         if (isLocal && code !== 3 && typeof window.showFileNotFoundError === 'function') {
             window.showFileNotFoundError(v);
         }
@@ -11323,7 +11331,9 @@ function scrayMimeForFile(filename) {
 
 // WebM is the genuinely uncertain one - Safari's support has been arriving
 // piecemeal, so it's left out of the hard-fail list and allowed to try.
-const SCRAY_UNPLAYABLE_EXT = new Set(['mkv', 'wmv', 'avi', 'flv', 'mpg', 'mpeg']);
+// native 15.77: these now go to the VLC player (ScrayVLCPlayer.swift) when the
+// IPA has it; the message below is only for an older IPA.
+const SCRAY_UNPLAYABLE_EXT = new Set(['mkv', 'wmv', 'avi', 'flv', 'mpg', 'mpeg', 'rm', 'rmvb', 'asf']);
 
 function scrayUnplayableReason(filename) {
     const ext = String(filename || '').split('.').pop().toLowerCase();
@@ -11334,6 +11344,15 @@ function scrayUnplayableReason(filename) {
 }
 
 const unplayable = scrayUnplayableReason(video.filename);
+if (unplayable && window.scrayPlayInVlc) {
+    // native 15.77: VLC plays it instead. Falls back to the message below if
+    // this IPA doesn't have VLC yet.
+    window.scrayPlayInVlc(video, resolvedStartAt, previewOnly, () => {
+        window.endFullscreenReload?.();
+        if (typeof showVideoError === 'function') showVideoError(unplayable, video);
+    });
+    return;
+}
 if (unplayable) {
     console.warn(`[player] ${unplayable}`);
     window.endFullscreenReload?.();
@@ -11725,6 +11744,65 @@ window.downloadVideo = downloadVideoInline;
 // Export globally
 window.showDownloadError = showDownloadError;
 window.showVideoError = showVideoError;
+
+// =========================================
+// VLC PLAYER  (native 15.77)
+// =========================================
+// Files AVFoundation can't play (.wmv, .avi, .flv, .mkv, .mpg, .rm, .asf...)
+// open in a full-screen VLCKit player instead - ScrayVLCPlayer.swift, bridge
+// action vlcPlay. It's a separate, simpler player: tap, double-tap skip,
+// drag to scrub, drag down to close, pinch zoom, turn sideways, next.
+//
+// History was already added by playVideoInline. The watch is counted when
+// the player closes, on the same thresholds as WATCH TRACKING: 10s watched
+// counts a view, and the seconds go to time_viewed.
+//
+// Returns straight away; the VLC player runs on its own. onUnavailable runs
+// if this IPA has no VLC (an older build with newer web files).
+window.scrayPlayInVlc = function (video, startAt, previewOnly, onUnavailable) {
+    const unavailable = (why) => {
+        console.warn('[vlc] not available:', why);
+        if (typeof onUnavailable === 'function') onUnavailable();
+    };
+    if (!window.ScrayBridge || typeof window.ScrayBridge.vlcPlay !== 'function') {
+        unavailable('no bridge');
+        return;
+    }
+    const isLocal = video.driveId === 'local' || (video.accountKey || '').startsWith('local::');
+    const job = {
+        url: isLocal ? null : (video.downloadUrl || null),
+        localPath: isLocal ? (video.oneDriveId || null) : null,
+        title: (window.scrayStashDisplayName && window.scrayStashDisplayName(video)) || video.filename || '',
+        start: (typeof startAt === 'number' && startAt > 0) ? startAt : 0
+    };
+    if (!job.url && !job.localPath) { unavailable('no address'); return; }
+
+    // Whatever the web player had going stops, and its loading state clears.
+    try { window.plyrPlayer && window.plyrPlayer.pause(); } catch {}
+    window.endVideoLoadHold?.();
+    const lo = document.getElementById('plyr-loading-overlay');
+    if (lo) lo.style.display = 'none';
+    console.log(`[vlc] playing ${video.filename}`);
+
+    window.ScrayBridge.vlcPlay(job).then((res) => {
+        res = res || {};
+        const watched = Math.floor(Number(res.watched) || 0);
+        console.log(`[vlc] closed ${video.filename} - ${watched}s watched${res.next ? ', next' : ''}`);
+        const trackOn = typeof window.queueExcelUpdate === 'function'
+            && (typeof window.isAutoTrackEnabled !== 'function' || window.isAutoTrackEnabled());
+        if (!previewOnly && trackOn && watched >= SCRAY_VIEW_THRESHOLD_S) {
+            window.queueExcelUpdate(video, { increment_views: true, played_now: true })
+                .catch(err => console.warn('[vlc] view not recorded:', err));
+            window.queueExcelUpdate(video, { add_time_viewed: watched })
+                .catch(err => console.warn('[vlc] time not recorded:', err));
+        }
+        if (res.next && typeof window.playNextInCurrentList === 'function') {
+            window.playNextInCurrentList();
+        } else if (window.inlineVideoPlayer && typeof window.inlineVideoPlayer.stop === 'function') {
+            window.inlineVideoPlayer.stop();
+        }
+    }).catch((err) => unavailable(err && err.message || err));
+};
 window.showFileNotFoundError = showFileNotFoundError;
 window.playNextInCurrentList = playNextInCurrentList;
 window.playPreviousInCurrentList = playPreviousInCurrentList;

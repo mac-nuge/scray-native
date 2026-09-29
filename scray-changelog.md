@@ -4,6 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.77 — test: VLC player for other formats
+<!-- 2026-09-29T20:48Z -->
+- **Asked:** make Native play the formats in the library that iOS can't - .wmv, .avi, .flv, .mkv, .mpg/.mpeg, .rm, .asf - with simple gestures, kept light.
+- **Why a second player:** the web view's `<video>` only has AVFoundation behind it (MP4/M4V/MOV, H.264/HEVC/AAC). Nothing in the web layer can change that, so those files open in a full-screen VLCKit player instead (`ScrayVLCPlayer.swift`, MobileVLCKit ~> 3.6 in the podspec). It is deliberately not the web player: no FLS pause menu, bookmarks, markers or dock. Layering VLC under the web view to keep those was considered and left for later - much bigger, and the canvas frame grabs couldn't work on a native picture anyway.
+- **Gestures:** tap shows/hides the controls; double tap left third −10s, right third +10s, middle play/pause; drag sideways scrubs (full width = 3 min or the whole video if shorter, seeks on release); drag down closes; pinch zooms 1–5× and moves with the pinch. Buttons: ✕, ⏭ next in the list, ⟳ turn sideways (FLS-style 90° clockwise - the app is portrait-locked; a wide video turns by itself once), play/pause, slider.
+- **player.js:** the "can't play on iOS" check now calls `window.scrayPlayInVlc` first; the old message only shows on an IPA without VLC. `.rm`, `.rmvb`, `.asf` added to that list (they used to reach Plyr and fail silently). A Plyr decode error (code 3 - e.g. an .mp4/.webm with a codec iOS doesn't do) retries once in VLC. On close: ≥10s watched counts a view plus the seconds to time_viewed (same thresholds as WATCH TRACKING; nothing for a wholesale preview); ⏭ plays next, otherwise the web player resets. History was already added before the hand-off.
+- **Bridge:** new `vlcPlay` - `{ url }` for OneDrive/Hetzner (the fresh downloadUrl), `{ localPath }` for a phone file (VLC can't read scray-video://). Resolves on close with position, duration, watched, ended, next.
+- **Library scan:** `BookmarkStore.videoExtensions` now also takes wmv, asf, flv, mpg, mpeg, rm, rmvb, webm, so those files on the phone show up; the in-app browser's Downloads list uses the same set.
+- **Native only:** Picker runs in a browser with no VLC, so there's no Picker counterpart.
+- **Deploy:** needs a new IPA (new pod + Swift). Web files alone on an old IPA keep the old message. Not compiled here (no Xcode) - first build is the real check; if Xcode complains about the delegate methods it's VLCKit header nullability, the explicit selectors are what VLC calls.
+
 ### picker 15.64 / native 15.76 — test: Sort stash results by duration diff
 <!-- 2026-09-29T19:45Z -->
 - StashDB results (search, and studio / performer views): a third sort, Duration diff, beside Best match and StashDB order - the scene closest in length to the file first (by % apart), scenes with no runtime last in StashDB's order. Shown whenever the file's length and at least one scene's are known. In a hunt it sticks from file to file like the other two.

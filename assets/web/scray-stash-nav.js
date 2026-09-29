@@ -367,7 +367,7 @@
     const searchSort = () => {
       try {
         const v = inHunt && typeof hunt.searchSort === 'function' ? hunt.searchSort() : '';
-        return v === 'match' || v === 'order' ? v : SEARCH_SORT;
+        return v === 'match' || v === 'order' || v === 'dur' ? v : SEARCH_SORT;
       } catch (err) { return SEARCH_SORT; }
     };
 
@@ -742,17 +742,31 @@
       if (e.sort === 'match') {
         list.sort((a, b) => (Number(b.s.confidence) || 0) - (Number(a.s.confidence) || 0)
                             || (a.s.order ?? a.i) - (b.s.order ?? b.i));
+      } else if (e.sort === 'dur') {
+        // Duration diff (picker 15.64 / native 15.76): closest length first;
+        // scenes with no length to compare go last, in StashDB's order.
+        list.sort((a, b) => durGap(a.s) - durGap(b.s) || (a.s.order ?? a.i) - (b.s.order ?? b.i));
       }
       return list;
+    }
+    /** How far apart the file and the scene are, as a fraction; Infinity when either length is missing. */
+    function durGap(c) {
+      const f = Number(c && c.file_duration_sec) || 0, s = Number(c && c.stash_duration_sec) || 0;
+      return f > 0 && s > 0 ? Math.abs(f - s) / Math.max(f, s) : Infinity;
     }
 
     // Best match needs scores, so the toggle only appears when the file is
     // catalogued and there is more than one scene to put in order.
     function sortHtml(e, orderLabel) {
-      if (!e.data || !e.data.scored || e.data.scenes.length < 2) return '';
+      if (!e.data || e.data.scenes.length < 2) return '';
+      // Duration diff (picker 15.64 / native 15.76) needs the file's length
+      // and at least one scene's.
+      const hasDur = e.data.scenes.some(c => durGap(c) !== Infinity);
+      if (!e.data.scored && !hasDur) return '';
       return '<span class="ssn-sort">' +
-          '<button type="button" data-sort="match" class="' + (e.sort === 'match' ? 'on' : '') + '">Best match</button>' +
+          (e.data.scored ? '<button type="button" data-sort="match" class="' + (e.sort === 'match' ? 'on' : '') + '">Best match</button>' : '') +
           '<button type="button" data-sort="order" class="' + (e.sort === 'order' ? 'on' : '') + '">' + orderLabel + '</button>' +
+          (hasDur ? '<button type="button" data-sort="dur" class="' + (e.sort === 'dur' ? 'on' : '') + '" title="Closest length to this file first">Duration diff</button>' : '') +
         '</span>';
     }
     const errHtml = (msg) => msg ? '<div class="ssn-state"><span class="ssn-err">' + esc(msg) + '</span></div>' : '';

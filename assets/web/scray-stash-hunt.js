@@ -223,9 +223,9 @@
       run: Date.now(),          // which hunt a last match was made in
       swipeIn: false,           // the next card slides in (⏭ in the swipe options sent us on)
       carry: new Map(),         // folder -> studio / performer names added to its searches
-      sort: '',                 // the search order picked this run: 'match' | 'order' | '' (StashDB order)
+      sort: '',                 // the search order picked this run: 'match' | 'order' | 'dur' | '' (StashDB order)
       bulkMin: 90,              // Tick N+ in the bulk check: the confidence it ticks from (picker 15.52 / native 15.63)
-      bulkSort: ''              // the bulk check's rows: 'conf' (highest confidence first) | '' (as the files come)
+      bulkSort: ''              // the bulk check's rows: 'conf' (highest confidence first) | 'dur' (closest length first) | '' (as the files come)
     };
   }
 
@@ -1229,12 +1229,27 @@
     const i = (scenes || []).findIndex(c => c && c.stash_id);
     return i < 0 ? null : Object.assign({ rank: i + 1 }, scenes[i]);
   }
+  /** How far apart file and scene are, as a fraction; Infinity without both lengths (picker 15.64 / native 15.76). */
+  const durGap = (c) => {
+    const f = Number(c && c.file_duration_sec) || 0, s = Number(c && c.stash_duration_sec) || 0;
+    return f > 0 && s > 0 ? Math.abs(f - s) / Math.max(f, s) : Infinity;
+  };
+  /** The closest length; StashDB's order breaks ties. Falls back to StashDB's first with no lengths. */
+  function closestOf(scenes) {
+    let best = null, bi = -1;
+    (scenes || []).forEach((c, i) => {
+      if (!c || !c.stash_id) return;
+      if (!best || durGap(c) < durGap(best)) { best = c; bi = i; }
+    });
+    return best ? Object.assign({ rank: bi + 1 }, best) : null;
+  }
   // Which scene a bulk row shows (picker 15.49 / native 15.60): the hunt's
-  // search order - StashDB order unless Best match has been picked.
-  const bulkOrder = () => (S && S.sort === 'match') ? 'match' : 'order';
-  const pickCard = (scenes) => bulkOrder() === 'match' ? bestOf(scenes) : firstOf(scenes);
+  // search order - StashDB order unless Best match (or, picker 15.64 /
+  // native 15.76, Duration diff) has been picked.
+  const bulkOrder = () => (S && (S.sort === 'match' || S.sort === 'dur')) ? S.sort : 'order';
+  const pickCard = (scenes) => bulkOrder() === 'match' ? bestOf(scenes) : bulkOrder() === 'dur' ? closestOf(scenes) : firstOf(scenes);
   function setBulkOrder(B, v) {
-    if (!S || (v !== 'match' && v !== 'order')) return;
+    if (!S || (v !== 'match' && v !== 'order' && v !== 'dur')) return;
     S.sort = v;
     B.rows.forEach(r => {
       if (!r.scenes || !(r.st === 'found' || r.st === 'fail')) return;
@@ -1254,7 +1269,13 @@
    * files' own order. Applied as the CSS order, so the rows keep their indexes.
    */
   function bulkRank(r) {
-    if (!S || S.bulkSort !== 'conf') return 0;
+    if (!S || (S.bulkSort !== 'conf' && S.bulkSort !== 'dur')) return 0;
+    // Length diff (picker 15.64 / native 15.76): closest first, in tenths of a
+    // percent; a row with no lengths to compare after the rest to decide on.
+    if (S.bulkSort === 'dur' && r.card && (r.st === 'found' || r.st === 'fail' || r.st === 'sub')) {
+      const g = durGap(r.card);
+      return g === Infinity ? 2500 : Math.min(2400, Math.round(g * 1000));
+    }
     if (r.card && (r.st === 'found' || r.st === 'fail' || r.st === 'sub')) {
       const c = Number(r.card.confidence);
       return Math.round((100 - (Number.isFinite(c) ? Math.max(0, Math.min(100, c)) : -1)) * 10);
@@ -1298,7 +1319,9 @@
         '<div class="shb-sub">' + [c.studio ? esc(c.studio) : 'no studio', c.release_date ? esc(c.release_date) : ''].filter(Boolean).join(' · ') +
           (cast ? ' · ' + cast : '') + '</div>' +
         '<div class="shb-facts">' + confHtml + dur +
-          (r.count > 1 ? '<span class="shb-of">' + (r.how === 'order'
+          (r.count > 1 ? '<span class="shb-of">' + (r.how === 'dur'
+            ? 'closest length of ' + r.count + (c.rank > 1 ? ' · #' + c.rank + ' on StashDB' : '')
+            : r.how === 'order'
             ? 'StashDB’s #' + c.rank + ' of ' + r.count + (r.best && r.best.stash_id !== c.stash_id
                 ? ' · best match is #' + r.best.rank + (Number.isFinite(Number(r.best.confidence)) ? ' (' + Number(r.best.confidence).toFixed(0) + ')' : '')
                 : ' · also the best match')
@@ -1354,9 +1377,9 @@
           ' <small>(' + bulkRest(B).length.toLocaleString() + ' more)</small></button>' : '');
     sheet.querySelectorAll('.shb-seg button').forEach(x => {
       const k = x.dataset.b;
-      x.classList.toggle('on', k === 'omatch' || k === 'oorder'
-        ? (k === 'omatch') === (bulkOrder() === 'match')
-        : (k === 'sconf') === (!!S && S.bulkSort === 'conf'));
+      x.classList.toggle('on', k === 'omatch' || k === 'oorder' || k === 'odur'
+        ? ({ omatch: 'match', oorder: 'order', odur: 'dur' })[k] === bulkOrder()
+        : ({ sfile: '', sconf: 'conf', sdur: 'dur' })[k] === ((S && S.bulkSort) || ''));
     });
     const t90 = sheet.querySelector('[data-b="t90"]');
     if (t90) {
@@ -1633,7 +1656,7 @@
     const list = sheet.querySelector('.shb-list');
     if (list) list.insertAdjacentHTML('beforeend', add.map((r, k) => bulkRowHtml(r, start + k)).join(''));
     const first = list && list.querySelector('.shb-row[data-r="' + start + '"]');
-    if (first && !(S && S.bulkSort === 'conf')) { try { first.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) { /* fine */ } }
+    if (first && !(S && (S.bulkSort === 'conf' || S.bulkSort === 'dur'))) { try { first.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) { /* fine */ } }
     runBulk(B, add);
   }
 
@@ -1703,9 +1726,11 @@
               (x.hunted ? '🎯 ' : '') + esc(x.name) + '</button>').join('') + '</div>' : '') +
         '</div>' +
         '<div class="shb-order"><span>Each file shows its</span><div class="shb-seg">' +
-          '<button type="button" data-b="omatch">Best match</button><button type="button" data-b="oorder">StashDB #1</button></div></div>' +
+          '<button type="button" data-b="omatch">Best match</button><button type="button" data-b="oorder">StashDB #1</button>' +
+          '<button type="button" data-b="odur" title="The scene closest in length to the file">Closest length</button></div></div>' +
         '<div class="shb-order"><span>Sort</span><div class="shb-seg">' +
-          '<button type="button" data-b="sfile">Files</button><button type="button" data-b="sconf">Confidence ↓</button></div></div>' +
+          '<button type="button" data-b="sfile">Files</button><button type="button" data-b="sconf">Confidence ↓</button>' +
+          '<button type="button" data-b="sdur" title="Smallest file / scene length difference first">Duration diff ↑</button></div></div>' +
         '<div class="shb-order"><span>Tick all at</span><div class="shb-thr">' +
           '<button type="button" data-b="tdown" title="5 lower">−</button>' +
           '<input class="shb-min" type="number" inputmode="numeric" min="0" max="100" step="1" value="' + bulkMin() + '" aria-label="Confidence to tick from">' +
@@ -1792,15 +1817,15 @@
           paintBulk();
           return;
         }
-        if (b.dataset.b === 'sfile' || b.dataset.b === 'sconf') {
-          S.bulkSort = b.dataset.b === 'sconf' ? 'conf' : '';
+        if (b.dataset.b === 'sfile' || b.dataset.b === 'sconf' || b.dataset.b === 'sdur') {
+          S.bulkSort = ({ sfile: '', sconf: 'conf', sdur: 'dur' })[b.dataset.b];
           B.rows.forEach(r => paintBulkRow(r));
           const list = sheet.querySelector('.shb-list');
           if (list) list.scrollTop = 0;
           return;
         }
-        if (b.dataset.b === 'omatch' || b.dataset.b === 'oorder') {
-          if (!B.submitting && !B.renaming) setBulkOrder(B, b.dataset.b === 'omatch' ? 'match' : 'order');
+        if (b.dataset.b === 'omatch' || b.dataset.b === 'oorder' || b.dataset.b === 'odur') {
+          if (!B.submitting && !B.renaming) setBulkOrder(B, ({ omatch: 'match', oorder: 'order', odur: 'dur' })[b.dataset.b]);
           return;
         }
         if (b.dataset.b === 'stop') { B.stop = true; B.running = false; paintBulk(); }
@@ -2264,7 +2289,7 @@
     carried: (video) => (optsFor(video) ? carryOf(video).slice() : []),
     /** The search order picked this run ('' until one is picked). */
     searchSort: () => (S && S.sort) || '',
-    setSearchSort: (v) => { if (S && (v === 'match' || v === 'order')) S.sort = v; },
+    setSearchSort: (v) => { if (S && (v === 'match' || v === 'order' || v === 'dur')) S.sort = v; },
     searched,
     openMatches, openBulk,
     isActive: () => !!S,

@@ -4,6 +4,12 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.64 / native 15.76 — test: Sort stash results by duration diff
+<!-- 2026-09-29T19:45Z -->
+- StashDB results (search, and studio / performer views): a third sort, Duration diff, beside Best match and StashDB order - the scene closest in length to the file first (by % apart), scenes with no runtime last in StashDB's order. Shown whenever the file's length and at least one scene's are known. In a hunt it sticks from file to file like the other two.
+- Stash hunt bulk check: Each file shows its… Closest length (as well as Best match / StashDB #1), and Sort… Duration diff ↑ (as well as Files / Confidence ↓) - rows closest in length first, rows with no lengths to compare after the rest to decide on.
+- scray-stash-nav.js and scray-stash-hunt.js, identical in both apps.
+
 ### picker 15.63 / native 15.75 — test: Save project workflow rules
 <!-- 2026-09-29T15:08Z -->
 - Saved the user workflow in root AGENTS.md so future tasks follow the test/stable version lifecycle, per-repo changelog updates merged by the browse page, separate find-and-replace code blocks on web, and picker/native shared UI synchronization. No application code changed in this repo.

@@ -4,6 +4,21 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.75 / native 15.90 — test: stash hunt pins apply to every next file
+<!-- 2026-09-30T21:05Z -->
+- **Reported:** after 15.74 / 15.89, pinning a name didn't put it in the next file's search.
+- **Cause:** pins were kept per folder (as the old automatic carry was), but the hunt picks its next file at random from the whole scope - a folder scope includes its subfolders, and a tag scope spans folders - so the next file was usually in another folder and had no pins. Not an effect of the pin change itself; the old carry had the same blind spot, it just wasn't noticed.
+- **Fix (scray-stash-hunt.js):** one pin list for the whole hunt run (`S.carry` under a single key, `PIN_KEY`), added to every next file's search whatever its folder. Unchanged otherwise: pin / unpin from the studio and performer pill menus, a pinned name taken out of the words (tap its 📌 pill) is unpinned, and pins last for this run only.
+- **Wording (scray-stash-nav.js):** the menu reads "Pin - add it to the next files' searches" / "Unpin - stop adding it to the next files"; the 📌 pill's title says the hunt's searches, not the folder's.
+- The comments now carry joint version tags, so the two apps' copies stay byte-identical (15.74 / 15.89's had drifted by their tags only).
+
+### picker 15.74 / native 15.89 — test: stash hunt pin by hand, no top folder tag
+<!-- 2026-09-30T20:55Z -->
+- **Asked:** in Stash hunt, don't pin the studio and performer onto the next file's search by default - let me pin them; and stop offering the top-level folder as a tag suggestion.
+- **Pinning (scray-stash-hunt.js, scray-stash-nav.js):** since picker 15.41 / native 15.52 any studio or performer name added to a search (one not in the filename) was carried into the search of the next files from the same folder by itself. Now nothing is carried unless pinned. The 🎯 studio / performer pills and the mapped-studio pills open their menu as before, which now has **📌 Pin - add it to this folder's next files** / **📌 Unpin**. Pinning a name that isn't in the words adds it and searches; unpinning leaves the words alone. A pinned studio / performer pill shows a 📌 in front. On the next file, pinned names are in the search and show as 📌 pills as before; taking one out of the words (tap it) unpins it. Still per folder, this run only. `hunt.searched()` now only prunes pins that were taken out of the words; `hunt.pin()` / `hunt.isPinned()` are new.
+- **Top-level folder (scray-stash-nav.js, scray-stash-hunt.js):** the file's first folder - of its catalogue path and of its path, so Native's phone paths are covered - is left out of the navigator's tag pills and the bulk check's word suggestions. Every file in it shares it, so as a search word it only ever made results worse. It still goes to the manage-data studio mapping, so a top folder mapped to a studio still offers that studio. The hunt bar's scope tags (which choose files, not words) are unchanged. The navigator's pills are the same whether or not a hunt is running, so the single-file Stash search loses it too.
+- **Both apps:** the two files are identical in Picker and Native and stay so.
+
 ### native 15.88 — test: VLC opens portrait, live VLC scrub, TYPE filter cloud
 <!-- 2026-09-30T20:40Z -->
 - **Asked:** in the VLCKit player, don't turn to landscape on launch, and give real-time scrubbing feedback (picture, playhead and time). In Native, replace the File Type select and the "Show only MP4" box with a button beside the tag clouds that lists file types like tags, with pills like the tags.

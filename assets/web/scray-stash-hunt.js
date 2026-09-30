@@ -222,7 +222,7 @@
       tagMenu: false,
       run: Date.now(),          // which hunt a last match was made in
       swipeIn: false,           // the next card slides in (⏭ in the swipe options sent us on)
-      carry: new Map(),         // folder -> studio / performer names added to its searches
+      carry: new Map(),         // PIN_KEY -> pinned studio / performer names, added to every search (picker 15.75 / native 15.90: hunt-wide, was per folder)
       sort: '',                 // the search order picked this run: 'match' | 'order' | 'dur' | '' (StashDB order)
       bulkMin: 90,              // Tick N+ in the bulk check: the confidence it ticks from (picker 15.52 / native 15.63)
       bulkSort: ''              // the bulk check's rows: 'conf' (highest confidence first) | 'dur' (closest length first) | '' (as the files come)
@@ -1009,30 +1009,42 @@
   const baseWords = (v) => window.scrayStashNav ? window.scrayStashNav.words(v.filename || '') : String(v.filename || '');
 
   // ---- names carried from file to file (picker 15.41 / native 15.52) --------
-  // A studio or performer name added to a file's search - one that isn't in
-  // its own filename - is added to the search of the next files from the same
-  // folder too. Take it out of the search (and search) and it stops. This run
-  // only.
+  // A pinned studio or performer name is added to the search of every next
+  // file in the hunt, whatever its folder. Take it out of the search (and
+  // search), or unpin it, and it stops. This run only.
+  // picker 15.74 / native 15.89: pinned by hand only - the navigator's studio / performer pill
+  // menus have Pin / Unpin. A name added to a search used to be carried by
+  // itself.
   const reEsc = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const hasWord = (text, name) => new RegExp('(^|\\s)' + reEsc(name) + '(?=\\s|$)', 'i').test(String(text || ''));
-  const carryOf = (v) => (S && S.carry && S.carry.get(folderOf(v))) || [];
+  // picker 15.75 / native 15.90: one list for the whole hunt. Pins were kept per folder, but the
+  // next file is picked at random from the whole scope - subfolders and tag
+  // matches included - so it was usually in another folder and never saw them.
+  const PIN_KEY = '*';
+  const carryOf = (v) => (S && S.carry && S.carry.get(PIN_KEY)) || [];
 
-  /** The navigator's report of a search it ran for the hunt's file. */
-  function searched(video, term, names) {
+  /**
+   * The navigator's report of a search it ran for the hunt's file. Only prunes
+   * now (picker 15.74 / native 15.89): a pinned name taken out of the words stops being carried.
+   * Nothing new is pinned here - see pin().
+   */
+  function searched(video, term) {
     if (!S || !optsFor(video)) return;
-    const base = baseWords(video);
-    const seen = new Set();
-    const added = [].concat(names || [], carryOf(video))
-      .map(n => String(n || '').replace(/\s+/g, ' ').trim())
-      .filter(n => {
-        const k = n.toLowerCase();
-        if (n.length < 2 || seen.has(k)) return false;
-        seen.add(k);
-        return hasWord(term, n) && !hasWord(base, n);
-      });
-    const folder = folderOf(video);
-    if (added.length) S.carry.set(folder, added); else S.carry.delete(folder);
+    const kept = carryOf(video).filter(n => hasWord(term, n));
+    if (kept.length) S.carry.set(PIN_KEY, kept); else S.carry.delete(PIN_KEY);
   }
+
+  /** Pin a name for the rest of the hunt, or unpin it (picker 15.74 / native 15.89). */
+  function pin(video, name, on) {
+    if (!S || !optsFor(video)) return false;
+    const n = String(name || '').replace(/\s+/g, ' ').trim();
+    if (n.length < 2) return false;
+    const list = carryOf(video).filter(x => lower(x) !== lower(n));
+    if (on) list.push(n);
+    if (list.length) S.carry.set(PIN_KEY, list); else S.carry.delete(PIN_KEY);
+    return true;
+  }
+  const isPinned = (video, name) => !!(S && optsFor(video)) && carryOf(video).some(x => lower(x) === lower(name));
 
   /** The file's own words, and whatever its folder carries. */
   const huntWords = (v) => {
@@ -1616,9 +1628,13 @@
     const counts = new Map();
     B.rows.forEach(r => {
       const v = r.v;
+      // Not the top-level folder (picker 15.74 / native 15.89) - every file shares it, so as a word
+      // it only ever made the search worse.
+      const top = (window.scrayStashNav && typeof window.scrayStashNav.topFolderTags === 'function')
+        ? window.scrayStashNav.topFolderTags(v) : new Set();
       [].concat(v.__huntTags || tagsOf(v), v.bracketTags || []).forEach(t => {
         const n = String(t || '').trim();
-        if (n) counts.set(n, (counts.get(n) || 0) + 1);
+        if (n && !top.has(lower(n))) counts.set(n, (counts.get(n) || 0) + 1);
       });
     });
     const tags = [...counts.keys()];
@@ -2291,6 +2307,8 @@
     searchSort: () => (S && S.sort) || '',
     setSearchSort: (v) => { if (S && (v === 'match' || v === 'order' || v === 'dur')) S.sort = v; },
     searched,
+    /** Pin / unpin a name for the rest of the hunt's files (picker 15.74 / native 15.89). */
+    pin, isPinned,
     openMatches, openBulk,
     isActive: () => !!S,
     _test: { inScope, scopeLabel, folderOf, tagsOf, keyOf, getSession: () => S, newSession, setSession: (s) => { S = s; }, buildPool, inScopeLeft,

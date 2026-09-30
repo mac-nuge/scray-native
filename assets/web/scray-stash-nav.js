@@ -795,28 +795,35 @@
         out.push(v);
       });
       // Studio names the folder tags stand for (picker 14.28 / native 14.41),
-      // from studioSuggestions below.
+      // from studioSuggestions below - still asked of every folder tag.
       const extra = studioSuggestions(out);
-      studioStart = out.length;
-      return out.concat(extra);
+      // ...but the top-level folder itself isn't offered as a word (picker 15.74 / native 15.89).
+      const top = topFolderTags(video);
+      const own = out.filter(t => !top.has(t.toLowerCase()));
+      studioStart = own.length;
+      return own.concat(extra);
     })();
     // Folder tags toggle their words in the box. Studio pills - the names the
     // folder tags stand for, and in a hunt the studio of its last match - open
     // a menu (picker 15.27 / native 15.36): filter these results, open the
     // studio's page, or add to the search words.
+    // Pinned - hunt-wide since picker 15.75 / native 15.90 (was per folder) - (picker 15.74 / native 15.89): a 📌 in front of a studio / performer pill whose name is
+    // pinned to this folder - pinning is in the pill's menu.
+    const pinned = (n) => !!(inHunt && typeof hunt.isPinned === 'function' && hunt.isPinned(video, n));
+    const pinMark = (n) => pinned(n) ? '&#128204; ' : '';
     const ptagsHtml = (e) => '<div class="ssn-ptags">' +
       (huntStudio
         ? '<button type="button" class="ssn-ptag ssn-ptag-hunt" data-pstudio="' + esc(huntStudio) + '" data-pname="' + esc(huntStudio) +
-          '" title="Studio of the hunt&rsquo;s last match">&#127919; ' + esc(huntStudio) + '</button>'
+          '" title="Studio of the hunt&rsquo;s last match - tap for Filter, Pin and more">' + pinMark(huntStudio) + '&#127919; ' + esc(huntStudio) + '</button>'
         : '') +
       huntPerfs.map(n => '<button type="button" class="ssn-ptag ssn-ptag-hunt ssn-ptag-perf" data-pperf="' + esc(n) + '" data-pname="' + esc(n) +
-          '" title="Performer in the hunt&rsquo;s last match">&#127919; ' + esc(n) + '</button>').join('') +
+          '" title="Performer in the hunt&rsquo;s last match - tap for Filter, Pin and more">' + pinMark(n) + '&#127919; ' + esc(n) + '</button>').join('') +
       huntCarry.filter(n => !pathTags.some(t => t.toLowerCase() === n.toLowerCase())).map(n =>
         '<button type="button" class="ssn-ptag ssn-ptag-carry" data-pword="' + esc(n) + '" data-pname="' + esc(n) +
-          '" title="Added to this folder&rsquo;s searches - tap to take it out">&#128204; ' + esc(n) + '</button>').join('') +
+          '" title="Pinned to the hunt&rsquo;s searches - tap to take it out (and unpin)">&#128204; ' + esc(n) + '</button>').join('') +
       pathTags.map((t, i) => i >= studioStart
         ? '<button type="button" class="ssn-ptag ssn-ptag-studio" data-pstudio="' + esc(t) + '" data-pname="' + esc(t) +
-          '" title="Studio name mapped in manage-data">' + esc(t) + '</button>'
+          '" title="Studio name mapped in manage-data - tap for Filter, Pin and more">' + pinMark(t) + esc(t) + '</button>'
         : '<button type="button" class="ssn-ptag" data-ptag="' + i + '" data-pname="' + esc(t) + '">' + esc(t) + '</button>').join('') +
       '</div>';
     const reEsc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -962,6 +969,9 @@
       const filtering = rfHas(e, dd, name);
       const box = host.querySelector('input.ssn-term');
       const inWords = !!(box && tagRe(name).test(box.value));
+      // Pin (picker 15.74 / native 15.89): in a hunt only - nothing carries otherwise.
+      const canPin = !!(inHunt && typeof hunt.pin === 'function');
+      const isPin = canPin && typeof hunt.isPinned === 'function' && hunt.isPinned(video, name);
       const m = document.createElement('div');
       m.className = 'basket-json-modal';
       m.id = 'ssnPillMenu';
@@ -976,6 +986,11 @@
             '<button type="button" class="modal-btn modal-btn-secondary" data-pm="page">&#128269; Open ' + (perf ? 'her' : 'the studio&rsquo;s') + ' page</button>' +
             '<button type="button" class="modal-btn modal-btn-secondary" data-pm="words">' +
               (inWords ? '&#8722; Take out of the search &amp; search again' : '&#43; Add to the search &amp; search') + '</button>' +
+            (canPin
+              ? '<button type="button" class="modal-btn modal-btn-secondary" data-pm="pin">' +
+                  (isPin ? '&#128204; Unpin - stop adding it to the next files'
+                         : '&#128204; Pin - add it to the next files&rsquo; searches') + '</button>'
+              : '') +
             '<button type="button" class="modal-btn modal-btn-cancel" data-pm="">Cancel</button>' +
           '</div>' +
         '</div>';
@@ -993,6 +1008,17 @@
           toggleWord(name);
           const bx = host.querySelector('input.ssn-term');
           if (bx) search(bx.value);
+        }
+        else if (b.dataset.pm === 'pin') {
+          hunt.pin(video, name, !isPin);
+          // Pinning puts it in the words (and searches) if it wasn't; unpinning
+          // leaves the words alone - it only stops it reaching the next file.
+          if (!isPin && !inWords) {
+            toggleWord(name);
+            const bx = host.querySelector('input.ssn-term');
+            if (bx) { search(bx.value); return; }
+          }
+          paint(false, true);
         }
       });
       document.body.appendChild(m);
@@ -2519,6 +2545,24 @@ body.fullscreen-active #ssnPvBar { display: none; }
     return extra;
   }
 
-  window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile, openHome, studioSuggestions };
+  /**
+   * The file's top-level folder as a tag (picker 15.74 / native 15.89), lower-case with hyphens the
+   * way folder tags are made - the catalogue path's first folder and the
+   * path's own, so Native's catalogue and phone paths are both covered. Never
+   * offered as a search word: every file under it shares it.
+   */
+  function topFolderTags(v) {
+    const out = new Set();
+    const norm = (s) => String(s || '').replace(/^\*/, '').trim().replace(/\s+/g, '-').toLowerCase();
+    const first = (p) => norm(String(p || '').replace(/^\*/, '').split('/').filter(Boolean)[0]);
+    try {
+      if (v && typeof v.cataloguePath === 'string') { const t = first(v.cataloguePath); if (t) out.add(t); }
+      const t = first(v && v.path);
+      if (t) out.add(t);
+    } catch (e) { /* no path - nothing to leave out */ }
+    return out;
+  }
+
+  window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile, openHome, studioSuggestions, topFolderTags };
   window.scrayPerformerChoice = performerChoice;
 })();

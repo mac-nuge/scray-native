@@ -1441,6 +1441,9 @@ if (!window.__scrayMpfsControlsPanInstalled) {
 }
 
 function applyManualRotationStyles() {
+    // native 15.81: re-seat the FLS bookmark cluster once this layout has landed.
+    setTimeout(scrayPlaceBmCluster, 0);
+    setTimeout(scrayPlaceBmCluster, 400);
     const targets = getManualRotationTargets();
     if (!targets || !targets.container) {
         console.warn('[rotate] applyManualRotationStyles: no container, aborting');
@@ -4782,6 +4785,30 @@ function attachFrameStepButtons() {
     const group = document.createElement('div');
     group.className = 'plyr-frame-step-group';
 
+    // native 15.82: every circle lights up the instant it is touched, so a
+    // tap that registered is visible before whatever it opens has drawn.
+    // Capture phase on the group, because each button stops its own
+    // touchstart from travelling. Held for a moment at least, so even a quick
+    // tap shows; a hold (the -/+ jog) stays lit for as long as it is held.
+    // ⚙️ PRESS_MIN_MS - how long a tap stays lit at the least.
+    const PRESS_MIN_MS = 220;
+    group.addEventListener('touchstart', (e) => {
+        const b = e.target.closest ? e.target.closest('.plyr-frame-step') : null;
+        if (!b || !pauseMenuTappable(b)) return;
+        clearTimeout(b.__pressT);
+        b.__pressAt = Date.now();
+        b.classList.add('is-pressed');
+    }, { capture: true, passive: true });
+    const pressEnd = (e) => {
+        const b = e.target.closest ? e.target.closest('.plyr-frame-step') : null;
+        if (!b || !b.classList.contains('is-pressed')) return;
+        clearTimeout(b.__pressT);
+        const left = Math.max(0, PRESS_MIN_MS - (Date.now() - (b.__pressAt || 0)));
+        b.__pressT = setTimeout(() => b.classList.remove('is-pressed'), left);
+    };
+    group.addEventListener('touchend', pressEnd, { capture: true, passive: true });
+    group.addEventListener('touchcancel', pressEnd, { capture: true, passive: true });
+
     const makeCircle = (cls, label, glyph) => {
         const b = document.createElement('button');
         b.className = 'plyr-frame-step ' + cls;
@@ -4872,7 +4899,34 @@ function attachFrameStepButtons() {
     group.appendChild(renameBtn);
     group.appendChild(leftBtn);
     group.appendChild(rightBtn);
+    // ---- FLS bookmark cluster (native 15.81) ----------------------------------
+    // In FLS the BM circle leaves the row and sits on its own, level with the
+    // COL button (where native's orange anchor-row guide used to run), with
+    // three quick-note circles stacked above it. style.css shows the cluster
+    // in FLS only and hides the row's own BM there; outside FLS nothing
+    // changes. It is a child of the group, so it keeps every rule the circles
+    // have - the controls fade, the scrub gate, pauseMenuTappable().
+    const bmCluster = document.createElement('div');
+    bmCluster.className = 'plyr-frame-bm-cluster';
+    const flsBmBtn = makeCircle('plyr-frame-bookmark plyr-frame-bm-fls', 'Bookmarks', 'BM');
+    setupTapButton(flsBmBtn, () => {
+        if (typeof window.showPlayerBookmarkModal === 'function') window.showPlayerBookmarkModal();
+    });
+    bmCluster.appendChild(flsBmBtn);
+    // Slot 0 sits directly above BM, slot 2 furthest from it. Labels and notes
+    // come from Settings (scrayQuickBmNotes) - read at tap time, so a change
+    // there applies without rebuilding anything.
+    [0, 1, 2].forEach(slot => {
+        const q = makeCircle('plyr-frame-quick-bm', 'Quick bookmark', '');
+        q.dataset.slot = String(slot);
+        setupTapButton(q, () => scrayQuickBookmark(scrayQuickBmNotes()[slot]));
+        bmCluster.appendChild(q);
+    });
+    group.appendChild(bmCluster);
+
     wrapper.appendChild(group);
+    scrayRelabelQuickBm();
+    scrayPlaceBmCluster();
 
     // Dimension lines marking out which slice of the picture does what on a
     // double tap. Purely decorative - pointer-events:none in CSS.
@@ -5068,6 +5122,185 @@ function showPlayerBookmarkModal() {
     }
 }
 window.showPlayerBookmarkModal = showPlayerBookmarkModal;
+
+// =========================================
+// QUICK BOOKMARKS + ADJUST (native 15.81)
+// =========================================
+// The three circles above BM in FLS save a bookmark with a fixed note at the
+// playhead in one tap. Notes are set in Settings; blank falls back to these.
+var SCRAY_QUICK_BM_DEFAULTS = ['kiss', 'ts', 'mish'];
+var SCRAY_QUICK_BM_KEY = 'scray.quickBmNotes';
+
+function scrayQuickBmNotes() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(SCRAY_QUICK_BM_KEY) || 'null'); } catch (e) {}
+    return SCRAY_QUICK_BM_DEFAULTS.map((d, i) => {
+        const v = Array.isArray(saved) ? String(saved[i] ?? '').trim() : '';
+        return v || d;
+    });
+}
+window.scrayQuickBmNotes = scrayQuickBmNotes;
+window.scrayQuickBmDefaults = () => SCRAY_QUICK_BM_DEFAULTS.slice();
+
+function scraySetQuickBmNotes(list) {
+    const clean = [0, 1, 2].map(i => String((list || [])[i] ?? '').trim());
+    try { localStorage.setItem(SCRAY_QUICK_BM_KEY, JSON.stringify(clean)); } catch (e) {}
+    scrayRelabelQuickBm();
+}
+window.scraySetQuickBmNotes = scraySetQuickBmNotes;
+
+function scrayRelabelQuickBm() {
+    const notes = scrayQuickBmNotes();
+    document.querySelectorAll('.plyr-frame-quick-bm').forEach(b => {
+        const note = notes[Number(b.dataset.slot) || 0];
+        b.textContent = note;
+        b.setAttribute('aria-label', `Bookmark: ${note}`);
+    });
+}
+window.scrayRelabelQuickBm = scrayRelabelQuickBm;
+
+// var / function, not const: attachFrameStepButtons can run before this part
+// of the file has, and a const read that early throws.
+function scrayEscHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** Saves { time: playhead, note } straight away; the confirmation has Adjust and Undo. */
+async function scrayQuickBookmark(note) {
+    const v = window.currentPlayingVideo;
+    const p = window.plyrPlayer;
+    note = String(note || '').trim();
+    if (!v || !p || !note || typeof window.saveBookmarks !== 'function') return;
+    const t = p.currentTime;
+    if (typeof t !== 'number' || isNaN(t)) return;
+    const ms = Math.round(t * 1000);
+    const list = Array.isArray(v.bookmarks) ? v.bookmarks : [];
+    // The server keys bookmarks by time, so two at the same millisecond would
+    // become one - refuse, as the rail's Adjust does.
+    if (list.some(b => Math.round(b.time * 1000) === ms)) {
+        showPlayerFeedback(`A bookmark is already at ${formatDuration(ms)}`, 'top-left');
+        return;
+    }
+    const before = list.map(b => ({ ...b }));
+    const bm = { time: ms / 1000, note };
+    // native 15.82: "Bookmarking..." straight away, where the confirmation will be.
+    const pend = window.scrayUndoToast?.pending?.(`\ud83d\udd16 Bookmarking ${scrayEscHtml(note)}...`);
+    v.bookmarks = before.map(b => ({ ...b })).concat([bm]).sort((a, b) => a.time - b.time);
+    try {
+        // A detached tooltip soaks up saveBookmarks' own messages - the undo
+        // toast below reports instead (same as the modal and the rail).
+        await window.saveBookmarks(v, document.createElement('div'));
+    } catch (err) {
+        console.error('[quick-bm] save failed:', err);
+        if (pend && pend.isConnected) {
+            delete pend.dataset.pending;
+            pend.textContent = '\u274c Save failed';
+            pend.style.background = '#dc3545';
+            setTimeout(() => pend.remove(), 2500);
+        } else {
+            window.showBookmarkConfirmation?.('\u274c Save failed', '#dc3545');
+        }
+        return;
+    }
+    const html = `\u2705 ${scrayEscHtml(note)} saved at ${formatDuration(ms)}`;
+    if (typeof window.scrayUndoToast === 'function') {
+        window.scrayUndoToast({
+            html,
+            className: 'bookmark-confirmation-tooltip',
+            ms: 3900,
+            extraActions: [{ label: 'Adjust', onClick: () => scrayAdjustBookmark(bm) }],
+            onUndo: async () => {
+                v.bookmarks = before.map(b => ({ ...b }));
+                await window.saveBookmarks(v, document.createElement('div'));
+            },
+        });
+    } else {
+        window.showBookmarkConfirmation?.(html);
+    }
+}
+window.scrayQuickBookmark = scrayQuickBookmark;
+
+/**
+ * Adjust on a save confirmation: pause, then open that bookmark on the rail
+ * in its edit view - the same one the note's pencil opens - so you scrub to
+ * the right spot and tap "Adjust -> time" to confirm the move.
+ */
+function scrayAdjustBookmark(bm) {
+    const p = window.plyrPlayer;
+    if (!p || !bm) return;
+    try { p.pause(); } catch (e) {}
+    const open = () => typeof window.scrayEditBookmarkOnRail === 'function'
+        && window.scrayEditBookmarkOnRail(bm.time, bm.note);
+    if (open()) return;
+    // Markers not drawn for it yet - draw them and try once more.
+    if (typeof window.renderBookmarkMarkers === 'function') window.renderBookmarkMarkers();
+    if (!open()) showPlayerFeedback('Bookmark not found', 'top-left');
+}
+window.scrayAdjustBookmark = scrayAdjustBookmark;
+
+/**
+ * Seat the FLS bookmark cluster level with the COL button, measured rather
+ * than guessed. FLS is rotate(90deg), so the cluster's FLS left/right runs
+ * down/up the physical screen one px for one px: moving it by the screen-y
+ * gap between BM's centre and the dock's centre lands it on the dock's line.
+ * Runs on layout moments only (FLS layout, resize, controls shown) - never in
+ * a loop. No dock box (not FLS, peeking) leaves it where it last was.
+ */
+function scrayPlaceBmCluster() {
+    if (!document.body.classList.contains('manual-rotate-landscape')) return;
+    const cluster = document.querySelector('.plyr-frame-bm-cluster');
+    const bm = cluster && cluster.querySelector('.plyr-frame-bm-fls');
+    const dock = document.getElementById('scrayDisguiseDock');
+    if (!bm || !dock) return;
+    const a = dock.getBoundingClientRect();
+    const b = bm.getBoundingClientRect();
+    if (!a.height || !b.height) return;
+    const gap = (a.top + a.height / 2) - (b.top + b.height / 2);
+    if (Math.abs(gap) < 1) return;
+    const cur = parseFloat(cluster.dataset.shiftPx || '16');
+    const next = Math.round(cur + gap);
+    cluster.dataset.shiftPx = String(next);
+    cluster.style.left = `calc(100% + ${next}px)`;
+}
+window.scrayPlaceBmCluster = scrayPlaceBmCluster;
+
+// =========================================
+// FLS PRESS FEEDBACK (native 15.85)
+// =========================================
+// Every button in FLS lights up the instant it is touched - the rail's chips,
+// Adjust / Delete / Yes / No / X, the confirmation's Adjust / Undo, the control
+// row - so a tap that registered shows before whatever it does has finished.
+// Capture phase on document, so it hears the touch before any button's own
+// stopPropagation. The circles have their own (attachFrameStepButtons).
+// ⚙️ SCRAY_PRESS_MIN_MS - how long a tap stays lit at the least.
+(function () {
+    var SCRAY_PRESS_MIN_MS = 220;
+    var SEL = 'button, .plyr__control, [role="button"]';
+    var target = function (e) {
+        if (!document.body.classList.contains('manual-rotate-landscape')) return null;
+        var b = e.target && e.target.closest ? e.target.closest(SEL) : null;
+        if (!b || b.closest('.plyr-frame-step-group')) return null;
+        var host = typeof getManualRotationFullscreenElement === 'function' ? getManualRotationFullscreenElement() : null;
+        return host && host.contains(b) ? b : null;
+    };
+    document.addEventListener('touchstart', function (e) {
+        var b = target(e);
+        if (!b) return;
+        clearTimeout(b.__scrayPressT);
+        b.__scrayPressAt = Date.now();
+        b.classList.add('scray-pressed');
+    }, { capture: true, passive: true });
+    var end = function (e) {
+        var b = e.target && e.target.closest ? e.target.closest(SEL) : null;
+        if (!b || !b.classList.contains('scray-pressed')) return;
+        clearTimeout(b.__scrayPressT);
+        var left = Math.max(0, SCRAY_PRESS_MIN_MS - (Date.now() - (b.__scrayPressAt || 0)));
+        b.__scrayPressT = setTimeout(function () { b.classList.remove('scray-pressed'); }, left);
+    };
+    document.addEventListener('touchend', end, { capture: true, passive: true });
+    document.addEventListener('touchcancel', end, { capture: true, passive: true });
+})();
+window.addEventListener('resize', () => setTimeout(scrayPlaceBmCluster, 400));
 
 /**
 * Rotated confirmation tooltip shown on top of the video, matching the
@@ -6735,7 +6968,7 @@ const CHIP_GAP_PX = 6;
 // the rail can sit: anchorX is clamped to half the rail width plus the side
 // margin, so a wide rail is pinned away from the edge no matter what nudge
 // is applied below.
-const CHIP_PREFERRED_PX = 112;
+const CHIP_PREFERRED_PX = 128;   // native 15.84: was 112, chips a size up
 const RAIL_GAP_ABOVE_CONTROLS_PX = 10;
 const RAIL_SIDE_MARGIN_PX = 4;
 // ⚙️ Shift from the play button's centre. Negative moves left. Only takes
@@ -6746,8 +6979,8 @@ const RAIL_ID = 'bookmarkTooltipRail';
 // ⚙️ Edit mode (picker 13.157 / native 13.155). The ✎ button's width on the
 // marker rail, and the width the edit rail asks for (clamped to the bar like
 // any rail).
-const RAIL_EDIT_BTN_PX = 30;
-const RAIL_EDIT_WIDTH_PX = 300;
+const RAIL_EDIT_BTN_PX = 36;   // native 15.84: was 30
+const RAIL_EDIT_WIDTH_PX = 340;   // native 15.84: was 300
 
 /**
  * A button for the rail other than a bookmark chip: ✎, Adjust, Delete, Yes,
@@ -6756,6 +6989,8 @@ const RAIL_EDIT_WIDTH_PX = 300;
  * .bookmark-tooltip-chip, so MPB's chip background override doesn't grey out
  * a red Delete.
  */
+// native 15.84: the rail's chips and buttons are a size up - 0.7rem text (was
+// 0.58rem) and 6px padding (was 4px) - so Adjust and friends are easier to hit.
 function makeRailButton(label, onTap, extraCss = '') {
     const b = document.createElement('button');
     b.type = 'button';
@@ -6768,12 +7003,12 @@ function makeRailButton(label, onTap, extraCss = '') {
         width: auto;
         min-width: 0;
         margin: 0;
-        padding: 4px 8px;
+        padding: 6px 10px;
         border: none;
         border-radius: 4px;
         background: rgba(0, 0, 0, 0.85);
         color: #fff;
-        font-size: 0.58rem;
+        font-size: 0.7rem;
         font-weight: bold;
         line-height: 1.25;
         text-align: center;
@@ -6938,12 +7173,12 @@ function showBookmarkRail(group, onPick, opts = {}) {
             width: auto;
             min-width: 0;
             margin: 0;
-            padding: 4px 6px;
+            padding: 6px 8px;
             border: none;
             border-radius: 4px;
             background: rgba(0, 0, 0, 0.85);
             color: #fff;
-            font-size: 0.58rem;
+            font-size: 0.7rem;
             line-height: 1.25;
             text-align: center;
             white-space: nowrap;
@@ -6977,7 +7212,7 @@ function showBookmarkRail(group, onPick, opts = {}) {
 
     if (typeof opts.onEdit === 'function') {
         const editBtn = makeRailButton('\u270e', () => opts.onEdit(rail),
-            `flex-basis: ${RAIL_EDIT_BTN_PX}px; padding: 4px 0; font-size: 0.7rem;`);
+            `flex-basis: ${RAIL_EDIT_BTN_PX}px; padding: 6px 0; font-size: 0.85rem;`);
         editBtn.title = 'Edit bookmark';
         rail.appendChild(editBtn);
     }
@@ -7024,6 +7259,8 @@ if (!progressBar) return;
 // A rail left over from the previous video would point at bookmarks that
 // are no longer on this bar.
 hideBookmarkRail();
+// And the Adjust hook below belongs to the bar being replaced (native 15.81).
+window.scrayEditBookmarkOnRail = null;
 progressBar.querySelectorAll('.progress-bookmark-marker').forEach(m => m.remove());
 // Their note labels live in the anchor under the bar now, not in the markers,
 // so they have to be cleared separately or they would outlive the video.
@@ -7180,8 +7417,8 @@ const railLabel = (text) => {
     label.title = text;
     label.style.cssText = `
         flex-grow: 1; flex-shrink: 1; flex-basis: 0; min-width: 0;
-        padding: 4px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.85);
-        color: #fff; font-size: 0.58rem; line-height: 1.25; text-align: center;
+        padding: 6px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.85);
+        color: #fff; font-size: 0.7rem; line-height: 1.25; text-align: center;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     `;
     return label;
@@ -7192,7 +7429,7 @@ const bmText = (bm) => {
 };
 const leaveEdit = () => { raisedEntry = null; dismissBookmarkRail(); };
 const cancelBtn = () => {
-    const b = makeRailButton('\u2715', leaveEdit, 'padding: 4px 7px;');
+    const b = makeRailButton('\u2715', leaveEdit, 'padding: 6px 9px;');
     b.title = 'Stop editing';
     return b;
 };
@@ -7228,7 +7465,7 @@ const editTarget = (rail, entry) => {
     rail.appendChild(nameBtn);
     // Funnel: the note's terms as a filter (picker 15.13 / native 15.9).
     const filterBtn = makeRailButton('', () => filterFrom(rail, entry),
-        `flex-basis: ${RAIL_EDIT_BTN_PX}px; padding: 4px 0;`);
+        `flex-basis: ${RAIL_EDIT_BTN_PX}px; padding: 6px 0;`);
     filterBtn.innerHTML = FUNNEL_SVG;
     filterBtn.title = 'Filter by this bookmark';
     rail.appendChild(filterBtn);
@@ -7257,7 +7494,7 @@ const editTarget = (rail, entry) => {
 // confirms, and that tap does nothing else. ✕ goes back to the edit rail.
 // A note with no keywords at all (stopwords only) filters by the mapped note
 // itself instead, as a Notes pick.
-const FUNNEL_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" '
+const FUNNEL_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" '
     + 'style="display:block;margin:0 auto;pointer-events:none">'
     + '<path d="M3 4h18l-7 8.5V19l-4 2v-8.5z" fill="currentColor"/></svg>';
 const FILTER_PICK_ON_BG = '#6f42c1';   // the NOTE cloud's picked colour
@@ -7355,7 +7592,7 @@ const pickFilterTerms = (rail, entry, terms) => {
     document.addEventListener('touchstart', outside, { capture: true, passive: false });
     document.addEventListener('mousedown', outside, true);
 
-    const back = makeRailButton('\u2715', () => finish(false), 'padding: 4px 7px;');
+    const back = makeRailButton('\u2715', () => finish(false), 'padding: 6px 9px;');
     back.title = 'Back without filtering';
     rail.appendChild(back);
     rail.__place?.(Math.max(RAIL_EDIT_WIDTH_PX,
@@ -7405,13 +7642,17 @@ const findIndex = (list, bm) => {
     return list.findIndex(b => Math.round(b.time * 1000) === ms && (b.note || '') === (bm.note || ''));
 };
 
-const saveEdit = async (build, doneText) => {
+const saveEdit = async (build, doneText, pendingText = 'Saving bookmark...') => {
     const v = window.currentPlayingVideo;
     if (!v || !Array.isArray(v.bookmarks) || typeof window.saveBookmarks !== 'function') return;
     const before = v.bookmarks.map(b => ({ ...b }));
     const next = build(v.bookmarks.map(b => ({ ...b })));
     if (!next) return;
     next.sort((a, b) => a.time - b.time);
+    // native 15.85: something on screen the instant the rail goes - the save
+    // takes a moment and the confirmation only comes once it lands. Replaced
+    // in place by the confirmation below.
+    const pend = window.scrayUndoToast?.pending?.(`\u23f3 ${pendingText}`);
     leaveEdit();
     v.bookmarks = next;
     // A detached tooltip soaks up saveBookmarks' own "saved" messages - the
@@ -7420,7 +7661,14 @@ const saveEdit = async (build, doneText) => {
         await window.saveBookmarks(v, document.createElement('div'));
     } catch (err) {
         console.error('Bookmark edit failed:', err);
-        window.showBookmarkConfirmation?.('\u274c Save failed', '#dc3545');
+        if (pend && pend.isConnected) {
+            delete pend.dataset.pending;
+            pend.textContent = '\u274c Save failed';
+            pend.style.background = '#dc3545';
+            setTimeout(() => pend.remove(), 2500);
+        } else {
+            window.showBookmarkConfirmation?.('\u274c Save failed', '#dc3545');
+        }
         return;
     }
     if (typeof window.scrayUndoToast === 'function') {
@@ -7456,7 +7704,7 @@ const adjustTo = (entry) => {
         }
         list[i].time = ms / 1000;
         return list;
-    }, `Bookmark moved ${from} \u2192 ${to}`);
+    }, `Bookmark moved ${from} \u2192 ${to}`, `Moving bookmark to ${to}...`);
 };
 
 const deleteBm = (entry) => {
@@ -7465,7 +7713,21 @@ const deleteBm = (entry) => {
         if (i === -1) { showPlayerFeedback('Bookmark not found', 'top-left'); return null; }
         list.splice(i, 1);
         return list;
-    }, `Bookmark ${formatDuration(entry.bm.time * 1000)} deleted`);
+    }, `Bookmark ${formatDuration(entry.bm.time * 1000)} deleted`, 'Deleting bookmark...');
+};
+
+// native 15.81: the Adjust on a save confirmation lands here - raise the rail
+// for that bookmark and go straight to its edit view (what the pencil opens),
+// so you scrub, then tap "Adjust -> time" to move it.
+window.scrayEditBookmarkOnRail = (time, note) => {
+    const ms = Math.round(time * 1000);
+    const same = (e) => Math.round(e.bm.time * 1000) === ms;
+    const entry = entries.find(e => same(e) && (e.bm.note || '') === (note || '')) || entries.find(same);
+    if (!entry) return false;
+    raise(entry);
+    if (!raisedRail) return false;
+    startEdit(raisedRail, entry, [entry]);
+    return true;
 };
 
 entries.forEach(entry => {
@@ -7733,6 +7995,8 @@ function scraySyncPausedClass() {
     document.body.classList.toggle('scray-paused', paused);
 }
 window.scraySyncPausedClass = scraySyncPausedClass;
+// native 15.81: the controls coming up is a cheap moment to re-check the cluster's seat.
+window.plyrPlayer.on('controlsshown', () => scrayPlaceBmCluster());
 // 'play' fires the instant togglePlay() is called, which is what makes the
 // circles vanish immediately rather than waiting for the first decoded frame.
 ['play', 'playing', 'pause', 'ended', 'emptied', 'loadedmetadata'].forEach(evt => {

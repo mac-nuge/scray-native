@@ -3360,7 +3360,11 @@ async function showBookmarksModal(video, autoAddTimestamp = false, openOpts = {}
         modal.remove();
 
         let tip = null;
-        if (typeof window.showBookmarkConfirmation === 'function') {
+        // native 15.82: shown at once, in the confirmation's own spot (top of the
+        // picture in FLS), and replaced in place by the confirmation.
+        if (typeof window.scrayUndoToast?.pending === 'function') {
+            tip = window.scrayUndoToast.pending(extra ? '\ud83d\udd16 Bookmarking...' : 'Saving bookmarks...');
+        } else if (typeof window.showBookmarkConfirmation === 'function') {
             tip = window.showBookmarkConfirmation('Saving bookmarks...', '#6c757d', true);
         }
         try {
@@ -3372,11 +3376,18 @@ async function showBookmarksModal(video, autoAddTimestamp = false, openOpts = {}
             if (typeof window.scrayUndoToast === 'function') {
                 const html = tip ? tip.innerHTML
                     : `${next.length} bookmark${next.length === 1 ? '' : 's'} saved`;
-                tip?.remove();
+                // A "Bookmarking..." toast is left for scrayUndoToast to swap in place.
+                if (!tip?.dataset?.pending) tip?.remove();
                 window.scrayUndoToast({
                     html,
                     className: 'bookmark-confirmation-tooltip',
                     ms: 3900,   // doubled (picker 14.14 / native 14.22)
+                    // native 15.81: Adjust, when this save added a bookmark to the
+                    // video on screen - pauses and opens it on the rail to move.
+                    extraActions: (extra && window.currentPlayingVideo?.oneDriveId === video.oneDriveId
+                        && typeof window.scrayAdjustBookmark === 'function')
+                        ? [{ label: 'Adjust', onClick: () => window.scrayAdjustBookmark(extra) }]
+                        : [],
                     onUndo: async () => {
                         video.bookmarks = before.map(b => ({ ...b }));
                         // A detached tooltip soaks up saveBookmarks' own

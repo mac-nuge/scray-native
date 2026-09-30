@@ -4,6 +4,50 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.72 / native 15.86 — test: FLS circles 1.2x and no Xt
+<!-- 2026-09-30T11:30Z -->
+- **Asked:** remove the Xt circle and make all the circles (BM ones included) 1.2 times bigger, moving things so nothing overlaps.
+- **Xt (style.css):** hidden in FLS. The same slot is X^n in MPFS and stays there - say if it should go from MPFS too.
+- **1.2x (style.css):** in FLS every circle - the row (S, H, B, ★, RN, −, +) and the BM / kiss / ts / mish cluster - goes from 34px to 41px, labels 13px → 16px (BM / RN 10px → 12px, quick notes 11px → 13px). The row still grows from its right-hand anchor, and with Xt gone it's about the same length as before; the cluster is re-measured onto COL's line, so nothing overlaps. MPFS is unchanged - its row runs across the phone's short side, where nine circles at this size would not fit.
+
+### picker 15.71 / native 15.85 — test: FLS button press feedback and saving message on adjust
+<!-- 2026-09-30T11:25Z -->
+- **Asked:** light up the Adjust button - and every FLS button - when tapped; there's a delay between tapping Adjust to confirm the move and the confirmation appearing.
+- **Press feedback (player.js, style.css):** in FLS every button lights the instant it's touched - the rail's chips, ✎, funnel, Adjust, Delete, Yes / No, ✕, the confirmation's Adjust / Undo, and the control row. A white wash over the button's own colour plus a white ring (`.scray-pressed`), held for at least 220 ms (⚙️ `SCRAY_PRESS_MIN_MS`). The circles keep their own from 15.82 / 15.68.
+- **The delay itself:** the rail's saves (Adjust → time, Delete) now show "⏳ Moving bookmark to m:ss..." / "⏳ Deleting bookmark..." in the confirmation corner the moment they're tapped; the confirmation with Undo replaces it in place when the save lands. A failed save turns it red.
+
+### picker 15.70 / native 15.84 — test: bookmark rail clears circles and controls, bigger
+<!-- 2026-09-30T11:20Z -->
+- **Asked:** the rail's Adjust buttons clashed with the circles - while the bookmark tooltips are showing, and while the Adjust buttons are up, hide the circles and the player controls; make the rail a bit bigger.
+- **Hiding (style.css):** while `#bookmarkTooltipRail` exists (the marker-tap tooltips, the jump flash, and the edit view with Adjust / Delete), the circles fade out and can't be tapped, and every other child of `.plyr__controls` (play, G, X, Xb, H<, >, M>, ...) is hidden along with the bar's background. The rail is a child of the controls, so they use visibility rather than display - the play button keeps its box and the rail stays where it anchors. The progress bar and title are separate and stay up, so you can still scrub for Adjust. Everything comes back as soon as the rail goes.
+- **Bigger (player.js):** chips and rail buttons 0.7rem text (was 0.58rem) with 6px padding (was 4px); the ✎ 0.85rem; the funnel icon 14px (was 12px); chip width 128px (was 112px), edit rail 340px (was 300px), ✎ / funnel buttons 36px (was 30px).
+
+### picker 15.69 / native 15.83 — test: FLS confirmations in bottom corner on two lines
+<!-- 2026-09-30T11:05Z -->
+- **Asked:** in FLS, move the bookmark and score confirmations to the bottom-right corner of the picture (as held sideways) - just above the progress bar - reading in landscape, with Adjust / Undo on a second line so it fits.
+- **Where (style.css):** `.scray-toast-fls` now sits at ⚙️ `bottom: 40px; right: 48px` inside the rotated FLS box, so it reads landscape. The top-centre spot from 15.82 / 15.68 is gone.
+- **Score too (scray-config.js):** score confirmations with Undo now go to the same corner in FLS, at the same smaller size as the bookmark ones. Outside FLS they're unchanged.
+- **Two lines:** in FLS the message is on the first line and the buttons (Adjust, Undo, or Yes / No) on a second, right-aligned. ⚙️ Up to 220px wide before the message ellipsises. Outside FLS it stays one line.
+- Also fixed two leftovers from 15.82 / 15.68 in scray-config.js: a version placeholder in three comments, and a max-width typo that the browser ignored.
+
+### picker 15.68 / native 15.82 — test: circle press feedback and FLS bookmark confirmation
+<!-- 2026-09-30T10:58Z -->
+- **Asked:** light the circle buttons up the moment they're tapped (all of them, not just the new BM ones); in FLS put the bookmark confirmation at the top of the picture (as held sideways), show it as soon as a bookmark is tapped with "Bookmarking..." while it saves, then the confirmation; make the confirmation a little smaller.
+- **Press feedback (player.js, style.css):** every circle gets `.is-pressed` on touchstart - near-white fill, dark glyph, white ring - for at least 220 ms (⚙️ `PRESS_MIN_MS`), or for as long as it's held (the −/+ jog). Only when the circle is actually tappable, so a hidden one doesn't flash.
+- **Where (scray-config.js, style.css):** in FLS, bookmark confirmations go inside the rotated FLS box at its top centre (`.scray-toast-fls`, ⚙️ `top: 22px`), reading the right way up. Taps on it don't reach the player. Outside FLS, and for score confirmations, nothing moves.
+- **Bookmarking... first:** new `scrayUndoToast.pending()`. The quick circles show "🔖 Bookmarking kiss..." the instant they're tapped; the BM modal's Save shows "🔖 Bookmarking..." (or "Saving bookmarks..." when the save only removed some). The confirmation with Adjust / Undo then replaces it in place, without a fade. A failed quick save turns it red.
+- **Smaller:** bookmark confirmations are a size down - text 0.62rem, padding 4px 9px, and the Adjust / Undo / Yes / No buttons 0.7rem with 4px 9px padding.
+
+### picker 15.67 / native 15.81 — test: FLS BM cluster with quick notes and adjust
+<!-- 2026-09-30T10:25Z -->
+- **Asked:** in FLS, move BM onto native's orange line (level with COL), still in line with the circles; stack three quick-note circles above it - kiss, ts, mish - settable in Settings; add Adjust to the bookmark save confirmation; quick circles save at once with Adjust + Undo; visible with the player controls; remove the orange line; picker too.
+- **FLS cluster (player.js, style.css):** a new `.plyr-frame-bm-cluster` inside the circle group - BM, then the three quick circles stacked FLS-upwards (slot 1 directly above BM). FLS only; the row's own BM steps out there, so the row closes up. `scrayPlaceBmCluster()` measures COL's dock and moves the cluster so BM's centre is level with it - on FLS layout, resize and whenever the controls come up. Being inside the group it shows and hides with the controls and title, gets out of the way during a scrub, and can't be tapped while hidden. Outside FLS nothing changes.
+- **Quick circles:** one tap saves `{ time: playhead, note }` straight away (refused if a bookmark already sits at that millisecond, as the rail's Adjust does). Confirmation: "✅ kiss saved at m:ss" with **Adjust** and **Undo**.
+- **Adjust:** on the quick-circle confirmation and on the BM modal's save confirmation (when the save added a bookmark to the video on screen). Pauses, then opens that bookmark on the rail in its edit view - the same one the note's pencil opens - so you scrub and tap "Adjust → time" to confirm; that save has its own Undo. New `extraActions` option on `scrayUndoToast` (scray-config.js) draws the button; `scrayEditBookmarkOnRail` in `renderBookmarkMarkers` opens the rail.
+- **Settings (settings.js):** "Quick bookmark buttons (FLS)" - three boxes, next-to-BM first. Stored on this device (`scray.quickBmNotes`); blank = default (kiss / ts / mish). Labels update on Save.
+- **Orange line:** the anchor row guide (13.128) is removed from disguise.js - CSS, the element and `placeRowGuides()`.
+- Picker gets the same cluster, Adjust and setting (picker has no orange line).
+
 ### picker 15.66 / native 15.80 — test: faint green for loaded part behind playhead
 <!-- 2026-09-30T09:52Z -->
 - **Asked:** the loaded (buffered) part of the progress bar was the same green before and after the playhead - make the part before the playhead a faint light green.

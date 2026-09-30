@@ -483,62 +483,8 @@
 #scrayDisguiseGlobe.is-close { background: #d32f2f; }
 #scrayDisguiseGlobe.is-close:hover { background: #e53935; }
 
-/* ⚙️ ANCHOR ROW GUIDE (13.128). One orange rule through the middle of the anchor
-   row, so the double-tap grid tells you where the buttons are as well as which
-   zone you are in.
-
-   It belongs to the DOUBLE-TAP GRID, not to the controls - up only while
-   body.scray-guides-awake is set, exactly as .fls-tap-guides is, with the same
-   asymmetric timing (instant up, 0.1s out). That class is on body and this
-   overlay is a sibling of body, so syncStateClasses mirrors it onto the root as
-   .is-guides-awake.
-
-   ⚙️ ONE LINE, AND ONLY FOR THE ANCHOR ROW. 13.126 and 13.127 also bracketed the
-   player controls, which meant tracking a row that FLS rotates 90deg into a
-   column - two vertical lines there, two horizontal ones in MPFS, decided by
-   measuring the rect. Mac dropped the controls guide, and with it all of that:
-   the anchor row lives in this overlay rather than in the player, so it is never
-   rotated and a horizontal rule is right in both modes. Nothing here needs to
-   know which mode is running.
-
-   It lives in the OVERLAY, not inside .fls-tap-guides with the rest of the grid.
-   The guide container is bounded in MPFS (top:33.333%, bottom:152px) - it IS the
-   gesture band - so a child of it cannot reach the anchor row below 152px. And
-   it lives inside .plyr__video-wrapper, which the zoom gesture AND the FLS
-   rotation both transform; a transformed ancestor becomes the containing block
-   for position:fixed, so a fixed child there would rotate along with it. */
-#scrayMpfsRowGuides {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  display: none;
-  z-index: 1;
-}
-/* Both fullscreen modes. is-fs is FLS or MPFS; MPB gets no grid, so no guide. */
-#scrayDisguise.is-fs #scrayMpfsRowGuides {
-  display: block;
-  opacity: 0;
-  transition: opacity 0.1s ease;
-}
-/* ⚙️ The tap grid's own visibility contract, copied rather than approximated:
-   see the .fls-tap-guides pair in style.css - change one, change the other. */
-#scrayDisguise.is-fs.is-guides-awake #scrayMpfsRowGuides {
-  opacity: 1;
-  transition: none;
-}
-
-.scray-row-line {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 2px;
-  /* Hidden until placeRowGuides() has a real row to centre on, so the line never
-     sits at an arbitrary place claiming the buttons are there. */
-  display: none;
-  /* ⚙️ Orange at 70% transparent, per Mac. 2px rather than the tap grid's 1px:
-     at alpha 0.3 over moving picture a hairline is not reliably visible. */
-  background: rgba(255, 140, 0, 0.3);
-}
+/* The orange ANCHOR ROW GUIDE (13.128) is gone (native 15.81) - the FLS BM
+   circle now sits on that line instead (scrayPlaceBmCluster in player.js). */
 
 /* ⚙️ VID / BM - the index page's view switch (scray-views.js, 13.120). First in
    the dock's DOM order, so it sits left of 🌐 and the COL panel; same box as the
@@ -603,8 +549,7 @@
    full opacity, with the same buttons it shows when nothing is playing. It costs
    one relayed class rather than a second layout.
 
-   Hiding the dock also retires the orange row guide on its own: placeRowGuides
-   drops a line whose target has no box, and a display:none dock has none. */
+   (The orange row guide that used to follow the dock went in native 15.81.) */
 #scrayDisguise.is-fs:not(.is-peek) #scrayDisguiseDock { display: none; }
 #scrayDisguise.is-fs:not(.is-peek) #scrayDisguiseStrip { display: none; }
 
@@ -1657,42 +1602,7 @@
     backRoot.appendChild(shot);
     root.appendChild(tint);
 
-    // ---- Anchor row guide (13.128) ---------------------------------------
-    // One line, appended before the dock so it paints under the buttons rather
-    // than across them.
-    const rowGuides = document.createElement('div');
-    rowGuides.id = 'scrayMpfsRowGuides';
-    const anchorLine = document.createElement('div');
-    anchorLine.className = 'scray-row-line is-anchors';
-    rowGuides.appendChild(anchorLine);
-    root.appendChild(rowGuides);
-
-    /**
-     * Centre the line on the anchor row.
-     *
-     * ⚙️ Both rects come from the SAME batch and the offset is expressed against
-     * the guide container's own rect - the element the line sits inside. That is
-     * what keeps this out of 13.119's trap: the bug there was writing a
-     * coordinate measured in the VISUAL viewport onto an element laid out
-     * against the LAYOUT viewport, two systems that diverge the moment Safari's
-     * toolbar collapses. Container-relative arithmetic has no second system in
-     * it, so there is nothing to diverge.
-     *
-     * Runs on the discrete moment the guide wakes, and on resize - never in a
-     * loop and never mid-animation, which is the other half of what drifted.
-     * Only opacity animates on the row; its position is CSS-anchored.
-     */
-    function placeRowGuides() {
-      const r = dock && dock.getBoundingClientRect();
-      if (!r || !r.height) { anchorLine.style.display = 'none'; return; }
-      const box = rowGuides.getBoundingClientRect();
-      anchorLine.style.display = 'block';
-      // Less half the line's own 2px, so the line is centred rather than
-      // starting at the centre.
-      anchorLine.style.top = Math.round(r.top + r.height / 2 - box.top - 1) + 'px';
-    }
-    window.addEventListener('resize', placeRowGuides);
-    window.addEventListener('orientationchange', placeRowGuides);
+    // The anchor row guide (13.128) was removed in native 15.81.
 
     // ---- Edge swipes open the panels (13.132) ----------------------------
     // Swipe in from the left edge for history, from the right edge for the
@@ -1918,9 +1828,6 @@
       const awake = b.classList.contains('scray-guides-awake');
       const wasAwake = root.classList.contains('is-guides-awake');
       root.classList.toggle('is-guides-awake', awake);
-      // Measure on the rising edge only: the rows are where they are, and the
-      // moment they are about to be shown is the one moment worth asking.
-      if (awake && !wasAwake) placeRowGuides();
 
       // The row's contents follow the app's state (13.129).
       // Peeking counts as not-playing: the player has slid aside and the page

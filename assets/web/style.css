@@ -2337,6 +2337,120 @@ body.portrait-fullscreen:not(.manual-rotate-landscape) .plyr__controls {
 /* ⚙️ Six circles now (232px at 32px + 8px gaps) instead of three (112px),
    growing leftward from this right anchor. Pulled in from 140px so the row
    does not run into the FLS title strip on the left edge. */
+/* native 15.84: WHILE A BOOKMARK RAIL IS UP (the marker tooltips, and the edit
+   view with Adjust / Delete) the circles and the rest of the player controls
+   step aside, so nothing sits over or under the rail's buttons. The rail
+   lives inside .plyr__controls, so the bar itself stays and only its other
+   children are hidden - visibility, not display, so the play button keeps its
+   box and the rail stays anchored where it always is. The progress bar and
+   title are separate elements and stay, so you can still scrub for Adjust. */
+body:has(#bookmarkTooltipRail) .plyr-frame-step-group {
+opacity: 0 !important;
+pointer-events: none !important;
+}
+body:has(#bookmarkTooltipRail) .plyr-frame-step-group .plyr-frame-step {
+pointer-events: none !important;
+}
+.plyr__controls:has(> #bookmarkTooltipRail) > :not(#bookmarkTooltipRail) {
+visibility: hidden !important;
+}
+.plyr__controls:has(> #bookmarkTooltipRail) {
+background: transparent !important;
+box-shadow: none !important;
+-webkit-backdrop-filter: none !important;
+backdrop-filter: none !important;
+}
+
+/* ⚙️ FLS PRESSED (native 15.85): any FLS button the moment it is touched - see
+   FLS PRESS FEEDBACK in player.js. A white wash laid over whatever colour
+   the button already is (so a blue Adjust reads as a lighter blue, a black
+   chip as grey), plus a white ring. */
+.scray-pressed {
+background-image: linear-gradient(rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.45)) !important;
+box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9) !important;
+transition: none !important;
+}
+
+/* ⚙️ PRESSED (native 15.82): lit the moment a circle is touched - see
+   PRESS_MIN_MS in attachFrameStepButtons. ⚙️ the colours to taste. */
+.plyr-frame-step-group .plyr-frame-step.is-pressed {
+background: rgba(255, 255, 255, 0.6) !important;
+color: rgba(0, 0, 0, 0.85) !important;
+box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+transition: none;
+}
+
+/* native 15.83: moved to the bottom-right corner of the picture (as held
+   sideways), just above the progress bar, and shared with score
+   confirmations; two lines - message, then the buttons. (15.82 had it at
+   the top centre.) ⚙️ bottom / right to nudge it. */
+.scray-toast-fls {
+position: absolute !important;
+top: auto !important;
+bottom: 40px !important;
+left: auto !important;
+right: 48px !important;
+transform: none !important;
+z-index: 99999 !important;
+white-space: nowrap;
+}
+
+/* ⚙️ FLS BOOKMARK CLUSTER (native 15.81). BM plus three quick-note circles,
+   stacked FLS-upwards from BM, seated level with the COL button -
+   scrayPlaceBmCluster() in player.js measures and writes `left`. FLS only;
+   the row's own BM steps out while it is up. A child of the group, so the
+   controls fade, the scrub gate and the pointer-events rules all reach it. */
+.plyr-frame-bm-cluster {
+display: none;
+}
+body.manual-rotate-landscape .plyr-frame-bm-cluster {
+display: flex;
+flex-direction: column-reverse;   /* first child (BM) at the bottom, the rest above */
+gap: inherit;
+position: absolute;
+bottom: 0;
+left: calc(100% + 16px);          /* until it has been measured */
+}
+body.manual-rotate-landscape .plyr-frame-step-group > .plyr-frame-bookmark {
+display: none;
+}
+/* ⚙️ Note labels: a touch smaller than BM so four or five letters fit. */
+.plyr-frame-step-group .plyr-frame-quick-bm {
+font-size: 11px;
+letter-spacing: -0.3px;
+white-space: nowrap;
+overflow: hidden;
+}
+
+/* ⚙️ FLS CIRCLES 1.2x (native 15.86). Every circle in FLS - the row and the BM
+   cluster - is 1.2 times the phone size set by the portrait media query
+   above (34px -> 41px), labels scaled with them. FLS only: MPFS runs the row
+   across the phone's short side, where nine circles at this size would not
+   fit. The row still grows from its right-hand anchor and the cluster is
+   re-seated on COL by scrayPlaceBmCluster, so nothing lands on anything else.
+   Three classes and an element, so it outranks the media query regardless of
+   order. */
+body.manual-rotate-landscape .plyr-frame-step-group .plyr-frame-step {
+width: 41px;
+height: 41px;
+min-width: 41px;
+min-height: 41px;
+max-width: 41px;
+max-height: 41px;
+font-size: 16px;
+}
+body.manual-rotate-landscape .plyr-frame-step-group .plyr-frame-bookmark,
+body.manual-rotate-landscape .plyr-frame-step-group .plyr-frame-rename {
+font-size: 12px;
+}
+body.manual-rotate-landscape .plyr-frame-step-group .plyr-frame-quick-bm {
+font-size: 13px;
+}
+/* ⚙️ No X^T circle in FLS (native 15.86) - the slot is X^n in MPFS and stays there. */
+body.manual-rotate-landscape .plyr-frame-step-group > .plyr-frame-filter {
+display: none;
+}
+
 body.manual-rotate-landscape .plyr-frame-step-group {
 /* ⚙️ Seven 48px circles + 8px gaps = 384px, so at 170px the row runs from
    170px to 554px in from the right edge - off the right margin, but still

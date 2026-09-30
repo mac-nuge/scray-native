@@ -225,6 +225,42 @@ console.log("settings.js loaded");
   window.scraySettings = { register, open, list: () => settings.map(s => s.id) };
 })();
 
+// ---- Quick bookmark buttons (native 15.81) ----------------------------------
+// The three circles above BM in FLS. Stored on this device; blank = default.
+window.scraySettings.register({
+  id: "quickBmNotes",
+  label: "Quick bookmark buttons (FLS)",
+  type: "custom",
+  hint: "The note each circle above BM saves, starting with the one next to BM. " +
+        "Leave one blank to use its default.",
+  build: () => {
+    const el = document.createElement("div");
+    el.style.cssText = "display:flex;gap:6px;";
+    const defs = (window.scrayQuickBmDefaults && window.scrayQuickBmDefaults()) || ["kiss", "ts", "mish"];
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem("scray.quickBmNotes") || "[]") || []; } catch (e) {}
+    const inputs = [0, 1, 2].map(i => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = String(stored[i] ?? "");
+      input.placeholder = defs[i];
+      input.autocapitalize = "off";
+      input.autocorrect = "off";
+      input.spellcheck = false;
+      input.style.cssText = "flex:1 1 0;min-width:0;box-sizing:border-box;margin:0;padding:10px;"
+        + "background:#2a2a2a;color:#fff;border:1px solid #555;border-radius:4px;font-size:0.9rem;";
+      el.appendChild(input);
+      return input;
+    });
+    return { el, value: () => inputs.map(x => x.value.trim()), focus: () => inputs[0].focus() };
+  },
+  get: () => "",
+  set: (value) => {
+    if (typeof window.scraySetQuickBmNotes === "function") window.scraySetQuickBmNotes(value);
+    else { try { localStorage.setItem("scray.quickBmNotes", JSON.stringify(value)); } catch (e) {} }
+  }
+});
+
 // ---- Setting 1: Picker URL -------------------------------------------------
 window.scraySettings.register({
   id: "pickerUrl",

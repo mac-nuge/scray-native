@@ -1320,13 +1320,16 @@ window.scrayAddSearchTerm = function (term) {
   const CONFIRM_MS = 5000;
   const RESULT_MS = 1500;
 
-  const button = (label, filled) => {
+  // ⚙️ native 15.82: bookmark confirmations are drawn a size smaller (Mac asked).
+  const COMPACT_BTN = 'padding: 4px 9px; font-size: 0.7rem;';
+  const button = (label, filled, compact) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = label;
     // margin: 0 overrides the global button margin in style.css.
     b.style.cssText = 'margin: 0; padding: 6px 12px; min-width: 0; width: auto; border-radius: 4px; '
       + 'font: inherit; font-size: 0.8rem; font-weight: bold; line-height: 1.2; cursor: pointer; '
+      + (compact ? COMPACT_BTN : '')
       + 'touch-action: manipulation; color: #fff; border: 1px solid rgba(255,255,255,0.8); '
       + `background: ${filled ? 'rgba(255,255,255,0.3)' : 'transparent'};`;
     // Taps on the toast stay on the toast: nothing behind it (a menu's
@@ -1336,13 +1339,77 @@ window.scrayAddSearchTerm = function (term) {
     return b;
   };
 
-  window.scrayUndoToast = function ({ html, onUndo, className = 'bookmark-confirmation-tooltip', bg = '#28a745', ms = 1950 }) {
-    // One at a time: they share a spot on screen, so a second save would sit
-    // exactly on top of the first. The newer save's toast wins - unless the
-    // older one is mid-undo, which is left to finish.
+  // extraActions (native 15.81): [{ label, onClick }] - buttons before Undo (e.g.
+  //   Adjust). A tap closes the toast and runs onClick; the save stands.
+  // native 15.82: where a toast goes. A bookmark one in FLS goes INTO the
+  // rotated FLS box, at the top centre of the picture as you hold the phone
+  // sideways (style.css .scray-toast-fls) - so it reads the right way up and
+  // sits where the eye already is. Everything else stays on body as before.
+  const isBookmarkToast = (cls) => /\bbookmark-confirmation-tooltip\b/.test(cls);
+  // native 15.83: score confirmations join them in FLS, and the spot moved to
+  // the bottom-right corner of the picture, above the progress bar, with the
+  // buttons on a second line so it fits there.
+  const isFlsToast = (cls) => /\b(bookmark|score)-confirmation-tooltip\b/.test(cls);
+  const flsHost = (cls) => isFlsToast(cls)
+      && document.body.classList.contains('manual-rotate-landscape')
+      && typeof window.getManualRotationFullscreenElement === 'function'
+      && window.getManualRotationFullscreenElement();
+  function placeToast(toast, cls) {
+    const fls = flsHost(cls);
+    if (fls) {
+      toast.classList.add('scray-toast-fls');
+      // ⚙️ How wide it may get before the message ellipsises.
+      toast.style.maxWidth = '220px';
+      toast.style.flexDirection = 'column';
+      toast.style.alignItems = 'stretch';
+      toast.style.gap = '4px';
+      // Inside the player now, so a tap on it must not reach the player's own
+      // tap/double-tap handlers either.
+      ['touchend', 'touchmove'].forEach(t =>
+        toast.addEventListener(t, e => e.stopPropagation(), { passive: true }));
+      fls.appendChild(toast);
+    } else {
+      document.body.appendChild(toast);
+    }
+  }
+  function compactToast(toast, cls) {
+    // Bookmark ones everywhere; score ones only in FLS, where they share the corner.
+    if (!isBookmarkToast(cls) && !flsHost(cls)) return false;
+    toast.style.fontSize = '0.62rem';
+    toast.style.padding = '4px 9px';
+    toast.style.gap = '7px';
+    return true;
+  }
+
+  // native 15.82: the "Bookmarking..." stage. Shown the moment the save starts,
+  // in the same spot; the confirmation (scrayUndoToast) replaces it in place.
+  // Returns the element; saveBookmarks may write progress text into it.
+  function pendingToast(html, { className = 'bookmark-confirmation-tooltip', bg = '#6c757d' } = {}) {
     document.querySelectorAll('.scray-undo-toast:not([data-undoing])').forEach(t => t.remove());
     const toast = document.createElement('div');
     toast.className = className + ' scray-undo-toast';
+    toast.dataset.pending = '1';
+    toast.innerHTML = html;
+    toast.style.background = bg;
+    compactToast(toast, className);
+    placeToast(toast, className);
+    toast.classList.add('show');   // no fade in: it is the answer to a tap
+    // Never stranded: a save that neither confirms nor fails is gone in 15s.
+    setTimeout(() => { if (toast.isConnected && toast.dataset.pending) toast.remove(); }, 15000);
+    return toast;
+  }
+
+  window.scrayUndoToast = function ({ html, onUndo, className = 'bookmark-confirmation-tooltip', bg = '#28a745', ms = 1950, extraActions = [] }) {
+    // One at a time: they share a spot on screen, so a second save would sit
+    // exactly on top of the first. The newer save's toast wins - unless the
+    // older one is mid-undo, which is left to finish.
+    // Replacing a "Bookmarking..." in place skips the fade-in, so the
+    // confirmation doesn't blink.
+    const replacing = !!document.querySelector('.scray-undo-toast[data-pending]');
+    document.querySelectorAll('.scray-undo-toast:not([data-undoing])').forEach(t => t.remove());
+    const toast = document.createElement('div');
+    toast.className = className + ' scray-undo-toast';
+    const compact = compactToast.bind(null, toast, className);
     toast.style.background = bg;
     // The confirmation tooltips are pointer-events: none so they never block
     // the player; this one has to take a tap.
@@ -1355,10 +1422,13 @@ window.scrayAddSearchTerm = function (term) {
     // let the message ellipsise rather than push Undo off the edge.
     toast.style.maxWidth = 'calc(100vw - 24px)';
     toast.style.boxSizing = 'border-box';
+    const small = compact();
     const msg = document.createElement('div');
     msg.style.cssText = 'min-width: 0; overflow: hidden; text-overflow: ellipsis;';
     const actions = document.createElement('div');
     actions.style.cssText = 'display: flex; gap: 6px; flex: 0 0 auto;';
+    // native 15.83: FLS stacks the buttons under the message, right-aligned.
+    if (flsHost(className)) actions.style.justifyContent = 'flex-end';
     toast.append(msg, actions);
 
     ['touchstart', 'mousedown', 'pointerdown', 'click'].forEach(t =>
@@ -1376,7 +1446,17 @@ window.scrayAddSearchTerm = function (term) {
     const showSaved = () => {
       msg.innerHTML = html;
       actions.replaceChildren();
-      const undo = button('Undo', true);
+      (extraActions || []).forEach(a => {
+        const b = button(a.label, false, small);
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          clearTimeout(timer);
+          toast.remove();
+          try { a.onClick(); } catch (err) { console.error('Toast action failed:', err); }
+        });
+        actions.append(b);
+      });
+      const undo = button('Undo', true, small);
       undo.addEventListener('click', (e) => { e.stopPropagation(); ask(); });
       actions.append(undo);
     };
@@ -1384,8 +1464,8 @@ window.scrayAddSearchTerm = function (term) {
     const ask = () => {
       msg.textContent = 'Undo?';
       actions.replaceChildren();
-      const yes = button('Yes', true);
-      const no = button('No', false);
+      const yes = button('Yes', true, small);
+      const no = button('No', false, small);
       yes.addEventListener('click', async (e) => {
         e.stopPropagation();
         clearTimeout(timer);
@@ -1415,11 +1495,13 @@ window.scrayAddSearchTerm = function (term) {
     };
 
     showSaved();
-    document.body.appendChild(toast);
-    setTimeout(() => toast.classList.add('show'), 10);
+    placeToast(toast, className);
+    if (replacing) toast.classList.add('show');
+    else setTimeout(() => toast.classList.add('show'), 10);
     hideAfter(ms);
     return toast;
   };
+  window.scrayUndoToast.pending = pendingToast;
 })();
 
 // ============================================================================

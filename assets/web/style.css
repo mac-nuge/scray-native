@@ -310,6 +310,8 @@ align-items: center;
 .floating-tag-studio        { background-color: #0f8b6c; color: white; }
 .floating-tag-performer     { background-color: #6c5ce7; color: white; }
 .floating-tag-stashtag      { background-color: #b8860b; color: white; }
+/* File types (native 15.88) - slate, shown upper-case: MP4, WMV. */
+.floating-tag-filetype      { background-color: #546e7a; color: white; text-transform: uppercase; }
 .floating-tag-intersect     { background-color: #222;    color: white; }
 .floating-tag-intersect-off { background-color: #bbb;    color: #222;  }
 /* Red, matching the exclude pill and the Clear buttons in the modals - the
@@ -4604,6 +4606,8 @@ color: #333;
 .scray-cloud-studio.is-on    { background: #0f8b6c; color: #fff; }
 .scray-cloud-performer.is-on { background: #6c5ce7; color: #fff; }
 .scray-cloud-stashtag.is-on  { background: #b8860b; color: #fff; }
+.scray-cloud-filetype        { text-transform: uppercase; }
+.scray-cloud-filetype.is-on  { background: #546e7a; color: #fff; }
 .scray-cloud-item.is-on .scray-cloud-count { opacity: 0.85; }
 
 /* NOTE cloud (picker 13.149 / stg-native 13.147). Keywords are the main
@@ -4665,6 +4669,7 @@ border-left: 4px solid rgba(255,255,255,0.5);
 .floating-tag-fexclude.fx-studio    { border-left-color: #0f8b6c; }
 .floating-tag-fexclude.fx-performer { border-left-color: #6c5ce7; }
 .floating-tag-fexclude.fx-stashtag  { border-left-color: #b8860b; }
+.floating-tag-fexclude.fx-filetype  { border-left-color: #546e7a; text-transform: uppercase; }
 
 .scray-cloud-empty { font-size: 0.75rem; color: #999; font-style: italic; }
 .scray-cloud-footer { display: flex; gap: 10px; width: 100%; margin-top: 12px; }

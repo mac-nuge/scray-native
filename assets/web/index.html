@@ -614,6 +614,7 @@
     <button id="btnPERF" class="dropdown-btn" title="Performers">PERF</button>
     <button id="btnSTAG" class="dropdown-btn" title="StashDB tags">STAG</button>
     <button id="btnNOTE" class="dropdown-btn" title="Bookmark notes">NOTE</button>
+    <button id="btnTYPE" class="dropdown-btn" title="File types (mp4, wmv, mkv...)">TYPE</button>
   </div>
 
   <br><br>
@@ -688,26 +689,8 @@
 
 <br>
 
-<!-- MIME Type Filter -->
-<div style="margin-top: 8px;" class="mimeTypeRow">
-  <label for="mimeTypeFilter">File Type</label>
-  <select id="mimeTypeFilter" multiple style="width: 200px; min-height: 60px;">
-    <!-- Populated dynamically -->
-  </select>
-</div>
-
-  <br>
-
-
-<!-- MP4 Only Filter -->
-<div style="margin-top: 8px;" class="mp4OnlyRow">
- <label>
-   <input type="checkbox" id="filterMp4Only">
-   Show only MP4
- </label>
-</div>
-
- <br>
+<!-- File Type select and Show only MP4 retired native 15.88: file types are
+     the TYPE button beside the tag clouds, with pills like the tags. -->
 
 <!-- Show Duplicates Filter - retired 13.196. Hidden, not deleted: randomiser.js
      reads #filterDuplicatesOnly while filtering, and unchecked means "no

@@ -4,6 +4,25 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.88 — test: VLC opens portrait, live VLC scrub, TYPE filter cloud
+<!-- 2026-09-30T20:40Z -->
+- **Asked:** in the VLCKit player, don't turn to landscape on launch, and give real-time scrubbing feedback (picture, playhead and time). In Native, replace the File Type select and the "Show only MP4" box with a button beside the tag clouds that lists file types like tags, with pills like the tags.
+- **VLC opens portrait (ScrayVLCPlayer.swift):** the once-only auto-turn for a wide picture in `timeChanged` is gone, and `orientationDecided` with it. ⟳ is now the only thing that turns it.
+- **VLC live scrub (ScrayVLCPlayer.swift):** a drag, or dragging the slider, used to move only the slider and time and seek once on release, so the picture sat still until you let go. Now the finger's position goes to VLC while you drag - at most one seek every ⚙️ `liveSeekInterval` (0.2 s), so a slow stream doesn't pile up seeks - and release still does one exact seek. The slider and time follow the finger every frame; VLC's own time ticks no longer overwrite them mid-drag (that was already true for the picture drag, and now for the slider too - its time label used to flick back to the playing time). The slider drag shows the same centre time hint as the picture drag. A cancelled picture drag goes back to where it started.
+- **TYPE filter (randomiser.js, ui.js, index.html, style.css):** a new facet class `filetype` - the file's extension from its filename, lower-case (mp4, wmv, mkv...). Not mimeType: the extension is what decides web player vs VLC, and a Hetzner row's mimeType is a guess. Riding `SCRAY_FACET_CLASSES` gives it the cloud (TYPE button after NOTE), include / exclude cycling on its chips, pills and exclude pills (slate, upper-case), and Clear all, with no new plumbing.
+- **Always AND:** file types are kept out of the ANY/ALL tag pass and applied after it, like keywords - a file has one type, so "Studio X or MP4" would be meaningless. Picking MP4 and WMV shows either. For the same reason the TYPE cloud has no Tag intersect switch, and file-type pills don't count towards the two terms that bring up the ∪/∩ pill. No Filter-in-Picker hand-off from the TYPE cloud: Picker has no such class.
+- **Removed:** the `#mimeTypeFilter` select and `populateMimeTypeFilter`, the MIME filter pass and its reset, the "Show only MP4" box, its filter pass and its mobile default. Note that box was ticked by default on phones, so non-MP4 files now show in lists by default - VLC plays them now. Leftover `.mimeTypeRow` / `#mimeTypeFilter` rules in the CSS match nothing and are harmless.
+- **Native only:** Picker keeps its File Type select and MP4 box for now - say if it should get TYPE too.
+- **Deploy:** the TYPE filter is web-only. The two VLC changes are Swift and need a new IPA; not compiled here (no Xcode).
+
+### native 15.87 — stable: playhead follows scrub while streaming
+<!-- 2026-09-30T20:10Z -->
+- **Asked:** in Native, scrubbing a streamed video updated the timestamp in real time but the playhead on the progress bar lagged behind; phone files were fine. Streaming can stay slow - the playhead should keep up with the finger.
+- **Cause:** the bar's filled part (and the timestamp above it) is only redrawn on `timeupdate`. Mid-scrub the video is paused, and a paused element only fires that when a seek *finishes*. A phone file seeks in milliseconds; a Hetzner stream waits on the network for every seek (slower still while the server is busy uploading), and `scrayScrubSeek` only issues the next seek once the last lands (or its 250 ms watchdog gives up). The top-left timestamp was fed straight from the finger, which is why the two disagreed. Not a regression of the earlier scrub fix - that one was about the *picture* keeping up; the bar was always tied to completed seeks.
+- **Fix (player.js):** `scrayScrubSeek` now paints the bar from the requested position on every `request()` inside a `begin()`/`end()` session, through `window.scrayScrubDisplayTime`, which `updatePermanentProgressBar` and `updateBufferedProgress` (the played/unplayed green split) use in place of `media.currentTime` while it's set. `end()` paints once at the landing point, then clears it so the media drives the bar again. Covers the anywhere-drag, FLS jog and the progress-bar drag. A bare `request()` without `begin()` (desktop bar drag) doesn't touch it, so nothing can be left stuck.
+- **Picture unchanged:** frames still arrive as fast as the stream allows - only the bar no longer waits for them.
+- **Native only so far:** Picker has the same bar/seek code (streams from OneDrive/Hetzner too, with a 700 ms watchdog) - not ported yet, pending Mac's call.
+
 ### picker 15.72 / native 15.86 — test: FLS circles 1.2x and no Xt
 <!-- 2026-09-30T11:30Z -->
 - **Asked:** remove the Xt circle and make all the circles (BM ones included) 1.2 times bigger, moving things so nothing overlaps.

@@ -538,7 +538,12 @@ window.showExcludeTagsModal = showExcludeTagsModal;
    Declared once because it was written out six times, and adding a class meant
    finding all six - miss one and the filter half-works in a way that takes a
    while to notice. */
-window.SCRAY_FACET_CLASSES = ['studio', 'performer', 'stashtag', 'note'];
+window.SCRAY_FACET_CLASSES = ['studio', 'performer', 'stashtag', 'note', 'filetype'];
+// 'filetype' (native 15.88) - the file's extension (mp4, wmv, mkv...). It rides
+// the facet machinery for its cloud (TYPE), pills, excludes and Clear all, but
+// it is NOT one more term in the ANY/ALL tag pass: a file has one type, so it
+// always narrows - AND with everything else - the way the old File Type
+// select and the "Show only MP4" box did. See getFilteredVideos.
 
 window.scrayFacetFilters = window.scrayFacetFilters || {
    studio:    new Set(),
@@ -790,7 +795,8 @@ window.SCRAY_FACET_META = {
    // Bookmark notes (13.110). On the bookmarks page a picked note narrows to
    // the BOOKMARKS carrying it; here it narrows to the VIDEOS that have one,
    // which is the same question asked of a list of files.
-   note:      { label: 'Notes',      pill: 'floating-tag-note'      }
+   note:      { label: 'Notes',      pill: 'floating-tag-note'      },
+   filetype:  { label: 'File types', pill: 'floating-tag-filetype'  }
 };
 
 /**
@@ -977,6 +983,7 @@ window.scrayFacetSet = scrayFacetSet;
  */
 function scrayFacetValues(video, kind) {
    if (kind === 'tag') return Array.isArray(video && video.tags) ? video.tags : [];
+   if (kind === 'filetype') { const t = scrayFileTypeOf(video); return t ? [t] : []; }
    if (kind === 'note') return scrayVideoNotes(video);
    const p = window.scrayStashNames && window.scrayStashNames.parts(video);
    if (!p) return [];
@@ -1013,6 +1020,21 @@ function scrayVideoNotes(video) {
 }
 window.scrayVideoNotes = scrayVideoNotes;
 window.scrayFacetValues = scrayFacetValues;
+
+/**
+ * A file's type for the TYPE filter (native 15.88): its extension, lower-case,
+ * no dot - "mp4", "wmv". From the filename rather than mimeType: that is what
+ * decides whether it plays in the web player or VLC, and a Hetzner row's
+ * mimeType is a guess ("video/mp4" when the server didn't say).
+ */
+function scrayFileTypeOf(video) {
+   const name = String((video && (video.filename || video.name)) || '');
+   const dot = name.lastIndexOf('.');
+   if (dot < 0 || dot === name.length - 1) return '';
+   const ext = name.slice(dot + 1).trim().toLowerCase();
+   return /^[a-z0-9]{1,6}$/.test(ext) ? ext : '';
+}
+window.scrayFileTypeOf = scrayFileTypeOf;
 
 /**
  * Add one term to a class and re-run the filter.
@@ -1412,7 +1434,8 @@ async function showTagCloudModal(kind) {
    // and need exactly one. The cross-app pair only exists where there is an
    // other app to hand to (Native's main view, or Picker inside Native's
    // in-app browser) - a plain desktop browser has neither.
-   const xappTarget = typeof window.scrayCrossAppTarget === 'function' ? window.scrayCrossAppTarget() : null;
+   // No hand-off for file types: Picker has no TYPE class to receive it.
+   const xappTarget = kind !== 'filetype' && typeof window.scrayCrossAppTarget === 'function' ? window.scrayCrossAppTarget() : null;
    const searchable = kind === 'studio' || kind === 'performer';
    const oneLabel = kind === 'studio' ? 'studio' : 'performer';
    let xappFilterBtn = null, xappSearchBtn = null, stashSearchBtn = null, xrow = null;
@@ -1591,7 +1614,9 @@ async function showTagCloudModal(kind) {
 
        // The intersect switch. Global rather than per-class, and offered in
        // every cloud so it is reachable from whichever one happens to be open.
-       mkToggle('Tag intersect', window.scrayTagIntersect, () => {
+       // Not in the TYPE cloud: file types always AND, so the switch
+       // would do nothing there (native 15.88).
+       if (kind !== 'filetype') mkToggle('Tag intersect', window.scrayTagIntersect, () => {
            window.scrayTagIntersect = !window.scrayTagIntersect;
            scrayRefreshFilters();
            renderControls();
@@ -2657,7 +2682,8 @@ window.SCRAY_FACET_CLASSES.forEach(kind => {
 // without opening one. Hidden below two terms: with nothing or one thing
 // selected ANY and ALL return the same rows, so the pill would be advertising
 // a distinction that does not exist yet.
-if (typeof window.scrayTotalFilterTerms === 'function' && window.scrayTotalFilterTerms() > 1) {
+if (typeof window.scrayTotalFilterTerms === 'function'
+    && window.scrayTotalFilterTerms() - (((window.scrayFacetFilters || {}).filetype || {}).size || 0) > 1) {
    const ixPill = document.createElement("span");
    ixPill.className = "floating-tag-pill " +
        (window.scrayTagIntersect ? "floating-tag-intersect" : "floating-tag-intersect-off");
@@ -3278,40 +3304,8 @@ window.showScoreFilterModal = showScoreFilterModal;
 /* =========================================
 Populate MIME Type Filter
 ========================================= */
-async function populateMimeTypeFilter() {
- const videos = await getAllVideos();
- const mimeTypes = new Set();
- 
- videos.forEach(v => {
-   if (v.mimeType) {
-     mimeTypes.add(v.mimeType);
-   }
- });
- 
- const select = $('#mimeTypeFilter');
- select.empty();
- 
- // Sort mime types alphabetically
- Array.from(mimeTypes).sort().forEach(type => {
-   // Create friendly display name
-   const displayName = type.replace('video/', '').toUpperCase();
-   select.append(new Option(`${displayName} (${type})`, type, false, false));
- });
- 
- select.select2({
-   placeholder: "All file types",
-   allowClear: true,
-   dropdownAutoWidth: true,
-   closeOnSelect: false,
-   minimumResultsForSearch: 0
- });
- 
- // Refresh filters when selection changes (replaced, not stacked - 13.180)
- select.off('change.scray').on('change.scray', function() {
-   window.skipSearchScroll = true;
-   filterDisplayedByFilename();
- });
-}
+// File type filter: populateMimeTypeFilter and the #mimeTypeFilter select2
+// retired in native 15.88 - file types are a facet class now (TYPE cloud).
 
 
 function getSizeBytesFromDropdowns(gbId, mbId) {
@@ -3361,7 +3355,7 @@ includeAll = Array.from(window.commonSelectedTags); // unified selection
 const keywordsOn = !!(window.scrayNoteKeywordFilter && window.scrayNoteKeywordFilter.size);
 const facetPicks = window.SCRAY_FACET_CLASSES
    .map(kind => [kind, Array.from((window.scrayFacetFilters || {})[kind] || [])])
-   .filter(pair => pair[1].length > 0 && !(keywordsOn && pair[0] === 'note'));
+   .filter(pair => pair[1].length > 0 && !(keywordsOn && pair[0] === 'note') && pair[0] !== 'filetype');
 
 // Networks (picker 14.8 / native 14.12): a file counts when its studio's
 // Parent is one of them. Part of the studio class, so additive with the rest.
@@ -3419,6 +3413,12 @@ if (includeAll.length > 0 || facetPicks.length > 0 || networkPicks.length > 0) {
 // not one more term to be OR-ed with a studio.
 if (keywordsOn) videos = videos.filter(scrayVideoPassesNoteKeywords);
 
+// File types (native 15.88), always AND: any of the picked types.
+const fileTypePicks = (window.scrayFacetFilters || {}).filetype;
+if (fileTypePicks && fileTypePicks.size) {
+   videos = videos.filter(rec => fileTypePicks.has(scrayFileTypeOf(rec)));
+}
+
 // Filter by exclude tags, if passed
 if (Array.isArray(excludeTags) && excludeTags.length > 0) {
    videos = videos.filter(rec => !(Array.isArray(rec.tags) && rec.tags.some(t => excludeTags.includes(t))));
@@ -3446,6 +3446,7 @@ if (facetExcl.length > 0) {
                const notes = scrayVideoNotes(rec);
                return list.some(val => notes.includes(val));
            }
+           if (kind === 'filetype') return list.includes(scrayFileTypeOf(rec));
            if (!p) return false;   // no StashDB row - nothing to exclude on
            const have = kind === 'studio'    ? (p.studio ? [p.studio] : [])
                       : kind === 'performer' ? (p.performerListAll || p.performerList || [])
@@ -3474,14 +3475,7 @@ videos = videos.filter(rec => {
 });
 }
 
-// MP4-only checkbox filtering
-const mp4Only = document.getElementById("filterMp4Only")?.checked;
-if (mp4Only) {
-videos = videos.filter(v => {
-   const ext = (v.filename || '').split('.').pop().toLowerCase();
-   return ext === 'mp4';
-});
-}
+// MP4-only checkbox retired (native 15.88) - pick MP4 in the TYPE cloud.
 
 // ✅ NEW: Duplicates-only checkbox filtering
 const duplicatesOnly = document.getElementById("filterDuplicatesOnly")?.checked;
@@ -3562,11 +3556,6 @@ if (hetznerState !== "any" && typeof window.scrayIsHetznerVideo === "function") 
  videos = videos.filter(v => !!window.scrayIsHetznerVideo(v) === wantHz);
 }
 
-// ✅ NEW: MIME type filter
-const mimeTypeFilter = $('#mimeTypeFilter').val() || [];
-if (mimeTypeFilter.length > 0) {
-videos = videos.filter(v => v.mimeType && mimeTypeFilter.includes(v.mimeType));
-}
 
 // Score filter (filters by user_score already in IndexedDB)
 if (selectedScoreFilters.size > 0) {
@@ -3882,8 +3871,6 @@ const hetznerOnlyBtn = document.getElementById("hetznerOnlyToggleBtn");
 if (hetznerOnlyBtn) hetznerOnlyBtn.dataset.state = "any";
 if (typeof window.syncHetznerOnlyToggleLabel === "function") window.syncHetznerOnlyToggleLabel();
 
-// ✅ NEW: Reset MIME type filter
-$('#mimeTypeFilter').val(null).trigger('change');
 
 // Reset score filter
 selectedScoreFilters.clear();
@@ -4398,7 +4385,6 @@ if (typeof updatePanelSortButton === 'function') {
 
  await populateTagDropdowns();
  populateSecondsDropdowns();
- await populateMimeTypeFilter();
   updateVideoStats();
 
   // ✅ Auto-show the full list as soon as videos are loaded (same effect as
@@ -4538,18 +4524,7 @@ searchBox.addEventListener("keydown", (e) => {
        setTimeout(scrollToRow, 350);
    }
    searchBox.addEventListener("focus", scrollListIntoViewForFilter);
-   // Default MP4-only checkbox to checked on mobile
-  const mp4Checkbox = document.getElementById("filterMp4Only");
-  if (mp4Checkbox) {
-      if (window.innerWidth <= 768) { // mobile breakpoint
-          mp4Checkbox.checked = true;
-      }
-      // Auto-refresh lists when MP4-only checkbox changes
-      mp4Checkbox.addEventListener("change", () => {
-          filterDisplayedByFilename();
-      });
-  }
-
+ 
   // ✅ NEW: Duplicates filter checkbox
   const duplicatesCheckbox = document.getElementById("filterDuplicatesOnly");
   if (duplicatesCheckbox) {

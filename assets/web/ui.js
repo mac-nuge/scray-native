@@ -2306,7 +2306,7 @@ const dropdowns = [
 // have a bookmark carrying it - the bookmarks page keeps the bookmarks
 // themselves, which is the same modal asked of a different list.
 [['btnAT', 'tag'], ['btnSTU', 'studio'], ['btnPERF', 'performer'], ['btnSTAG', 'stashtag'],
- ['btnNOTE', 'note']]
+ ['btnNOTE', 'note'], ['btnTYPE', 'filetype']]
   .forEach(pair => {
       const btn = document.getElementById(pair[0]);
       // Bound once, whoever gets there first. The bookmarks page wires NOTE

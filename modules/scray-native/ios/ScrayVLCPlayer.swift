@@ -17,13 +17,15 @@ import MobileVLCKit
 //   * tap                show / hide the controls
 //   * double tap         left third -10s, right third +10s, middle play/pause
 //   * drag sideways      scrub (the full width = 3 min, or the whole video
-//                        if shorter), seeks on release
+//                        if shorter) - the picture, slider and time follow
+//                        the finger live (native 15.88), exact seek on release
 //   * drag down          close
 //   * pinch              zoom (1-5x), move it with the pinch, back to 1x
 //                        snaps it straight
 //   * ⟳ button           turn the picture sideways (the app is portrait-
-//                        locked, so this is the FLS-style 90° clockwise turn);
-//                        it starts sideways by itself for a wide video
+//                        locked, so this is the FLS-style 90° clockwise turn).
+//                        Always opens portrait (native 15.88) - it used to
+//                        turn itself for a wide video.
 //   * ⏭ button           close and play the next video in the list
 //   * slider             seek
 //
@@ -82,6 +84,12 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
     // Same meaning as player.js's SCRAY_WATCH_MAX_STEP_S: a bigger jump
     // between two time ticks is a seek, not watching.
     private static let watchMaxStep: Double = 2
+    // ⚙️ Live scrub (native 15.88): at most one seek this often while a finger
+    // drags. The slider and time follow the finger every frame regardless;
+    // this only paces how often VLC is asked for a new picture. Lower = more
+    // pictures on a fast source, but on a slow stream each seek piles onto
+    // the one before.
+    private static let liveSeekInterval: TimeInterval = 0.2
 
     private let url: URL
     private let titleText: String
@@ -114,8 +122,7 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
     private var guideLeading: NSLayoutConstraint!
     private var guideTrailing: NSLayoutConstraint!
 
-    private var landscape = false
-    private var orientationDecided = false     // auto-turn once, or when tapped
+    private var landscape = false               // only ever turned by ⟳
     private var controlsVisible = true
     private var hideTimer: Timer?
     private var hintTimer: Timer?
@@ -126,6 +133,11 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
     private var panMode: PanMode = .idle
     private var scrubFrom: Double = 0
     private var scrubTarget: Double?
+
+    // Live scrub pacing - see liveSeekInterval.
+    private var pendingLiveSeek: Double?
+    private var lastLiveSeekAt: CFTimeInterval = 0
+    private var liveSeekTimer: Timer?
 
     private var zoom: CGFloat = 1
     private var zoomOffset: CGPoint = .zero
@@ -471,6 +483,46 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         updateTimeUI(at: target)
     }
 
+    // MARK: - Live scrub (native 15.88)
+    // A drag used to move only the slider and time and seek once on release,
+    // so the picture sat still until you let go. Now the picture follows too:
+    // the latest finger position is sent to VLC at most every
+    // liveSeekInterval, and release still does one exact seek.
+
+    private func liveSeek(_ seconds: Double) {
+        pendingLiveSeek = seconds
+        let wait = Self.liveSeekInterval - (CACurrentMediaTime() - lastLiveSeekAt)
+        if wait <= 0 {
+            fireLiveSeek()
+        } else if liveSeekTimer == nil {
+            liveSeekTimer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak self] _ in
+                self?.liveSeekTimer = nil
+                self?.fireLiveSeek()
+            }
+        }
+    }
+
+    private func fireLiveSeek() {
+        guard let t = pendingLiveSeek else { return }
+        pendingLiveSeek = nil
+        lastLiveSeekAt = CACurrentMediaTime()
+        if ended {
+            // seek(to:) knows how to restart a finished video.
+            seek(to: t)
+            return
+        }
+        var target = max(0, t)
+        if durationSec > 0 { target = min(target, max(0, durationSec - 0.5)) }
+        player.time = VLCTime(int: Int32(target * 1000))
+        lastTimeSec = nil
+    }
+
+    private func cancelLiveSeek() {
+        liveSeekTimer?.invalidate()
+        liveSeekTimer = nil
+        pendingLiveSeek = nil
+    }
+
     private func togglePlay() {
         if ended {
             ended = false
@@ -503,7 +555,6 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
     @objc private func nextTapped() { finish(next: true) }
 
     @objc private func rotateTapped() {
-        orientationDecided = true
         setLandscape(!landscape, animated: true)
         showControls()
     }
@@ -520,12 +571,18 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
 
     @objc private func sliderMoved() {
         guard durationSec > 0 else { return }
-        timeLabel.text = Self.fmt(Double(slider.value) * durationSec)
+        let target = Double(slider.value) * durationSec
+        timeLabel.text = Self.fmt(target)
+        flashHint("\(Self.fmt(target)) / \(Self.fmt(durationSec))", stay: true)
+        liveSeek(target)
     }
 
     @objc private func sliderUp() {
         sliderDragging = false
+        cancelLiveSeek()
         if durationSec > 0 { seek(to: Double(slider.value) * durationSec) }
+        // Fade the drag's hint out - a plain tap on the slider never showed one.
+        if hintLabel.alpha > 0 { flashHint(hintLabel.text ?? "") }
         showControls()
     }
 
@@ -585,6 +642,7 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
                 flashHint("\(Self.fmt(target)) / \(Self.fmt(durationSec))\n\(sign)\(Self.fmt(abs(delta)))", stay: true)
                 timeLabel.text = Self.fmt(target)
                 if durationSec > 0 { slider.value = Float(target / durationSec) }
+                liveSeek(target)
             case .dismiss:
                 let pull = max(0, t.y)
                 stage.alpha = 1 - min(pull / 500, 0.5)
@@ -594,7 +652,12 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         case .ended, .cancelled, .failed:
             switch panMode {
             case .scrub:
+                cancelLiveSeek()
+                // Released: one exact seek where the finger left off.
+                // Cancelled: back to where the drag started, since the live
+                // seeks have already moved the picture away from it.
                 if g.state == .ended, let target = scrubTarget { seek(to: target) }
+                else { seek(to: scrubFrom) }
                 scrubTarget = nil
                 flashHint(hintLabel.text ?? "")
                 showControls()
@@ -705,16 +768,12 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         }
         lastTimeSec = now
 
-        if scrubTarget == nil { updateTimeUI(at: now) }
+        // Mid-drag the slider and time belong to the finger - VLC's ticks
+        // from the live seeks would otherwise pull them back and forth.
+        if scrubTarget == nil && !sliderDragging { updateTimeUI(at: now) }
 
-        // Wide picture: turn sideways by itself, once.
-        if !orientationDecided {
-            let vs = player.videoSize
-            if vs.width > 0 && vs.height > 0 {
-                orientationDecided = true
-                setLandscape(vs.width > vs.height, animated: true)
-            }
-        }
+        // No auto-turn for a wide picture any more (native 15.88): it always
+        // opens portrait, and ⟳ turns it.
     }
 
     // MARK: - Closing
@@ -724,6 +783,7 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         onClose = nil
         hideTimer?.invalidate()
         hintTimer?.invalidate()
+        cancelLiveSeek()
         NotificationCenter.default.removeObserver(self)
         let result: [String: Any] = [
             "position": currentSec,

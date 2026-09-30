@@ -4213,6 +4213,24 @@ window.scrayScrubSeek = (function () {
     let watchdog = null;
     let resumeOnEnd = false;
     let boundEl = null;
+    // native 15.87: true between begin() and end(). While it is, the progress
+    // bar is drawn from the finger, not from the media element.
+    let sessionActive = false;
+
+    // native 15.87: the bar's playhead only redrew on 'timeupdate', and a
+    // paused element fires that when a seek FINISHES. On a phone file that
+    // is a few ms; streamed from Hetzner every seek waits on the network
+    // (slower still while the server is uploading), so the timestamp
+    // followed the finger but the playhead trailed behind it. Paint the bar
+    // straight from the requested position instead - the picture still
+    // lands as fast as the source allows.
+    const paintBar = (seconds) => {
+        window.scrayScrubDisplayTime = seconds;
+        try {
+            if (typeof window.updatePermanentProgressBar === 'function') window.updatePermanentProgressBar();
+            if (typeof window.updateBufferedProgress === 'function') window.updateBufferedProgress();
+        } catch (e) {}
+    };
 
     const media = () => (window.plyrPlayer && window.plyrPlayer.media) || null;
 
@@ -4297,6 +4315,7 @@ window.scrayScrubSeek = (function () {
             // Only carried over while the player is actually paused, so a
             // leaked flag can't resume something the user stopped by hand.
             resumeOnEnd = resumeOnEnd && !!(window.plyrPlayer && window.plyrPlayer.paused);
+            sessionActive = true;
             if (!SCRUB_PAUSE_WHILE_DRAGGING) return;
             try {
                 if (window.plyrPlayer && !window.plyrPlayer.paused) {
@@ -4309,6 +4328,9 @@ window.scrayScrubSeek = (function () {
             if (typeof seconds !== 'number' || !isFinite(seconds)) return;
             target = seconds;
             lastRequested = seconds;
+            // Only inside a begin()/end() session - a bare request() (desktop
+            // bar drag) has no end() to hand the bar back to the media.
+            if (sessionActive) paintBar(seconds);
             pump();
         },
         // Safe to call twice, and safe to call without a matching begin().
@@ -4332,6 +4354,13 @@ window.scrayScrubSeek = (function () {
                     window.plyrPlayer.currentTime = landOn;
                 }
             } catch (e) {}
+            // Hand the bar back to the media element, drawn once at the
+            // landing point so it doesn't wait on the final seek either.
+            if (sessionActive) {
+                sessionActive = false;
+                if (typeof landOn === 'number' && isFinite(landOn)) paintBar(landOn);
+            }
+            window.scrayScrubDisplayTime = null;
             if (resumeOnEnd) {
                 resumeOnEnd = false;
                 try {
@@ -6885,7 +6914,9 @@ if (!media || !media.buffered || !duration || isNaN(duration) || duration <= 0) 
 
 const buffered = media.buffered;
 let totalBufferedSeconds = 0;
-const playedPercent = Math.max(0, Math.min(100, ((media.currentTime || 0) / duration) * 100));
+// native 15.87: mid-scrub the split follows the finger too.
+const splitAt = (window.scrayScrubDisplayTime != null) ? window.scrayScrubDisplayTime : (media.currentTime || 0);
+const playedPercent = Math.max(0, Math.min(100, (splitAt / duration) * 100));
 
 for (let i = 0; i < buffered.length; i++) {
     const start = buffered.start(i);
@@ -7793,7 +7824,9 @@ window.renderBookmarkMarkers = renderBookmarkMarkers;
 // Update permanent progress bar
 let _lastLoggedDuration = null;
 function updatePermanentProgressBar() {
-const current = window.plyrPlayer.currentTime;
+// native 15.87: mid-scrub the finger's position, not the media's - see
+// paintBar in scrayScrubSeek.
+const current = (window.scrayScrubDisplayTime != null) ? window.scrayScrubDisplayTime : window.plyrPlayer.currentTime;
 let duration = window.plyrPlayer.duration;
 const rawDuration = duration;
 if ((!duration || isNaN(duration) || duration <= 0) && window.currentPlayingVideo?.durationMs) {
@@ -7875,6 +7908,7 @@ if (timestamp) timestamp.style.opacity = '1';
 });
 
 // Update on time change
+window.updatePermanentProgressBar = updatePermanentProgressBar;   // native 15.87 - scrayScrubSeek paints mid-scrub
 window.plyrPlayer.on('timeupdate', updatePermanentProgressBar);
 
 // =========================================================

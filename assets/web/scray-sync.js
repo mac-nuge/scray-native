@@ -474,9 +474,11 @@ async function drainQuietly() {
   try {
     const { conflicts, held } = await pushOutbox();
     if (held && window.scrayDbMode) window.scrayDbMode.resolveHeld();
-    if (conflicts.length && typeof window.scrayShowConflicts === "function") {
-      window.scrayShowConflicts(conflicts);
-    }
+    // native 15.78: no conflict pop-up on the quiet drain. This runs straight
+    // after every online score/edit, where the warning was just noise. The
+    // server has already applied your side and sync_log keeps the old value;
+    // the manual/reconnect sync (scray-sync-ui.js) still shows the report.
+    if (conflicts.length) console.log("[sync] quiet drain overwrote", conflicts.length, "field(s):", conflicts);
     window.dispatchEvent(new CustomEvent("scray-sync-done", { detail: { quiet: true } }));
   } catch (err) {
     console.log("[sync] deferred — will retry on next change or reconnect:", err.message);

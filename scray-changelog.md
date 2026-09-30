@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.78 — test: no overwrite warning after scoring
+<!-- 2026-09-30T09:15Z -->
+- **Asked:** the ⚠️ conflict(s) / Overwritten pop-up after scoring online was excessive - it was really meant for offline changes landing on top of changes made elsewhere.
+- **Change:** the quiet push that runs straight after each score or edit (`drainQuietly` in scray-sync.js) no longer opens the conflict report; any overwritten fields are just logged to the console. The server still applies your side and `sync_log` still keeps the old value.
+- **Kept:** the manual / reconnect sync (Sync now, coming back online, returning to the app with queued changes) still shows the report.
+- **Native only:** Picker's scray-sync.js has the same pop-up, left as is for now.
+
 ### native 15.77 — test: VLC player for other formats
 <!-- 2026-09-29T20:48Z -->
 - **Asked:** make Native play the formats in the library that iOS can't - .wmv, .avi, .flv, .mkv, .mpg/.mpeg, .rm, .asf - with simple gestures, kept light.

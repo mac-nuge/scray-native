@@ -7716,6 +7716,9 @@ window.plyrPlayer.on('canplay', () => window.scrayApplyPendingStartAt?.('canplay
 // available while the video is actually paused, so the paused state is
 // mirrored onto the body for CSS to key off. Nothing else's visibility
 // rules are touched - every other element keeps the rules it already had.
+// native 15.79: style.css no longer hides the circles on this class - they follow
+// the controls/title (.plyr--hide-controls) now. The class is kept for anything
+// else that keys off it.
 function scraySyncPausedClass() {
     const paused = !window.plyrPlayer || !!window.plyrPlayer.paused;
     document.body.classList.toggle('scray-paused', paused);

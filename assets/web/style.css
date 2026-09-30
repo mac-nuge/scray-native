@@ -2252,12 +2252,15 @@ pointer-events: auto !important;
 transform: none !important;
 }
 
-/* .plyr-frame-step-group deliberately dropped from this list: it is a pause
-   menu now, gated on body.scray-paused, and forcing it visible here would
-   also out-specify that gate. */
+/* native 15.79: the circles follow the controls and title again (they used to be a
+   pause-only menu), so they are held up with them while a video loads. */
+body.scray-video-loading .plyr--hide-controls .plyr-frame-step-group,
 body.scray-video-loading .plyr--hide-controls .fls-video-title,
 body.scray-video-loading .plyr--hide-controls .fls-filter-pill {
 opacity: 1 !important;
+pointer-events: auto !important;
+}
+body.scray-video-loading .plyr--hide-controls .plyr-frame-step-group .plyr-frame-step {
 pointer-events: auto !important;
 }
 
@@ -2273,7 +2276,6 @@ pointer-events: none;
    without actually switching them off. These reach the buttons directly.
    Any new state that hides the group needs a line here too; pauseMenuTappable()
    in player.js is the backstop for ones that get missed. */
-body:not(.scray-paused) .plyr-frame-step-group .plyr-frame-step,
 body.scray-scrubbing .plyr-frame-step-group .plyr-frame-step,
 .plyr--hide-controls .plyr-frame-step-group .plyr-frame-step {
 pointer-events: none !important;
@@ -2348,11 +2350,11 @@ bottom: 96px !important;
 /* The orange play/pause circle is gone - the bookmark circle took its slot,
    and every circle now shares the same neutral tint from .plyr-frame-step.
 
-   PAUSE MENU GATE: the six circles exist only while the video is paused.
-   body.scray-paused is maintained by scraySyncPausedClass() in player.js.
-   Everything else keeps the visibility rules it already had - the display:none
-   rules above (desktop, mini-player, MPFS) still win over this, as they should. */
-body:not(.scray-paused) .plyr-frame-step-group,
+   SCRUB GATE (native 15.79): the circles show and hide with the player controls and
+   title (.plyr--hide-controls, above) - playing or paused - and were only
+   paused-only before. They still get out of the way during a scrub.
+   body.scray-scrubbing is maintained in player.js. The display:none rules
+   above still win over this, as they should. */
 body.scray-scrubbing .plyr-frame-step-group {
 opacity: 0 !important;
 pointer-events: none !important;

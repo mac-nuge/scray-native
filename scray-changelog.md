@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.65 / native 15.79 — test: circle buttons follow controls and title
+<!-- 2026-09-30T09:45Z -->
+- **Asked:** the circle buttons (Xn/XT, S, H, B, BM, ★, RN, −/+) only showed while the video was paused - have them show and hide with the player controls and title instead.
+- **Change (style.css):** dropped the paused gate (`body:not(.scray-paused)`) on `.plyr-frame-step-group` and its buttons. The circles now follow `.plyr--hide-controls` like the title: up while the controls are up (playing or paused), faded and untappable when Plyr hides the controls. They're also held up with the controls and title while a video loads. They still get out of the way during a scrub.
+- **player.js:** comment only - `scray-paused` is still set, nothing hides the circles on it now.
+- Same change in both apps.
+
 ### native 15.78 — test: no overwrite warning after scoring
 <!-- 2026-09-30T09:15Z -->
 - **Asked:** the ⚠️ conflict(s) / Overwritten pop-up after scoring online was excessive - it was really meant for offline changes landing on top of changes made elsewhere.

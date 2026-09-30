@@ -5921,6 +5921,14 @@ pointer-events: none;
 transition: width 0.1s linear;
 }
 
+/* native 15.80: loaded AND already played (left of the playhead) - faint light
+   green, so the darker green only marks what's loaded ahead of you.
+   Solid, like the green above, so the white played fill under it doesn't
+   change it. ⚙️ shade to taste. */
+.permanent-progress-buffered.is-played {
+background: rgb(178, 222, 184);
+}
+
 .permanent-progress-buffered-label {
 color: #fff;
 font-size: 0.7rem;

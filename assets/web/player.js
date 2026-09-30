@@ -6652,6 +6652,7 @@ if (!media || !media.buffered || !duration || isNaN(duration) || duration <= 0) 
 
 const buffered = media.buffered;
 let totalBufferedSeconds = 0;
+const playedPercent = Math.max(0, Math.min(100, ((media.currentTime || 0) / duration) * 100));
 
 for (let i = 0; i < buffered.length; i++) {
     const start = buffered.start(i);
@@ -6663,11 +6664,19 @@ for (let i = 0; i < buffered.length; i++) {
     const widthPercent = endPercent - startPercent;
     if (widthPercent <= 0) continue;
 
-    const seg = document.createElement('div');
-    seg.className = 'permanent-progress-buffered';
-    seg.style.left = `${startPercent}%`;
-    seg.style.width = `${widthPercent}%`;
-    bar.appendChild(seg);
+    // native 15.80: split at the playhead - loaded and already played is a faint
+    // light green (.is-played), loaded and still ahead keeps the darker green.
+    // timeupdate redraws this, so the split follows playback.
+    const addSeg = (fromPct, toPct, played) => {
+        if (toPct - fromPct <= 0) return;
+        const seg = document.createElement('div');
+        seg.className = 'permanent-progress-buffered' + (played ? ' is-played' : '');
+        seg.style.left = `${fromPct}%`;
+        seg.style.width = `${toPct - fromPct}%`;
+        bar.appendChild(seg);
+    };
+    addSeg(startPercent, Math.min(endPercent, playedPercent), true);
+    addSeg(Math.max(startPercent, playedPercent), endPercent, false);
 }
 
 if (label) {

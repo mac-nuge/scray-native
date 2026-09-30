@@ -4,6 +4,12 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.66 / native 15.80 — test: faint green for loaded part behind playhead
+<!-- 2026-09-30T09:52Z -->
+- **Asked:** the loaded (buffered) part of the progress bar was the same green before and after the playhead - make the part before the playhead a faint light green.
+- **Change:** `updateBufferedProgress()` (player.js) now splits each loaded range at the playhead: the played side gets `.is-played` (faint light green, rgb(178, 222, 184), in style.css), the side still ahead keeps the darker green. It redraws on every timeupdate, so the split moves with playback and after a seek. The % buffered label is unchanged.
+- Same change in both apps.
+
 ### picker 15.65 / native 15.79 — test: circle buttons follow controls and title
 <!-- 2026-09-30T09:45Z -->
 - **Asked:** the circle buttons (Xn/XT, S, H, B, BM, ★, RN, −/+) only showed while the video was paused - have them show and hide with the player controls and title instead.

@@ -14,7 +14,8 @@ import MobileVLCKit
 // action vlcPlay). It deliberately stays small - it is NOT the web player:
 // no FLS pause menu, bookmarks, markers or dock. What it does have:
 //
-//   * tap                show / hide the controls
+//   * tap                show / hide the controls (native 15.91: VLC's own
+//                        tap recogniser used to swallow it)
 //   * double tap         left third -10s, right third +10s, middle play/pause
 //   * drag sideways      scrub (the full width = 3 min, or the whole video
 //                        if shorter) - the picture, slider and time follow
@@ -121,6 +122,12 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
     private var guideBottom: NSLayoutConstraint!
     private var guideLeading: NSLayoutConstraint!
     private var guideTrailing: NSLayoutConstraint!
+
+    // The hint sits in the centre for double-tap feedback (±10s, ▶︎ / ❚❚) and
+    // in the top right corner, under the top bar, for the scrub / slider
+    // timestamp (native 15.91) so it doesn't cover the picture.
+    private var hintCentre: [NSLayoutConstraint] = []
+    private var hintCorner: [NSLayoutConstraint] = []
 
     private var landscape = false               // only ever turned by ⟳
     private var controlsVisible = true
@@ -331,12 +338,20 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
 
             spinner.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: stage.centerYAnchor),
-            hintLabel.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
-            hintLabel.centerYAnchor.constraint(equalTo: stage.centerYAnchor),
             errorLabel.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
             errorLabel.centerYAnchor.constraint(equalTo: stage.centerYAnchor),
             errorLabel.widthAnchor.constraint(lessThanOrEqualTo: stage.widthAnchor, constant: -48),
         ])
+
+        hintCentre = [
+            hintLabel.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+            hintLabel.centerYAnchor.constraint(equalTo: stage.centerYAnchor),
+        ]
+        hintCorner = [
+            hintLabel.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 8),
+            hintLabel.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -8),
+        ]
+        NSLayoutConstraint.activate(hintCentre)
     }
 
     private func buildGestures() {
@@ -358,6 +373,16 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
         pinch.delegate = self
         stage.addGestureRecognizer(pinch)
+    }
+
+    // VLCKit's iOS video output adds its own single-tap recogniser to the
+    // drawable's superview - the stage. It wins every single tap before ours
+    // (ours waits for the double tap to fail), so a tap never showed the
+    // controls; only a drag did (native 15.91). Ours now run alongside any
+    // recogniser that isn't ours; ours still exclude each other as before.
+    func gestureRecognizer(_ g: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        return other.delegate !== self
     }
 
     // Buttons and the slider keep their own touches.
@@ -445,8 +470,11 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         UIView.animate(withDuration: 0.25) { self.overlay.alpha = 0 }
     }
 
-    private func flashHint(_ text: String, stay: Bool = false) {
+    private func flashHint(_ text: String, stay: Bool = false, corner: Bool = false) {
         hintTimer?.invalidate()
+        NSLayoutConstraint.deactivate(corner ? hintCentre : hintCorner)
+        NSLayoutConstraint.activate(corner ? hintCorner : hintCentre)
+        hintLabel.textAlignment = corner ? .right : .center
         hintLabel.text = text
         hintLabel.alpha = 1
         guard !stay else { return }
@@ -573,7 +601,7 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         guard durationSec > 0 else { return }
         let target = Double(slider.value) * durationSec
         timeLabel.text = Self.fmt(target)
-        flashHint("\(Self.fmt(target)) / \(Self.fmt(durationSec))", stay: true)
+        flashHint("\(Self.fmt(target)) / \(Self.fmt(durationSec))", stay: true, corner: true)
         liveSeek(target)
     }
 
@@ -582,7 +610,7 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         cancelLiveSeek()
         if durationSec > 0 { seek(to: Double(slider.value) * durationSec) }
         // Fade the drag's hint out - a plain tap on the slider never showed one.
-        if hintLabel.alpha > 0 { flashHint(hintLabel.text ?? "") }
+        if hintLabel.alpha > 0 { flashHint(hintLabel.text ?? "", corner: true) }
         showControls()
     }
 
@@ -639,7 +667,7 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
                 scrubTarget = target
                 let delta = target - scrubFrom
                 let sign = delta < 0 ? "−" : "+"
-                flashHint("\(Self.fmt(target)) / \(Self.fmt(durationSec))\n\(sign)\(Self.fmt(abs(delta)))", stay: true)
+                flashHint("\(Self.fmt(target)) / \(Self.fmt(durationSec))\n\(sign)\(Self.fmt(abs(delta)))", stay: true, corner: true)
                 timeLabel.text = Self.fmt(target)
                 if durationSec > 0 { slider.value = Float(target / durationSec) }
                 liveSeek(target)
@@ -659,7 +687,7 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
                 if g.state == .ended, let target = scrubTarget { seek(to: target) }
                 else { seek(to: scrubFrom) }
                 scrubTarget = nil
-                flashHint(hintLabel.text ?? "")
+                flashHint(hintLabel.text ?? "", corner: true)
                 showControls()
             case .dismiss:
                 let v = g.velocity(in: stage)

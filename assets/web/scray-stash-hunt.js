@@ -1306,10 +1306,11 @@
     const v = r.v;
     const dir = v.__huntFolder || folderOf(v);
     const file = '<div class="shb-file">' + (dir ? '<span class="sh-dir">' + esc(dir) + '/</span>' : '') + esc(v.filename || '') + '</div>';
-    const tickable = (r.st === 'found' || r.st === 'fail') && !(bulk && bulk.submitting);
-    const renPick = !!(bulk && bulk.ask === 'pick' && r.st === 'done' && r.sug && !r.rst);
+    const tickable = (r.st === 'found' || r.st === 'fail') && !(bulk && (bulk.submitting || preAsk(bulk)));
+    const renPick = !!(bulk && ((bulk.ask === 'pick' && r.st === 'done' && r.sug && !r.rst) ||
+                                (bulk.ask === 'prepick' && inPending(bulk, r) && r.sug)));
     let body = '';
-    if (r.card && (r.st === 'found' || r.st === 'sub' || r.st === 'done' || r.st === 'fail')) {
+    if (r.card && (r.st === 'found' || r.st === 'sub' || r.st === 'done' || r.st === 'fail' || r.st === 'q')) {
       const c = r.card;
       const conf = Number(c.confidence);
       const confHtml = c.confidence != null && Number.isFinite(conf)
@@ -1341,8 +1342,13 @@
     }
     // After matching (picker 15.38 / native 15.47): the suggested name.
     let ren = '';
-    if (r.st === 'done') {
-      if (r.rst === 'renamed') ren = '<span class="shb-ren ok">✎ Renamed to ' + esc(r.newName || '') + '</span>';
+    if (bulk && preAsk(bulk) && inPending(bulk, r) && r.sug) {
+      // Before handing over (picker 15.76 / native 15.96): the name it would get.
+      ren = '<span class="shb-ren"' + (bulk.ask === 'prepick' && !r.ren ? ' style="opacity:.45;text-decoration:line-through"' : '') +
+            '>✎ → ' + esc(r.sug) + '</span>';
+    } else if (r.st === 'done' || r.st === 'q') {
+      if (r.rst === 'q') ren = '<span class="shb-ren">✎ Then renamed to ' + esc(r.newName || r.sug || '') + '</span>';
+      else if (r.rst === 'renamed') ren = '<span class="shb-ren ok">✎ Renamed to ' + esc(r.newName || '') + '</span>';
       else if (r.rst === 'renaming') ren = '<span class="shb-ren">✎ Renaming…</span>';
       else if (r.rst === 'rfail') ren = '<span class="shb-ren bad">✎ Rename failed' + (r.rnote ? ': ' + esc(r.rnote) : '') + '</span>';
       else if (r.sug) ren = '<span class="shb-ren">✎ → ' + esc(r.sug) + '</span>';
@@ -1355,6 +1361,7 @@
       err: '<span class="shb-st bad">⚠️ ' + esc(r.note) + '</span>',
       fpmatch: '<span class="shb-st good">✅ Matched by fingerprint' + (r.scene && r.scene.title ? ': ' + esc(r.scene.title) : '') + '</span>',
       sub: '<span class="shb-st">Submitting…</span>',
+      q: '<span class="shb-st">⏳ Queued on the server - it carries on if you close this</span>',
       done: '<span class="shb-st good">✅ Matched' + (r.note ? ' - ' + esc(r.note) : '') + '</span>',
       fail: '<span class="shb-st bad">⚠️ Couldn’t submit: ' + esc(r.note) + '</span>',
       found: ''
@@ -1363,7 +1370,7 @@
       '<span class="shb-tick">' + (renPick ? (r.ren ? '☑' : '☐') : tickable ? (r.tick ? '☑' : '☐') : (r.st === 'done' || r.st === 'fpmatch' ? '✅' : '')) + '</span>' +
       '<div class="shb-main">' + file + body + status + ren + '</div>' +
       '<div class="shb-btns">' +
-        (r.st !== 'done' && r.st !== 'fpmatch' && r.st !== 'sub'
+        (r.st !== 'done' && r.st !== 'fpmatch' && r.st !== 'sub' && r.st !== 'q'
           ? '<button type="button" class="shb-hunt" data-hunt="' + i + '" title="Its full Stash details - then back to the bulk check">🔎</button>' : '') +
         '<button type="button" class="shb-hunt shb-pv" data-pv="' + i + '" title="Preview in the player">▶</button>' +
       '</div>' +
@@ -1398,13 +1405,13 @@
       const hi = bulkHigh(B);
       const all = hi.length && hi.every(r => r.tick);
       t90.textContent = (all ? '☐ Untick ' : '☑ Tick ') + bulkMin() + '+ (' + hi.length + ')';
-      t90.disabled = !hi.length || B.submitting || B.renaming;
+      t90.disabled = !hi.length || B.submitting || B.renaming || preAsk(B);
     }
     const go = sheet.querySelector('[data-b="match"]');
     const P = B.prog;
     const pct = P && P.total ? Math.round(100 * P.done / P.total) : 0;
     go.textContent = B.submitting
-      ? (P && P.finishing ? 'Finishing…' : 'Matching… ' + pct + '%')
+      ? (P && P.what === 'queue' ? 'Handing over…' : P && P.finishing ? 'Finishing…' : 'Matching… ' + pct + '%')
       : '✓ Match ticked' + (ticked ? ' (' + ticked + ')' : '');
     // How far Match ticked / the renaming has got (picker 15.51 / native 15.62).
     const bar = sheet.querySelector('.shb-prog');
@@ -1412,19 +1419,41 @@
       bar.hidden = !P;
       if (P) {
         bar.innerHTML = '<div class="shb-prog-bar"><i style="width:' + (P.finishing ? 100 : pct) + '%"></i></div>' +
-          '<div class="shb-prog-t">' + (P.what === 'rename' ? '✎ Renaming' : '✓ Matching') + ' · <b>' + (P.finishing ? 100 : pct) + '%</b> · ' +
+          '<div class="shb-prog-t">' + (P.what === 'rename' ? '✎ Renaming' : P.what === 'server' ? '🎯 On the server' : P.what === 'queue' ? '🎯 Handing over' : '✓ Matching') +
+            ' · <b>' + (P.finishing ? 100 : pct) + '%</b> · ' +
             P.done + ' of ' + P.total + (P.fail ? ' · <span class="bad">' + P.fail + ' failed</span>' : '') +
             (P.finishing ? ' · updating names…' : '') + '</div>';
       }
     }
-    go.disabled = !ticked || B.submitting || B.renaming;
+    go.disabled = !ticked || B.submitting || B.renaming || preAsk(B);
     sheet.querySelector('[data-b="close"]').disabled = B.submitting || B.renaming;
     const again = sheet.querySelector('[data-b="again"]');
     if (again) again.disabled = !!(B.running || B.submitting || B.renaming);
     // Rename the ones just matched? (picker 15.38 / native 15.47)
     const ask = sheet.querySelector('.shb-ask');
     const can = B.rows.filter(r => r.st === 'done' && r.sug && !r.rst);
-    if (!B.ask || (!can.length && !B.renaming)) {
+    if (preAsk(B)) {
+      // Asked BEFORE matching now (picker 15.76 / native 15.96): the match and
+      // the rename go to the server together, so the names are settled first -
+      // from the scene each file is being matched to.
+      const pend = B.pending || [];
+      const named = pend.filter(r => r.sug);
+      ask.hidden = false;
+      if (B.ask === 'prepick') {
+        const n = named.filter(r => r.ren).length;
+        ask.innerHTML = '<span>Tap the ones to rename as well.</span>' +
+          '<button type="button" data-b="qback">Back</button>' +
+          '<button type="button" data-b="qgo" class="go">✓ Match ' + pend.length + (n ? ' · ✎ rename ' + n : '') + '</button>';
+      } else {
+        ask.innerHTML = '<span>Match ' + plural(pend.length, 'file') + ' - and rename ' +
+            (named.length === pend.length ? (pend.length === 1 ? 'it' : 'them') : named.length + ' of them') +
+            ' to ' + (named.length === 1 ? 'its' : 'their') + ' suggested name' + (named.length === 1 ? '' : 's') + '?</span>' +
+          '<button type="button" data-b="qall" class="go">All</button>' +
+          '<button type="button" data-b="qpick">Choose</button>' +
+          '<button type="button" data-b="qnone">Match only</button>' +
+          '<button type="button" data-b="qback">Back</button>';
+      }
+    } else if (!B.ask || (!can.length && !B.renaming)) {
       ask.hidden = true;
       if (B.ask && !B.renaming) B.ask = null;
     } else if (B.renaming) {
@@ -1517,11 +1546,144 @@
     if (S) paintBar();
   }
 
+  // ---- Match + rename on the server (picker 15.76 / native 15.96) -----------
+  // Match ticked hands the files to api.php's hunt job (scray-hunt-jobs.js
+  // shows its progress, minimised to a pill), so it carries on with the sheet
+  // closed and the app closed. The names are worked out first, from the scene
+  // each file is being matched to (scrayCleanNameSuggestionFor - the same rule
+  // and the same name as after the match), and the rename question is asked
+  // before handing over. A server without hunt jobs gets the old way below.
+  const preAsk = (B) => !!B && (B.ask === 'pre' || B.ask === 'prepick');
+  const inPending = (B, r) => !!(B && B.pending && B.pending.includes(r));
+
+  async function queueBulk(list, renames) {
+    const B = bulk;
+    if (!B || B.submitting) return;
+    B.ask = null;
+    B.submitting = true;
+    B.prog = { what: 'queue', done: 0, total: list.length, fail: 0 };
+    B.rows.forEach(r => paintBulkRow(r));
+    const local = v => (typeof window.isLocalVideo === 'function' ? !!window.isLocalVideo(v) : v && v.driveId === 'local');
+    const items = [];
+    for (const r of list) {
+      const v = r.v;
+      const ren = renames.includes(r) && !!r.sug;
+      const phone = local(v);
+      let also = [];
+      // Native: the box copy linked to a phone file is renamed with it, as the
+      // rename modal does (native 15.11).
+      if (ren && phone && typeof window.scrayHetznerLinkedCopies === 'function') {
+        try { also = (await window.scrayHetznerLinkedCopies(v)).map(h => ({ video_key: keyOf(h), local_id: h.oneDriveId || null })); } catch (e) { also = []; }
+      }
+      items.push({ video_key: r.key, filename: v.filename || '', stash_id: r.card.stash_id,
+                   new_name: ren ? r.sug : null, local_id: v.oneDriveId || v.idFromAPI || null, phone, also });
+    }
+    let job = null;
+    try {
+      job = await window.scrayHuntJobs.start(items);
+    } catch (err) {
+      B.submitting = false;
+      B.prog = null;
+      if (err && err.unsupported) {
+        // An older api.php: match here, one at a time, as before.
+        B.noServer = true;
+        B.pending = null;
+        paintBulk();
+        return submitBulk();
+      }
+      toast('⚠️ Couldn’t hand the files to the server: ' + ((err && err.message) || err), '#b8860b');
+      B.pending = null;
+      B.rows.forEach(r => paintBulkRow(r));
+      return;
+    }
+    if (bulk !== B) return;
+    B.jobs = B.jobs || new Set();
+    B.jobs.add(job.job_id);
+    list.forEach((r, i) => {
+      r.job = job.job_id; r.jobIdx = i;
+      r.st = 'q'; r.tick = false; r.note = '';
+      r.rst = renames.includes(r) && r.sug ? 'q' : null;
+      r.newName = r.rst ? r.sug : '';
+      r.ren = false;
+    });
+    B.pending = null;
+    B.submitting = false;
+    B.prog = { what: 'server', done: 0, total: list.length, fail: 0 };
+    B.rows.forEach(r => paintBulkRow(r));
+    paintBulk();
+    if (S) paintBar();
+    toast('🎯 ' + plural(list.length, 'file') + ' handed to the server - close this whenever you like');
+  }
+
+  /** The hunt job's answers, onto this sheet's rows (scray-hunt-jobs.js sends them). */
+  function onHuntJobs(e) {
+    const B = bulk;
+    if (!B || !B.jobs || !B.jobs.size) return;
+    const jobs = ((e && e.detail && e.detail.jobs) || []).filter(j => B.jobs.has(j.job_id));
+    if (!jobs.length) return;
+    let total = 0, done = 0, fail = 0, liveAny = false;
+    for (const j of jobs) {
+      if (j.state === 'queued' || j.state === 'running') liveAny = true;
+      for (const it of j.items || []) {
+        const r = B.rows.find(x => x.job === j.job_id && x.jobIdx === it.idx);
+        if (!r) continue;
+        total++;
+        const was = r.st + '|' + r.rst;
+        if (it.match_st === 'done' && r.st !== 'done') {
+          r.st = 'done';
+          r.note = it.note || '';
+          tookMatch(r.v, r.key, cardScene(r.card), 'bulk');
+        } else if (it.match_st === 'failed') {
+          r.st = 'fail'; r.note = it.note || 'failed';
+        } else if (it.match_st === 'cancelled') {
+          r.st = 'found'; r.rst = null; r.job = null;
+        }
+        if (it.rename_st === 'done' && r.rst !== 'renamed') {
+          const oldKey = r.key;
+          r.rst = 'renamed';
+          r.newName = it.new_filename || r.newName;
+          if (it.new_key) {
+            Object.assign(r.v, { videoKey: it.new_key });
+            if (!it.phone) r.v.filename = it.new_filename || r.v.filename;
+            renamedFile(r.v, oldKey);
+            r.key = it.new_key;
+          }
+        } else if (it.rename_st === 'failed') {
+          r.rst = 'rfail'; r.rnote = it.rnote || '';
+        } else if (it.rename_st === 'skipped' || it.rename_st === 'cancelled') {
+          if (r.rst === 'q') r.rst = null;
+        }
+        const finished = it.match_st !== 'pending' && it.rename_st !== 'pending';
+        if (finished) done++;
+        if (it.match_st === 'failed' || it.rename_st === 'failed') fail++;
+        if (was !== r.st + '|' + r.rst) paintBulkRow(r);
+      }
+    }
+    B.prog = liveAny ? { what: 'server', done, total, fail } : null;
+    paintBulk();
+    if (S) paintBar();
+  }
+  window.addEventListener('scray-hunt-jobs', onHuntJobs);
+
   async function submitBulk() {
     const B = bulk;
     if (!B || B.submitting) return;
     const list = B.rows.filter(r => r.tick && r.card && (r.st === 'found' || r.st === 'fail'));
     if (!list.length) return;
+    if (window.scrayHuntJobs && !B.noServer) {
+      list.forEach(r => {
+        try {
+          r.sug = typeof window.scrayCleanNameSuggestionFor === 'function' ? window.scrayCleanNameSuggestionFor(r.v, r.card) : null;
+        } catch (e) { r.sug = null; }
+        r.ren = !!r.sug;
+      });
+      B.pending = list;
+      if (!list.some(r => r.sug)) return queueBulk(list, []);
+      B.ask = 'pre';
+      B.rows.forEach(r => paintBulkRow(r));
+      paintBulk();
+      return;
+    }
     B.submitting = true;
     B.prog = { what: 'match', done: 0, total: list.length, fail: 0 };
     list.forEach(r => paintBulkRow(r));
@@ -1852,11 +2014,25 @@
         if (b.dataset.b === 'rpick') { B.ask = 'pick'; B.rows.forEach(r => paintBulkRow(r)); }
         if (b.dataset.b === 'rgo') renameBulk(can().filter(r => r.ren));
         if (b.dataset.b === 'rnone') { B.ask = null; B.rows.forEach(r => { r.ren = false; paintBulkRow(r); }); }
+        // Before handing over (picker 15.76 / native 15.96).
+        const pend = () => (B.pending || []);
+        if (b.dataset.b === 'qall') queueBulk(pend(), pend().filter(r => r.sug));
+        if (b.dataset.b === 'qnone') queueBulk(pend(), []);
+        if (b.dataset.b === 'qpick') { B.ask = 'prepick'; B.rows.forEach(r => paintBulkRow(r)); }
+        if (b.dataset.b === 'qgo') queueBulk(pend(), pend().filter(r => r.sug && r.ren));
+        if (b.dataset.b === 'qback') { B.ask = null; B.pending = null; B.rows.forEach(r => { r.ren = false; paintBulkRow(r); }); }
         return;
       }
       const row = e.target.closest('.shb-row');
       if (!row || B.submitting || B.renaming) return;
       const r = B.rows[+row.dataset.r];
+      if (r && B.ask === 'prepick' && inPending(B, r) && r.sug) {
+        r.ren = !r.ren;
+        paintBulkRow(r);
+        paintBulk();
+        return;
+      }
+      if (preAsk(B)) return;
       if (r && B.ask === 'pick' && r.st === 'done' && r.sug && !r.rst) {
         r.ren = !r.ren;
         paintBulkRow(r);

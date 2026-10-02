@@ -2283,6 +2283,16 @@ body.scray-scrubbing .plyr-frame-step-group .plyr-frame-step,
 pointer-events: none !important;
 }
 
+/* native 15.92: the bookmark circles (BM in the row, and FLS's BM and
+   quick-note cluster) are see-through while a double tap to seek may be
+   under way, so its taps reach the picture - scrayGuardBmCircles() in
+   player.js sets the class. Four classes and an element, so it outranks the
+   video-loading hold above. */
+body.scray-seek-tapping .plyr-frame-step-group .plyr-frame-step.plyr-frame-bookmark,
+body.scray-seek-tapping .plyr-frame-step-group .plyr-frame-step.plyr-frame-quick-bm {
+pointer-events: none !important;
+}
+
 /* ⚙️ Mobile portrait: raised further above the controls bar, and shifted
    left, since controls sit centered near the bottom on narrow screens. */
 @media (max-width: 768px) and (orientation: portrait) {

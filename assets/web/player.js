@@ -6043,6 +6043,31 @@ function scrayIsMpb() {
         !window.plyrPlayer?.fullscreen?.active;
 }
 
+// ---- Bookmark circles' area wakes nothing (native 15.93) ----
+// A tap where the bookmark circles live - FLS's BM and quick-note cluster,
+// and the row's BM - used to bring the controls up, circles included, right
+// under the finger, so a double-tap seek there turned into a bookmark. While
+// the controls are hidden, a touch that starts there now counts as a touch on
+// the picture: it can double-tap, but it never raises the controls. Only the
+// control area does (the bar and the progress bar). Measured from the live
+// circles, which keep their layout while faded out (opacity 0).
+// ⚙️ SCRAY_BM_AREA_SLOP_PX - margin round the circles that counts as their area.
+const SCRAY_BM_AREA_SLOP_PX = 12;
+let scrayGestureInBmArea = false;
+
+function scrayPointInBmCircleArea(x, y) {
+    const pad = SCRAY_BM_AREA_SLOP_PX;
+    const els = document.querySelectorAll(
+        '.plyr-frame-step-group .plyr-frame-bm-cluster, .plyr-frame-step-group > .plyr-frame-bookmark'
+    );
+    for (const el of els) {
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height) continue;   // display:none in this mode
+        if (x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) return true;
+    }
+    return false;
+}
+
 /** Whether a screen point is on the control bar or the progress bar. */
 function scrayPointInControlArea(x, y) {
     const pad = SCRAY_CONTROL_AREA_SLOP_PX;
@@ -6156,6 +6181,14 @@ document.addEventListener('touchstart', (e) => {
     scrayGestureOnPicture = !scrayPointInControlArea(t.clientX, t.clientY);
     // MPB: the whole player is the control area - a tap anywhere shows the bar.
     scrayGestureInControls = !scrayGestureOnPicture || scrayIsMpb();
+    // The bookmark circles' area, while they're hidden, is picture only
+    // (native 15.93) - see scrayPointInBmCircleArea.
+    scrayGestureInBmArea = plyr.classList.contains('plyr--hide-controls')
+        && scrayPointInBmCircleArea(t.clientX, t.clientY);
+    if (scrayGestureInBmArea) {
+        scrayGestureOnPicture = true;
+        scrayGestureInControls = false;
+    }
     scrayGestureRaisedBar = false;
     scrayGesturePendingRaise = false;
     if (scrayGestureInControls) {
@@ -6341,6 +6374,11 @@ function scrayInstallControlsPolicy(player) {
             if (show) scrayArmControlsHide(player);
             return r;
         }
+        // Plyr's own touch raise, for a touch in the hidden bookmark circles'
+        // area (native 15.93). Our code's raises remove the class first, so
+        // they never get here.
+        if (scrayGestureInBmArea && !player.paused && !window.scrayVideoLoading && !railUp
+            && Date.now() - scrayLastTouchAt < SCRAY_TOUCH_MOUSE_WINDOW_MS) return false;
         if (!scrayControlsMayShow(player, railUp)) return false;
         const shown = plyrToggle(toggle);
         scrayArmControlsHide(player);
@@ -9020,6 +9058,32 @@ attachFrameStepButtons(); // Re-attach frame-step buttons on new video
 computeBottomDock(); // ✅ Player height may have changed for the new video
 });
 
+// ---- Bookmark circles stand aside for a double-tap seek (native 15.92) ----
+// A double tap to seek (-/+ 3 / 10 / 30) often lands its second tap - or the
+// next pair's first - on a BM or quick-note circle, because the first tap
+// brought the controls up under the finger. The circle ate the tap: a
+// bookmark saved or the modal opened, and no seek. While a double tap may be
+// under way, body.scray-seek-tapping makes the bookmark circles see-through
+// (style.css), so the tap reaches the picture and finishes the seek.
+// ⚙️ SCRAY_BM_GUARD_TAP_MS  - after any tap on the picture: the double-tap
+//                             window (300ms) plus a little slack.
+// ⚙️ SCRAY_BM_GUARD_SEEK_MS - after a seek double tap: long enough for the
+//                             next pair to start, so repeated seeking runs on.
+const SCRAY_BM_GUARD_TAP_MS = 350;
+const SCRAY_BM_GUARD_SEEK_MS = 800;
+let scrayBmGuardUntil = 0;
+let scrayBmGuardTimer = null;
+function scrayGuardBmCircles(ms) {
+    const until = Date.now() + ms;
+    if (until <= scrayBmGuardUntil) return;   // never cut a longer guard short
+    scrayBmGuardUntil = until;
+    document.body.classList.add('scray-seek-tapping');
+    clearTimeout(scrayBmGuardTimer);
+    scrayBmGuardTimer = setTimeout(() => {
+        document.body.classList.remove('scray-seek-tapping');
+    }, ms);
+}
+
 // Double-tap gesture handler - works in ALL modes (inline and fullscreen)
 function setupDoubleTapHandler() {
  let lastTap = 0;
@@ -9113,6 +9177,10 @@ function setupDoubleTapHandler() {
      if (isMiniPlayer) return;
      
      const now = Date.now();
+
+     // This tap may be the first of a double tap - keep the bookmark circles
+     // out of the way of the second (native 15.92).
+     scrayGuardBmCircles(SCRAY_BM_GUARD_TAP_MS);
 
      // Every tap feeds the triple counter, before the double-tap gate.
      {
@@ -9221,6 +9289,7 @@ if (isLandscape && isMobile) {
     window.plyrPlayer.currentTime = Math.max(
         0, Math.min(window.plyrPlayer.duration, window.plyrPlayer.currentTime + delta)
     );
+    scrayGuardBmCircles(SCRAY_BM_GUARD_SEEK_MS);
     showPlayerFeedback(
         `${delta > 0 ? '+' : '−'}${amount}s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`
     );
@@ -9334,6 +9403,7 @@ if (false) {
             showPlayerFeedback('⏸ Pause', 'top-left');
         }
     } else if (effTapX > q3) {
+        scrayGuardBmCircles(SCRAY_BM_GUARD_SEEK_MS);
         // Q4: plus seeks, 3 vertical sections (bottom to top: +3s, +10s, +30s)
         if (intoBand > bottomThird) {
             // Bottom section: +3s
@@ -9349,6 +9419,7 @@ if (false) {
             showPlayerFeedback(`+30s (${formatDuration(window.plyrPlayer.currentTime * 1000)})`, 'top-right');
         }
     } else {
+        scrayGuardBmCircles(SCRAY_BM_GUARD_SEEK_MS);
         // Q3: minus seeks, 3 vertical sections (bottom to top: -3s, -10s, -30s)
         if (intoBand > bottomThird) {
             // Bottom section: -3s

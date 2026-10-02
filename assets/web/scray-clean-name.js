@@ -179,9 +179,12 @@
   function cleanNameParts(video, opts) {
     if (!video) return null;
     const noParent = !!(opts && opts.noParent);
-    const p = (window.scrayStashNames && window.scrayStashNames.parts)
-      ? window.scrayStashNames.parts(video)
-      : null;
+    // opts.scene (picker 15.76 / native 15.96 / browse 15.152): a scene picked
+    // but not matched yet - its parts as they will be once it is.
+    const names = window.scrayStashNames;
+    const p = (opts && opts.scene)
+      ? (names && names.partsFromScene ? names.partsFromScene(opts.scene) : null)
+      : (names && names.parts ? names.parts(video) : null);
     if (!p) return null;
 
     // attrsFor answers by either spelling, so the mapped studio finds the row
@@ -228,6 +231,17 @@
   }
 
   /**
+   * The suggestion as it will be once `scene` is matched to the video
+   * (picker 15.76 / native 15.96 / browse 15.152) - for the bulk check, which
+   * hands the match and the rename to the server together. Null when it
+   * wouldn't change the name.
+   */
+  function cleanNameSuggestionFor(video, scene) {
+    const parts = cleanNameParts(video, { scene });
+    return differs(parts ? parts.name : null, video && video.filename);
+  }
+
+  /**
    * `suggested`, unless it is the name the file already has. NFC: the same
    * name typed on a Mac and in the catalogue can differ by composition alone,
    * and that is not a rename worth offering.
@@ -243,5 +257,6 @@
   window.scrayCleanName           = cleanName;
   window.scrayCleanNameNoParent   = cleanNameNoParent;
   window.scrayCleanNameSuggestion = cleanNameSuggestion;
+  window.scrayCleanNameSuggestionFor = cleanNameSuggestionFor;
   window.scrayCleanNameDiffers    = differs;
 })();

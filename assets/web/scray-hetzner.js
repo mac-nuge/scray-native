@@ -97,6 +97,9 @@
       fileFingerprint: typeof window.scrayFingerprint === "function"
         ? window.scrayFingerprint({ sizeBytes: size, durationMs: dur, width: w, height: h }) : null,
       videoKey: key,
+      // native 15.95: the server's fingerprint of this row (browse 15.149) -
+      // a re-fetch only asks again for rows whose fingerprint has changed.
+      hzSig: r.sig || null,
       inCatalogue: true,                 // it came from the catalogue
       inOneDrive: !!r.in_onedrive,
       lastScanned: new Date().toISOString(),
@@ -124,6 +127,66 @@
       after = res.next;
     }
     return out;
+  }
+
+  // =========================================
+  // INCREMENTAL RE-FETCH (native 15.95, browse 15.149)
+  // A re-fetch used to list every video on the box (~6,000, a page of 1,000
+  // at a time), rewrite every Hetzner row, and clear every row's
+  // cataloguePath - so the sync after it re-pulled the full history of every
+  // one of them. Now, once the rows here carry the server's fingerprint
+  // (hzSig), a re-fetch asks for the manifest - every key and fingerprint,
+  // nothing else - and then full rows only for keys that are new or whose
+  // fingerprint changed. Unchanged rows aren't touched, keep their
+  // cataloguePath, and get the ordinary delta sync. Keys no longer in the
+  // manifest are removed, as before.
+  // The fingerprint is worked out on the server from the listed row itself,
+  // so a move, rename, new tag, duration read later or OneDrive copy gone all
+  // change it - no change feed to keep in step.
+  // Falls back to the full listing on the very first fetch (no rows), when no
+  // row has a fingerprint yet (the first re-fetch after this update), or
+  // against a server without the manifest.
+  // =========================================
+  // ⚙️ Keys per request when asking for the changed rows (the server takes
+  // up to 5,000; smaller steps move the pill's count more often).
+  const KEYS_PAGE = 500;
+
+  /** What the library holds now: Hetzner rows by id, and the keys on the phone. */
+  async function snapshot() {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const rows = await readAll(tx.objectStore(STORE_NAME));
+    return {
+      existing: new Map(rows.filter(isHetznerRow).map(v => [v.oneDriveId, v])),
+      phoneKeys: phoneKeysOf(rows),
+    };
+  }
+
+  /** null when the server has no manifest - the caller lists everything instead. */
+  async function listChanges(snap, onProgress) {
+    onProgress?.("Checking the box for changes…", { stage: 1, done: 0, total: 0 });
+    const res = await api("hetzner_list", { manifest: 1 });
+    if (!res || !Array.isArray(res.manifest)) return null;
+    const all = new Set();
+    const want = [];
+    let skipped = 0;
+    for (const [key, sig] of res.manifest) {
+      if (!key) continue;
+      all.add(key);
+      if (snap.phoneKeys.has(key)) { skipped++; continue; }   // the phone copy wins
+      const prior = snap.existing.get(ID_PREFIX + key);
+      if (!prior || !sig || prior.hzSig !== sig) want.push(key);
+    }
+    const rows = [];
+    const say = () => onProgress?.(`Fetching ${want.length.toLocaleString()} new or changed…`,
+                                   { stage: 1, done: rows.length, total: want.length });
+    say();
+    for (let i = 0; i < want.length; i += KEYS_PAGE) {
+      const r = await api("hetzner_list", { keys: want.slice(i, i + KEYS_PAGE) });
+      rows.push(...((r && r.videos) || []));
+      say();
+    }
+    return { rows, all, total: all.size, skipped };
   }
 
   function readAll(store) {
@@ -163,11 +226,29 @@
     return Object.assign(new Error(text), { step, cause: err });
   }
 
-  async function fetchHetzner({ onProgress, rescan = true } = {}) {
+  async function fetchHetzner({ onProgress, rescan = true, full = false } = {}) {
     if (typeof window.scrayApiCall !== "function") throw new Error("the sync layer isn't loaded");
     // native 15.22: the server re-reads the box too, in the background - see
     // kickBoxRescan. This listing doesn't wait for it.
     if (rescan) kickBoxRescan();
+    // native 15.95: only what changed, once the rows here have fingerprints.
+    if (!full) {
+      let snap = null;
+      try { snap = await snapshot(); } catch (err) { console.warn("[hetzner] couldn't read the library, listing everything:", err); }
+      if (snap && [...snap.existing.values()].some(v => v.hzSig)) {
+        let ch;
+        try { ch = await listChanges(snap, onProgress); } catch (err) { throw stepError("listing", err); }
+        if (ch) {
+          onProgress?.(`Saving ${ch.rows.length.toLocaleString()} to the library…`, { stage: 2, done: 0, total: ch.rows.length });
+          try {
+            return await saveAndSync(ch.rows, onProgress, ch);
+          } catch (err) {
+            throw err && err.step ? err : stepError("saving", err);
+          }
+        }
+        console.log("[hetzner] no manifest on this server - listing everything");
+      }
+    }
     onProgress?.("Listing the box…", { stage: 1, done: 0, total: boxTotal() });
     let listed;
     try { listed = await listAll(onProgress); } catch (err) { throw stepError("listing", err); }
@@ -179,7 +260,9 @@
     }
   }
 
-  async function saveAndSync(listed, onProgress) {
+  // inc (native 15.95): { all, total, skipped } from listChanges - `listed` is
+  // then only the new and changed rows, and `all` every key still on the box.
+  async function saveAndSync(listed, onProgress, inc = null) {
     const db = await openDB();
     const tx = db.transaction([STORE_NAME, META_STORE_NAME], "readwrite");
     const src = tx.objectStore(STORE_NAME);
@@ -192,7 +275,7 @@
     const existing  = new Map(rows.filter(isHetznerRow).map(v => [v.oneDriveId, v]));
 
     const keep = new Set();
-    let added = 0, updated = 0, skipped = 0, removed = 0;
+    let added = 0, updated = 0, skipped = inc ? inc.skipped : 0, removed = 0;
     const now = new Date().toISOString();
     for (const r of listed) {
       if (!r || !r.video_key) continue;
@@ -213,17 +296,28 @@
       }
     }
     // Includes rows a 14.51 fetch left behind (accountKey "hetzner::box").
+    // Incremental: unchanged rows weren't listed, so it goes by the manifest -
+    // a row stays while its key is still on the box and not on the phone.
     for (const id of existing.keys()) {
-      if (keep.has(id)) continue;
+      if (inc) {
+        const key = id.startsWith(ID_PREFIX) ? id.slice(ID_PREFIX.length) : "";
+        if (key && inc.all.has(key) && !phoneKeys.has(key)) continue;
+      } else if (keep.has(id)) {
+        continue;
+      }
       src.delete(id); meta.delete(id); removed++;
     }
     await done(tx);
     setEnabled(true);
-    setBoxTotal(listed.length);
-    console.log(`[hetzner] ${listed.length} listed: ${added} added, ${updated} updated, ${removed} removed, ${skipped} already on the phone`);
-    const tally = [added ? `+${added.toLocaleString()} new` : "", removed ? `−${removed.toLocaleString()} gone` : ""].filter(Boolean).join(" · ");
-    onProgress?.(`${(added + updated).toLocaleString()} in the library${tally ? " · " + tally : ""}`,
-                 { stage: 2, done: listed.length, total: listed.length, added, removed, skipped });
+    const total = inc ? inc.total : listed.length;
+    const inLibrary = total - skipped;
+    setBoxTotal(total);
+    console.log(`[hetzner] ${inc ? `incremental: ${total} on the box, ${listed.length} new or changed` : `${total} listed`}: ` +
+                `${added} added, ${updated} updated, ${removed} removed, ${skipped} already on the phone`);
+    const tally = [added ? `+${added.toLocaleString()} new` : "", inc && updated ? `${updated.toLocaleString()} changed` : "",
+                   removed ? `−${removed.toLocaleString()} gone` : ""].filter(Boolean).join(" · ");
+    onProgress?.(`${inLibrary.toLocaleString()} in the library${tally ? " · " + tally : ""}`,
+                 { stage: 2, done: total, total, added, removed, skipped });
 
     let checkError = null;
     if (typeof window.scraySyncLibrary === "function") {
@@ -231,14 +325,14 @@
       try {
         res = await window.scraySyncLibrary({ quiet: true, onProgress });
       } catch (err) {
-        throw stepError("syncing", err, `${(added + updated).toLocaleString()} Hetzner videos are in the library`);
+        throw stepError("syncing", err, `${inLibrary.toLocaleString()} Hetzner videos are in the library`);
       }
       checkError = (res && res.checkError) || null;
       await stampSynced();
     }
     if (typeof refreshAllLists === "function") refreshAllLists();
     if (typeof window.renderFolderPills === "function") await window.renderFolderPills();
-    return { listed: listed.length, added, updated, removed, skipped, checkError };
+    return { listed: total, added, updated, removed, skipped, checkError, incremental: !!inc };
   }
 
   /** What the user sees once a fetch is done (native 15.50). */
@@ -249,6 +343,8 @@
     };
     const bits = [`☁ ${(r.listed - r.skipped).toLocaleString()} Hetzner videos`];
     if (r.added) bits.push(`+${r.added.toLocaleString()} new`);
+    if (r.incremental && r.updated) bits.push(`${r.updated.toLocaleString()} changed`);
+    if (r.incremental && !r.added && !r.updated && !r.removed) bits.push("no changes");
     if (r.removed) bits.push(`−${r.removed.toLocaleString()} gone`);
     if (r.checkError) {
       // The pull landed; only the check of this phone's own files didn't.

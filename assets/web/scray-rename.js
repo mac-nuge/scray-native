@@ -221,6 +221,38 @@
     return { scope: "everywhere", onedrive: r.onedrive_renamed || 0, hetzner: r.hetzner_renamed || 0, onPhone: false };
   }
 
+  // ---- 1b. a rename a Stash hunt job did on the server (native 15.96) --------
+  // The job (api.php hunt_job_*, scray-hunt-jobs.js) renamed OneDrive, the box
+  // and the catalogue - and any linked box copy - the way "Everywhere" does
+  // above. This is the rest, for this phone, whenever the app is next open:
+  // the phone's own copy of the file (which only the app can touch) and the
+  // rows. A phone copy that won't rename is left with the catalogue's name
+  // noted, so it shows in the ✎ names list to try again - as above.
+  async function followServerRename(f) {
+    const rows = typeof window.getAllVideos === "function" ? await window.getAllVideos() : [];
+    const byId = id => (id ? rows.find(x => localId(x) === id) : null);
+    const v = byId(f.local_id);
+    if (v && f.new_filename) {
+      const onPhone = typeof window.isLocalVideo === "function" ? window.isLocalVideo(v) : !!f.phone;
+      if (onPhone) {
+        try {
+          if (nfc(v.filename) !== nfc(f.new_filename)) await window.renameLocalFile(v, f.new_filename);
+        } catch (err) {
+          console.warn(`[rename] the server renamed ${v.filename}, but not this phone's copy:`, err);
+        }
+        await setRowFields(localId(v), { videoKey: f.new_key, catalogueFilename: f.new_filename });
+      } else {
+        await setRowFields(localId(v), { filename: f.new_filename, videoKey: f.new_key });
+      }
+    }
+    for (const a of f.also_done || []) {
+      if (a && a.ok && byId(a.local_id)) await setRowFields(a.local_id, { filename: a.filename, videoKey: a.new_key });
+    }
+    await refresh();
+    return true;
+  }
+  window.scrayHuntJobFollow = followServerRename;
+
   // ---- 2. the list -------------------------------------------------------------
   let S = null;     // the open sheet
   let lastRows = [];

@@ -950,7 +950,30 @@ window.scrayStashNames = (function () {
   function parts(video) {
     const k = keyFor(video);
     if (!k) return null;
-    const r = rows[k];
+    return partsOfRow(rows[k]);
+  }
+
+  /**
+   * The same, for a scene that isn't matched yet (picker 15.76 / native 15.96):
+   * a stash_nav search card, laid out the way the server's stash_names row
+   * will be once the match lands (scrayStashNameRows) - studio, the women of
+   * the cast, title, length, the rest of the cast with their codes, tags. The
+   * bulk check names its files from this before handing the match and the
+   * rename to the server together. A correction you'd filed against the file
+   * (stash_overrides) isn't in a card, so it isn't in this.
+   */
+  function partsFromScene(c) {
+    if (!c) return null;
+    const cast = Array.isArray(c.cast) ? c.cast : [];
+    const nm = p => String((p && p.name) || "").trim();
+    const fem  = cast.filter(p => p && p.gender_short === "F").map(nm).filter(Boolean);
+    const rest = cast.filter(p => p && p.gender_short !== "F" && nm(p)).map(p => (p.gender_short || "?") + ":" + nm(p));
+    const tags = Array.isArray(c.tags) ? c.tags.map(t => typeof t === "string" ? t : (t && t.name) || "") : [];
+    return partsOfRow([c.studio || "", fem.join(", "), c.title || "",
+                       Number(c.stash_duration_sec) || null, 0, rest.join(", "), tags.filter(Boolean).join(", ")]);
+  }
+
+  function partsOfRow(r) {
     if (!r) return null;
 
     // Studio goes through the same display-name dictionary as everywhere else
@@ -1088,7 +1111,7 @@ window.scrayStashNames = (function () {
     return Array.isArray(a) ? a : [];
   }
 
-  return { parts, text, has, keyFor, refresh, rekey, asFor, dump: () => rows };
+  return { parts, partsFromScene, text, has, keyFor, refresh, rekey, asFor, dump: () => rows };
 })();
 
 /**
@@ -1306,8 +1329,8 @@ window.scrayAddSearchTerm = function (term) {
 // =========================================
 // A save confirmation with an Undo button, for bookmark and score saves. The
 // same look as the tooltip it replaces - it takes that tooltip's class - but
-// it can be tapped. Undo asks "Undo?" first, so a stray tap near the player
-// controls can't throw a save away; while it's asking, the toast stays up.
+// it can be tapped. Undo undoes straight away (native 15.94) - it used to ask
+// "Undo?" with Yes / No first.
 //
 // window.scrayUndoToast({ html, onUndo, className, bg, ms })
 //   html      - the confirmation, as the plain tooltip would have shown it
@@ -1315,9 +1338,7 @@ window.scrayAddSearchTerm = function (term) {
 //   className - the tooltip class to borrow (bookmark- or score-confirmation-tooltip)
 //   ms        - how long it stays up untouched
 (function () {
-  // ⚙️ How long the "Undo?" question waits for an answer before giving up
-  //    (the save stands), and how long the undone / failed result stays.
-  const CONFIRM_MS = 5000;
+  // ⚙️ How long the undone / failed result stays.
   const RESULT_MS = 1500;
 
   // ⚙️ native 15.82: bookmark confirmations are drawn a size smaller (Mac asked).
@@ -1457,41 +1478,29 @@ window.scrayAddSearchTerm = function (term) {
         actions.append(b);
       });
       const undo = button('Undo', true, small);
-      undo.addEventListener('click', (e) => { e.stopPropagation(); ask(); });
+      undo.addEventListener('click', (e) => { e.stopPropagation(); doUndo(); });
       actions.append(undo);
     };
 
-    const ask = () => {
-      msg.textContent = 'Undo?';
+    // native 15.94: no "Undo?" / Yes / No step any more - Undo undoes.
+    const doUndo = async () => {
+      if (toast.dataset.undoing) return;   // a second tap mid-undo
+      clearTimeout(timer);
+      toast.dataset.undoing = '1';
+      msg.textContent = 'Undoing...';
       actions.replaceChildren();
-      const yes = button('Yes', true, small);
-      const no = button('No', false, small);
-      yes.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        clearTimeout(timer);
-        toast.dataset.undoing = '1';
-        msg.textContent = 'Undoing...';
-        actions.replaceChildren();
-        toast.style.background = '#6c757d';
-        try {
-          await onUndo();
-          msg.textContent = '↩ Undone';
-          toast.style.background = '#28a745';
-        } catch (err) {
-          console.error('Undo failed:', err);
-          msg.textContent = '❌ Undo failed';
-          toast.style.background = '#dc3545';
-        }
-        toast.style.pointerEvents = 'none';
-        hideAfter(RESULT_MS);
-      });
-      no.addEventListener('click', (e) => {
-        e.stopPropagation();
-        showSaved();
-        hideAfter(ms);
-      });
-      actions.append(yes, no);
-      hideAfter(CONFIRM_MS);
+      toast.style.background = '#6c757d';
+      try {
+        await onUndo();
+        msg.textContent = '↩ Undone';
+        toast.style.background = '#28a745';
+      } catch (err) {
+        console.error('Undo failed:', err);
+        msg.textContent = '❌ Undo failed';
+        toast.style.background = '#dc3545';
+      }
+      toast.style.pointerEvents = 'none';
+      hideAfter(RESULT_MS);
     };
 
     showSaved();

@@ -4,12 +4,19 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.98 — test: VLC double tap thirds, rotate, play, seek
+<!-- 2026-10-02T15:52Z -->
+- **Asked:** in the VLCKit player, double tap on the left third turns the orientation, the middle third play/pause, the right third seeks - its left half −10, its right half +10 - in both orientations.
+- **Change (ScrayVLCPlayer.swift, handleDoubleTap):** left third (0-⅓) calls `setLandscape(!landscape)` - the same turn as the ⟳ button - and flashes ⟳; middle third (⅓-⅔) play/pause as before; right third split at ⅚: −10 s left of it, +10 s right of it (⚙️ `skipSeconds`). The −10 used to be the whole left third and +10 the whole right third.
+- **Both orientations:** the tap is measured in the stage's own coordinates, and the stage is what turns, so the thirds are the picture's thirds as you see it, portrait or turned.
+- **Deploy:** Swift - needs a new IPA; not compiled here (no Xcode).
+
 ### native 15.97 — test: only COL wakes controls in FLS, not the whole row
 <!-- 2026-10-02T15:45Z -->
 - **Reported:** after 15.93, a tap where FLS's bookmark circles live still brings the controls (and the circles) up. 15.93 was committed (it went in with 15.96) - it just never saw these taps.
 - **Cause (disguise.js):** while the controls are hidden, the dock becomes a tap catcher that raises them (13.123's "one tap wakes, a second presses"). The catcher was the whole dock - and the dock spans the screen's width (13.121). In FLS only COL shows in it (COL IS BACK), but the invisible full-width row still caught every tap across the bottom of the picture. FLS's bookmark cluster is seated level with COL (native 15.81), so a tap on the circles' spot hit the dock, which sits above the player, and woke the controls before player.js's 15.93 check could see the touch.
 - **Fix:** in that blind state the dock itself takes no taps; only COL's own box does (its insides stay dead, so the tap wakes rather than presses, as before). The rest of the row lets the tap through to the player, where 15.93 treats a tap on the hidden circles' spot as a picture tap - a double tap there seeks. MPFS has no dock, so nothing else changes.
-- **Native only:** Picker's disguise.js has the same full-width catcher - it eats taps along the bottom band of Picker's FLS too, though Picker has no bookmark cluster there. Pending Mac's call.
+- **Picker:** the same full-width catcher was there too (eating taps along the bottom band of its FLS) - ported in picker 15.77.
 
 ### picker 15.76 / native 15.96 / browse 15.152 — test: stash hunt match and rename as server job
 <!-- 2026-10-02T15:40Z -->

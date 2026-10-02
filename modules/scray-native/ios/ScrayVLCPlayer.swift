@@ -16,7 +16,10 @@ import MobileVLCKit
 //
 //   * tap                show / hide the controls (native 15.91: VLC's own
 //                        tap recogniser used to swallow it)
-//   * double tap         left third -10s, right third +10s, middle play/pause
+//   * double tap         (native 15.98) left third turns the picture (as ⟳),
+//                        middle third play/pause, right third seeks: its left
+//                        half -10s, its right half +10s. Thirds of the picture
+//                        as you see it, so the same in portrait and turned.
 //   * drag sideways      scrub (the full width = 3 min, or the whole video
 //                        if shorter) - the picture, slider and time follow
 //                        the finger live (native 15.88), exact seek on release
@@ -627,14 +630,23 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
     }
 
     @objc private func handleDoubleTap(_ g: UITapGestureRecognizer) {
+        // In the stage's own coordinates, which turn with it - so "left third"
+        // is the left of the picture as you see it, portrait or turned.
         let x = g.location(in: stage).x
         let w = stage.bounds.width
         if x < w / 3 {
-            seek(to: currentSec - Self.skipSeconds)
-            flashHint("−\(Int(Self.skipSeconds))s")
-        } else if x > w * 2 / 3 {
-            seek(to: currentSec + Self.skipSeconds)
-            flashHint("+\(Int(Self.skipSeconds))s")
+            // Left third (native 15.98): turn the picture, as ⟳ does.
+            setLandscape(!landscape, animated: true)
+            flashHint("⟳")
+        } else if x >= w * 2 / 3 {
+            // Right third (native 15.98): its left half back, its right half on.
+            if x < w * 5 / 6 {
+                seek(to: currentSec - Self.skipSeconds)
+                flashHint("−\(Int(Self.skipSeconds))s")
+            } else {
+                seek(to: currentSec + Self.skipSeconds)
+                flashHint("+\(Int(Self.skipSeconds))s")
+            }
         } else {
             // isPlaying only changes once VLC gets there, so go by the ask.
             let willPlay = ended || !player.isPlaying

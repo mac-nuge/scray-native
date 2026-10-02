@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.97 — test: only COL wakes controls in FLS, not the whole row
+<!-- 2026-10-02T15:45Z -->
+- **Reported:** after 15.93, a tap where FLS's bookmark circles live still brings the controls (and the circles) up. 15.93 was committed (it went in with 15.96) - it just never saw these taps.
+- **Cause (disguise.js):** while the controls are hidden, the dock becomes a tap catcher that raises them (13.123's "one tap wakes, a second presses"). The catcher was the whole dock - and the dock spans the screen's width (13.121). In FLS only COL shows in it (COL IS BACK), but the invisible full-width row still caught every tap across the bottom of the picture. FLS's bookmark cluster is seated level with COL (native 15.81), so a tap on the circles' spot hit the dock, which sits above the player, and woke the controls before player.js's 15.93 check could see the touch.
+- **Fix:** in that blind state the dock itself takes no taps; only COL's own box does (its insides stay dead, so the tap wakes rather than presses, as before). The rest of the row lets the tap through to the player, where 15.93 treats a tap on the hidden circles' spot as a picture tap - a double tap there seeks. MPFS has no dock, so nothing else changes.
+- **Native only:** Picker's disguise.js has the same full-width catcher - it eats taps along the bottom band of Picker's FLS too, though Picker has no bookmark cluster there. Pending Mac's call.
+
 ### picker 15.76 / native 15.96 / browse 15.152 — test: stash hunt match and rename as server job
 <!-- 2026-10-02T15:40Z -->
 - **Asked:** in Stash hunt's bulk check, run the matching and renaming as a separate panel (like the upload one) that minimises to a small progress counter, so other things can be done meanwhile - and run them on the server, so closing the app doesn't stop them. Decided with Mac: Match + Rename move to the server (the check pass stays in the sheet, since its results are reviewed before ticking); a file on the phone has its phone copy renamed the next time the app is open; both apps at once.

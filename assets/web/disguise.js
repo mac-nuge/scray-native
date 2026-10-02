@@ -681,12 +681,23 @@
    which faded the dock to nothing while the page was supposed to be back. 13.134
    put the exclusion on the FS_ANCHOR_OPACITY rule and missed this pair, which is
    the one that actually hides it. */
+/* ⚙️ COL ONLY (native 15.97). The catcher used to be the whole dock - and the
+   dock spans the screen's width (13.121), so the entire bottom row of the
+   picture woke the controls: a tap on FLS's bookmark circles, seated level
+   with COL (native 15.81), brought them all back up under the finger instead
+   of reaching the player. Now only COL's own box catches; the rest of the row
+   lets the tap through. In FLS COL is the dock's only visible child (COL IS
+   BACK), and MPFS has no dock, so nothing else lost a catcher. The dock's
+   pointerdown handler still hears it: COL is inside the dock. */
 #scrayDisguise.is-fs.is-controls-hidden:not(.is-peek) #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) {
   opacity: 0;
-  pointer-events: auto;
+  pointer-events: none;
 }
 #scrayDisguise.is-fs.is-controls-hidden:not(.is-peek) #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) * {
   pointer-events: none;
+}
+#scrayDisguise.is-fs.is-controls-hidden:not(.is-peek) #scrayDisguiseDock:has(#scrayDisguiseControl.is-collapsed) > #scrayDisguiseControl {
+  pointer-events: auto;
 }
 #scrayDisguiseNav {
   display: flex; flex-wrap: wrap; gap: 4px;

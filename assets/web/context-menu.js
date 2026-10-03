@@ -230,6 +230,27 @@ function createCompactButtonGroup(buttons, visibleCount = 2, video = null) {
        if (bmSpec) window.scrayApplyBookmarkButtonColour(bmSpec, video);
    }
 
+   // Convert to MP4 (picker 15.86 / native 15.104, scray-convert.js): on the
+   // menu of every file on the Hetzner box, in the overflow just above delete,
+   // as Stash's basket swap does. Box files only - the gateway converts them.
+   // Mutates the caller's array for the same reason the Stash entry does.
+   if (video && window.scrayConvert && window.scrayConvert.appAvailability(video).ok &&
+       !buttons.some(b => b && b.scrayConvert)) {
+     const convBtn = {
+       label: "Convert to MP4\u2026",
+       scrayConvert: true,
+       title: "Make an MP4 copy on the box, at a quality you choose",
+       color: "#6f42c1",
+       onClick: (e) => {
+         if (e && e.stopPropagation) e.stopPropagation();
+         window.scrayConvert.forApp(video);
+       }
+     };
+     const xAt = buttons.findIndex(b => b && b.label === 'X');
+     if (xAt >= visibleCount) buttons.splice(xAt, 0, convBtn);
+     else buttons.push(convBtn);
+   }
+
    // Show first N buttons
    const visibleButtons = buttons.slice(0, visibleCount);
    const hiddenButtons = buttons.slice(visibleCount);

@@ -12307,3 +12307,70 @@ setInterval(ensureVideoInfoExists, 2000);
 // stays.
 
 })();
+// ============================================================================
+// STALL RESCUE (native 15.100 / picker 15.83)
+// A stream sometimes stops mid-play and never carries on: the picture sits,
+// nothing more arrives, and a seek - any seek - gets it going again, while a
+// replay doesn't stall at the same spot. That's a request that has gone quiet
+// (the Hetzner path is phone -> gateway -> Storage Box, and the box can stall
+// a read), and the player waits on it rather than asking again. A seek makes
+// it ask again, so this does what you were doing by hand: while the video is
+// meant to be playing, if neither the time nor what's buffered ahead has
+// moved for SCRAY_STALL_MS, it nudges the position a hair forward. At most
+// SCRAY_STALL_TRIES nudges at one spot, a little further each time; each one
+// is logged as [stall] so a report shows when and where.
+// Leaves alone: paused, ended, hidden page, a scrub in progress (the scrub
+// has its own watchdog), nothing loaded.
+// ============================================================================
+(() => {
+    const SCRAY_STALL_MS = 4000;       // ⚙️ no progress this long while playing = stalled
+    const SCRAY_STALL_TRIES = 3;       // ⚙️ nudges at one spot before leaving it be
+    const SCRAY_STALL_STEP_S = 0.1;    // ⚙️ first nudge; the 2nd is twice that, and so on
+    const SCRAY_STALL_TICK_MS = 1000;
+
+    let lastT = -1, lastBuf = -1, quietSince = 0;
+    let tries = 0, triedAt = -10;
+
+    const mediaEl = () => {
+        const m = window.plyrPlayer && window.plyrPlayer.media;
+        return m && m.tagName === 'VIDEO' ? m : null;
+    };
+    // End of the buffered stretch the playhead is in (or just short of).
+    const bufferedEnd = (m, t) => {
+        const b = m.buffered;
+        for (let i = 0; i < b.length; i++) {
+            if (b.start(i) <= t + 0.5 && b.end(i) >= t) return b.end(i);
+        }
+        return t;
+    };
+
+    setInterval(() => {
+        const m = mediaEl();
+        if (!m || document.hidden || m.paused || m.ended || !m.currentSrc || m.readyState === 0
+            || document.body.classList.contains('scray-scrubbing')) {
+            lastT = -1; lastBuf = -1; quietSince = 0;
+            return;
+        }
+        const t = m.currentTime, buf = bufferedEnd(m, t), now = Date.now();
+        if (Math.abs(t - lastT) > 0.05 || buf > lastBuf + 0.05) {
+            lastT = t; lastBuf = buf; quietSince = now;
+            if (Math.abs(t - triedAt) > 2) tries = 0;   // moved on from the last stall
+            return;
+        }
+        if (!quietSince) { quietSince = now; return; }
+        if (now - quietSince < SCRAY_STALL_MS) return;
+
+        const samePlace = Math.abs(t - triedAt) <= 2;
+        if (samePlace && tries >= SCRAY_STALL_TRIES) return;   // given up here
+        tries = samePlace ? tries + 1 : 1;
+        triedAt = t;
+        const dur = isFinite(m.duration) ? m.duration : Infinity;
+        const to = Math.min(t + SCRAY_STALL_STEP_S * tries, dur - 0.5);
+        console.warn(`[stall] stuck ${((now - quietSince) / 1000).toFixed(0)}s at ${t.toFixed(1)}s ` +
+            `(buffered to ${buf.toFixed(1)}s, readyState ${m.readyState}, networkState ${m.networkState}) - ` +
+            `nudging to ${to.toFixed(2)}s, try ${tries}/${SCRAY_STALL_TRIES}`);
+        window.scrayStallRescues = (window.scrayStallRescues || 0) + 1;
+        quietSince = now;   // the nudge gets its own window
+        try { m.currentTime = to; } catch (e) { /* nothing loaded to seek in */ }
+    }, SCRAY_STALL_TICK_MS);
+})();

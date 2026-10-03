@@ -20,9 +20,11 @@ import MobileVLCKit
 //                        middle third play/pause, right third seeks: its left
 //                        half -10s, its right half +10s. Thirds of the picture
 //                        as you see it, so the same in portrait and turned.
-//   * drag sideways      scrub (the full width = 3 min, or the whole video
-//                        if shorter) - the picture, slider and time follow
-//                        the finger live (native 15.88), exact seek on release
+//   * drag sideways      scrub (a slow drag across the full width = 3 min,
+//                        or the whole video if shorter; native 15.100: a
+//                        faster drag goes further, up to 8x) - the picture,
+//                        slider and time follow the finger live (native
+//                        15.88), exact seek on release
 //   * drag down          close
 //   * pinch              zoom (1-5x), move it with the pinch, back to 1x
 //                        snaps it straight
@@ -32,6 +34,9 @@ import MobileVLCKit
 //                        turn itself for a wide video.
 //   * ⏭ button           close and play the next video in the list
 //   * slider             seek
+//   * 🔈 + volume slider (native 15.100) under the seek bar. Always opens
+//                        muted; the speaker unmutes, the slider sets the
+//                        level (remembered on this device) and unmutes too.
 //
 // The bridge call resolves when the player closes, with
 // { position, duration, watched, ended, next } - player.js turns `watched`
@@ -94,6 +99,21 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
     // pictures on a fast source, but on a slow stream each seek piles onto
     // the one before.
     private static let liveSeekInterval: TimeInterval = 0.2
+    // ⚙️ Accelerated scrub (native 15.100). A drag slower than accelFromSpeed
+    // (points a second) moves at the plain rate - the full width is
+    // scrubSpanSeconds. Faster, each point is worth more: gain =
+    // 1 + ((speed - accelFromSpeed) / accelPerSpeed) ^ accelPower, at most
+    // accelMaxGain. So about 3.6x at 1,500 pt/s, the cap from ~2,800 pt/s.
+    // The gain is taken per finger movement, so slowing down mid-drag goes
+    // back to fine control without lifting the finger.
+    private static let accelFromSpeed: Double = 400
+    private static let accelPerSpeed: Double = 550
+    private static let accelPower: Double = 1.4
+    private static let accelMaxGain: Double = 8
+    // ⚙️ Volume (native 15.100): VLC's own level, 0-100 (100 = as recorded),
+    // on top of the phone's volume. Remembered on this device.
+    private static let volumeKey = "scray.vlcVolume"
+    private static let defaultVolume: Float = 100
 
     private let url: URL
     private let titleText: String
@@ -117,6 +137,8 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
     private let slider = UISlider()
     private let timeLabel = UILabel()
     private let durationLabel = UILabel()
+    private let muteButton = UIButton(type: .system)
+    private let volumeSlider = UISlider()
     private let hintLabel = ScrayPaddedLabel()
     private let spinner = UIActivityIndicatorView(style: .large)
     private let errorLabel = UILabel()
@@ -143,6 +165,17 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
     private var panMode: PanMode = .idle
     private var scrubFrom: Double = 0
     private var scrubTarget: Double?
+    private var scrubLastX: CGFloat = 0          // accelerated scrub: translation at the last move
+    private var scrubGain: Double = 1
+
+    // Always opens muted (native 15.100). VLC only takes audio settings once
+    // its audio output exists, so syncAudio() re-applies them as playback
+    // starts and on each time tick until they stick.
+    private var muted = true
+    private var volume: Float = {
+        let v = UserDefaults.standard.object(forKey: ScrayVLCPlayerController.volumeKey) as? Float
+        return min(100, max(0, v ?? ScrayVLCPlayerController.defaultVolume))
+    }()
 
     // Live scrub pacing - see liveSeekInterval.
     private var pendingLiveSeek: Double?
@@ -219,6 +252,7 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         UIApplication.shared.isIdleTimerDisabled = true
         spinner.startAnimating()
         player.play()
+        syncAudio()
     }
 
     private func symbolButton(_ b: UIButton, _ name: String, size: CGFloat = 20) {
@@ -290,10 +324,31 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         slider.addTarget(self, action: #selector(sliderMoved), for: .valueChanged)
         slider.addTarget(self, action: #selector(sliderUp), for: [.touchUpInside, .touchUpOutside, .touchCancel])
 
-        let bottomStack = UIStackView(arrangedSubviews: [playButton, timeLabel, slider, durationLabel])
-        bottomStack.axis = .horizontal
-        bottomStack.alignment = .center
-        bottomStack.spacing = 8
+        let seekRow = UIStackView(arrangedSubviews: [playButton, timeLabel, slider, durationLabel])
+        seekRow.axis = .horizontal
+        seekRow.alignment = .center
+        seekRow.spacing = 8
+
+        // Volume row (native 15.100): speaker (mute / unmute) and VLC's level.
+        symbolButton(muteButton, "speaker.slash.fill", size: 17)
+        muteButton.addTarget(self, action: #selector(muteTapped), for: .touchUpInside)
+        volumeSlider.minimumValue = 0
+        volumeSlider.maximumValue = 100
+        volumeSlider.value = volume
+        volumeSlider.minimumTrackTintColor = .white
+        volumeSlider.translatesAutoresizingMaskIntoConstraints = false
+        volumeSlider.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        volumeSlider.addTarget(self, action: #selector(volumeMoved), for: .valueChanged)
+        volumeSlider.addTarget(self, action: #selector(volumeDone), for: [.touchUpInside, .touchUpOutside, .touchCancel])
+        let volumeRow = UIStackView(arrangedSubviews: [muteButton, volumeSlider, UIView()])
+        volumeRow.axis = .horizontal
+        volumeRow.alignment = .center
+        volumeRow.spacing = 8
+
+        let bottomStack = UIStackView(arrangedSubviews: [seekRow, volumeRow])
+        bottomStack.axis = .vertical
+        bottomStack.alignment = .fill
+        bottomStack.spacing = 0
         bottomStack.translatesAutoresizingMaskIntoConstraints = false
         bottomBar.addSubview(bottomStack)
 
@@ -355,6 +410,7 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
             hintLabel.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -8),
         ]
         NSLayoutConstraint.activate(hintCentre)
+        setMuteIcon()
     }
 
     private func buildGestures() {
@@ -490,6 +546,57 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         let name = ended ? "arrow.counterclockwise" : (player.isPlaying ? "pause.fill" : "play.fill")
         let cfg = UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
         playButton.setImage(UIImage(systemName: name, withConfiguration: cfg), for: .normal)
+    }
+
+    // MARK: - Volume (native 15.100)
+
+    private func setMuteIcon() {
+        let name = muted || volume <= 0 ? "speaker.slash.fill"
+                 : volume < 34 ? "speaker.wave.1.fill"
+                 : volume < 67 ? "speaker.wave.2.fill" : "speaker.wave.3.fill"
+        let cfg = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+        muteButton.setImage(UIImage(systemName: name, withConfiguration: cfg), for: .normal)
+    }
+
+    /// Puts VLC's level and mute where they should be, if they aren't already.
+    /// Cheap enough for every time tick, which is what makes "opens muted"
+    /// hold: settings given before VLC's audio output exists are dropped.
+    private func syncAudio() {
+        // Optional on purpose, as with player.time below.
+        let audio: VLCAudio? = player.audio
+        guard let audio else { return }
+        let want = Int32(muted ? 0 : volume.rounded())
+        if audio.volume != want { audio.volume = want }
+        if audio.isMuted != muted { audio.isMuted = muted }
+    }
+
+    @objc private func muteTapped() {
+        muted.toggle()
+        // Unmuting at zero would sound like nothing happened.
+        if !muted && volume <= 0 { volume = 50; volumeSlider.value = volume; saveVolume() }
+        syncAudio()
+        setMuteIcon()
+        flashHint(muted ? "🔇" : "🔊 \(Int(volume.rounded()))%")
+        showControls()
+    }
+
+    @objc private func volumeMoved() {
+        volume = volumeSlider.value
+        muted = volume <= 0
+        syncAudio()
+        setMuteIcon()
+        flashHint("🔊 \(Int(volume.rounded()))%", stay: true)
+        showControls(autoHide: false)
+    }
+
+    @objc private func volumeDone() {
+        saveVolume()
+        flashHint(hintLabel.text ?? "")
+        showControls()
+    }
+
+    private func saveVolume() {
+        UserDefaults.standard.set(volume, forKey: Self.volumeKey)
     }
 
     private var currentSec: Double {
@@ -664,6 +771,8 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
                 panMode = .scrub
                 scrubFrom = currentSec
                 scrubTarget = scrubFrom
+                scrubLastX = t.x
+                scrubGain = 1
                 showControls(autoHide: false)
             } else if v.y > 0 {
                 panMode = .dismiss
@@ -674,12 +783,19 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
             switch panMode {
             case .scrub:
                 let span = durationSec > 0 ? min(durationSec, Self.scrubSpanSeconds) : Self.scrubSpanSeconds
-                var target = scrubFrom + Double(t.x / max(stage.bounds.width, 1)) * span
+                // Accelerated (native 15.100): each movement since the last
+                // one, scaled by how fast the finger is going right now.
+                let dx = t.x - scrubLastX
+                scrubLastX = t.x
+                scrubGain = Self.scrubGainFor(speed: Double(abs(g.velocity(in: stage).x)))
+                var target = (scrubTarget ?? scrubFrom)
+                    + Double(dx / max(stage.bounds.width, 1)) * span * scrubGain
                 target = max(0, durationSec > 0 ? min(target, durationSec) : target)
                 scrubTarget = target
                 let delta = target - scrubFrom
                 let sign = delta < 0 ? "−" : "+"
-                flashHint("\(Self.fmt(target)) / \(Self.fmt(durationSec))\n\(sign)\(Self.fmt(abs(delta)))", stay: true, corner: true)
+                let fast = scrubGain >= 1.5 ? "  ⏩×\(Int(scrubGain.rounded()))" : ""
+                flashHint("\(Self.fmt(target)) / \(Self.fmt(durationSec))\n\(sign)\(Self.fmt(abs(delta)))\(fast)", stay: true, corner: true)
                 timeLabel.text = Self.fmt(target)
                 if durationSec > 0 { slider.value = Float(target / durationSec) }
                 liveSeek(target)
@@ -715,6 +831,13 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
         default:
             break
         }
+    }
+
+    /// Accelerated scrub's multiplier for a finger speed (points a second).
+    static func scrubGainFor(speed: Double) -> Double {
+        let over = speed - accelFromSpeed
+        guard over > 0 else { return 1 }
+        return min(accelMaxGain, 1 + pow(over / accelPerSpeed, accelPower))
     }
 
     @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
@@ -773,6 +896,7 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
             if player.isPlaying { spinner.stopAnimating() } else { spinner.startAnimating() }
         case .playing:
             spinner.stopAnimating()
+            syncAudio()
             showControls()
         case .paused:
             spinner.stopAnimating()
@@ -794,6 +918,7 @@ final class ScrayVLCPlayerController: UIViewController, VLCMediaPlayerDelegate, 
 
     private func timeChanged() {
         spinner.stopAnimating()
+        syncAudio()
         let media: VLCMedia? = player.media
         if let len = media?.length, len.intValue > 0 {
             durationSec = Double(len.intValue) / 1000

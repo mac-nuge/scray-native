@@ -4,6 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.100 / picker 15.83 — test: VLC volume, muted start, fast scrub, stall rescue
+<!-- 2026-10-03T14:25Z -->
+- **Asked:** in the VLC player, a volume control, start videos muted, and accelerated scrubbing. And: Hetzner videos streamed in Native keep freezing until a seek; a replay usually doesn't freeze at the same point - any ideas?
+- **VLC volume (ScrayVLCPlayer.swift, Native only):** a second row in the bottom bar - a speaker button (mute / unmute; the icon shows the level) and a slider for VLC's own level, 0-100, on top of the phone's volume. The level is remembered on this device (`scray.vlcVolume`, ⚙️ default 100). Moving the slider unmutes; unmuting at 0 goes to 50. A centre hint shows 🔇 / 🔊 n%.
+- **Muted start:** every video opens muted. VLC drops audio settings given before its audio output exists, so `syncAudio()` puts the level and mute where they should be when playback starts and on every time tick (it only writes when they differ) - so it holds from the first sound.
+- **Accelerated scrub:** a sideways drag now adds up each movement scaled by the finger's speed at that moment. Slower than ⚙️ 400 pt/s it's the old rate (full width = 3 min, or the whole video if shorter); faster, gain = 1 + ((speed − 400) / 550)^1.4, ⚙️ capped at 8x (about 3.6x at 1,500 pt/s). Slowing down mid-drag goes straight back to fine control. The corner hint shows ⏩×n while accelerated. Cancel still returns to where the drag began; the slider isn't accelerated.
+- **Freezing - cause (not confirmed):** a Hetzner stream is phone → gateway (nginx, `proxy_buffering off`, `proxy_read_timeout 300s`) → Storage Box over WebDAV. A freeze that a seek clears and a replay doesn't repeat is a transient stall: one read from the box goes quiet, nginx keeps the connection open for up to 5 minutes, and the player waits on it rather than asking again. A seek makes it ask again on a fresh request. The web player had nothing watching for this.
+- **Stall rescue (player.js, both apps):** while a video is meant to be playing (not paused or ended, page visible, no scrub in progress), if neither the time nor the buffered-ahead point moves for ⚙️ 4 s, it nudges the position 0.1 s forward - the seek you were doing by hand. Up to ⚙️ 3 nudges at one spot (0.1, 0.2, 0.3 s), then it leaves it. Each is logged as `[stall] stuck …s at …` with buffered / readyState / networkState, and counted in `window.scrayStallRescues`, so a report shows where and how often. Any source, not just Hetzner.
+- **Deploy:** the stall rescue is web-only (both apps). The VLC changes are Swift and need a new IPA; not compiled here (no Xcode) - the audio calls are VLCKit 3.6's `VLCAudio.volume` / `isMuted`.
+- Checked: `node --check` on both player.js; the stall rescue against a fake `<video>` (a 20 s stall gets 3 nudges, logged; none while paused).
+
 ### picker 15.82 / native 15.99 — stable: TYPE filter in Picker, MP4 on open setting
 <!-- 2026-10-03T14:05Z -->
 - **Asked:** give Picker Native's file type filter (the TYPE cloud) and remove the old one; in both apps, a setting to open showing only MP4.

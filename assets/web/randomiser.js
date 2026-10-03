@@ -4387,6 +4387,16 @@ if (typeof updatePanelSortButton === 'function') {
  populateSecondsDropdowns();
   updateVideoStats();
 
+   // Show only MP4 when opening (picker 15.82 / native 15.99) - the Settings
+   // switch, on this device. MP4 goes into the TYPE filter once, as the page
+   // opens, before the list below is drawn; its pill or Clear all takes it off.
+   // Only where there is a TYPE button: the bookmarks page has no file types.
+   if (document.getElementById("btnTYPE") && typeof window.scrayMp4OnOpen === "function"
+       && window.scrayMp4OnOpen() && window.scrayFacetFilters && window.scrayFacetFilters.filetype) {
+       window.scrayFacetFilters.filetype.add("mp4");
+       if (typeof window.updateFloatingTagPillsFromCommon === "function") window.updateFloatingTagPillsFromCommon();
+   }
+
   // ✅ Auto-show the full list as soon as videos are loaded (same effect as
   // pressing the old L button) - no button press needed
   listAllVideos();

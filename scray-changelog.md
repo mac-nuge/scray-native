@@ -4,6 +4,16 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.82 / native 15.99 — test: TYPE filter in Picker, MP4 on open setting
+<!-- 2026-10-03T14:05Z -->
+- **Asked:** give Picker Native's file type filter (the TYPE cloud) and remove the old one; in both apps, a setting to open showing only MP4.
+- **Picker - TYPE filter (randomiser.js, ui.js, index.php, style.css):** native 15.88's change, ported as is (it applied cleanly to Picker's copies). The `filetype` facet class - the extension from the filename, lower-case - with its TYPE button after NOTE, the cloud, include / exclude chips, slate upper-case pills and Clear all. Always AND: kept out of the ANY/ALL tag pass, no Tag intersect switch in its cloud, not counted towards the ∪/∩ pill, no cross-app hand-off. Removed: the File Type select (`#mimeTypeFilter`, `populateMimeTypeFilter`, its filter pass and reset) and the Show only MP4 box with its filter pass and its phone default - so on a phone Picker no longer starts MP4-only unless the new setting says so.
+- **Basket checkout (picker basket-checkout.php):** it runs the same filters, so it gets the TYPE button too (after STAG), and loses the old select and box.
+- **Bookmarks pages (picker bookmarks.php, native bookmarks.html):** the old File Type select and Show only MP4 box are removed - nothing has read them since randomiser.js stopped (Native since 15.88, Picker now). No TYPE button there: the bookmarks page filters bookmarks, and file types aren't part of that.
+- **Setting - Show only MP4 when opening (settings.js, randomiser.js, both apps):** a tick box in Settings, stored on this device (`scray.mp4OnOpen`), off by default. When on, MP4 is put in the TYPE filter once as the page opens - in Native before the first list is drawn - so it shows as an ordinary MP4 pill; tap it or Clear all to see every type. Only on pages with a TYPE button. `window.scrayMp4OnOpen()` reads it.
+- Checked: `node --check` on every changed script in both apps. Not run in a browser.
+- **Deploy:** web only, no IPA needed for Native.
+
 ### native 15.98 — test: VLC double tap thirds, rotate, play, seek
 <!-- 2026-10-02T15:52Z -->
 - **Asked:** in the VLCKit player, double tap on the left third turns the orientation, the middle third play/pause, the right third seeks - its left half −10, its right half +10 - in both orientations.

@@ -283,6 +283,35 @@ window.scraySettings.register({
   set: (value) => { window.scraySetPickerUrl(value); }
 });
 
+// ---- Show only MP4 when opening (native 15.99) -------------------
+// Stored on this device. randomiser.js reads it once as the page opens and
+// puts MP4 in the TYPE filter; the MP4 pill or Clear all takes it off again.
+window.scrayMp4OnOpen = () => {
+  try { return localStorage.getItem("scray.mp4OnOpen") === "1"; } catch (e) { return false; }
+};
+window.scraySettings.register({
+  id: "mp4OnOpen",
+  label: "Show only MP4 when opening",
+  type: "custom",
+  hint: "Each time the app opens, the lists start with MP4 picked in the TYPE filter. " +
+        "Tap the MP4 pill to see every file type.",
+  build: () => {
+    const el = document.createElement("label");
+    el.style.cssText = "display:flex;align-items:center;gap:10px;font-size:0.9rem;cursor:pointer;margin:0;";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = window.scrayMp4OnOpen();
+    box.style.cssText = "width:20px;height:20px;margin:0;";
+    el.appendChild(box);
+    el.appendChild(document.createTextNode("Only MP4 at start"));
+    return { el, value: () => box.checked, focus: () => box.focus() };
+  },
+  get: () => "",
+  set: (value) => {
+    try { localStorage.setItem("scray.mp4OnOpen", value ? "1" : "0"); } catch (e) {}
+  }
+});
+
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("settingsLink")?.addEventListener("click", (e) => {
     e.preventDefault();

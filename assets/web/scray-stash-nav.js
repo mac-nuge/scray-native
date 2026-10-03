@@ -136,6 +136,93 @@
   }
   const words = (filename) => clean(String(filename ?? '').replace(/\.[a-z0-9]{1,5}$/i, ''));
 
+  // ---- matching words, highlighted (picker 15.84 / native 15.102) ----------
+  // The words a file and a StashDB scene have in common, marked on both sides:
+  // on each result card (title, studio, performers, code, date) and, in a Stash
+  // hunt, on the file's name. Words are compared folded - lower case, accents
+  // off - and split the way clean() splits a filename (separators, CamelCase,
+  // letters meeting digits). A word counts when the other side has it, has it
+  // with or without a plural s / es ("Taylors" - "Taylor's" is Taylor + s),
+  // has two words that run together into it ("TaylorSwift" - "Taylor Swift"),
+  // and the other way round, or one starts the other, 5+ letters each
+  // ("caribbeancompr" - "Caribbeancom"). Too short (under 3), a filler word, a file
+  // extension or a resolution number never counts.
+  const HL_STOP = new Set(('the and with for from her his him she you your are was its into out off '
+    + 'gets got get has had all new big hot sexy xxx com www net org part scene clip video full '
+    + 'episode mp4 mkv wmv avi mov m4v mpg mpeg flv webm fps kbps hevc x264 x265 h264 h265 '
+    + 'remaster remastered uhd fhd hd sd').split(' '));
+  const HL_RES = /^(?:240|360|480|540|576|720|1080|1280|1440|1920|2160|3840|4320)$/;
+  const hlFold = (t) => String(t ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const hlStem = (w) => (w.length > 4 && w.endsWith('es')) ? w.slice(0, -2) : (w.length > 3 && w.endsWith('s')) ? w.slice(0, -1) : w;
+  const hlUseful = (w) => !!w && w.length >= 3 && !HL_STOP.has(w) && !HL_RES.test(w);
+  /** Text as pieces: { s: as written, w: the folded word, or '' between words }. */
+  function hlSegments(text) {
+    const str = String(text ?? '');
+    const out = [];
+    const re = /[\p{L}\p{N}]+/gu;
+    let last = 0, m;
+    while ((m = re.exec(str))) {
+      if (m.index > last) out.push({ s: str.slice(last, m.index), w: '' });
+      m[0].replace(/(\p{Ll})(\p{Lu})/gu, '$1\u0001$2')
+          .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1\u0001$2')
+          .replace(/(\p{L})(\p{N})/gu, '$1\u0001$2')
+          .replace(/(\p{N})(\p{L})/gu, '$1\u0001$2')
+          .split('\u0001').forEach(p => { if (p) out.push({ s: p, w: hlFold(p) }); });
+      last = m.index + m[0].length;
+    }
+    if (last < str.length) out.push({ s: str.slice(last), w: '' });
+    return out;
+  }
+  /** The words of one side, ready to test the other side's words against. */
+  function hlTerms(texts) {
+    const set = new Set(), stems = new Set(), pairs = new Set();
+    [].concat(texts || []).forEach(t => {
+      const ws = hlSegments(t).filter(g => g.w).map(g => g.w);
+      ws.forEach((w, i) => {
+        set.add(w);
+        stems.add(hlStem(w));
+        const j = i + 1 < ws.length ? w + ws[i + 1] : '';
+        if (j.length >= 5) pairs.add(j);
+      });
+    });
+    return { set, stems, pairs };
+  }
+  /** One word starts the other, both 5+ letters: "caribbeancompr" - "Caribbeancom", "brazzersexxtra" - "Brazzers". */
+  function hlPrefix(w, other) {
+    if (w.length < 5) return false;
+    if (!other.long) other.long = [...other.set].filter(v => v.length >= 5 && hlUseful(v));
+    return other.long.some(v => w.startsWith(v) || v.startsWith(w));
+  }
+  /** `text`, HTML-escaped, with the words `other` shares marked. */
+  function hlHtml(text, other) {
+    const segs = hlSegments(text);
+    if (!other || !other.set.size) return esc(text);
+    const idx = [];
+    segs.forEach((g, i) => { if (g.w) idx.push(i); });
+    const on = new Set();
+    idx.forEach((i, k) => {
+      const w = segs[i].w;
+      if (hlUseful(w) && (other.set.has(w) || other.pairs.has(w) || other.stems.has(hlStem(w)) || hlPrefix(w, other))) on.add(i);
+      // Two words here that are one word there.
+      const n = idx[k + 1];
+      if (n != null) {
+        const j = w + segs[n].w;
+        if (j.length >= 5 && hlUseful(j) && (other.set.has(j) || other.stems.has(hlStem(j)))) { on.add(i); on.add(n); }
+      }
+    });
+    return segs.map((g, i) => on.has(i) ? '<mark class="ssn-hl">' + esc(g.s) + '</mark>' : esc(g.s)).join('');
+  }
+  /** A file's side: its name (no extension) and its folder. */
+  const hlFileTerms = (video) => hlTerms([
+    String((video && video.filename) || '').replace(/\.[a-z0-9]{1,5}$/i, ''),
+    (video && (video.__huntFolder || video.path)) || ''
+  ]);
+  /** The scenes' side: everything a card shows that can match. */
+  const hlSceneTerms = (cards) => hlTerms([].concat(cards || []).flatMap(c => c ? [
+    c.title, c.studio, c.code, c.release_date,
+    ...(c.cast || []).flatMap(p => [p && p.name, p && p.as])
+  ] : []).filter(Boolean));
+
   const clock = (n) => {
     n = Math.round(Number(n) || 0);
     if (!n) return '—';
@@ -254,6 +341,8 @@
 #stashModal .ssn-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
 #stashModal .ssn-tags span { background: #eef1f4; border-radius: 10px; padding: 1px 7px; white-space: nowrap; }
 #stashModal .ssn-syn { opacity: .85; margin: 6px 0; white-space: pre-wrap; }
+/* picker 15.84 / native 15.102: words the file and the scene share. */
+mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius: 2px; }
 #stashModal .ssn-why { width: 100%; border-collapse: collapse; margin: 6px 0 0; }
 #stashModal .ssn-why td { padding: 2px 4px; vertical-align: top; border-top: 1px solid rgba(128,128,128,.15); }
 #stashModal .ssn-why td.p { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: #1e7e34; }
@@ -335,6 +424,10 @@
     const key     = opts.videoKey || '';
     const canAccept = !!opts.canAccept;
     const scoreTerm = words(video.filename || '');
+    // Highlighting (picker 15.84 / native 15.102): the file's words, and the
+    // cards each paint draws - told to the hunt so its file line can mark them.
+    const fileTerms = hlFileTerms(video);
+    let painted = [];
     const openExternal = typeof opts.openExternal === 'function'
       ? opts.openExternal : (url) => window.open(url, '_blank');
 
@@ -701,6 +794,7 @@
       }
       backBtn.textContent = stack.length > 1 ? '‹ Back' : (opts.rootBackLabel || '‹ Back to lookup');
 
+      painted = [];
       host.innerHTML = '<div class="ssn">' + (e.type === 'search' ? rfilterHtml(e) : '') + finderHtml() +
         (e.type === 'home'
           ? '<div class="ssn-home">Type a studio&rsquo;s or performer&rsquo;s name, then pick one to open their page.</div>' +
@@ -735,6 +829,9 @@
       paintStudioList();
       paintFilter();
       paintPtags();
+      if (inHunt && typeof hunt.shown === 'function') {
+        try { hunt.shown(video, painted); } catch (err) { /* the file line stays plain */ }
+      }
     }
 
     function sortedScenes(e) {
@@ -1547,6 +1644,8 @@
     }
 
     function cardHtml(c, i, herePid, hereSid) {
+      painted.push(c);
+      const hl = (t) => hlHtml(t, fileTerms);
       const fileSec = Number(c.file_duration_sec) || 0;
       const sceneSec = Number(c.stash_duration_sec) || 0;
       let durClass = '', durNote = sceneSec ? 'no file length' : 'no scene runtime', durShort = '—';
@@ -1566,15 +1665,15 @@
       // this IS that studio's view.
       const studioBit = !c.studio ? 'no studio'
         : (hereSid && c.studio_id === hereSid)
-          ? esc(c.studio)
+          ? hl(c.studio)
           : '<button type="button" class="ssn-stlink" data-stid="' + esc(c.studio_id || '') + '" data-stname="' +
-              esc(c.studio) + '" data-sid="' + esc(c.stash_id) + '">' + esc(c.studio) + '</button>';
-      const sub = [studioBit].concat([c.release_date, c.code].filter(Boolean).map(esc)).join(' &middot; ');
+              esc(c.studio) + '" data-sid="' + esc(c.stash_id) + '">' + hl(c.studio) + '</button>';
+      const sub = [studioBit].concat([c.release_date, c.code].filter(Boolean).map(hl)).join(' &middot; ');
 
       const cast = (c.cast || []).map(p =>
         '<button type="button" class="ssn-perf' + (p.id && [].concat(herePid || []).includes(p.id) ? ' here' : '') + '" ' +
           'data-pid="' + esc(p.id || '') + '" data-pname="' + esc(p.name) + '" data-sid="' + esc(c.stash_id) + '">' +
-          esc(p.name) + (p.as ? ' <small>as ' + esc(p.as) + '</small>' : '') +
+          hl(p.name) + (p.as ? ' <small>as ' + hl(p.as) + '</small>' : '') +
           (p.gender_short && p.gender_short !== '?' ? ' <small>' + esc(p.gender_short) + '</small>' : '') +
         '</button>').join('');
 
@@ -1601,7 +1700,7 @@
             ? '<div class="ssn-cover ssn-thumb' + (revealAll ? ' shown' : '') + '" data-cover><img src="' + esc(c.cover) + '" alt="" loading="lazy">' +
               '<div class="ssn-veil">Tap 3 times</div></div>'
             : '<div class="ssn-cover ssn-thumb none">no cover</div>') +
-          '<div class="ssn-tt"><div class="ssn-title">' + esc(c.title || '(untitled scene)') + '</div>' +
+          '<div class="ssn-tt"><div class="ssn-title">' + (c.title ? hl(c.title) : '(untitled scene)') + '</div>' +
             '<div class="ssn-sub">' + sub + '</div>' +
           '</div>' +
         '</div>' +
@@ -2563,6 +2662,8 @@ body.fullscreen-active #ssnPvBar { display: none; }
     return out;
   }
 
-  window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile, openHome, studioSuggestions, topFolderTags };
+  window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile, openHome, studioSuggestions, topFolderTags,
+    // picker 15.84 / native 15.102 - shared with scray-stash-hunt.js.
+    hl: { html: hlHtml, terms: hlTerms, fileTerms: hlFileTerms, sceneTerms: hlSceneTerms } };
   window.scrayPerformerChoice = performerChoice;
 })();

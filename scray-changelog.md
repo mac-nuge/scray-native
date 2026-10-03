@@ -4,7 +4,27 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### native 15.101 — test: SideStore source for IPA builds
+### browse 15.156 / picker 15.85 / native 15.103 — test: catalogue f4v, rmvb and other video types
+<!-- 2026-10-03T16:00Z -->
+- **Reported:** Drive check keeps showing migrated files as Not in library - three on drives U and V, two .f4v and an .rmvb. Asked: is it their file types?
+- **Cause:** yes. Drive check matches on fingerprint then exact size, whatever the type - so Not in library means no catalogue copy at all. The box scan (`scrayHetznerIsVideoName`, used by the rescan and `hetzner_ls`) only catalogues the types in `SCRAY_HZ_VIDEO_EXT`, which had no .f4v, .rmvb, .rm, .asf and others. Copies of those on the box were never catalogued, so nothing could match them. OneDrive's list (`SCRAY_OD_VIDEO_EXT`) had .rmvb but no .f4v.
+- **api.php (browse 15.156):** the box list gains f4v, asf, rm, rmvb, vob, divx, ogv, mts, m2v; OneDrive's gains f4v, vob, divx, ogv, mts, m2v (so both lists are the same, plus m4a for OneDrive). The next box rescan finds these as new files and catalogues them.
+- **Picker (onedrive.js, 15.85):** `VIDEO_EXTENSIONS` gets the same additions, so OneDrive fetches list them too.
+- **Native (player.js, 15.103):** f4v, vob, divx, ogv, mts and m2v go to the VLC player, like rmvb already did - the web player can't be relied on for them.
+- **Not changed:** the uploaders (phone / web upload to OneDrive or the box) still take only mp4, m4v, mov, mkv and avi.
+- **After deploying:** start a box rescan (a Hetzner re-fetch in Native or Picker asks for one, at most every 10 minutes), let it finish, then Reload the catalogue in Drive check.
+- Checked: `php -l`; `node --check` on onedrive.js and player.js.
+
+### picker 15.84 / native 15.102 — test: Stash hunt highlights matching words, Match more
+<!-- 2026-10-03T15:35Z -->
+- **Asked:** in Stash hunt, highlight all the words the video and a suggestion have in common; and in the Stash modal, after a manual match, a Match more link that goes to Stash hunt.
+- **Matching words (scray-stash-nav.js):** a shared helper (`scrayStashNav.hl`) finds the words a file and a scene share and marks them yellow (`mark.ssn-hl`). Compared folded (lower case, accents off), split like a filename (separators, CamelCase, letters meeting digits). A word counts when the other side has it, has it with or without a plural s / es ("Taylors" - "Taylor's"), has two words that run together into it ("TaylorSwift" - "Taylor Swift"), or when one starts the other, 5+ letters each ("caribbeancompr" - "Caribbeancom"); and the same the other way round. Never counted: under 3 letters, filler words (the, and, with…), extensions, codec and resolution words (720p, x264…).
+- **Where:** every result card in the navigator (title, studio, performers and their credited-as names, code, date) - against the file's name and folder - so a plain Stash search gets it too. In a hunt, the hunt bar's file line marks the words any card on screen shares (`scrayStashHunt.shown`, called after each paint). In the bulk check, each row marks both sides against its own scene; the bulk check's preview bar gets the file line marks too.
+- **Match more (file-operations.js):** the green "Matched. Rename the file to suit?" strip - shown after an Accept, a pasted URL or details entered by hand on an unmatched file - gets a purple **🎯 Match more** button beside Rename too?. It starts Stash hunt (the hunt closes this modal first). Not shown when the match was made inside a hunt - Next is already there.
+- **Both apps:** scray-stash-nav.js and scray-stash-hunt.js stay identical in Picker and Native; the file-operations.js change is the same in both.
+- Checked: `node --check`; the matching against four real-shaped names (a CamelCase file in a studio folder, possessive and plural titles, a scene code, an accented word), HTML escaping inside marks, nothing marked when one side is empty. Not run in a browser.
+
+### native 15.101 — stable: SideStore source for IPA builds
 <!-- 2026-10-03T14:45Z -->
 - **Asked:** the SideStore route for builds - each IPA published where SideStore can see it, so a new build is an update to tap rather than a file to copy.
 - **Workflows (build-ios.yml, build-ios-release.yml):** a step after packaging uploads over SSH to a folder on macnguyen.com behind an unguessable path - the IPA (sent as `.part`, renamed when complete), the app's icon, an `.htaccess` (no folder listing, `source.json` never cached, IPAs as downloads) - then reads the current `source.json`, adds this build and puts it back, and deletes IPAs the source no longer lists. Both apps share one source: the release build as **BBW iPlayer** (`com.mac.scraynative`), the dev build as **Scray Picker (Dev)** (`com.mac.scraynative.dev`), ⚙️ the last 3 builds each. Each version's notes are the web VERSION line and the build number. The IPA is still attached to the run as before. Until the secrets are set the step warns and skips, so builds don't break.

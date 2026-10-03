@@ -527,9 +527,34 @@
 #stashHuntBulk .shb-foot .go { flex: 1.6 1 0; background: #28a745; border-color: #28a745; color: #fff; font-weight: 700; }
 #stashHuntBulk .shb-foot .go:disabled { opacity: .5; }
 #stashModal .ssn-hunt-row { display: flex; align-items: center; gap: 10px; margin: 4px 4px 12px; font-size: .8rem; color: #777; }
+mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius: 2px; }
 #stashModal .ssn .ssn-hunt-go { background: #6f42c1; border-color: #6f42c1; color: #fff; font-weight: 700; padding: 8px 14px; font-size: .88rem; }
 `;
     document.head.appendChild(css);
+  }
+
+  // ---- matching words on the file's name (picker 15.84 / native 15.102) ----
+  // scray-stash-nav.js marks the words a result card shares with the file; this
+  // marks the file's side - the words any card on show shares - on the hunt
+  // bar's file line, and both sides of each bulk check row.
+  const HL = () => (window.scrayStashNav && window.scrayStashNav.hl) || null;
+  /** A file line's inside: folder/ and name, the words `terms` has marked. */
+  function fileLineHtml(v, terms) {
+    const dir = v.__huntFolder || folderOf(v);
+    const h = HL();
+    const mk = (t) => (h && terms ? h.html(t, terms) : esc(t));
+    return (dir ? '<span class="sh-dir">' + mk(dir) + '/</span>' : '') + mk(v.filename || '');
+  }
+  /** The navigator has drawn these cards for `video`: mark the file line to match. */
+  function shown(video, cards) {
+    const h = HL();
+    if (!video || !h) return;
+    const key = keyOf(video);
+    const terms = cards && cards.length ? h.sceneTerms(cards) : null;
+    if (S && S.cur && S.cur.key === key) S.cur.shownTerms = terms;
+    document.querySelectorAll('.sh-file[data-hlk]').forEach(el => {
+      if (el.dataset.hlk === key) el.innerHTML = fileLineHtml(video, terms);
+    });
   }
 
   function paintBar() {
@@ -558,8 +583,8 @@
         '<span class="sh-stats" title="Matched · skipped · hidden this run">✅ ' + st.matched +
           ' · ⏭ ' + st.skipped + ' · 🚫 ' + st.never + (st.streak > 1 ? ' · 🔥' + st.streak : '') + '</span>' +
       '</div>' +
-      '<div class="sh-file" title="' + esc((dir ? dir + '/' : '') + (v.filename || '')) + '">' +
-        (dir ? '<span class="sh-dir">' + esc(dir) + '/</span>' : '') + esc(v.filename || '') + '</div>' +
+      '<div class="sh-file" data-hlk="' + esc(S.cur.key) + '" title="' + esc((dir ? dir + '/' : '') + (v.filename || '')) + '">' +
+        fileLineHtml(v, S.cur.shownTerms || null) + '</div>' +
       (won ? '<div class="sh-won-line">' + (S.cur.auto ? '✅ Matched by fingerprint!' : '✅ Matched!') + ' On to the next one?</div>' : '') +
       '<div class="sh-acts">' +
         '<button type="button" data-h="play" title="Preview in the player">▶</button>' +
@@ -1305,7 +1330,12 @@
   function bulkRowHtml(r, i) {
     const v = r.v;
     const dir = v.__huntFolder || folderOf(v);
-    const file = '<div class="shb-file">' + (dir ? '<span class="sh-dir">' + esc(dir) + '/</span>' : '') + esc(v.filename || '') + '</div>';
+    // Matching words marked on both sides (picker 15.84 / native 15.102).
+    const h = HL();
+    const sceneT = h && r.card ? h.sceneTerms([r.card]) : null;
+    const fileT = h && r.card ? h.fileTerms(v) : null;
+    const hs = (t) => (h && fileT ? h.html(t, fileT) : esc(t));
+    const file = '<div class="shb-file">' + fileLineHtml(v, sceneT) + '</div>';
     const tickable = (r.st === 'found' || r.st === 'fail') && !(bulk && (bulk.submitting || preAsk(bulk)));
     const renPick = !!(bulk && ((bulk.ask === 'pick' && r.st === 'done' && r.sug && !r.rst) ||
                                 (bulk.ask === 'prepick' && inPending(bulk, r) && r.sug)));
@@ -1326,10 +1356,10 @@
       } else {
         dur = '<span class="shb-dur">' + (fs ? 'File ' + clock(fs) + ' · ' : '') + (ss ? 'Scene ' + clock(ss) : 'no scene runtime') + '</span>';
       }
-      const cast = (c.cast || []).map(p => esc(p.name) + (p.gender_short && p.gender_short !== '?' ? ' <small>' + esc(p.gender_short) + '</small>' : '')).join(', ');
+      const cast = (c.cast || []).map(p => hs(p.name) + (p.gender_short && p.gender_short !== '?' ? ' <small>' + esc(p.gender_short) + '</small>' : '')).join(', ');
       body =
-        '<div class="shb-scene"><b>' + (c.title ? esc(c.title) : '<i>No title</i>') + '</b></div>' +
-        '<div class="shb-sub">' + [c.studio ? esc(c.studio) : 'no studio', c.release_date ? esc(c.release_date) : ''].filter(Boolean).join(' · ') +
+        '<div class="shb-scene"><b>' + (c.title ? hs(c.title) : '<i>No title</i>') + '</b></div>' +
+        '<div class="shb-sub">' + [c.studio ? hs(c.studio) : 'no studio', c.release_date ? hs(c.release_date) : ''].filter(Boolean).join(' · ') +
           (cast ? ' · ' + cast : '') + '</div>' +
         '<div class="shb-facts">' + confHtml + dur +
           (r.count > 1 ? '<span class="shb-of">' + (r.how === 'dur'
@@ -2153,7 +2183,7 @@
           '<div class="sh-top"><span class="sh-insp-l">⚡ From the bulk check · ' + (i + 1) + ' of ' + B.rows.length + '</span>' +
             '<button type="button" data-h="hunt" title="Leave the bulk check and hunt this file">🎯 Hunt it</button>' +
             '<button type="button" class="sh-back" data-h="back">✕ Back to bulk</button></div>' +
-          '<div class="sh-file">' + (dir ? '<span class="sh-dir">' + esc(dir) + '/</span>' : '') + esc(r.v.filename || '') + '</div>';
+          '<div class="sh-file" data-hlk="' + esc(keyOf(r.v)) + '">' + fileLineHtml(r.v, null) + '</div>';
         bar.addEventListener('click', (e) => {
           const t = e.target.closest('[data-h]');
           if (!t) return;
@@ -2473,6 +2503,8 @@
 
   window.scrayStashHunt = {
     start, stop, optsFor, openScope: () => openSheet({}),
+    /** The navigator's cards for this file, to mark its name (picker 15.84 / native 15.102). */
+    shown,
     /** The studio of the hunt's last match, for the hunt's own file only. */
     suggestStudio: (video) => (optsFor(video) ? lastStudio : ''),
     /** The female performer(s) of the hunt's last match, for its own file only. */

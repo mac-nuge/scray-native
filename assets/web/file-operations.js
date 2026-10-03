@@ -4603,7 +4603,16 @@ async function showStashModal(video, openOpts) {
             'padding:7px 9px;border-radius:6px;background:#eaf7ee;border-left:3px solid #28a745;font-size:.82rem;';
         offer.innerHTML = '<span>Matched. Rename the file to suit?</span>' +
             '<button id="stashRenameNow" class="modal-btn modal-btn-secondary" ' +
-            'style="flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;">&#9998; Rename too?</button>';
+            'style="flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;">&#9998; Rename too?</button>' +
+            // Match more (picker 15.84 / native 15.102): after a match made here
+            // rather than in a Stash hunt, straight on to the hunt's unmatched
+            // files. scray-stash-hunt.js starts it from any .ssn-hunt-go tap,
+            // and closes this modal first.
+            (!hunt && window.scrayStashHunt
+                ? '<button type="button" class="ssn-hunt-go modal-btn" title="Stash hunt: unmatched files, one at a time" ' +
+                  'style="flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;font-weight:700;' +
+                  'background:#6f42c1;border-color:#6f42c1;color:#fff;">&#127919; Match more</button>'
+                : '');
         body.prepend(offer);
         body.scrollTop = 0;
         // In a Stash hunt (picker 15.38 / native 15.47): two taps, and the file

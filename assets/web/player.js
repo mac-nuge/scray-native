@@ -11714,7 +11714,10 @@ function scrayMimeForFile(filename) {
 // piecemeal, so it's left out of the hard-fail list and allowed to try.
 // native 15.77: these now go to the VLC player (ScrayVLCPlayer.swift) when the
 // IPA has it; the message below is only for an older IPA.
-const SCRAY_UNPLAYABLE_EXT = new Set(['mkv', 'wmv', 'avi', 'flv', 'mpg', 'mpeg', 'rm', 'rmvb', 'asf']);
+// native 15.103: + f4v, vob, divx, ogv, mts, m2v - the types the box scan now
+// catalogues (browse 15.156) that the web player can't be relied on for.
+const SCRAY_UNPLAYABLE_EXT = new Set(['mkv', 'wmv', 'avi', 'flv', 'mpg', 'mpeg', 'rm', 'rmvb', 'asf',
+                                      'f4v', 'vob', 'divx', 'ogv', 'mts', 'm2v']);
 
 function scrayUnplayableReason(filename) {
     const ext = String(filename || '').split('.').pop().toLowerCase();

@@ -4,6 +4,16 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.101 — test: SideStore source for IPA builds
+<!-- 2026-10-03T14:45Z -->
+- **Asked:** the SideStore route for builds - each IPA published where SideStore can see it, so a new build is an update to tap rather than a file to copy.
+- **Workflows (build-ios.yml, build-ios-release.yml):** a step after packaging uploads over SSH to a folder on macnguyen.com behind an unguessable path - the IPA (sent as `.part`, renamed when complete), the app's icon, an `.htaccess` (no folder listing, `source.json` never cached, IPAs as downloads) - then reads the current `source.json`, adds this build and puts it back, and deletes IPAs the source no longer lists. Both apps share one source: the release build as **BBW iPlayer** (`com.mac.scraynative`), the dev build as **Scray Picker (Dev)** (`com.mac.scraynative.dev`), ⚙️ the last 3 builds each. Each version's notes are the web VERSION line and the build number. The IPA is still attached to the run as before. Until the secrets are set the step warns and skips, so builds don't break.
+- **Secrets (repo → Settings → Secrets → Actions):** `SIDESTORE_SSH_KEY` (a key made for this, its public half added in hPanel → SSH Access), `SIDESTORE_HOST`, `SIDESTORE_PORT`, `SIDESTORE_USER`, `SIDESTORE_DIR` (the folder's full path on the server), `SIDESTORE_URL` (the same folder's https address). The path and URL hold the token, so neither is in the repo or the run's summary.
+- **scripts/sidestore-publish.js (new):** builds the source in SideStore / AltStore's format - `versions` (version, buildVersion, date, notes, downloadURL, size) plus the older single-version fields - merging into what's there; a re-run of a build replaces its entry, and a missing or broken source starts a new one. Writes the list of IPAs to keep.
+- **app.config.js:** `version` is now `1.0.<run number>` (was always 1.0.0). SideStore spots an update by version and checks the IPA it downloads against the listed one, so each build needs its own. The dev and release workflows count runs separately; their bundle IDs differ, so that's fine. Nothing in the app reads the version (only the build report).
+- **Why not the gateway:** its firewall only lets SSH in from Mac's address, and GitHub's builders come from anywhere. Hostinger's SSH (port 65002) takes a key from anywhere.
+- Checked: the workflows parse and the step passes `bash -n`; the step run four times against a local folder standing in for the server (stand-in ssh/scp) - each build added, the 4th dropping the 1st and its IPA, notes and sizes right, `.htaccess` written; with no secrets it warns and exits 0; `app.config.js` gives 1.0.42 for run 42. Not run on GitHub or against Hostinger.
+
 ### native 15.100 / picker 15.83 — test: VLC volume, muted start, fast scrub, stall rescue
 <!-- 2026-10-03T14:25Z -->
 - **Asked:** in the VLC player, a volume control, start videos muted, and accelerated scrubbing. And: Hetzner videos streamed in Native keep freezing until a seek; a replay usually doesn't freeze at the same point - any ideas?

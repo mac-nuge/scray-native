@@ -24,6 +24,10 @@ module.exports = ({ config }) => {
   return {
     ...config,
     name: IS_DEV_VARIANT ? 'Scray Picker (Dev)' : 'BBW iPlayer',
+    // native 15.101: a version per IPA build (1.0.<run number>), so SideStore
+    // sees each build as an update - it compares this, and checks the IPA
+    // against what its source lists. Was 1.0.0 for every build.
+    version: `1.0.${buildNumber}`,
     ...(IS_DEV_VARIANT ? {} : { icon: './assets/images/icon-release-iplayer.png' }),
     // The offline/release app must not claim the dev-client link
     // (exp+scray-native://), or scanning Metro's QR code opens it instead of

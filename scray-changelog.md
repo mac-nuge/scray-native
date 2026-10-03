@@ -4,6 +4,12 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.165 / picker 15.89 / native 15.106 — test: bulk convert queues in batches
+<!-- 2026-10-03T20:55Z -->
+- **Why:** the backlog Mac picked is 2,488 videos (872 GB) in one selection. api.php takes at most 500 per bulk call (`SCRAY_CONV_BULK_MAX`) and silently dropped the rest; thousands in one call would also be slow on Hostinger.
+- **Change (scray-convert-bulk.js, identical in all three):** names are checked 250 at a time and conversions queued 100 at a time, with "Queueing… n of N" on the button, so any number can go in one go. If a batch fails outright, what was queued before it stays queued and the result lists the rest as "not queued - <why>". The done message no longer says the gateway does them one at a time (a booster may be helping).
+- Checked in jsdom: 1,234 files - looked up in 13 calls, names in 5, queued in 100s, and a failing 9th batch leaves 800 queued and 434 listed as not queued.
+
 ### browse 15.161 / picker 15.88 / native 15.105 — test: bulk convert in Migrate and the apps
 <!-- 2026-10-03T19:40Z -->
 - **Asked:** after browse 15.160's bulk Convert in Data explorer - the same in Migrate and in Picker / Native.

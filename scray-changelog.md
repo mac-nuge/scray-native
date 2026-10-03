@@ -4,7 +4,7 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### picker 15.82 / native 15.99 — test: TYPE filter in Picker, MP4 on open setting
+### picker 15.82 / native 15.99 — stable: TYPE filter in Picker, MP4 on open setting
 <!-- 2026-10-03T14:05Z -->
 - **Asked:** give Picker Native's file type filter (the TYPE cloud) and remove the old one; in both apps, a setting to open showing only MP4.
 - **Picker - TYPE filter (randomiser.js, ui.js, index.php, style.css):** native 15.88's change, ported as is (it applied cleanly to Picker's copies). The `filetype` facet class - the extension from the filename, lower-case - with its TYPE button after NOTE, the cloud, include / exclude chips, slate upper-case pills and Clear all. Always AND: kept out of the ANY/ALL tag pass, no Tag intersect switch in its cloud, not counted towards the ∪/∩ pill, no cross-app hand-off. Removed: the File Type select (`#mimeTypeFilter`, `populateMimeTypeFilter`, its filter pass and reset) and the Show only MP4 box with its filter pass and its phone default - so on a phone Picker no longer starts MP4-only unless the new setting says so.

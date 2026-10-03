@@ -108,6 +108,7 @@
       <button type="button" class="bulk-btn bulk-basket" data-bulk="basket" title="Add to the basket">B</button>
       <button type="button" class="bulk-btn bulk-refresh" data-bulk="refresh" title="Refresh data">Ref</button>
       <button type="button" class="bulk-btn bulk-stash" data-bulk="stash" title="Edit stash details (studio, performers, tags)">S</button>
+      <button type="button" class="bulk-btn bulk-convert" data-bulk="convert" title="Convert to MP4 (files on the Hetzner box)">MP4</button>
       <button type="button" class="bulk-btn bulk-delete" data-bulk="delete" title="Delete" aria-label="Delete">${BIN_SVG}</button>
       <button type="button" class="bulk-btn bulk-clear" data-bulk="close" title="Turn bulk select off">✕</button>`;
     bar.addEventListener('click', (e) => {
@@ -397,6 +398,20 @@
     }
 
     if (what === 'stash') { await openBulkStash(videos); return; }
+
+    // Convert to MP4 (picker 15.88 / native 15.105, scray-convert-bulk.js):
+    // the box files among the selection, one set of settings for all.
+    if (what === 'convert') {
+      const conv = window.scrayConvert, bulk = window.scrayConvertBulk;
+      if (!conv || !bulk) { alert('Convert is not available here.'); return; }
+      const box = videos.filter(v => conv.appAvailability(v).ok);
+      const left = videos.length - box.length;
+      if (!box.length) { say('⚠️ Only files on the Hetzner box can be converted', '#c0392b'); return; }
+      if (left) say(`${left} not on the Hetzner box left out`);
+      if (box.length === 1) conv.forApp(box[0]);
+      else bulk.forApp(box, { onQueued: () => clearSelection() });
+      return;
+    }
 
     if (what === 'delete') {
       if (typeof window.showBulkDeleteModal !== 'function') { alert('Delete is not available here.'); return; }

@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.161 / picker 15.88 / native 15.105 — test: bulk convert in Migrate and the apps
+<!-- 2026-10-03T19:40Z -->
+- **Asked:** after browse 15.160's bulk Convert in Data explorer - the same in Migrate and in Picker / Native.
+- **One modal everywhere (scray-convert-bulk.js):** now identical in all three repos, as scray-convert.js is, with the same two looks: the console one for the browse pages, the apps' own modal classes (basket-json-modal, modal-btn) for Picker and Native. `scrayConvertBulk.forApp(videos)` does the apps' part: their API, the suggested names from `scrayCleanNameSuggestion`, by picker / native, Converter's address. The apps send the modal's calls base64-wrapped (api.php's `body()` already unwraps that): a list of filenames is what Hostinger's CDN refused in Picker's Hetzner fetch (picker 15.81).
+- **Picker / Native:** **MP4** on the Bulk select bar (orange, after S). It takes the box files among the selection - the rest are left out, with a note saying how many - and opens the one-file modal for one, the bulk modal for more. The selection clears once they're queued. scray-bulk-select.js is identical in both apps; index.php / index.html load scray-convert-bulk.js after scray-convert.js.
+- **Migrate:** **Convert N…** in the toolbar while box files are ticked (counted in videos), and Convert to MP4… on a ticked row says how many box files and does them all. OneDrive files among the ticked ones are left out; one box file opens the one-file modal.
+- Checked: the modal in jsdom in both looks (the app one: its classes, suggested names, what it sends and that it's base64-wrapped, the result); the Bulk select bar's MP4 in jsdom (a OneDrive file left out with a note, the bulk modal for the rest, the selection cleared); `node --check`; Migrate's and Data explorer's inline scripts parse.
+
 ### browse 15.158 / picker 15.86 / native 15.104 — test: Convert box files to MP4 on the gateway
 <!-- 2026-10-03T17:10Z -->
 - **Asked:** a file type converter that runs on the server: **Convert** on a file's menu in Native, Picker, Data explorer and Migrate (each in its own look, the same behaviour) opens a modal - convert to MP4 with an adjustable quality % and an accurate size estimate, the same name by default or the suggested one, into the same folder by default or another one - and a new converter.html to watch them. Then: **Hetzner files only**, not OneDrive. Answers: phone-only files can't be converted; one pass or two, chosen in the modal; the original is kept and linked to the MP4 as a variant, with an option to delete it.

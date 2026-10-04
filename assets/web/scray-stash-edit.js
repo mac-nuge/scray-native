@@ -1150,6 +1150,23 @@
     return res;
   }
 
+  // ---- unmatch details entered by hand (picker 15.93 / native 15.110) -------
+  // The lookup panel's Unmatch for a file whose details were entered by hand:
+  // the same as the form's Remove these details - the hand-entered scene goes
+  // and the file is back to unmatched, ready to start again. Resolves to the
+  // server's reply, with a readable `summary`.
+  async function unmatchManual(videoKey) {
+    const res = await api('stash_edit_manual_delete', { method: 'POST', body: { video_keys: [videoKey] } });
+    if (res && res.refused) throw new Error('this file is matched to StashDB, not entered by hand');
+    vocabAt = 0;
+    try { if (window.scrayStashNames) await window.scrayStashNames.refresh(true); } catch (e) { /* lists catch up later */ }
+    try {
+      if (typeof window.scrayLoadStashState === 'function') await window.scrayLoadStashState(true);
+    } catch (e) { /* the S button catches up on the next poll */ }
+    res.summary = 'Unmatched - the details entered by hand are removed.';
+    return res;
+  }
+
   // ---- take studio / performers from another scene ------------------------
   // (picker 15.33 / native 15.42) The same saves the form makes, for the two
   // fields, with the file's other details carried back up untouched.
@@ -1226,5 +1243,5 @@
     };
   }
 
-  window.scrayStashEdit = { open, unmatch, take, _rank: rank, _parseDur: parseDur, _vocab: VOCAB };
+  window.scrayStashEdit = { open, unmatch, unmatchManual, take, _rank: rank, _parseDur: parseDur, _vocab: VOCAB };
 })();

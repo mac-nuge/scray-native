@@ -4,6 +4,41 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.93 / native 15.110 — test: unmatch for details entered by hand
+<!-- 2026-10-04T10:14Z -->
+- **Asked:** no Unmatch option for manually edited videos in Stash hunt - add one, to start again.
+- **Why it was missing:** the Stash panel only offered ✕ Unmatch for a StashDB match; details entered by hand just said Entered by hand, and the only way out was Remove these details at the foot of the ✏️ Edit details form.
+- **Change (file-operations.js, picker and native):** the panel shows ✕ Unmatch beside Entered by hand too - two taps, as for a StashDB match. It removes the hand-entered details and the file is back to unmatched (the not-found panel, ready to match again). In a hunt the file goes back in the pool, and a past match in Recent files shows as Unmatched, as with a StashDB unmatch.
+- **Change (scray-stash-edit.js, identical in both):** `scrayStashEdit.unmatchManual(videoKey)` - the form's Remove these details (`stash_edit_manual_delete`, already in api.php), with the names and S-button state refreshed; refuses a StashDB match.
+- Checked: `node --check`; jsdom - unmatchManual sends one key to stash_edit_manual_delete, refreshes names and state, and throws on a refusal (both copies).
+
+### picker 15.92 / native 15.109 — test: edit name option, double-tap cursor
+<!-- 2026-10-04T10:08Z -->
+- **Asked:** Rename in the hunt only went straight to the suggested name (tap again) - add a manual rename too, with the existing rename modal; and in the search box (tap selects a word, which works) a double tap should put the cursor in.
+- **Change (file-operations.js, picker and native):** in a Stash hunt the Matched chip has ✎ Edit name beside ✎ Rename too? when there's a suggested name - the rename modal on top (Use suggested is in there to start from), and the hunt's list follows if the name changes.
+- **Change (scray-stash-hunt.js, identical in both):** a past match's bar has ✍️ Edit name beside ✎ Rename when there's a suggestion (✎ Rename already opens the modal when there isn't); it disarms a pending Rename, and the bar and Recent files follow the new name.
+- **Change (scray-stash-nav.js, identical in both):** `wordTap` - a second tap within 400 ms and 30 px of the first puts the cursor in the gap between letters nearest the finger, instead of the browser's own double-tap select (held again after iOS's). A single tap still selects the word; ⚙️ `WT_DOUBLE_MS` / `WT_DOUBLE_PX`.
+- Checked: `node --check`; jsdom run (both copies, 54 checks) - Edit name opens the modal on top and a hand rename carries to the list and bar; tap selects Challenge, a quick second tap leaves the cursor at 14 and keeps it after a native select, a slow tap selects the word again.
+
+### picker 15.91 / native 15.108 — test: stash hunt thumbs, delete, past match options, word tap
+<!-- 2026-10-04T09:58Z -->
+- **Asked:** a tiny thumbnail on the bulk check's result cards; a delete option in Stash hunt for a video that just wants deleting, not matching; looking back at previous matches should have all the usual options (rename, delete, etc.); in the search box a tap on a term should select the term, a tap between terms place the cursor.
+- **Change (scray-stash-hunt.js, identical in both):**
+  - Bulk rows show a tiny cover of the scene they show (`thumbHtml`), blurred as the navigator's covers are: tap one 3 times to see it, once more to blur it; 👁 in the status row unblurs every cover (🙈 blurs them again, `S.bulkReveal` for the rest of the hunt). Taps on a cover don't tick the row.
+  - 🗑 beside the file in the hunt bar opens the app's own Delete File modal (OneDrive recycle bin, and the phone copy / everywhere where it offers them). Once deleted the file leaves the pool, the hunt moves on, Recent files lists it as 🗑 Deleted (a new chip; tapping it only says so) and the bar's tally counts 🗑. Cancel changes nothing.
+  - A past match opened from Recent files: the bar has ▶ preview, ✏️ details, ✎ Rename (two taps to the suggested name, as Rename too does in the hunt; the rename modal on top when there's no suggestion - the list follows the new name) and 🗑 Delete (then back to the hunt), as well as 🎯 Back to the hunt.
+  - The bulk check's add-words box selects words on a tap too.
+- **Change (scray-stash-nav.js, identical in both):** `wordTap(root, selector)` - in the navigator's search box a tap on a word selects the whole word (type to replace it, ⌫ to drop it); a tap in a gap or past the last word puts the cursor there; a second tap on the selected word puts the cursor inside it. Works out the character under the finger from the box's font, so it's the word actually tapped.
+- **Change (file-operations.js, picker and native):** `showDeleteModal(video, opts)` - opens at the top z-index (as the rename modal does) so it sits over the Stash modal and the FLS player; `opts.onDone(ok, message)` gets the done message instead of the alert, and false on Cancel. Callers without opts behave as before.
+- Checked: `node --check` on all four files; jsdom run (both copies) - word taps select / leave the cursor as above; 🗑 then cancel changes nothing, 🗑 then deleted moves on, counts and lists it; past match bar has all five buttons, rename to the suggestion updates the list and bar, delete returns to the hunt; bulk covers blurred, 3 taps show, 👁 / 🙈 all, row ticking unaffected.
+
+### picker 15.90 / native 15.107 — test: stash matches coloured by kind, file line in italics
+<!-- 2026-10-04T09:50Z -->
+- **Asked:** in Stash hunt the words the results share with the file were all yellow - performer matches green, studio matches pink, everything else yellow, the file details in italics; the same in the normal Stash modal.
+- **Change (scray-stash-nav.js, identical in both):** `hlHtml(text, other, kinds)` colours each mark by what the word is: a performer's name (or credited-as name) `ssn-hl-p` green, the studio's `ssn-hl-s` pink, anything else stays yellow; performer wins a tie. `hlSceneTerms` now carries `.kinds` (the cards' performer and studio names apart, `hlKinds`), so the file's side picks the colours up on its own. On a result card the studio line only ever marks pink, performer names only green, and the title / date / code by what the word is (a performer's name in a title is green). Applies wherever the cards are drawn - the hunt and the normal Stash modal's navigator.
+- **Change (scray-stash-hunt.js, identical in both):** the hunt bar's file line (`.sh-file`) and the bulk check's file lines (`.shb-file`) are italic; the bulk check's scene side uses the same colours.
+- Checked: `node --check`; a card with studio Brazzers Exxtra and Freya Mayer against BrazzersExxtra_FreyaMayer_Challenge - studio words pink, Freya / Mayer green, Challenge yellow on both sides.
+
 ### browse 15.165 / picker 15.89 / native 15.106 — test: bulk convert queues in batches
 <!-- 2026-10-03T20:55Z -->
 - **Why:** the backlog Mac picked is 2,488 videos (872 GB) in one selection. api.php takes at most 500 per bulk call (`SCRAY_CONV_BULK_MAX`) and silently dropped the rest; thousands in one call would also be slow on Hostinger.

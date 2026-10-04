@@ -810,7 +810,7 @@ if (opts && opts.auto === 'suggested') {
 /**
 * Show delete confirmation modal
 */
-async function showDeleteModal(video) {
+async function showDeleteModal(video, opts) {
    // ⚙️ Delete everywhere (native 13.158, needs browse 13.67's api.php): a
    // phone file that is in the catalogue can take its OneDrive copies and its
    // catalogue row with it. The phone holds no Graph token, so that half goes
@@ -819,8 +819,18 @@ async function showDeleteModal(video) {
    const everywhereOk = isLocalVideo(video) && video.inCatalogue === true;
    // native 15.11: a row that streams from Hetzner deletes from the box itself.
    const hzRow = typeof window.scrayIsHetznerVideo === 'function' && window.scrayIsHetznerVideo(video) && !isLocalVideo(video);
+   // opts.onDone(ok, message) (picker 15.91 / native 15.108): the Stash hunt
+   // hears how it went - the done message instead of the alert, false when
+   // cancelled. At the top z-index, as the rename modal is, so it opens over
+   // the Stash modal (and the FLS player) rather than underneath it.
+   const onDone = opts && typeof opts.onDone === 'function' ? opts.onDone : null;
+   const finish = (ok, msg) => {
+       if (onDone) { try { onDone(ok, msg); } catch (e) { console.error('[delete] onDone:', e); } }
+       else if (ok) alert(msg);
+   };
    const modal = document.createElement('div');
     modal.className = 'basket-json-modal';
+    modal.style.zIndex = '2147483647';
     modal.innerHTML = `
    <div class="basket-json-modal-content">
            <h3>Delete File</h3>
@@ -862,12 +872,13 @@ async function showDeleteModal(video) {
 
    // Close on background click
    modal.addEventListener('click', (e) => {
-       if (e.target === modal) modal.remove();
+       if (e.target === modal) { modal.remove(); finish(false); }
    });
 
    // Cancel button
    document.getElementById('cancelDeleteBtn').addEventListener('click', () => {
        modal.remove();
+       finish(false);
    });
 
    // Confirm delete
@@ -885,13 +896,13 @@ async function showDeleteModal(video) {
                const parts = ['Phone',
                    n ? `OneDrive (${n} cop${n === 1 ? 'y' : 'ies'}, in the Recycle bin)` : null,
                    h ? `Hetzner (${h} cop${h === 1 ? 'y' : 'ies'})` : null].filter(Boolean);
-               alert(`Deleted everywhere: ${video.filename}\n` + parts.join(', ') + ' and the catalogue'
+               finish(true, `Deleted everywhere: ${video.filename}\n` + parts.join(', ') + ' and the catalogue'
                    + (!n && !h ? ' - no OneDrive or Hetzner copy was on record' : ''));
                return;
            }
            const delRes = await deleteFile(video);
            modal.remove();
-           alert(hzRow
+           finish(true, hzRow
                ? `Deleted from Hetzner: ${video.filename}` + (Number(delRes && delRes.onedrive_deleted)
                    ? '\nIts OneDrive copy is in the Recycle bin' : '')
                : `Successfully deleted: ${video.filename}`);
@@ -4619,6 +4630,39 @@ async function showStashModal(video, openOpts) {
         // takes its suggested name there and then - no rename modal. Without a
         // suggestion it opens the modal as before.
         const huntSug = hunt && window.scrayCleanNameSuggestion ? window.scrayCleanNameSuggestion(video) : null;
+        // ✎ Edit name beside it (picker 15.92 / native 15.109): the rename
+        // modal on top, to change the name by hand - Use suggested is in there
+        // too. The hunt's list follows if the name changes.
+        if (huntSug) {
+            const eb = document.createElement('button');
+            eb.type = 'button';
+            eb.id = 'stashRenameEdit';
+            eb.className = 'modal-btn modal-btn-secondary';
+            eb.style.cssText = 'flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;';
+            eb.innerHTML = '&#9998; Edit name';
+            offer.querySelector('#stashRenameNow').after(eb);
+            eb.addEventListener('click', async () => {
+                if (typeof window.showRenameModal !== 'function') return;
+                const before = video.filename;
+                const keyBefore = video.videoKey || window.scrayVideoKey(video.filename);
+                try {
+                    await window.showRenameModal(video, { zIndex: 2147483647 });
+                } catch (e) {
+                    console.error('[stash] rename modal failed:', e);
+                    return;
+                }
+                const rm = document.getElementById('renameInput')?.closest('.basket-json-modal');
+                const watch = setInterval(() => {
+                    if (rm && rm.isConnected) return;
+                    clearInterval(watch);
+                    if (video.filename === before) return;
+                    offer.remove();
+                    if (typeof hunt.renamed === 'function') {
+                        try { hunt.renamed(video, keyBefore); } catch (e) { /* the list keeps the old name */ }
+                    }
+                }, 400);
+            });
+        }
         let renArm = null;
         const renIdle = (b) => { b.innerHTML = '&#9998; Rename too?'; b.style.background = ''; b.style.color = ''; };
         offer.querySelector('#stashRenameNow').addEventListener('click', async () => {
@@ -4998,16 +5042,19 @@ async function showStashModal(video, openOpts) {
               '<button id="stashManualBtn" class="modal-btn modal-btn-secondary" ' +
                       'style="flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;">' +
                 (isManual ? '&#9998; Edit details' : '&#9998; Correct details') + '</button>' +
-              (isManual ? '<span style="font-size:.78rem;opacity:.65;">Entered by hand</span>' :
-                // Wrong scene? (14.40) Undoes the match outright - scene,
-                // imported timestamps, corrections and, where it was ours, the
-                // fingerprint at StashDB - and lands back on the not-found
-                // panel so the right one can be matched.
+              // Wrong scene? (14.40) Undoes the match outright - scene,
+              // imported timestamps, corrections and, where it was ours, the
+              // fingerprint at StashDB - and lands back on the not-found
+              // panel so the right one can be matched. Details entered by
+              // hand have it too (picker 15.93 / native 15.110): they're
+              // removed and the file starts again unmatched.
+              (isManual ? '<span style="font-size:.78rem;opacity:.65;">Entered by hand</span>' : '') +
                 '<button id="stashUnmatchBtn" class="modal-btn modal-btn-secondary" ' +
-                        'title="Not this scene: detach it and withdraw your fingerprint from StashDB" ' +
+                        (isManual ? 'data-manual="1" title="Remove the details entered by hand and start again, unmatched" '
+                                  : 'title="Not this scene: detach it and withdraw your fingerprint from StashDB" ') +
                         'style="flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;' +
                         'background:transparent;color:#dc3545;border:1px solid #dc3545;">' +
-                  '&#10005; Unmatch</button>') +
+                  '&#10005; Unmatch</button>' +
               '<span id="stashUnmatchMsg" style="font-size:.78rem;color:#dc3545;"></span>' +
             '</div>';
 
@@ -5123,7 +5170,8 @@ async function showStashModal(video, openOpts) {
                 }
                 clearTimeout(armT); armT = null;
                 const msg = modal.querySelector('#stashUnmatchMsg');
-                if (!window.scrayStashEdit || !window.scrayStashEdit.unmatch) {
+                const manual = unBtn.dataset.manual === '1';
+                if (!window.scrayStashEdit || !(manual ? window.scrayStashEdit.unmatchManual : window.scrayStashEdit.unmatch)) {
                     disarm();
                     if (msg) msg.textContent = 'scray-stash-edit.js is not loaded';
                     return;
@@ -5131,8 +5179,10 @@ async function showStashModal(video, openOpts) {
                 unBtn.disabled = true;
                 unBtn.textContent = 'Unmatching…';
                 try {
-                    const res = await window.scrayStashEdit.unmatch(
-                        video.videoKey || window.scrayVideoKey(video.filename), video);
+                    const vk = video.videoKey || window.scrayVideoKey(video.filename);
+                    const res = manual
+                        ? await window.scrayStashEdit.unmatchManual(vk)
+                        : await window.scrayStashEdit.unmatch(vk, video);
                     flashNote = res.summary || 'Unmatched.';
                     await load(false);
                 } catch (err) {

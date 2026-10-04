@@ -193,35 +193,71 @@
     if (!other.long) other.long = [...other.set].filter(v => v.length >= 5 && hlUseful(v));
     return other.long.some(v => w.startsWith(v) || v.startsWith(w));
   }
-  /** `text`, HTML-escaped, with the words `other` shares marked. */
-  function hlHtml(text, other) {
+  /** One word against a side's words: the same, a plural, two words run together, or a 5+ letter start. */
+  const hlHit = (w, other) => hlUseful(w) &&
+    (other.set.has(w) || other.pairs.has(w) || other.stems.has(hlStem(w)) || hlPrefix(w, other));
+  /** Two words joined against a side's words: "Taylor Swift" here, "TaylorSwift" there. */
+  const hlHitJoin = (j, other) => j.length >= 5 && hlUseful(j) && (other.set.has(j) || other.stems.has(hlStem(j)));
+  /**
+   * What kind of match (picker 15.90 / native 15.107): 'p' a performer's name
+   * (green), 's' the studio's (pink), '' anything else (yellow). `kinds` is
+   * { perf, studio }, each hlTerms() of those names; performer wins a tie.
+   */
+  function hlKindOf(w, kinds, join) {
+    if (!kinds) return '';
+    const hit = join ? hlHitJoin : hlHit;
+    if (kinds.perf && kinds.perf.set.size && hit(w, kinds.perf)) return 'p';
+    if (kinds.studio && kinds.studio.set.size && hit(w, kinds.studio)) return 's';
+    return '';
+  }
+  /**
+   * `text`, HTML-escaped, with the words `other` shares marked. Each mark is
+   * coloured by `kinds` (or, for a file's side, the scene terms' own .kinds).
+   */
+  function hlHtml(text, other, kinds) {
     const segs = hlSegments(text);
     if (!other || !other.set.size) return esc(text);
+    kinds = kinds || other.kinds || null;
     const idx = [];
     segs.forEach((g, i) => { if (g.w) idx.push(i); });
-    const on = new Set();
+    const on = new Map();
+    const put = (i, k) => { if (!on.get(i)) on.set(i, k); };
     idx.forEach((i, k) => {
       const w = segs[i].w;
-      if (hlUseful(w) && (other.set.has(w) || other.pairs.has(w) || other.stems.has(hlStem(w)) || hlPrefix(w, other))) on.add(i);
+      if (hlHit(w, other)) put(i, hlKindOf(w, kinds, false));
       // Two words here that are one word there.
       const n = idx[k + 1];
       if (n != null) {
         const j = w + segs[n].w;
-        if (j.length >= 5 && hlUseful(j) && (other.set.has(j) || other.stems.has(hlStem(j)))) { on.add(i); on.add(n); }
+        if (hlHitJoin(j, other)) { const kk = hlKindOf(j, kinds, true); put(i, kk); put(n, kk); }
       }
     });
-    return segs.map((g, i) => on.has(i) ? '<mark class="ssn-hl">' + esc(g.s) + '</mark>' : esc(g.s)).join('');
+    return segs.map((g, i) => on.has(i)
+      ? '<mark class="ssn-hl' + (on.get(i) ? ' ssn-hl-' + on.get(i) : '') + '">' + esc(g.s) + '</mark>'
+      : esc(g.s)).join('');
   }
   /** A file's side: its name (no extension) and its folder. */
   const hlFileTerms = (video) => hlTerms([
     String((video && video.filename) || '').replace(/\.[a-z0-9]{1,5}$/i, ''),
     (video && (video.__huntFolder || video.path)) || ''
   ]);
-  /** The scenes' side: everything a card shows that can match. */
-  const hlSceneTerms = (cards) => hlTerms([].concat(cards || []).flatMap(c => c ? [
-    c.title, c.studio, c.code, c.release_date,
-    ...(c.cast || []).flatMap(p => [p && p.name, p && p.as])
-  ] : []).filter(Boolean));
+  /** The scenes' performer names and studios, apart - what colours a match. */
+  const hlKinds = (cards) => {
+    const cs = [].concat(cards || []).filter(Boolean);
+    return {
+      perf: hlTerms(cs.flatMap(c => (c.cast || []).flatMap(p => [p && p.name, p && p.as])).filter(Boolean)),
+      studio: hlTerms(cs.map(c => c.studio).filter(Boolean))
+    };
+  };
+  /** The scenes' side: everything a card shows that can match, its kinds along. */
+  const hlSceneTerms = (cards) => {
+    const t = hlTerms([].concat(cards || []).flatMap(c => c ? [
+      c.title, c.studio, c.code, c.release_date,
+      ...(c.cast || []).flatMap(p => [p && p.name, p && p.as])
+    ] : []).filter(Boolean));
+    t.kinds = hlKinds(cards);
+    return t;
+  };
 
   const clock = (n) => {
     n = Math.round(Number(n) || 0);
@@ -343,6 +379,9 @@
 #stashModal .ssn-syn { opacity: .85; margin: 6px 0; white-space: pre-wrap; }
 /* picker 15.84 / native 15.102: words the file and the scene share. */
 mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius: 2px; }
+/* picker 15.90 / native 15.107: a performer's name green, the studio's pink. */
+mark.ssn-hl.ssn-hl-p { background: #8ee0a1; }
+mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
 #stashModal .ssn-why { width: 100%; border-collapse: collapse; margin: 6px 0 0; }
 #stashModal .ssn-why td { padding: 2px 4px; vertical-align: top; border-top: 1px solid rgba(128,128,128,.15); }
 #stashModal .ssn-why td.p { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: #1e7e34; }
@@ -413,6 +452,103 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
   // ⚙️ How a search's results are ordered at first: 'order' is StashDB's own
   // order (picker 15.35 / native 15.44), 'match' is Best match against this file.
   const SEARCH_SORT = 'order';
+
+  // ---- a tap on a word selects it (picker 15.91 / native 15.108) -----------
+  // In a box of search words, a tap ON a word selects the whole word - type
+  // to replace it, ⌫ to take it out - and a tap in the gap between two words
+  // (or past the last) puts the cursor there as usual. Tap the word that's
+  // already selected and the cursor goes inside it, for a one-letter fix.
+  // picker 15.92 / native 15.109: a double tap puts the cursor where it
+  // landed (between the letters nearest the finger) instead of the browser's
+  // own double-tap select. Dragging the cursor is left to the browser.
+  // wordTap(root, selector): every box under root matching selector, wired
+  // once per root and selector (the Stash modal's body is reused).
+  let wtCtx = null;
+  /** The character under clientX in `input`, or -1 for none (before or past the text). */
+  function wtCharAt(input, clientX) {
+    const s = input.value || '';
+    if (!s) return -1;
+    const cs = getComputedStyle(input);
+    const r = input.getBoundingClientRect();
+    const x = clientX - r.left - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.paddingLeft) || 0) + (input.scrollLeft || 0);
+    if (x < 0) return -1;
+    if (!wtCtx) { try { wtCtx = document.createElement('canvas').getContext('2d'); } catch (e) { wtCtx = null; } }
+    if (!wtCtx) return -1;
+    wtCtx.font = [cs.fontStyle, cs.fontWeight, cs.fontSize, cs.fontFamily].join(' ');
+    const ls = parseFloat(cs.letterSpacing) || 0;
+    for (let i = 0; i < s.length; i++) {
+      if (x < wtCtx.measureText(s.slice(0, i + 1)).width + ls * (i + 1)) return i;
+    }
+    return -1;
+  }
+  /** The gap between letters nearest clientX in `input`: 0 .. its length. */
+  function wtCaretAt(input, clientX) {
+    const s = input.value || '';
+    if (!s) return 0;
+    const cs = getComputedStyle(input);
+    const r = input.getBoundingClientRect();
+    const x = clientX - r.left - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.paddingLeft) || 0) + (input.scrollLeft || 0);
+    if (!wtCtx) { try { wtCtx = document.createElement('canvas').getContext('2d'); } catch (e) { wtCtx = null; } }
+    if (!wtCtx) return -1;
+    wtCtx.font = [cs.fontStyle, cs.fontWeight, cs.fontSize, cs.fontFamily].join(' ');
+    const ls = parseFloat(cs.letterSpacing) || 0;
+    let best = 0, gap = Math.abs(x);
+    for (let i = 1; i <= s.length; i++) {
+      const d = Math.abs(x - (wtCtx.measureText(s.slice(0, i)).width + ls * i));
+      if (d < gap) { gap = d; best = i; }
+    }
+    return best;
+  }
+  // ⚙️ What counts as a double tap: the second within this long, this close.
+  const WT_DOUBLE_MS = 400, WT_DOUBLE_PX = 30;
+  const wtLast = new WeakMap();   // box -> { t, x } of the last single tap
+  /** The word around character i of s: [start, end). */
+  function wtWord(s, i) {
+    let a = i, b = i + 1;
+    while (a > 0 && !/\s/.test(s[a - 1])) a--;
+    while (b < s.length && !/\s/.test(s[b])) b++;
+    return [a, b];
+  }
+  const wtPrev = new WeakMap();   // box -> its selection as the finger came down
+  function wordTapOn(root, selector) {
+    if (!root || !selector || typeof root.addEventListener !== 'function') return;
+    const wired = root.__ssnWordTap || (root.__ssnWordTap = new Set());
+    if (wired.has(selector)) return;
+    wired.add(selector);
+    const boxOf = (e) => (e.target && e.target.closest) ? e.target.closest(selector) : null;
+    root.addEventListener('pointerdown', (e) => {
+      const box = boxOf(e);
+      if (box) wtPrev.set(box, document.activeElement === box ? [box.selectionStart, box.selectionEnd] : null);
+    }, true);
+    root.addEventListener('click', (e) => {
+      const box = boxOf(e);
+      if (!box || box.disabled || box.readOnly || e.detail > 2) return;
+      if (!e.clientX && !e.clientY) return;      // a click with no position (keyboard, script)
+      // A double tap (picker 15.92 / native 15.109): the cursor where it landed.
+      const now = Date.now(), last = wtLast.get(box);
+      if (e.detail === 2 || (last && now - last.t < WT_DOUBLE_MS && Math.abs(e.clientX - last.x) < WT_DOUBLE_PX)) {
+        wtLast.delete(box);
+        const c = wtCaretAt(box, e.clientX);
+        if (c < 0) return;
+        const put = () => { try { if (document.activeElement === box) box.setSelectionRange(c, c); } catch (err) { /* not a text box */ } };
+        put();
+        // Again after iOS has had its own go at a double tap (it selects the word).
+        setTimeout(put, 0);
+        setTimeout(put, 120);
+        return;
+      }
+      wtLast.set(box, { t: now, x: e.clientX });
+      const s = box.value || '';
+      const i = wtCharAt(box, e.clientX);
+      if (i < 0 || /\s/.test(s[i])) return;      // a gap: the cursor stays where the tap put it
+      const [a, b] = wtWord(s, i);
+      const p = wtPrev.get(box);
+      if (p && p[0] === a && p[1] === b) return;   // already selected: a cursor inside it
+      const pick = () => { try { if (document.activeElement === box) box.setSelectionRange(a, b); } catch (err) { /* not a text box */ } };
+      pick();
+      setTimeout(pick, 0);                          // iOS settles its own cursor after the tap
+    }, true);
+  }
 
   // ---- the navigator ---------------------------------------------------------
   function open(opts) {
@@ -1645,7 +1781,12 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
 
     function cardHtml(c, i, herePid, hereSid) {
       painted.push(c);
-      const hl = (t) => hlHtml(t, fileTerms);
+      // Coloured by what matched (picker 15.90 / native 15.107): the studio
+      // line pink, performer names green, anything else by what the word is.
+      const kinds = hlKinds([c]);
+      const hl = (t) => hlHtml(t, fileTerms, kinds);
+      const hlS = (t) => hlHtml(t, fileTerms, { studio: kinds.studio });
+      const hlP = (t) => hlHtml(t, fileTerms, { perf: kinds.perf });
       const fileSec = Number(c.file_duration_sec) || 0;
       const sceneSec = Number(c.stash_duration_sec) || 0;
       let durClass = '', durNote = sceneSec ? 'no file length' : 'no scene runtime', durShort = '—';
@@ -1665,15 +1806,15 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
       // this IS that studio's view.
       const studioBit = !c.studio ? 'no studio'
         : (hereSid && c.studio_id === hereSid)
-          ? hl(c.studio)
+          ? hlS(c.studio)
           : '<button type="button" class="ssn-stlink" data-stid="' + esc(c.studio_id || '') + '" data-stname="' +
-              esc(c.studio) + '" data-sid="' + esc(c.stash_id) + '">' + hl(c.studio) + '</button>';
+              esc(c.studio) + '" data-sid="' + esc(c.stash_id) + '">' + hlS(c.studio) + '</button>';
       const sub = [studioBit].concat([c.release_date, c.code].filter(Boolean).map(hl)).join(' &middot; ');
 
       const cast = (c.cast || []).map(p =>
         '<button type="button" class="ssn-perf' + (p.id && [].concat(herePid || []).includes(p.id) ? ' here' : '') + '" ' +
           'data-pid="' + esc(p.id || '') + '" data-pname="' + esc(p.name) + '" data-sid="' + esc(c.stash_id) + '">' +
-          hl(p.name) + (p.as ? ' <small>as ' + hl(p.as) + '</small>' : '') +
+          hlP(p.name) + (p.as ? ' <small>as ' + hlP(p.as) + '</small>' : '') +
           (p.gender_short && p.gender_short !== '?' ? ' <small>' + esc(p.gender_short) + '</small>' : '') +
         '</button>').join('');
 
@@ -1934,6 +2075,8 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
     host.addEventListener('keydown', onKey);
     host.addEventListener('input', onInput);
     host.addEventListener('focusin', onFocusIn);
+    // A tap on a search word selects it (picker 15.91 / native 15.108).
+    wordTapOn(host, 'input.ssn-term');
 
     // Studio search above the keyboard (13.191 / 13.190). Focusing the box
     // scrolls the modal so the box sits at the top of it, with the list
@@ -2664,6 +2807,8 @@ body.fullscreen-active #ssnPvBar { display: none; }
 
   window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile, openHome, studioSuggestions, topFolderTags,
     // picker 15.84 / native 15.102 - shared with scray-stash-hunt.js.
-    hl: { html: hlHtml, terms: hlTerms, fileTerms: hlFileTerms, sceneTerms: hlSceneTerms } };
+    hl: { html: hlHtml, terms: hlTerms, fileTerms: hlFileTerms, sceneTerms: hlSceneTerms, kinds: hlKinds },
+    // picker 15.91 / native 15.108 - a tap on a word selects it; the hunt's bulk box too.
+    wordTap: wordTapOn };
   window.scrayPerformerChoice = performerChoice;
 })();

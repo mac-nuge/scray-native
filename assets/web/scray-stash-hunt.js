@@ -23,6 +23,14 @@
 // (TinEye's Search, say). The handle is { mount(modal), loaded(matched, modal),
 // closed(modal) }.
 //
+// picker 15.92 / native 15.109: ✍️ Edit name beside ✎ Rename on a past match
+// (and ✎ Edit name beside Rename too in the Stash modal) - the rename modal.
+// picker 15.91 / native 15.108: bulk rows show a tiny cover of their scene
+// (blurred - tap one 3 times, or 👁 for all); 🗑 beside the file deletes it
+// with the app's own Delete File modal and it leaves the hunt (Deleted in
+// Recent files); a past match opened from Recent files has ▶ ✏️ ✎ Rename 🗑
+// as well as Back to the hunt; the bulk check's word box selects a word on a
+// tap, as the navigator's search box does (scray-stash-nav.js wordTap).
 // picker 15.55 / native 15.66: 🔎 opens the file's Stash modal ON TOP of the
 // bulk sheet, which stays as it is underneath - close it and you're back.
 // (15.54 hid the sheet and rebuilt the hunt's card on close, which then sat
@@ -216,7 +224,7 @@
       neverLoaded: false,
       seen: new Set(),          // keys already offered this run
       cur: null,                // { video, key, matched, auto, loaded }
-      stats: { matched: 0, skipped: 0, never: 0, streak: 0, best: 0 },
+      stats: { matched: 0, skipped: 0, never: 0, deleted: 0, streak: 0, best: 0 },
       modal: null,
       bar: null,
       tagMenu: false,
@@ -351,7 +359,7 @@
 /* picker 15.48 / native 15.59: the scope and what's left wrap onto a second line, a size smaller, instead of being cut off. */
 #stashModal .sh-bar button.sh-scope { white-space: normal; overflow-wrap: anywhere; font-size: .72rem; line-height: 1.2; padding: 5px 8px; }
 #stashModal .sh-stats { flex: 0 0 auto; font-size: .74rem; color: #555; white-space: nowrap; }
-#stashModal .sh-file { margin: 6px 2px; font-size: .78rem; color: #444; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
+#stashModal .sh-file { margin: 6px 2px; font-size: .78rem; color: #444; font-style: italic; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
 #stashModal .sh-file .sh-dir { color: #888; }
 #stashModal .sh-won-line { margin: 2px 2px 6px; font-weight: 700; color: #1e7e34; font-size: .85rem; }
 #stashModal .sh-acts { display: flex; gap: 5px; }
@@ -462,7 +470,7 @@
 #stashHuntBulk .shb-row.st-wait, #stashHuntBulk .shb-row.st-fp, #stashHuntBulk .shb-row.st-search, #stashHuntBulk .shb-row.st-none, #stashHuntBulk .shb-row.st-err { cursor: default; }
 #stashHuntBulk .shb-tick { flex: 0 0 22px; font-size: 1.2rem; line-height: 1.1; text-align: center; color: #28a745; }
 #stashHuntBulk .shb-main { flex: 1 1 auto; min-width: 0; }
-#stashHuntBulk .shb-file { font-size: .7rem; color: #444; word-break: break-word; line-height: 1.25; }
+#stashHuntBulk .shb-file { font-size: .7rem; color: #444; font-style: italic; word-break: break-word; line-height: 1.25; }
 #stashHuntBulk .shb-file .sh-dir { color: #999; }
 #stashHuntBulk .shb-scene { margin-top: 2px; font-size: .76rem; line-height: 1.25; }
 #stashHuntBulk .shb-sub { font-size: .7rem; color: #555; line-height: 1.25; }
@@ -528,7 +536,26 @@
 #stashHuntBulk .shb-foot .go:disabled { opacity: .5; }
 #stashModal .ssn-hunt-row { display: flex; align-items: center; gap: 10px; margin: 4px 4px 12px; font-size: .8rem; color: #777; }
 mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius: 2px; }
+mark.ssn-hl.ssn-hl-p { background: #8ee0a1; }
+mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
 #stashModal .ssn .ssn-hunt-go { background: #6f42c1; border-color: #6f42c1; color: #fff; font-weight: 700; padding: 8px 14px; font-size: .88rem; }
+/* picker 15.91 / native 15.108: 🗑 beside the file, the past-match bar's own buttons, tiny covers in the bulk check. */
+#stashModal .sh-frow { display: flex; align-items: flex-start; gap: 6px; margin: 6px 2px; }
+#stashModal .sh-frow .sh-file { flex: 1 1 auto; min-width: 0; margin: 0; }
+#stashModal .sh-bar .sh-del { flex: 0 0 auto; padding: 4px 8px; font-size: .8rem; border-color: #f1b0b7; background: #fff5f5; }
+#stashModal .sh-bar .sh-ren { white-space: normal; overflow-wrap: anywhere; }
+#stashModal .sh-bar .sh-ren.armed { background: #6f42c1; border-color: #6f42c1; color: #fff; }
+#stashHuntLast .shl-row.k-deleted { opacity: .6; }
+#stashHuntLast .shl-row.k-deleted .shl-f { text-decoration: line-through; }
+#stashHuntBulk .shb-thumb { flex: 0 0 56px; width: 56px; height: 32px; margin-top: 2px; position: relative; overflow: hidden; border-radius: 4px; background: #222; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+#stashHuntBulk .shb-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; filter: blur(7px); transform: scale(1.25); }
+#stashHuntBulk .shb-thumb.shown img { filter: none; transform: none; }
+#stashHuntBulk .shb-thumb .v { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: .72rem; font-weight: 700; background: rgba(0,0,0,.35); }
+#stashHuntBulk .shb-thumb.shown .v { display: none; }
+#stashHuntBulk .shb-thumb.none { background: #eee; cursor: default; }
+#stashHuntBulk .shb-hb { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
+#stashHuntBulk .shb-head .shb-eye { padding: 4px 9px; font-size: .8rem; }
+#stashHuntBulk .shb-head .shb-eye.on { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
 `;
     document.head.appendChild(css);
   }
@@ -581,10 +608,12 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
           esc(scopeLabel(S.scope)) + ' · ' + left.toLocaleString() + ' left ▾</button>' +
         (bulkable() && left ? '<button type="button" class="sh-bulk" data-h="bulk" title="Check the rest of this folder / tag at once">⚡ Bulk</button>' : '') +
         '<span class="sh-stats" title="Matched · skipped · hidden this run">✅ ' + st.matched +
-          ' · ⏭ ' + st.skipped + ' · 🚫 ' + st.never + (st.streak > 1 ? ' · 🔥' + st.streak : '') + '</span>' +
+          ' · ⏭ ' + st.skipped + ' · 🚫 ' + st.never + (st.deleted ? ' · 🗑 ' + st.deleted : '') + (st.streak > 1 ? ' · 🔥' + st.streak : '') + '</span>' +
       '</div>' +
-      '<div class="sh-file" data-hlk="' + esc(S.cur.key) + '" title="' + esc((dir ? dir + '/' : '') + (v.filename || '')) + '">' +
+      // 🗑 beside the file (picker 15.91 / native 15.108).
+      '<div class="sh-frow"><div class="sh-file" data-hlk="' + esc(S.cur.key) + '" title="' + esc((dir ? dir + '/' : '') + (v.filename || '')) + '">' +
         fileLineHtml(v, S.cur.shownTerms || null) + '</div>' +
+        '<button type="button" class="sh-del" data-h="del" title="Delete this file">🗑</button></div>' +
       (won ? '<div class="sh-won-line">' + (S.cur.auto ? '✅ Matched by fingerprint!' : '✅ Matched!') + ' On to the next one?</div>' : '') +
       '<div class="sh-acts">' +
         '<button type="button" data-h="play" title="Preview in the player">▶</button>' +
@@ -621,6 +650,8 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
       case 'tag': S.tagMenu = !S.tagMenu; paintBar(); break;
       case 'never': never(); break;
       case 'next': next(); break;
+      // Deleted: on to the next file (picker 15.91 / native 15.108).
+      case 'del': deleteVideo(v, () => { if (S && S.cur && S.cur.video === v) advance(); }); break;
     }
   }
 
@@ -881,7 +912,7 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
   const MATCHES_KEPT = 100;
   // picker 15.39 / native 15.48: every file the hunt has shown, not only the
   // matches - kind 'match' | 'skip' | 'never' | 'unmatched' (none = match).
-  const KIND = { match: ['✅', 'Matched'], skip: ['⏭', 'Skipped'], unmatched: ['↩︎', 'Unmatched'], never: ['🚫', 'Never'] };
+  const KIND = { match: ['✅', 'Matched'], skip: ['⏭', 'Skipped'], unmatched: ['↩︎', 'Unmatched'], never: ['🚫', 'Never'], deleted: ['🗑', 'Deleted'] };   // deleted: picker 15.91 / native 15.108
   let listFilter = 'all';
   /** What finds a file again after a rename moves its key. */
   const idsOf = (v) => ({
@@ -966,6 +997,48 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
     if (!S) return;
     S.seen.add(newKey);
     if (S.cur && (S.cur.video === video || S.cur.key === oldKey)) S.cur.key = newKey;
+  }
+
+  // ---- 🗑 Delete (picker 15.91 / native 15.108) -----------------------------
+  // The app's own Delete File modal, over the Stash modal - the OneDrive
+  // recycle bin, and the phone copy or everywhere where it offers them. Once
+  // the file has gone it leaves the hunt, Recent files keeps it as Deleted,
+  // and then() moves on. Cancel changes nothing.
+  function deleteVideo(video, then) {
+    if (!video) return;
+    if (typeof window.showDeleteModal !== 'function') { toast('⚠️ Delete isn’t available here', '#b8860b'); return; }
+    endPreview();
+    const key = keyOf(video);
+    try {
+      window.showDeleteModal(video, {
+        onDone(ok, msg) {
+          if (!ok) return;
+          toast('🗑 ' + esc(String(msg || 'Deleted')).replace(/\n+/g, '<br>'));
+          droppedFile(video, key);
+          if (typeof then === 'function') { try { then(); } catch (e) { console.error('[hunt] after delete:', e); } }
+        }
+      });
+    } catch (e) {
+      console.error('[hunt] delete:', e);
+      toast('⚠️ Couldn’t open Delete: ' + (e.message || e), '#dc3545');
+    }
+  }
+  /** Deleted: out of the pool, and Deleted on the list (a match keeps its scene to show). */
+  function droppedFile(video, key) {
+    const m = matches.find(x => x.key === key);
+    if (m) {
+      m.kind = 'deleted';
+      m.at = new Date().toISOString();
+      matches = [m].concat(matches.filter(x => x !== m));
+      writeJson(LS_MATCHES, matches);
+    } else {
+      noteSeen(video, 'deleted');
+    }
+    matchVideos.delete(key);
+    if (!S) return;
+    S.stats.deleted = (S.stats.deleted || 0) + 1;
+    S.pool = S.pool.filter(v => v !== video && keyOf(v) !== key);
+    S.seen.add(key);
   }
 
   /** A match made outside the modal (bulk check): counted, and out of the pool. */
@@ -1112,7 +1185,7 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
       const counts = { all: matches.length };
       matches.forEach(m => { const k = kindOf(m); counts[k] = (counts[k] || 0) + 1; });
       if (listFilter !== 'all' && !counts[listFilter]) listFilter = 'all';
-      const chips = ['all', 'match', 'skip', 'unmatched', 'never'].filter(k => k === 'all' || counts[k]).map(k =>
+      const chips = ['all', 'match', 'skip', 'unmatched', 'never', 'deleted'].filter(k => k === 'all' || counts[k]).map(k =>
         '<button type="button" data-f="' + k + '" class="' + (listFilter === k ? 'on' : '') + '">' +
           (k === 'all' ? 'All' : KIND[k][0] + ' ' + KIND[k][1]) + ' <b>' + counts[k] + '</b></button>').join('');
       const rows = matches.map((m, i) => ({ m, i }))
@@ -1129,7 +1202,7 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
         const file = '<span class="shl-f">' + (m.dir ? '<span class="sh-dir">' + esc(m.dir) + '/</span>' : '') + esc(m.name) + '</span>';
         return '<button type="button" class="shl-row k-' + k + '" data-i="' + i + '">' +
           '<span class="shl-k">' + KIND[k][0] + '</span><span class="shl-b">' +
-          (k === 'match'
+          (k === 'match' || (k === 'deleted' && m.title)
             ? '<span class="shl-t">' + (m.title ? esc(m.title) : '<i>No title</i>') + '</span>' + (who ? '<span class="shl-w">' + esc(who) + '</span>' : '') + file
             : file) +
           '<span class="shl-when">' + esc(tags.filter(Boolean).join(' · ')) + '</span></span>' +
@@ -1153,6 +1226,8 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
       if (row) {
         e.stopPropagation();
         const m = matches[+row.dataset.i];
+        // Deleted (picker 15.91 / native 15.108): nothing left to open.
+        if (m && kindOf(m) === 'deleted') { toast('🗑 That file was deleted'); return; }
         sheet.remove();
         if (!m) return;
         if (kindOf(m) === 'match') inspect(m); else reopen(m);
@@ -1183,22 +1258,95 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
 
   // The Stash modal on a past match: a slim bar with Back to the hunt, and
   // an unmatch there puts the file back in the hunt.
+  // picker 15.91 / native 15.108: with the hunt's own options too - ▶ preview,
+  // ✏️ details, ✎ Rename (two taps to the suggested name, as Rename too does
+  // in the hunt; the rename modal when there's no suggestion) and 🗑 Delete.
   function inspectHandle(m0, video) {
     let m = m0, gone = false;
+    let renArm = null, renTimer = null, renBusy = false;
     return {
       mount(modal) {
         ensureCss();
         const bar = document.createElement('div');
         bar.className = 'sh-bar sh-insp';
-        bar.innerHTML =
-          '<div class="sh-top"><span class="sh-insp-l">↩︎ Checking a past match</span>' +
-            '<button type="button" class="sh-back" data-h="back">🎯 Back to the hunt</button></div>' +
-          '<div class="sh-file">' + (m.dir ? '<span class="sh-dir">' + esc(m.dir) + '/</span>' : '') + esc(m.name) + '</div>';
-        bar.addEventListener('click', (e) => {
-          if (!e.target.closest('[data-h="back"]')) return;
-          e.stopPropagation();
+        const paint = () => {
+          bar.innerHTML =
+            '<div class="sh-top"><span class="sh-insp-l">↩︎ Checking a past match</span>' +
+              '<button type="button" class="sh-back" data-h="back">🎯 Back to the hunt</button></div>' +
+            '<div class="sh-frow"><div class="sh-file">' + (m.dir ? '<span class="sh-dir">' + esc(m.dir) + '/</span>' : '') + esc(video.filename || m.name) + '</div>' +
+              '<button type="button" class="sh-del" data-h="del" title="Delete this file">🗑</button></div>' +
+            '<div class="sh-acts">' +
+              '<button type="button" data-h="play" title="Preview in the player">▶</button>' +
+              '<button type="button" data-h="edit" title="Correct the Stash details by hand">✏️</button>' +
+              '<button type="button" data-h="ren" class="sh-ren' + (renArm ? ' armed' : '') + '" title="' +
+                (hasSug() ? 'Rename to the suggested name (two taps)' : 'Rename the file') + '">' +
+                (renBusy ? 'Renaming…' : renArm ? 'Tap again to rename: ' + esc(renArm) : '✎ Rename') + '</button>' +
+              // By hand too (picker 15.92 / native 15.109) - Rename already is when there's no suggestion.
+              (hasSug() && !renBusy ? '<button type="button" data-h="renm" class="sh-ren" title="Edit the name in the rename modal">✍️ Edit name</button>' : '') +
+            '</div>';
+        };
+        const closeModal = () => {
           const cb = modal.querySelector('#stashCloseBtn');
-          if (cb) cb.click();
+          if (cb) cb.click(); else resume();
+        };
+        const sugOf = () => (window.scrayCleanNameSuggestion ? window.scrayCleanNameSuggestion(video) : null);
+        function hasSug() { return !!sugOf(); }
+        /** The rename modal on top, to edit by hand; the list follows if the name changes. */
+        const renameByHand = async () => {
+          if (renBusy || typeof window.showRenameModal !== 'function') return;
+          clearTimeout(renTimer);
+          if (renArm) { renArm = null; paint(); }
+          const keyBefore = keyOf(video);
+          const before = video.filename;
+          try { await window.showRenameModal(video, { zIndex: 2147483647 }); } catch (e) { console.error('[hunt] rename:', e); return; }
+          const box = document.getElementById('renameInput');
+          const rm = box && box.closest('.basket-json-modal');
+          const watch = setInterval(() => {
+            if (rm && rm.isConnected) return;
+            clearInterval(watch);
+            if (video.filename !== before) renamedFile(video, keyBefore);
+            if (bar.isConnected) paint();
+          }, 400);
+        };
+        const rename = async () => {
+          if (renBusy || typeof window.showRenameModal !== 'function') return;
+          const keyBefore = keyOf(video);
+          const sug = sugOf();
+          // No suggestion (already named to suit, say): by hand.
+          if (!sug) { renameByHand(); return; }
+          if (!renArm) {
+            renArm = sug;
+            clearTimeout(renTimer);
+            renTimer = setTimeout(() => { renArm = null; if (bar.isConnected) paint(); }, 3000);
+            paint();
+            return;
+          }
+          clearTimeout(renTimer);
+          renArm = null;
+          renBusy = true;
+          paint();
+          try {
+            const res = await window.showRenameModal(video, { auto: 'suggested' });
+            if (res && res.ok) renamedFile(video, keyBefore);
+          } catch (e) {
+            console.error('[hunt] rename to the suggestion failed:', e);
+          }
+          renBusy = false;
+          if (bar.isConnected) paint();
+        };
+        paint();
+        bar.addEventListener('click', (e) => {
+          const b = e.target.closest('button[data-h]');
+          if (!b) return;
+          e.stopPropagation();
+          switch (b.dataset.h) {
+            case 'back': closeModal(); break;
+            case 'play': if (window.scrayStashNav) window.scrayStashNav.preview(video, modal); break;
+            case 'edit': if (typeof modal.scrayOpenDetails === 'function') modal.scrayOpenDetails(); break;
+            case 'ren': rename(); break;
+            case 'renm': renameByHand(); break;
+            case 'del': deleteVideo(video, closeModal); break;
+          }
         });
         const h = modal.querySelector('h3');
         if (h && h.parentNode) h.after(bar); else modal.firstElementChild.prepend(bar);
@@ -1228,7 +1376,8 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
           m = matches[0];
         }
       },
-      closed() { resume(); }
+      closed() { resume(); },
+      renamed(v, oldKey) { renamedFile(v, oldKey); }
     };
   }
 
@@ -1327,6 +1476,34 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
   const cardScene = (c) => ({ id: c.stash_id, title: c.title, studio: c.studio, cast: c.cast || [],
                               performers: (c.cast || []).map(p => p.name) });
 
+  // Tiny covers (picker 15.91 / native 15.108): the shown scene's, blurred as
+  // the navigator's covers are - tap one 3 times, or 👁 for every row.
+  const thumbTaps = new Map();
+  function thumbHtml(r, i) {
+    const c = r.card;
+    if (!c || !(r.st === 'found' || r.st === 'sub' || r.st === 'done' || r.st === 'fail' || r.st === 'q')) return '';
+    if (!c.cover) return '<span class="shb-thumb none"></span>';
+    const shown = !!(r.reveal || (S && S.bulkReveal));
+    return '<span class="shb-thumb' + (shown ? ' shown' : '') + '" data-thumb="' + i + '">' +
+      '<img src="' + esc(c.cover) + '" alt="" loading="lazy"><span class="v">👁</span></span>';
+  }
+  function tapThumb(r, el) {
+    if (r.reveal) { r.reveal = false; thumbTaps.delete(r); paintBulkRow(r); return; }
+    if (S && S.bulkReveal) return;
+    const st = thumbTaps.get(r) || { n: 0, t: null };
+    st.n++;
+    clearTimeout(st.t);
+    if (st.n >= 3) { thumbTaps.delete(r); r.reveal = true; paintBulkRow(r); return; }
+    st.t = setTimeout(() => {
+      thumbTaps.delete(r);
+      const v = el.isConnected && el.querySelector('.v');
+      if (v) v.textContent = '👁';
+    }, 3000);
+    thumbTaps.set(r, st);
+    const v = el.querySelector('.v');
+    if (v) v.textContent = String(3 - st.n);
+  }
+
   function bulkRowHtml(r, i) {
     const v = r.v;
     const dir = v.__huntFolder || folderOf(v);
@@ -1334,7 +1511,11 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
     const h = HL();
     const sceneT = h && r.card ? h.sceneTerms([r.card]) : null;
     const fileT = h && r.card ? h.fileTerms(v) : null;
-    const hs = (t) => (h && fileT ? h.html(t, fileT) : esc(t));
+    // Coloured by what matched (picker 15.90 / native 15.107): studio pink, performers green.
+    const kinds = sceneT && sceneT.kinds;
+    const hs = (t) => (h && fileT ? h.html(t, fileT, kinds) : esc(t));
+    const hsS = (t) => (h && fileT ? h.html(t, fileT, kinds ? { studio: kinds.studio } : null) : esc(t));
+    const hsP = (t) => (h && fileT ? h.html(t, fileT, kinds ? { perf: kinds.perf } : null) : esc(t));
     const file = '<div class="shb-file">' + fileLineHtml(v, sceneT) + '</div>';
     const tickable = (r.st === 'found' || r.st === 'fail') && !(bulk && (bulk.submitting || preAsk(bulk)));
     const renPick = !!(bulk && ((bulk.ask === 'pick' && r.st === 'done' && r.sug && !r.rst) ||
@@ -1356,10 +1537,10 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
       } else {
         dur = '<span class="shb-dur">' + (fs ? 'File ' + clock(fs) + ' · ' : '') + (ss ? 'Scene ' + clock(ss) : 'no scene runtime') + '</span>';
       }
-      const cast = (c.cast || []).map(p => hs(p.name) + (p.gender_short && p.gender_short !== '?' ? ' <small>' + esc(p.gender_short) + '</small>' : '')).join(', ');
+      const cast = (c.cast || []).map(p => hsP(p.name) + (p.gender_short && p.gender_short !== '?' ? ' <small>' + esc(p.gender_short) + '</small>' : '')).join(', ');
       body =
         '<div class="shb-scene"><b>' + (c.title ? hs(c.title) : '<i>No title</i>') + '</b></div>' +
-        '<div class="shb-sub">' + [c.studio ? hs(c.studio) : 'no studio', c.release_date ? hs(c.release_date) : ''].filter(Boolean).join(' · ') +
+        '<div class="shb-sub">' + [c.studio ? hsS(c.studio) : 'no studio', c.release_date ? hs(c.release_date) : ''].filter(Boolean).join(' · ') +
           (cast ? ' · ' + cast : '') + '</div>' +
         '<div class="shb-facts">' + confHtml + dur +
           (r.count > 1 ? '<span class="shb-of">' + (r.how === 'dur'
@@ -1398,6 +1579,7 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
     }[r.st] || '';
     return '<div class="shb-row st-' + r.st + (r.tick || (renPick && r.ren) ? ' on' : '') + (renPick ? ' pick' : '') + '" data-r="' + i + '" style="order:' + bulkRank(r) + '">' +
       '<span class="shb-tick">' + (renPick ? (r.ren ? '☑' : '☐') : tickable ? (r.tick ? '☑' : '☐') : (r.st === 'done' || r.st === 'fpmatch' ? '✅' : '')) + '</span>' +
+      thumbHtml(r, i) +
       '<div class="shb-main">' + file + body + status + ren + '</div>' +
       '<div class="shb-btns">' +
         (r.st !== 'done' && r.st !== 'fpmatch' && r.st !== 'sub' && r.st !== 'q'
@@ -1419,11 +1601,16 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
       '<span>' + (B.running ? 'Checked ' + done + ' of ' + B.rows.length : 'Checked ' + done + ' of ' + B.rows.length) +
         ' · ' + found + ' with a likely scene' + (fp ? ' · ' + fp + ' matched by fingerprint' : '') +
         (B.extra ? ' · searched with + <b>' + esc(B.extra) + '</b>' : '') + '</span>' +
+      '<span class="shb-hb">' +
       (B.running ? '<button type="button" data-b="stop">Stop</button>' : '') +
       // The rest of the scope, 60 at a time (picker 15.61 / native 15.72).
       (bulkRest(B).length && !B.running && !B.submitting && !B.renaming
         ? '<button type="button" data-b="more" class="more">+ Next ' + Math.min(BULK_MAX, bulkRest(B).length) +
-          ' <small>(' + bulkRest(B).length.toLocaleString() + ' more)</small></button>' : '');
+          ' <small>(' + bulkRest(B).length.toLocaleString() + ' more)</small></button>' : '') +
+      // Every cover at once (picker 15.91 / native 15.108).
+      '<button type="button" data-b="eye" class="shb-eye' + (S && S.bulkReveal ? ' on' : '') + '" title="' +
+        (S && S.bulkReveal ? 'Blur the covers again' : 'Unblur every cover') + '">' + (S && S.bulkReveal ? '🙈' : '👁') + '</button>' +
+      '</span>';
     sheet.querySelectorAll('.shb-seg button').forEach(x => {
       const k = x.dataset.b;
       x.classList.toggle('on', k === 'omatch' || k === 'oorder' || k === 'odur'
@@ -1957,6 +2144,8 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
     clearOfDock(sheet, SHEET_PAD);
     const addBox = sheet.querySelector('.shb-add');
     addBox.addEventListener('input', () => paintBulkPills(sheet));
+    // A tap on a word selects it (picker 15.91 / native 15.108).
+    if (window.scrayStashNav && typeof window.scrayStashNav.wordTap === 'function') window.scrayStashNav.wordTap(sheet, 'input.shb-add');
     // A mark typed in (picker 15.52 / native 15.63).
     const minBox = sheet.querySelector('.shb-min');
     if (minBox) {
@@ -1972,6 +2161,14 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
     addBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); bulkAgain(); } });
     sheet.addEventListener('click', (e) => {
       if (bulk !== B) return;
+      // A cover: 3 taps to see it, one to blur it again (picker 15.91 / native 15.108).
+      const th = e.target.closest('.shb-thumb[data-thumb]');
+      if (th) {
+        e.stopPropagation();
+        const r = B.rows[+th.dataset.thumb];
+        if (r) tapThumb(r, th);
+        return;
+      }
       const b = e.target.closest('button');
       if (b && b.dataset.hunt != null) {
         // A look at the whole thing, then back here (picker 15.54 / native 15.65).
@@ -2005,6 +2202,12 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
       if (b && b.dataset.b) {
         e.stopPropagation();
         if (b.dataset.b === 'again') { bulkAgain(); return; }
+        if (b.dataset.b === 'eye') {
+          S.bulkReveal = !S.bulkReveal;
+          if (!S.bulkReveal) B.rows.forEach(r => { r.reveal = false; });
+          B.rows.forEach(r => paintBulkRow(r));
+          return;
+        }
         if (b.dataset.b === 'more') { moreBulk(); return; }
         if (b.dataset.b === 'tdown' || b.dataset.b === 'tup') {
           // Steps of 5, onto the nearest 5 first (87 → 85 / 90).
@@ -2239,9 +2442,10 @@ mark.ssn-hl { background: #ffe066; color: #1a1a1a; padding: 0 1px; border-radius
   function stop() {
     if (!S) return;
     const st = S.stats;
-    if (st.matched || st.skipped || st.never) {
+    if (st.matched || st.skipped || st.never || st.deleted) {
       toast('🎯 Hunt over: ' + st.matched + ' matched, ' + st.skipped + ' skipped' +
-            (st.never ? ', ' + st.never + ' hidden' : '') + (st.best > 1 ? ' - best run ' + st.best : ''));
+            (st.never ? ', ' + st.never + ' hidden' : '') + (st.deleted ? ', ' + st.deleted + ' deleted' : '') +
+            (st.best > 1 ? ' - best run ' + st.best : ''));
     }
     document.getElementById('stashHuntSheet')?.remove();
     document.getElementById('stashHuntLast')?.remove();

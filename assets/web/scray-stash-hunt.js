@@ -1514,7 +1514,11 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     // Coloured by what matched (picker 15.90 / native 15.107): studio pink, performers green.
     const kinds = sceneT && sceneT.kinds;
     const hs = (t) => (h && fileT ? h.html(t, fileT, kinds) : esc(t));
-    const hsS = (t) => (h && fileT ? h.html(t, fileT, kinds ? { studio: kinds.studio } : null) : esc(t));
+    // The file carries the studio's other spelling (picker 15.97 / native 15.114): the whole name is a match.
+    const hsS = (t) => (h && fileT
+      ? (typeof h.studioAltHit === 'function' && h.studioAltHit(t, v) ? '<mark class="ssn-hl ssn-hl-s">' + esc(t) + '</mark>'
+         : h.html(t, fileT, kinds ? { studio: kinds.studio } : null))
+      : esc(t));
     const hsP = (t) => (h && fileT ? h.html(t, fileT, kinds ? { perf: kinds.perf } : null) : esc(t));
     const file = '<div class="shb-file">' + fileLineHtml(v, sceneT) + '</div>';
     const tickable = (r.st === 'found' || r.st === 'fail') && !(bulk && (bulk.submitting || preAsk(bulk)));

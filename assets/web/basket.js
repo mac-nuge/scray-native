@@ -1850,6 +1850,11 @@ document.getElementById("basketToggleBtn")?.addEventListener("click", () => togg
 // installs by itself (scray-basket-sync.js). Save/Load to Excel are still in
 // the ... menu below.
 
+// 💾 SAVE / 📂 LOAD list (native 15.118, ported from Picker) - the server's
+// shared lists. Loading is a normal basket change, so it syncs on its own.
+document.getElementById("basketSaveBtn")?.addEventListener("click", () => window.scrayBasketSaveListClick());
+document.getElementById("basketLoadBtn")?.addEventListener("click", () => window.showPlaylistPickerModal());
+
 document.getElementById("basketSelectAllBtn")?.addEventListener("click", () => {
  basketVideos.forEach(v => selectedBasketIds.add(v.oneDriveId));
  renderBasket();

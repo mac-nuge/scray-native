@@ -4240,6 +4240,20 @@ body.manual-rotate-landscape .basket-json-modal-content {
   max-width: 90vh;
   max-height: 90vw;
 }
+/* Upright in FLS (picker 15.96 / native 15.113): the rename modal stays the
+   way the phone is held - portrait, as in every other mode - rather than
+   turning with the picture. Typing a name sideways with a portrait keyboard
+   was the worst of both. The overlay keeps its padding so the panel clears
+   the edges. */
+body.manual-rotate-landscape .basket-json-modal.scray-upright {
+  padding: 20px;
+}
+body.manual-rotate-landscape .basket-json-modal.scray-upright .basket-json-modal-content {
+  transform: none;
+  width: 100%;
+  max-width: 400px;
+  max-height: 90vh;
+}
 
 /* ⚙️ FLS only: every modal reachable from the pause menu drops to 50% so the
    paused frame underneath stays readable while scoring, bookmarking or

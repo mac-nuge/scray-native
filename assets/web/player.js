@@ -4811,6 +4811,48 @@ function attachFrameStepButtons() {
         btn.addEventListener('click', (e) => e.stopPropagation());
     }
 
+    // ---- Bookmark circles: one tap acts, two taps seek (picker 15.95 / native 15.112) ----
+    // BM and the FLS quick-note circles live where the double-tap seek zones
+    // are. A circle used to take its touch outright, so with the circles up a
+    // double tap landing on one opened the bookmarks or saved a quick note,
+    // and the seek never happened. Now a bookmark circle waits out the
+    // double-tap window before acting, and lets its touchend bubble to the
+    // wrapper's handleDoubleTap - so a second tap within the window (on the
+    // circle, or on the picture once the circle has gone see-through) is a
+    // double tap: it seeks, and the circle does nothing. One tap on its own
+    // still opens the bookmarks / saves the quick note, a moment later.
+    // The touchstart is still stopped, so a drag that starts on a circle
+    // doesn't scrub.
+    // ⚙️ BM_TAP_WAIT_MS - a little past handleDoubleTap's 300 ms window.
+    const BM_TAP_WAIT_MS = 340;
+    function setupBmTapButton(btn, action) {
+        let pend = null;
+        btn.addEventListener('touchstart', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+        }, { passive: false });
+        btn.addEventListener('touchend', (e) => {
+            e.preventDefault();          // no synthetic click; the touchend itself bubbles on purpose
+            if (!pauseMenuTappable(btn)) { e.stopPropagation(); return; }
+            if (pend) {
+                // The second tap of a double: the wrapper seeks, the circle stands down.
+                clearTimeout(pend);
+                pend = null;
+                return;
+            }
+            const at = Date.now();
+            pend = setTimeout(() => {
+                pend = null;
+                // A double tap the wrapper handled since this tap (its second
+                // tap may have gone to the picture, not to this circle).
+                if ((window.scrayLastDoubleTapAt || 0) >= at) return;
+                try { action(); } catch (err) { console.error('[pause-menu] action failed:', err); }
+            }, BM_TAP_WAIT_MS);
+        }, { passive: false });
+        btn.addEventListener('touchcancel', (e) => { e.stopPropagation(); clearTimeout(pend); pend = null; });
+        btn.addEventListener('click', (e) => e.stopPropagation());
+    }
+
     const group = document.createElement('div');
     group.className = 'plyr-frame-step-group';
 
@@ -4887,7 +4929,7 @@ function attachFrameStepButtons() {
 
     // 3 - bookmark modal (took over the old orange play/pause circle)
     const bookmarkBtn = makeCircle('plyr-frame-bookmark', 'Bookmarks', 'BM');
-    setupTapButton(bookmarkBtn, () => {
+    setupBmTapButton(bookmarkBtn, () => {
         if (typeof window.showPlayerBookmarkModal === 'function') window.showPlayerBookmarkModal();
     });
 
@@ -4938,7 +4980,7 @@ function attachFrameStepButtons() {
     const bmCluster = document.createElement('div');
     bmCluster.className = 'plyr-frame-bm-cluster';
     const flsBmBtn = makeCircle('plyr-frame-bookmark plyr-frame-bm-fls', 'Bookmarks', 'BM');
-    setupTapButton(flsBmBtn, () => {
+    setupBmTapButton(flsBmBtn, () => {
         if (typeof window.showPlayerBookmarkModal === 'function') window.showPlayerBookmarkModal();
     });
     bmCluster.appendChild(flsBmBtn);
@@ -4948,7 +4990,7 @@ function attachFrameStepButtons() {
     [0, 1, 2].forEach(slot => {
         const q = makeCircle('plyr-frame-quick-bm', 'Quick bookmark', '');
         q.dataset.slot = String(slot);
-        setupTapButton(q, () => scrayQuickBookmark(scrayQuickBmNotes()[slot]));
+        setupBmTapButton(q, () => scrayQuickBookmark(scrayQuickBmNotes()[slot]));
         bmCluster.appendChild(q);
     });
     group.appendChild(bmCluster);
@@ -5237,7 +5279,8 @@ async function scrayQuickBookmark(note) {
             html,
             className: 'bookmark-confirmation-tooltip',
             ms: 3900,
-            extraActions: [{ label: 'Adjust', onClick: () => scrayAdjustBookmark(bm) }],
+            // picker 15.96 / native 15.113: Adjust opens by itself below.
+            extraActions: [],
             onUndo: async () => {
                 v.bookmarks = before.map(b => ({ ...b }));
                 await window.saveBookmarks(v, document.createElement('div'));
@@ -5246,6 +5289,8 @@ async function scrayQuickBookmark(note) {
     } else {
         window.showBookmarkConfirmation?.(html);
     }
+    // Straight into Adjust (picker 15.96 / native 15.113), as the BM modal's save does.
+    scrayAdjustBookmark(bm, { auto: true });
 }
 window.scrayQuickBookmark = scrayQuickBookmark;
 
@@ -5254,16 +5299,40 @@ window.scrayQuickBookmark = scrayQuickBookmark;
  * in its edit view - the same one the note's pencil opens - so you scrub to
  * the right spot and tap "Adjust -> time" to confirm the move.
  */
-function scrayAdjustBookmark(bm) {
+// opts.auto (picker 15.95 / native 15.112): straight after a save - the BM
+// modal's, or a quick circle's (15.96 / 15.113) - without a tap on Adjust. The
+// bookmark is already saved where it was; the rail is up to move it. Play
+// (the button, or the double tap) confirms it at the playhead: moved there if
+// you scrubbed, kept if you didn't. "Adjust -> time" does the same by hand.
+// The rail's X cancels the bookmark - deletes it, with Undo.
+function scrayAdjustBookmark(bm, opts) {
     const p = window.plyrPlayer;
     if (!p || !bm) return;
+    const auto = !!(opts && opts.auto);
     try { p.pause(); } catch (e) {}
     const open = () => typeof window.scrayEditBookmarkOnRail === 'function'
-        && window.scrayEditBookmarkOnRail(bm.time, bm.note);
-    if (open()) return;
-    // Markers not drawn for it yet - draw them and try once more.
-    if (typeof window.renderBookmarkMarkers === 'function') window.renderBookmarkMarkers();
-    if (!open()) showPlayerFeedback('Bookmark not found', 'top-left');
+        && window.scrayEditBookmarkOnRail(bm.time, bm.note, { auto });
+    let ok = open();
+    if (!ok) {
+        // Markers not drawn for it yet - draw them and try once more.
+        if (typeof window.renderBookmarkMarkers === 'function') window.renderBookmarkMarkers();
+        ok = open();
+    }
+    if (!ok) { if (!auto) showPlayerFeedback('Bookmark not found', 'top-left'); return; }
+    if (!auto) return;
+    showPlayerFeedback(`Saved at ${formatDuration(bm.time * 1000)} \u00b7 scrub, then play to move it \u00b7 \u2715 cancels it`, 'top-left');
+    // Play resumes: confirmed where the playhead is - moved if it was scrubbed,
+    // kept if not - and the rail goes.
+    const media = p.media || p.elements?.container?.querySelector('video');
+    const onPlay = () => {
+        const rail = document.getElementById(window.SCRAY_RAIL_ID || 'bookmarkTooltipRail');
+        if (rail && rail.dataset.editing === '1' && rail.dataset.autoAdjust === '1'
+            && typeof window.scrayRailConfirmAtPlayhead === 'function') {
+            window.scrayRailConfirmAtPlayhead();
+        }
+    };
+    if (media) media.addEventListener('play', onPlay, { once: true });
+    else p.once?.('play', onPlay);
 }
 window.scrayAdjustBookmark = scrayAdjustBookmark;
 
@@ -7497,9 +7566,14 @@ const bmText = (bm) => {
     return note ? `${formatDuration(bm.time * 1000)} ${note}` : formatDuration(bm.time * 1000);
 };
 const leaveEdit = () => { raisedEntry = null; dismissBookmarkRail(); };
+// X: stop editing - or, on the edit view a save opened by itself (auto
+// Adjust, picker 15.96 / native 15.113), cancel the bookmark just saved.
 const cancelBtn = () => {
-    const b = makeRailButton('\u2715', leaveEdit, 'padding: 6px 9px;');
-    b.title = 'Stop editing';
+    const autoNow = () => document.getElementById(RAIL_ID)?.dataset.autoAdjust === '1';
+    const b = makeRailButton('\u2715', () => {
+        if (autoNow() && raisedEntry) deleteBm(raisedEntry); else leaveEdit();
+    }, 'padding: 6px 9px;');
+    b.title = autoNow() ? 'Cancel this bookmark (deletes it)' : 'Stop editing';
     return b;
 };
 
@@ -7788,13 +7862,28 @@ const deleteBm = (entry) => {
 // native 15.81: the Adjust on a save confirmation lands here - raise the rail
 // for that bookmark and go straight to its edit view (what the pencil opens),
 // so you scrub, then tap "Adjust -> time" to move it.
-window.scrayEditBookmarkOnRail = (time, note) => {
+// Leave the edit view, keeping the bookmark as it is (picker 15.95 / native 15.112).
+window.scrayLeaveBookmarkEdit = leaveEdit;
+// Confirm the bookmark being edited at the playhead (picker 15.96 / native
+// 15.113): moved there if the playhead has left it, kept where it is if not.
+window.scrayRailConfirmAtPlayhead = () => {
+    if (!raisedEntry || !isEditing()) return false;
+    const t = window.plyrPlayer?.currentTime;
+    if (typeof t !== 'number' || isNaN(t)) { leaveEdit(); return true; }
+    if (Math.round(t * 1000) === Math.round(raisedEntry.bm.time * 1000)) { leaveEdit(); return true; }
+    adjustTo(raisedEntry);
+    return true;
+};
+// opts.auto: the edit view a save opened by itself - X cancels the bookmark
+// and play confirms it (scrayAdjustBookmark).
+window.scrayEditBookmarkOnRail = (time, note, opts) => {
     const ms = Math.round(time * 1000);
     const same = (e) => Math.round(e.bm.time * 1000) === ms;
     const entry = entries.find(e => same(e) && (e.bm.note || '') === (note || '')) || entries.find(same);
     if (!entry) return false;
     raise(entry);
     if (!raisedRail) return false;
+    if (opts && opts.auto) raisedRail.dataset.autoAdjust = '1'; else delete raisedRail.dataset.autoAdjust;
     startEdit(raisedRail, entry, [entry]);
     return true;
 };
@@ -9224,6 +9313,8 @@ function setupDoubleTapHandler() {
      if (tapLength < 300 && tapLength > 0) {
          e.stopPropagation();
          e.preventDefault();
+         // A bookmark circle waiting to act stands down (picker 15.95 / native 15.112).
+         window.scrayLastDoubleTapAt = now;
          
          // Get rect from the actual element being tapped (works in both inline and fullscreen)
          const targetElement = e.currentTarget;

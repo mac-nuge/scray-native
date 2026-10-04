@@ -148,14 +148,67 @@ ${scopeAsk ? `
     <span class="scray-delete-everywhere-note" id="renameScopeNote"></span>
 </div>` : ''}
 
-<!-- Rename and Cancel buttons -->
-<div style="display: flex; gap: 8px;">
+<!-- Rename and Cancel buttons. Stuck to the panel's bottom edge (picker 15.95 /
+     native 15.112), so with the keyboard up they stay in view above it rather
+     than scrolling off under the keys. -->
+<div id="renameBtnRow" style="display: flex; gap: 8px; position: sticky; bottom: 0; background: #fff; padding-top: 8px; margin-top: -4px;">
     <button id="confirmRenameBtn" class="modal-btn modal-btn-primary" style="flex: 1;">Rename</button>
     <button id="cancelRenameBtn" class="modal-btn modal-btn-cancel" style="flex: 1;">Cancel</button>
 </div>
 </div>
 `;
+// Upright in FLS (picker 15.96 / native 15.113) - see style.css .scray-upright.
+modal.classList.add('scray-upright');
 document.body.appendChild(modal);
+
+// Above the keyboard (picker 15.95 / native 15.112). WKWebView doesn't shrink
+// the layout viewport for the on-screen keyboard, so this centred modal stayed
+// centred and Rename / Cancel ended up behind the keys - a scroll, or putting
+// the keyboard away, before every rename. visualViewport reports the covered
+// strip: the panel is pinned to the top and shortened to the space above the
+// keys (its own scroll takes over), and the button row is sticky at its foot,
+// so Rename is always on screen. The same idea as the bookmarks modal's.
+{
+    const vv = window.visualViewport;
+    const TOP_PAD_PX = 12;     // ⚙️ the panel's distance from the top with the keyboard up
+    const KEYBOARD_GAP_PX = 6; // ⚙️ clear space between the panel and the keys
+    const KEYBOARD_MIN_PX = 80;
+    const panel = modal.querySelector('.basket-json-modal-content');
+    const fit = () => {
+        if (!modal.isConnected || !panel) return;
+        const ov = modal.getBoundingClientRect();
+        const visBottomAbs = vv ? vv.offsetTop + vv.height : window.innerHeight;
+        const visBottom = Math.max(0, Math.min(ov.height, visBottomAbs - ov.top));
+        const hiddenBelow = Math.max(0, ov.height - visBottom);
+        const keyboardUp = hiddenBelow > KEYBOARD_MIN_PX;
+        if (keyboardUp) {
+            // Anchored to the keyboard (picker 15.100 / native 15.117): the
+            // panel's foot sits GAP above the keys, so Rename is right there
+            // and a short panel leaves no gap - it rises off the top instead.
+            modal.style.alignItems = 'flex-end';
+            modal.style.paddingTop = TOP_PAD_PX + 'px';
+            modal.style.paddingBottom = (hiddenBelow + KEYBOARD_GAP_PX) + 'px';
+            panel.style.maxHeight = Math.max(140, visBottom - TOP_PAD_PX - KEYBOARD_GAP_PX) + 'px';
+        } else {
+            modal.style.alignItems = '';
+            modal.style.paddingTop = '';
+            modal.style.paddingBottom = '';
+            panel.style.maxHeight = '';
+        }
+    };
+    if (vv) {
+        vv.addEventListener('resize', fit);
+        vv.addEventListener('scroll', fit);
+        const watch = new MutationObserver(() => {
+            if (modal.isConnected) return;
+            vv.removeEventListener('resize', fit);
+            vv.removeEventListener('scroll', fit);
+            watch.disconnect();
+        });
+        watch.observe(document.body, { childList: true });
+        fit();
+    }
+}
 
 const input = document.getElementById('renameInput');
 // opts.auto (picker 15.38 / native 15.47): built but never shown - see the end.
@@ -3395,10 +3448,9 @@ async function showBookmarksModal(video, autoAddTimestamp = false, openOpts = {}
                     ms: 3900,   // doubled (picker 14.14 / native 14.22)
                     // native 15.81: Adjust, when this save added a bookmark to the
                     // video on screen - pauses and opens it on the rail to move.
-                    extraActions: (extra && window.currentPlayingVideo?.oneDriveId === video.oneDriveId
-                        && typeof window.scrayAdjustBookmark === 'function')
-                        ? [{ label: 'Adjust', onClick: () => window.scrayAdjustBookmark(extra) }]
-                        : [],
+                    // picker 15.95 / native 15.112: Adjust opens by itself below, so
+                    // the toast keeps Undo only.
+                    extraActions: [],
                     onUndo: async () => {
                         video.bookmarks = before.map(b => ({ ...b }));
                         // A detached tooltip soaks up saveBookmarks' own
@@ -3406,6 +3458,13 @@ async function showBookmarksModal(video, autoAddTimestamp = false, openOpts = {}
                         await saveBookmarks(video, document.createElement('div'));
                     },
                 });
+            }
+            // Adjust straight away (picker 15.95 / native 15.112): a bookmark
+            // added to the video on screen opens on the rail to move - play on
+            // to keep it where it is, or scrub and Adjust.
+            if (extra && window.currentPlayingVideo?.oneDriveId === video.oneDriveId
+                && typeof window.scrayAdjustBookmark === 'function') {
+                try { window.scrayAdjustBookmark(extra, { auto: true }); } catch (e) { console.warn('[bookmarks] auto adjust:', e); }
             }
         } catch (err) {
             console.error('Bookmark save failed:', err);
@@ -3646,10 +3705,13 @@ async function showBookmarksModal(video, autoAddTimestamp = false, openOpts = {}
         // Five buttons share the row, so side padding is trimmed and the
         // global 10px button margin (style.css) is dropped - it was dead space
         // under the row.
-        const ROW_BTN = 'margin: 0 !important; min-width: 0; white-space: nowrap; padding-left: 2px !important; padding-right: 2px !important; ';
+        // Smaller type (picker 15.98 / native 15.115): "Add note" was clipped at
+        // the row's width in FLS. ⚙️ The size for the whole row. The pending
+        // count after Save went in 15.99 / 15.116 - it never fit.
+        const ROW_BTN = 'margin: 0 !important; min-width: 0; white-space: nowrap; padding-left: 2px !important; padding-right: 2px !important; font-size: 0.8rem !important; overflow: hidden; text-overflow: ellipsis; ';
         html += `
                 <div class="file-operation-buttons" style="flex: 0 0 auto; display: flex; flex-direction: row; gap: 6px; margin: 0 !important; padding-top: 8px; background: #fff;">
-                    <button type="button" id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="${ROW_BTN}flex: 1; background: #28a745;">Save${pending ? ` (${pending})` : ''}</button>
+                    <button type="button" id="saveBookmarksBtn" class="modal-btn modal-btn-primary" style="${ROW_BTN}flex: 1; background: #28a745;" title="${pending ? `${pending} to delete` : 'Save'}">Save</button>
                     ${hasPlayhead ? `<button type="button" id="addNoteBtn" class="modal-btn" style="${ROW_BTN}flex: 1.3; background: #007bff; color: #fff;">Add note</button>` : ''}
                     ${hasPlayhead ? `<button type="button" id="clearPicksBtn" class="modal-btn" title="Clear the picked notes" style="${ROW_BTN}flex: 1; background: #fd7e14; color: #fff;">Clear</button>` : ''}
                     <button type="button" id="deleteBookmarksBtn" class="modal-btn" style="${ROW_BTN}flex: 1; background: ${mode === 'delete' ? '#a71d2a' : '#dc3545'}; color: #fff;">Delete</button>

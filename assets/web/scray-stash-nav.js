@@ -222,6 +222,9 @@
     segs.forEach((g, i) => { if (g.w) idx.push(i); });
     const on = new Map();
     const put = (i, k) => { if (!on.get(i)) on.set(i, k); };
+    // A studio's mapped spelling - "mg18" - is too short for the word rules;
+    // its run of words is marked whole (picker 15.97 / native 15.114).
+    if (kinds && kinds.studioAlts && kinds.studioAlts.length) hlMarkAlts(segs, idx, kinds.studioAlts, on);
     idx.forEach((i, k) => {
       const w = segs[i].w;
       if (hlHit(w, other)) put(i, hlKindOf(w, kinds, false));
@@ -241,18 +244,68 @@
     String((video && video.filename) || '').replace(/\.[a-z0-9]{1,5}$/i, ''),
     (video && (video.__huntFolder || video.path)) || ''
   ]);
+  // ---- a studio's other spellings (picker 15.97 / native 15.114) -----------
+  // manage-data maps studio names - "Massage Girls 18" <-> "mg18" - and a file
+  // is as likely to carry the short one as the long one. The highlighter
+  // knows both: a studio's mapped spelling in the file name is a studio match
+  // (pink), on the file's side and on the card's. Compact (letters and digits
+  // only, folded) so "mg18", "MG-18" and "mg 18" are one spelling.
+  const hlCompact = (t) => hlFold(t).replace(/[^\p{L}\p{N}]+/gu, '');
+  function studioSpellings(name) {
+    const out = [];
+    const nm = window.scrayNameMap;
+    const studios = (nm && nm.dump && nm.dump().studio) || null;
+    if (!studios || !name) return out;
+    const k = hlCompact(name);
+    if (!k) return out;
+    Object.keys(studios).forEach(raw => {
+      const mapped = String(studios[raw] || '');
+      const rk = hlCompact(raw), mk = hlCompact(mapped);
+      if (rk === k && mk && mk !== k) out.push(mapped);
+      else if (mk === k && rk && rk !== k) out.push(raw);
+    });
+    return out;
+  }
+  /** Whether one of the studio's other spellings is in the file's name or folder. */
+  function hlStudioAltHit(name, video) {
+    const alts = studioSpellings(name).map(hlCompact).filter(a => a.length >= 3);
+    if (!alts.length) return false;
+    const text = hlFold(String((video && video.filename) || '').replace(/\.[a-z0-9]{1,5}$/i, '') + ' ' +
+                        ((video && (video.__huntFolder || video.path)) || ''));
+    const words = text.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    const flat = words.join('');
+    return alts.some(a => words.includes(a) || (a.length >= 4 && flat.includes(a)));
+  }
+  /** Mark the runs of words in `segs` that spell one of `alts` (compact), as the studio's. */
+  function hlMarkAlts(segs, idx, alts, on) {
+    (alts || []).forEach(alt => {
+      if (!alt || alt.length < 3) return;
+      for (let k = 0; k < idx.length; k++) {
+        let str = '';
+        for (let m = k; m < idx.length; m++) {
+          str += segs[idx[m]].w;
+          if (str === alt) { for (let q = k; q <= m; q++) if (!on.get(idx[q])) on.set(idx[q], 's'); break; }
+          if (!alt.startsWith(str)) break;
+        }
+      }
+    });
+  }
   /** The scenes' performer names and studios, apart - what colours a match. */
   const hlKinds = (cards) => {
     const cs = [].concat(cards || []).filter(Boolean);
+    const studios = cs.map(c => c.studio).filter(Boolean);
     return {
       perf: hlTerms(cs.flatMap(c => (c.cast || []).flatMap(p => [p && p.name, p && p.as])).filter(Boolean)),
-      studio: hlTerms(cs.map(c => c.studio).filter(Boolean))
+      studio: hlTerms(studios.flatMap(n => [n].concat(studioSpellings(n)))),
+      // The compact other spellings, marked as runs of words (hlMarkAlts).
+      studioAlts: studios.flatMap(studioSpellings).map(hlCompact)
     };
   };
   /** The scenes' side: everything a card shows that can match, its kinds along. */
   const hlSceneTerms = (cards) => {
     const t = hlTerms([].concat(cards || []).flatMap(c => c ? [
       c.title, c.studio, c.code, c.release_date,
+      ...(c.studio ? studioSpellings(c.studio) : []),
       ...(c.cast || []).flatMap(p => [p && p.name, p && p.as])
     ] : []).filter(Boolean));
     t.kinds = hlKinds(cards);
@@ -1785,7 +1838,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       // line pink, performer names green, anything else by what the word is.
       const kinds = hlKinds([c]);
       const hl = (t) => hlHtml(t, fileTerms, kinds);
-      const hlS = (t) => hlHtml(t, fileTerms, { studio: kinds.studio });
+      // The file carries the studio's other spelling (picker 15.97 / native 15.114): the whole name is a match.
+      const hlS = (t) => hlStudioAltHit(t, video) ? '<mark class="ssn-hl ssn-hl-s">' + esc(t) + '</mark>' : hlHtml(t, fileTerms, { studio: kinds.studio });
       const hlP = (t) => hlHtml(t, fileTerms, { perf: kinds.perf });
       const fileSec = Number(c.file_duration_sec) || 0;
       const sceneSec = Number(c.stash_duration_sec) || 0;
@@ -2807,7 +2861,7 @@ body.fullscreen-active #ssnPvBar { display: none; }
 
   window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile, openHome, studioSuggestions, topFolderTags,
     // picker 15.84 / native 15.102 - shared with scray-stash-hunt.js.
-    hl: { html: hlHtml, terms: hlTerms, fileTerms: hlFileTerms, sceneTerms: hlSceneTerms, kinds: hlKinds },
+    hl: { html: hlHtml, terms: hlTerms, fileTerms: hlFileTerms, sceneTerms: hlSceneTerms, kinds: hlKinds, studioAltHit: hlStudioAltHit },
     // picker 15.91 / native 15.108 - a tap on a word selects it; the hunt's bulk box too.
     wordTap: wordTapOn };
   window.scrayPerformerChoice = performerChoice;

@@ -4,6 +4,63 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.101 / native 15.119 — test: offer to save the basket before loading a list
+<!-- 2026-10-04T11:58Z -->
+- **Asked:** when loading a list, offer to save the basket first so it isn't lost - in both.
+- **Change (scray-basket-sync.js, both):** Load in the Load list modal first calls `scrayOfferSaveBeforeLoad()`. If the basket has anything in it, a small modal asks: 💾 Save basket first (opens the usual Save list modal, then loads), Load without saving, or Cancel. Cancelling the save modal, Cancel, Escape or a tap outside stops the load and the basket is left as it was. An empty basket loads straight away. Native counts items only on other devices too, the same as its Save list does.
+- Checked: `node --check`; a stubbed run of each path (empty, load without saving, cancel, save cancelled, saved).
+
+### native 15.118 — test: Load list and Save list in the basket
+<!-- 2026-10-04T12:55Z -->
+- **Asked:** the basket's list buttons only worked in Picker - port them to Native.
+- **Change (index.html, basket.js, basket-index.js):** 📂 Load list / 💾 Save list in the basket toolbar, as in Picker (picker 15.2), and in the desktop column's copy of it.
+- **Change (scray-basket-sync.js):** `savePlaylist` / `listPlaylists` / `deletePlaylist` / `loadPlaylist` and the save / load modals, ported from Picker's copy. Same server `playlists` table, so a list saved in Native loads in Picker and data-explorer and the other way round.
+  - Save stores the whole basket, items only on other devices included (the modal says how many).
+  - Load replaces the basket: what this library has shows; the rest of the list is kept as items only on other devices, in the list's order, and goes out in the sync - the old basket's other-device items are dropped, not merged back in. The done pop-up says how many are only on other devices.
+- If Load or Save fails with a 403, the device key isn't allowed the playlists_* actions on the server.
+- Checked: `node --check`; a stubbed run of the sync file - load a list over a basket with another device's item, push sends exactly the list.
+
+### picker 15.100 / native 15.117 — test: rename modal sits on the keyboard
+<!-- 2026-10-04T12:05Z -->
+- **Asked:** with the keyboard up the rename modal left a big gap above the keys - close it, the way the bookmarks modal was anchored.
+- **Change (file-operations.js, both):** 15.112's keyboard fit pinned the panel to the top and only capped its height, so a panel shorter than the strip left the rest empty. It now anchors to the bottom of the visible strip (`align-items: flex-end`, the keyboard's height plus a 6px gap as bottom padding), so the Rename / Cancel row sits just above the keys and a short panel rises off the top instead. The height cap and the sticky button row stay.
+- Checked: `node --check` only.
+
+### picker 15.99 / native 15.116 — test: no count after Save in the bookmark modal
+<!-- 2026-10-04T12:02Z -->
+- **Asked:** still cut off at 0.8rem - drop the "(n)" after Save altogether.
+- **Change (file-operations.js, both):** the Save button reads Save; the number of bookmarks marked for deletion is its tooltip instead. The row stays at 15.98's 0.8rem.
+- Checked: `node --check` only.
+
+### picker 15.98 / native 15.115 — test: smaller type on the bookmark modal's button row
+<!-- 2026-10-04T11:58Z -->
+- **Asked:** the bookmark modal's Save button clipped its count - "Save (2" - in FLS; reduce the font.
+- **Change (file-operations.js, both):** the five-button row (Save, Add note, Clear, Delete, Close) is 0.8rem (was the modal buttons' 0.95rem on a phone), with overflow hidden and an ellipsis as the backstop. ⚙️ `ROW_BTN` in showPlayerBookmarkModal.
+- Checked: `node --check` only.
+
+### picker 15.97 / native 15.114 — test: stash hunt marks a studio's mapped name too
+<!-- 2026-10-04T11:55Z -->
+- **Asked:** in the bulk stash hunt, when a studio's mapped name is what the filename carries (Massage Girls 18 ↔ mg18), mark that as a match as well.
+- **Change (scray-stash-nav.js, identical in both):** `studioSpellings(name)` reads manage-data's studio map (`scrayNameMap`) both ways - the mapped name for a raw one, the raw for a mapped one. The highlighter uses them: `hlKinds` / `hlSceneTerms` carry the other spellings as studio terms, and `hlHtml` marks a run of words that spells one of them (compact - letters and digits, folded - so "mg18", "MG-18" and "mg 18" are one) pink, even where the words are too short for the ordinary rules ("mg", "18"). On a card, the studio line is marked whole when the file carries one of its other spellings (`hlStudioAltHit`, in `scrayStashNav.hl` for the hunt). Both directions: an mg18 file against a Massage Girls 18 card, and a Massage_Girls_18 file against an mg18 card.
+- **Change (scray-stash-hunt.js, identical in both):** the bulk check's studio line does the same.
+- Checked: `node --check`; a stub name map - mg18_JaneRoe_oily against Massage Girls 18 marks mg·18 pink and Jane Roe green on the file line, MG-18 too, the card's studio marked whole; the reverse spelling likewise. Data-explorer's search doesn't have the name map on the page, so it's unchanged.
+
+### picker 15.96 / native 15.113 — test: upright rename in FLS, auto adjust on quick circles, play confirms
+<!-- 2026-10-04T11:45Z -->
+- **Asked:** the rename modal in FLS should be upright (portrait, as in the other modes) - more ergonomic; the kiss / ts / mish quick circles should go straight into Adjust like the BM modal's save; and in that Adjust, double-tapping to unpause should save the bookmark (no Adjust tap needed) - only ✕ cancels it, which cancels the bookmark.
+- **Upright rename (style.css native, file-operations.js both):** the rename modal carries `.scray-upright`; in FLS native's rule that rotates `.basket-json-modal-content` by 90° is undone for it (transform none, 400px wide, 90vh tall, the overlay's 20px padding back), so it sits the way the phone is held, with the portrait keyboard - and 15.112's keyboard fit works in the same frame. Picker never rotated this modal in FLS, so only the class is added there.
+- **Quick circles (player.js, both):** `scrayQuickBookmark` calls `scrayAdjustBookmark(bm, { auto: true })` after the save, and its toast keeps Undo only.
+- **Play confirms (player.js, both):** in the edit view a save opened by itself (`rail.dataset.autoAdjust`, set through `scrayEditBookmarkOnRail(time, note, { auto })`), pressing play - the button or the middle-third double tap - runs `scrayRailConfirmAtPlayhead()`: the bookmark is moved to the playhead if you scrubbed (the same save as Adjust → time, with Undo), kept where it was if you didn't, and the rail goes either way. ✕ on that rail deletes the bookmark (`deleteBm`, with Undo) instead of just leaving the edit; its title says so. The hand-opened edit view (the pencil) is unchanged: ✕ still only stops editing. The note on screen now reads "Saved at m:ss · scrub, then play to move it · ✕ cancels it".
+- Checked: `node --check` on both copies of player.js and file-operations.js. Not run on the phone.
+
+### picker 15.95 / native 15.112 — test: rename above keyboard, BM circles double tap, auto adjust
+<!-- 2026-10-04T11:30Z -->
+- **Asked:** (1) the rename modal's Rename button sits behind the on-screen keyboard - fix it; (2) the bookmark circles' area was meant to stop interfering with double-tap seek, but double tap to seek seems to have gone with it - the seek must work there, only the BM / quick-note taps should keep out of the way; (3) after a BM note is saved from the modal, go straight into Adjust - playing on keeps the saved time, scrubbing and confirming moves it.
+- **Rename above the keyboard (file-operations.js, both):** the modal watches `visualViewport`; with the keyboard up it pins itself to the top, pads its bottom by the covered strip and caps the panel to the space above the keys (its own scroll takes over), and the Rename / Cancel row is `position: sticky` at the panel's foot - so Rename is on screen whatever is scrolled. The bookmarks modal's approach, cut down.
+- **Bookmark circles and the double tap (player.js, both):** `setupBmTapButton` for BM (row and FLS), and the three quick-note circles. A tap on one now waits ⚙️ `BM_TAP_WAIT_MS` (340 ms) before acting, and its touchend bubbles to the wrapper's `handleDoubleTap` - so a second tap inside the window, on the circle or on the picture (native 15.92's guard makes the circles see-through after a picture tap), is a double tap: it seeks, and the circle stands down (`window.scrayLastDoubleTapAt`, set when handleDoubleTap handles a double). One tap still opens the bookmarks / saves the quick note, a third of a second later. The touchstart is still swallowed, so a drag from a circle doesn't scrub. Native 15.93's no-wake area stays as it was.
+- **Auto Adjust (file-operations.js, player.js, both):** after the BM modal saves a bookmark to the video on screen, `scrayAdjustBookmark(bm, { auto: true })` runs: pause, the bookmark's edit view on the rail, and a note "Saved at m:ss · scrub and Adjust to move it, or play on to keep it". Pressing play while the rail is still up leaves the edit (`scrayLeaveBookmarkEdit`) - the bookmark stays where it was saved; scrub then "Adjust → time" moves it as before. The save toast keeps Undo but no longer carries Adjust (it opens by itself). Quick-circle saves (kiss / ts / mish) are unchanged - still Adjust on the toast.
+- Checked: `node --check` on player.js and file-operations.js in both apps. Not run on the phone - the keyboard fit and the tap timing want trying.
+
 ### browse 15.168 / picker 15.94 / native 15.111 — test: text and pictures to reports
 <!-- 2026-10-04T11:05Z -->
 - **Asked:** beside Jira Report in the floating menu, a Text/pics to reports button - a modal like Jira's with a text field and paste / attach for pictures, any number of them - sent as a report to report.php under the name custom (not picker / native); and in report.php a way to save a report with text and pictures too, to open from the phone - so pictures and text can go both ways.

@@ -52,6 +52,10 @@ if (!desktopBasketCol || !mobileBasketPanel) {
 
 // ↑ push / ↓ pull (to Excel) removed from the toolbar - see basket.js.
 
+// 💾 SAVE / 📂 LOAD list - same handlers as the mobile toolbar in basket.js.
+clonedTools.querySelector("#basketSaveBtn")?.addEventListener("click", () => window.scrayBasketSaveListClick());
+clonedTools.querySelector("#basketLoadBtn")?.addEventListener("click", () => window.showPlaylistPickerModal());
+
 clonedTools.querySelector("#basketSelectAllBtn")?.addEventListener("click", () => {
     window.basketVideos.forEach(v => window.selectedBasketIds.add(v.oneDriveId));
     window.renderBasket();

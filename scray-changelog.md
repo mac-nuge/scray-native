@@ -4,6 +4,16 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.102 / native 15.120 / browse 15.176 — test: studio and performer filter in the bulk check
+<!-- 2026-10-04T19:40Z -->
+- **Asked:** in Stash hunt's bulk check (data-explorer, Native and Picker), a filter for studio and performer, to weed out the mismatches.
+- **What it does:** a row of two buttons, Only All studios (n) ▾ / All performers (n) ▾, under Tick all at. Each opens a searchable list of the studios / performers in every file's results, with how many files have them (performers by aka too). Picking works as the single search's filter does (picker 15.26 / native 15.35): any of the studios, all of the performers together. It applies to every file at once: each row then shows its scene - by Best match, StashDB #1 or Closest length, as chosen - from the scenes that pass only. A near miss from another studio or cast drops out, and the row moves to its right scene if it has one. A row left with nothing reads Nothing from <studio> with <performer> in its N results and sorts with the empty ones. ✕ on a button, or Clear in its list, drops it.
+  - A tick belongs to the scene shown, so a row whose scene changes is unticked; Tick 90+ counts what the filter leaves.
+  - The line under a scene adds · k pass the filter while one is on.
+  - Kept for the sheet: Search all again and + Next keep it. Not changeable while matching or while the rename question is up.
+- **Changes:** scray-stash-hunt.js (identical in Picker and Native) - `bulkRf*`, `passOnly`, `recardBulk` (Best match / StashDB #1 / Closest length now go through it too), the `filt` row state, the filter row and its list. scray-stash-search.js (data-explorer) - the same on its bulk check, in the console's look (the single search's filter list).
+- Checked: `node --check` on all three; jsdom - three files, filter by studio (one row moves to its right scene and its tick drops, one empties, one stays), then a performer as well (all together), the list's search box, ✕ / Clear / Done, Search all again keeping the filter; the apps' sheet run the same way through `openBulk`.
+
 ### picker 15.101 / native 15.119 — test: offer to save the basket before loading a list
 <!-- 2026-10-04T11:58Z -->
 - **Asked:** when loading a list, offer to save the basket first so it isn't lost - in both.

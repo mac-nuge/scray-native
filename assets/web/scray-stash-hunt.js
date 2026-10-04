@@ -509,6 +509,18 @@
 #stashHuntBulk .shb-trow .again { flex: 0 0 auto; background: #6c5ce7; border-color: #6c5ce7; color: #fff; font-weight: 700; }
 #stashHuntBulk .shb-trow .again:disabled { opacity: .5; }
 #stashHuntBulk .shb-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+#stashHuntBulk .shb-rfrow .shb-rfbtns { display: flex; gap: 6px; flex: 1; min-width: 0; justify-content: flex-end; flex-wrap: wrap; }
+#stashHuntBulk .shb-rfbtns button { padding: 5px 10px; font-size: .76rem; background: #fff; border: 1px solid #ccc; border-radius: 7px; color: #222; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#stashHuntBulk .shb-rfbtns button.on { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
+#stashHuntBulk .shb-rfbtns button.x { padding: 5px 8px; }
+#stashHuntBulk .shb-rfpop { border: 1px solid #ddd; border-radius: 8px; padding: 8px; margin: 0 0 6px; background: #fafafa; }
+#stashHuntBulk .shb-rfpop .how { font-size: .72rem; color: #777; margin-bottom: 5px; }
+#stashHuntBulk .shb-rfpop .top { display: flex; gap: 6px; margin-bottom: 6px; }
+#stashHuntBulk .shb-rfpop input { flex: 1; min-width: 0; font-size: 16px; padding: 5px 8px; border: 1px solid #ccc; border-radius: 7px; }
+#stashHuntBulk .shb-rfpop .list { max-height: 34vh; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 2px; }
+#stashHuntBulk .shb-rfpop .opt { display: flex; justify-content: space-between; gap: 8px; text-align: left; padding: 6px 8px; font-size: .8rem; background: #fff; border: 1px solid #eee; border-radius: 6px; color: #222; }
+#stashHuntBulk .shb-rfpop .opt.on { background: #efeaff; border-color: #6c5ce7; color: #4b3cc9; font-weight: 600; }
+#stashHuntBulk .shb-rfpop .opt small { color: #888; font-weight: 400; }
 #stashHuntBulk .shb-pill { padding: 3px 9px; border-radius: 12px; border-color: #b9d4f5; background: #eaf3ff; color: #0b5ed7; font-size: .76rem; }
 #stashHuntBulk .shb-pill.k-studio { border-color: #cbbef5; background: #f3efff; color: #5b3fd1; }
 #stashHuntBulk .shb-pill.k-perf { border-color: #f1a7c9; background: #fdf0f6; color: #b0246a; }
@@ -1433,20 +1445,121 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
   // search order - StashDB order unless Best match (or, picker 15.64 /
   // native 15.76, Duration diff) has been picked.
   const bulkOrder = () => (S && (S.sort === 'match' || S.sort === 'dur')) ? S.sort : 'order';
-  const pickCard = (scenes) => bulkOrder() === 'match' ? bestOf(scenes) : bulkOrder() === 'dur' ? closestOf(scenes) : firstOf(scenes);
-  function setBulkOrder(B, v) {
-    if (!S || (v !== 'match' && v !== 'order' && v !== 'dur')) return;
-    S.sort = v;
+  // ---- studio / performer filter (picker 15.102 / native 15.120) -------------
+  // Over every file's results at once, the way the single search filters its
+  // own (picker 15.26 / native 15.35): any of the studios picked, all of the
+  // performers picked together. Each row then shows its scene from those only,
+  // so a near miss from another studio or cast drops out; a row with nothing
+  // left says so. Kept on the sheet, so Search all again and + Next keep it.
+  const bkk = (x) => String(x == null ? '' : x).normalize('NFC').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const bulkRf = (B) => (B && B.rf) || { rfs: [], rfp: [] };
+  const bulkRfOn = (B) => { const f = bulkRf(B); return !!(f.rfs.length || f.rfp.length); };
+  function bulkRfPass(B, c) {
+    const f = bulkRf(B);
+    if (f.rfs.length && !f.rfs.some(x => x.k === bkk(c.studio))) return false;
+    if (f.rfp.length && !f.rfp.every(x => (c.cast || []).some(p => bkk(p && p.name) === x.k))) return false;
+    return true;
+  }
+  /** The results with the ones the filter leaves out blanked - so a card keeps its place in StashDB's list. */
+  const passOnly = (scenes) => (scenes || []).map(c => (c && bulkRfPass(bulk, c) ? c : null));
+  /** Studios and performers across every file's results: how many files have them. */
+  function bulkRfCounts(B) {
+    const st = new Map(), pf = new Map();
     B.rows.forEach(r => {
-      if (!r.scenes || !(r.st === 'found' || r.st === 'fail')) return;
+      if (!r.scenes || !r.scenes.length || r.st === 'done' || r.st === 'fpmatch' || r.st === 'q') return;
+      const ss = new Set(), ps = new Set();
+      r.scenes.forEach(c => {
+        if (!c) return;
+        const sk = bkk(c.studio);
+        if (sk && !ss.has(sk)) { ss.add(sk); const x = st.get(sk) || { k: sk, name: c.studio, n: 0 }; x.n++; st.set(sk, x); }
+        (c.cast || []).forEach(p => {
+          const pk = bkk(p && p.name);
+          if (!pk || ps.has(pk)) return;
+          ps.add(pk);
+          const x = pf.get(pk) || { k: pk, name: p.name, n: 0, aliases: [] }; x.n++;
+          (p.aliases || []).forEach(a => { if (a && !x.aliases.includes(a)) x.aliases.push(a); });
+          pf.set(pk, x);
+        });
+      });
+    });
+    const order = (m) => [...m.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+    return { rfs: order(st), rfp: order(pf) };
+  }
+  const pickCard = (scenes) => { const s = passOnly(scenes); return bulkOrder() === 'match' ? bestOf(s) : bulkOrder() === 'dur' ? closestOf(s) : firstOf(s); };
+  /** Every row's shown scene again, after the order or the filter changed. */
+  function recardBulk(B) {
+    B.rows.forEach(r => {
+      if (!r.scenes || !['found', 'fail', 'filt', 'none'].includes(r.st)) return;
       const c = pickCard(r.scenes);
       // A different scene isn't the one that was ticked.
       if (!c || !r.card || c.stash_id !== r.card.stash_id) r.tick = false;
       r.card = c;
-      r.how = v;
+      r.best = bestOf(passOnly(r.scenes));
+      r.how = bulkOrder();
+      if (r.st !== 'fail') r.st = c ? 'found' : (r.scenes.length ? 'filt' : 'none');
+      else if (!c) r.st = 'filt';
     });
     B.rows.forEach(r => paintBulkRow(r));
     paintBulk();
+  }
+  function setBulkOrder(B, v) {
+    if (!S || (v !== 'match' && v !== 'order' && v !== 'dur')) return;
+    S.sort = v;
+    recardBulk(B);
+  }
+  /** The two filter buttons, and the open list under them. */
+  function paintBulkRf(sheet, withPop) {
+    const B = bulk;
+    if (!B || !sheet) return;
+    const f = bulkRf(B);
+    const counts = bulkRfCounts(B);
+    const LBL = { rfs: ['Studio', 'studios'], rfp: ['Performer', 'performers'] };
+    const btn = (dd) => {
+      const picks = f[dd];
+      const [, many] = LBL[dd];
+      const label = !picks.length ? 'All ' + many + ' (' + counts[dd].length + ')'
+        : picks.length <= 2 ? picks.map(x => x.name).join(dd === 'rfs' ? ', ' : ' + ')
+        : picks.slice(0, 2).map(x => x.name).join(dd === 'rfs' ? ', ' : ' + ') + ' +' + (picks.length - 2);
+      return '<button type="button" data-b="rf_' + dd + '" class="' + (picks.length ? 'on' : '') + '">' + esc(label) + ' ' + (B.rfOpen === dd ? '▴' : '▾') + '</button>' +
+        (picks.length ? '<button type="button" class="x" data-b="rfx_' + dd + '" title="All ' + many + '">✕</button>' : '');
+    };
+    const btns = sheet.querySelector('.shb-rfbtns');
+    if (btns) btns.innerHTML = btn('rfs') + btn('rfp');
+    if (!withPop) return;
+    const pop = sheet.querySelector('.shb-rfpop');
+    if (!pop) return;
+    const dd = B.rfOpen;
+    if (!dd) { pop.hidden = true; pop.innerHTML = ''; return; }
+    const picks = f[dd];
+    const opts = counts[dd].slice();
+    picks.forEach(pk => { if (!opts.some(o => o.k === pk.k)) opts.push({ k: pk.k, name: pk.name, n: 0 }); });
+    const isOn = (k) => picks.some(x => x.k === k);
+    opts.sort((a, b) => (isOn(b.k) ? 1 : 0) - (isOn(a.k) ? 1 : 0));
+    const box = pop.querySelector('.shb-rffind');
+    const term = box ? box.value : '';
+    pop.hidden = false;
+    pop.innerHTML = '<div class="how">' + (dd === 'rfs' ? 'Pick several to see scenes from any of them' : 'Pick several to see scenes they’re all in together') +
+        ' - for every file at once. The number is how many files have them in their results.</div>' +
+      '<div class="top"><input class="shb-rffind" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="Search ' +
+        LBL[dd][1] + ' in the results…" value="' + esc(term) + '"><button type="button" data-b="rfdone">Done</button></div>' +
+      '<div class="list">' + (opts.length ? opts.map(o => {
+        const find = [o.name].concat(o.aliases || []).join(' | ');
+        const aka = (o.aliases || []).length ? ' <small>aka ' + o.aliases.slice(0, 3).map(esc).join(', ') + '</small>' : '';
+        return '<button type="button" class="opt' + (isOn(o.k) ? ' on' : '') + '" data-rfpick="' + esc(o.name) + '" data-dd="' + dd + '" data-find="' + esc(lower(find)) + '">' +
+          '<span>' + (isOn(o.k) ? '✓ ' : '') + esc(o.name) + aka + '</span><small>' + (o.n || '') + '</small></button>';
+      }).join('') : '<div class="how">Nothing in the results yet.</div>') + '</div>';
+    narrowBulkRf(pop);
+  }
+  function narrowBulkRf(pop) {
+    const box = pop.querySelector('.shb-rffind');
+    const t = box ? lower(box.value.trim()) : '';
+    pop.querySelectorAll('.opt').forEach(o => { o.style.display = !t || (o.dataset.find || '').includes(t) ? '' : 'none'; });
+  }
+  /** The filter as words, for a row it leaves empty. */
+  function bulkRfWords(B) {
+    const f = bulkRf(B);
+    return [f.rfs.length ? 'from ' + f.rfs.map(x => x.name).join(' or ') : '',
+            f.rfp.length ? 'with ' + f.rfp.map(x => x.name).join(' and ') : ''].filter(Boolean).join(' ');
   }
   /**
    * Where a row sits when sorted by confidence (picker 15.50 / native 15.61):
@@ -1467,7 +1580,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       return Math.round((100 - (Number.isFinite(c) ? Math.max(0, Math.min(100, c)) : -1)) * 10);
     }
     if (r.st === 'wait' || r.st === 'fp' || r.st === 'search') return 3000;
-    if (r.st === 'none' || r.st === 'err') return 4000;
+    if (r.st === 'none' || r.st === 'err' || r.st === 'filt') return 4000;
     return 5000;
   }
   /** Rows to decide on whose shown scene scores 90 or more (picker 15.50 / native 15.61). */
@@ -1553,7 +1666,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
             ? 'StashDB’s #' + c.rank + ' of ' + r.count + (r.best && r.best.stash_id !== c.stash_id
                 ? ' · best match is #' + r.best.rank + (Number.isFinite(Number(r.best.confidence)) ? ' (' + Number(r.best.confidence).toFixed(0) + ')' : '')
                 : ' · also the best match')
-            : 'best of ' + r.count + (c.rank > 1 ? ' · #' + c.rank + ' on StashDB' : '')) + '</span>' : '') + '</div>';
+            : 'best of ' + r.count + (c.rank > 1 ? ' · #' + c.rank + ' on StashDB' : '')) +
+            (bulkRfOn(bulk) ? ' · ' + passOnly(r.scenes).filter(Boolean).length + ' pass the filter' : '') + '</span>' : '') + '</div>';
     }
     // After matching (picker 15.38 / native 15.47): the suggested name.
     let ren = '';
@@ -1573,6 +1687,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       fp: '<span class="shb-st">Checking the fingerprint…</span>',
       search: '<span class="shb-st">Searching StashDB by name…</span>',
       none: '<span class="shb-st">Nothing on StashDB for its name.</span>',
+      filt: '<span class="shb-st">Nothing ' + esc(bulkRfWords(bulk)) + ' in its ' + plural(r.count || 0, 'result') + '.</span>',
       err: '<span class="shb-st bad">⚠️ ' + esc(r.note) + '</span>',
       fpmatch: '<span class="shb-st good">✅ Matched by fingerprint' + (r.scene && r.scene.title ? ': ' + esc(r.scene.title) : '') + '</span>',
       sub: '<span class="shb-st">Submitting…</span>',
@@ -1597,6 +1712,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     const B = bulk;
     const sheet = document.getElementById('stashHuntBulk');
     if (!B || !sheet) return;
+    paintBulkRf(sheet, false);
     const done = B.rows.filter(r => !['wait', 'fp', 'search'].includes(r.st)).length;
     const found = B.rows.filter(r => r.card).length;
     const fp = B.rows.filter(r => r.st === 'fpmatch').length;
@@ -1736,10 +1852,10 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       const scenes = (res && res.scenes) || [];
       r.count = scenes.length;
       r.scenes = scenes;
-      r.best = bestOf(scenes);
+      r.best = bestOf(passOnly(scenes));
       r.how = bulkOrder();
       r.card = pickCard(scenes);
-      r.st = r.card ? 'found' : 'none';
+      r.st = r.card ? 'found' : (scenes.length ? 'filt' : 'none');   // filt: all left out by the filter (picker 15.102 / native 15.120)
     } catch (e) {
       if (bulk !== B) return;
       r.st = 'err';
@@ -2065,7 +2181,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     if (!B || !sheet || B.running || B.submitting || B.renaming) return;
     const box = sheet.querySelector('.shb-add');
     B.extra = box ? box.value.replace(/\s+/g, ' ').trim() : '';
-    const rows = B.rows.filter(r => ['found', 'none', 'err', 'fail', 'wait'].includes(r.st));
+    const rows = B.rows.filter(r => ['found', 'none', 'err', 'fail', 'wait', 'filt'].includes(r.st));
     if (!rows.length) { toast('Nothing left to search again'); return; }
     rows.forEach(r => { r.card = null; r.tick = false; r.count = 0; r.note = ''; r.st = 'wait'; paintBulkRow(r); });
     try { box && box.blur(); } catch (e) { /* no keyboard */ }
@@ -2135,6 +2251,9 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
           '<input class="shb-min" type="number" inputmode="numeric" min="0" max="100" step="1" value="' + bulkMin() + '" aria-label="Confidence to tick from">' +
           '<button type="button" data-b="tup" title="5 higher">+</button></div>' +
           '<button type="button" data-b="t90" class="shb-t90">☑ Tick ' + bulkMin() + '+</button></div>' +
+        // Studio / performer filter (picker 15.102 / native 15.120).
+        '<div class="shb-order shb-rfrow"><span>Only</span><div class="shb-rfbtns"></div></div>' +
+        '<div class="shb-rfpop" hidden></div>' +
         '<div class="shb-head"></div>' +
         '<div class="shb-list">' + B.rows.map(bulkRowHtml).join('') + '</div>' +
         '<div class="shb-prog" hidden></div>' +
@@ -2151,6 +2270,16 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     // A tap on a word selects it (picker 15.91 / native 15.108).
     if (window.scrayStashNav && typeof window.scrayStashNav.wordTap === 'function') window.scrayStashNav.wordTap(sheet, 'input.shb-add');
     // A mark typed in (picker 15.52 / native 15.63).
+    // The filter list's search box (picker 15.102 / native 15.120).
+    sheet.addEventListener('input', (ev) => {
+      if (!ev.target.closest('.shb-rffind')) return;
+      const pop = sheet.querySelector('.shb-rfpop');
+      if (pop) narrowBulkRf(pop);
+    });
+    sheet.addEventListener('keydown', (ev) => {
+      if (!ev.target.closest('.shb-rffind')) return;
+      if (ev.key === 'Enter') { ev.preventDefault(); ev.target.blur(); }
+    });
     const minBox = sheet.querySelector('.shb-min');
     if (minBox) {
       minBox.addEventListener('input', () => {
@@ -2174,6 +2303,27 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         return;
       }
       const b = e.target.closest('button');
+      // The studio / performer filter (picker 15.102 / native 15.120).
+      if (b && (b.dataset.rfpick != null || /^rf/.test(b.dataset.b || ''))) {
+        e.stopPropagation();
+        const busy = B.submitting || B.renaming || preAsk(B);
+        if (!B.rf) B.rf = { rfs: [], rfp: [] };
+        const k = b.dataset.b || '';
+        if (k === 'rf_rfs' || k === 'rf_rfp') { B.rfOpen = B.rfOpen === k.slice(3) ? '' : k.slice(3); paintBulkRf(sheet, true); return; }
+        if (k === 'rfdone') { B.rfOpen = ''; paintBulkRf(sheet, true); return; }
+        if (busy) return;
+        if (k === 'rfx_rfs' || k === 'rfx_rfp') { B.rf[k.slice(4)] = []; recardBulk(B); paintBulkRf(sheet, true); return; }
+        if (b.dataset.rfpick != null) {
+          const dd = b.dataset.dd === 'rfp' ? 'rfp' : 'rfs';
+          const name = b.dataset.rfpick, kk = bkk(name);
+          if (!kk) return;
+          const list = B.rf[dd];
+          B.rf[dd] = list.some(x => x.k === kk) ? list.filter(x => x.k !== kk) : list.concat([{ k: kk, name }]);
+          recardBulk(B);
+          paintBulkRf(sheet, true);
+        }
+        return;
+      }
       if (b && b.dataset.hunt != null) {
         // A look at the whole thing, then back here (picker 15.54 / native 15.65).
         e.stopPropagation();

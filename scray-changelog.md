@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### browse 15.168 / picker 15.94 / native 15.111 — test: text and pictures to reports
+<!-- 2026-10-04T11:05Z -->
+- **Asked:** beside Jira Report in the floating menu, a Text/pics to reports button - a modal like Jira's with a text field and paste / attach for pictures, any number of them - sent as a report to report.php under the name custom (not picker / native); and in report.php a way to save a report with text and pictures too, to open from the phone - so pictures and text can go both ways.
+- **Change (api.php, browse):** `save_custom_report` - body `{ text, shots: [dataURL…], from }`. Stores `<id>.txt` (a short header then the text) with the app name `custom`, and the pictures beside it numbered `<id>-1.jpg`, `<id>-2.png` … (PNG / JPEG / WebP by their bytes, 6 MB each, 12 at most). Same folder outside the webroot, same keep-the-newest-40 as `save_report`, which now prunes numbered pictures too (`scrayReportUnlinkPics`). Answers with the report.php link.
+- **Change (report.php, browse):** knows about several pictures per report - `scrayReportShots()` lists the one screenshot a diagnostics report has and a custom report's numbered ones, `?shot=<id>&n=<k>` serves each, the page shows them all as a gallery, Delete / Delete all take them all. A ✎ New note fold at the top: a text box (paste a picture into it to attach it), Attach pictures… (several), Save as a report - a plain multipart POST to report.php itself (gated like the rest, no API key), stored exactly as the apps' custom reports are and opened straight after. Ctrl+Enter saves.
+- **Change (scray-bugreport.js, picker and native):** `scrayReportNote()` opens Text & pictures to reports: a text box, Paste (the Jira modal's paste wiring, adding rather than replacing), Attach photos (several at once), thumbnails with ✕, Send to reports → `save_custom_report`; the status shows the report.php link (copied to the clipboard too) and the modal closes after a moment. Pictures are shrunk as the Jira modal's screenshot is.
+- **Change (disguise.js, picker and native):** the Text/pics to reports button under Jira Report in the floating menu (same shape; hidden when collapsed).
+- Checked: `php -l` on api.php and report.php; report.php's helpers run against a scratch folder (numbered pictures in order, the old single screenshot still found, formats detected, custom listed); `node --check` on both copies of scray-bugreport.js and disguise.js; jsdom (both copies) - paste adds, ✕ removes, attach of two images and one text file adds two and says so, Send carries all three pictures and shows the link.
+
 ### picker 15.93 / native 15.110 — test: unmatch for details entered by hand
 <!-- 2026-10-04T10:14Z -->
 - **Asked:** no Unmatch option for manually edited videos in Stash hunt - add one, to start again.

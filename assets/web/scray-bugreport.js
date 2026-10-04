@@ -754,6 +754,14 @@ console.log("scray-bugreport.js loaded");
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 #scrayBugTypeToggle button.on { background: #2d6cdf; border-color: #2d6cdf; color: #fff; font-weight: 600; }
+/* Text/pics to reports (picker 15.94 / native 15.111): the pictures, several. */
+#scrayNotePics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+#scrayNotePics:empty { display: none; }
+#scrayNotePics .pic { position: relative; width: 84px; height: 64px; border: 1px solid #454545; border-radius: 6px; overflow: hidden; background: #000; }
+#scrayNotePics .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#scrayNotePics .pic button { position: absolute; top: 2px; right: 2px; width: auto; height: auto; margin: 0; padding: 0 6px; font-size: 0.72rem; line-height: 1.4; border-radius: 4px; border: 1px solid #666; background: rgba(0,0,0,.65); color: #fff; cursor: pointer; }
+#scrayBugPanel textarea#scrayNoteText { height: 120px; overflow-y: auto; }
+#scrayBugPanel .notelink { display: block; margin-top: 4px; font-size: 0.78rem; color: #8ab4ff; word-break: break-all; }
 `;
     document.head.appendChild(el);
   }
@@ -1053,6 +1061,189 @@ console.log("scray-bugreport.js loaded");
     }
   }
 
+  // -------------------------------------------------------------
+  // Text/pics to reports (picker 15.94 / native 15.111)
+  // -------------------------------------------------------------
+  // The one thing neither the Jira modal nor "send report" would do: carry a
+  // note and some pictures - as many as you like - somewhere they can be read
+  // back, from the phone or the PC. Sent to api.php?action=save_custom_report
+  // and stored as a report under the app name 'custom', so report.php lists it
+  // with the diagnostics ones and shows every picture. report.php can write
+  // one too, which is the way back to the phone.
+  // ⚙️ Pictures in one note; the server caps at the same number.
+  const NOTE_MAX_PICS = 12;
+  let noteOpen = false;
+
+  function closeNote() {
+    const o = document.getElementById("scrayNoteOverlay");
+    if (o) o.remove();
+    if (unfit) { unfit(); unfit = null; }
+    noteOpen = false;
+  }
+
+  function openNoteModal() {
+    if (noteOpen) return;
+    noteOpen = true;
+    injectStyles();
+    const pics = [];     // data: URLs, shrunk
+
+    const overlay = document.createElement("div");
+    overlay.id = "scrayNoteOverlay";
+    // The same panel as the Jira modal's, so its styles apply.
+    overlay.innerHTML = `
+      <div id="scrayBugPanel" role="dialog" aria-modal="true">
+        <div id="scrayBugHead">
+          <h2>Text &amp; pictures to reports</h2>
+        </div>
+        <div class="row">
+          <label for="scrayNoteText">Text</label>
+          <textarea id="scrayNoteText" placeholder="Anything - a note to yourself, a filename, a link. Paste a picture here to attach it."></textarea>
+        </div>
+        <div class="row" id="scrayBugShotRow">
+          <div id="scrayBugShotBtns">
+            <span class="lbl">Pictures</span>
+            <span id="scrayBugShotNone">none</span>
+            <span class="grow"></span>
+            <button type="button" id="scrayBugShotPaste" hidden>Paste</button>
+            <label class="filebtn" for="scrayNoteFiles">Attach photos</label>
+            <input type="file" id="scrayNoteFiles" accept="image/*" multiple hidden>
+            <span id="scrayBugShotNote"></span>
+            <div id="scrayBugPasteBox" class="pastebox" contenteditable="true"
+                 role="textbox" aria-label="Long-press here and choose Paste" hidden></div>
+          </div>
+          <div id="scrayNotePics"></div>
+        </div>
+        <div id="scrayBugActions">
+          <button type="button" id="scrayNoteCancel">Cancel</button>
+          <button type="button" id="scrayNoteSend" class="primary">Send to reports</button>
+        </div>
+        <div id="scrayBugStatus"></div>
+      </div>`;
+    overlay.style.cssText = "";
+    overlay.className = "";
+    // Same overlay rules as the Jira modal's, by id - borrow them.
+    overlay.setAttribute("style", "position:fixed;inset:0;z-index:" + Z_MODAL + ";background:rgba(0,0,0,0.72);" +
+      "display:flex;align-items:flex-start;justify-content:center;padding:max(10px,env(safe-area-inset-top)) 10px 10px;" +
+      "box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;");
+    document.documentElement.appendChild(overlay);
+
+    const vv = window.visualViewport;
+    if (vv) {
+      const panelEl = overlay.firstElementChild;
+      const fit = () => {
+        overlay.style.top = vv.offsetTop + "px";
+        overlay.style.height = vv.height + "px";
+        overlay.style.bottom = "auto";
+        const a = document.activeElement;
+        if (a && panelEl.contains(a) && a.scrollIntoView) a.scrollIntoView({ block: "nearest" });
+      };
+      fit();
+      vv.addEventListener("resize", fit);
+      vv.addEventListener("scroll", fit);
+      unfit = () => { vv.removeEventListener("resize", fit); vv.removeEventListener("scroll", fit); };
+    }
+
+    const status   = overlay.querySelector("#scrayBugStatus");
+    const sendBtn  = overlay.querySelector("#scrayNoteSend");
+    const textEl   = overlay.querySelector("#scrayNoteText");
+    const picsEl   = overlay.querySelector("#scrayNotePics");
+    const noneEl   = overlay.querySelector("#scrayBugShotNone");
+    const noteEl   = overlay.querySelector("#scrayBugShotNote");
+    const filesEl  = overlay.querySelector("#scrayNoteFiles");
+
+    function paintPics() {
+      picsEl.innerHTML = "";
+      pics.forEach((src, i) => {
+        const d = document.createElement("div"); d.className = "pic";
+        const img = document.createElement("img"); img.src = src; img.alt = "";
+        const x = document.createElement("button"); x.type = "button"; x.textContent = "\u2715"; x.title = "Take this picture out";
+        x.addEventListener("click", () => { pics.splice(i, 1); paintPics(); });
+        d.append(img, x);
+        picsEl.appendChild(d);
+      });
+      noneEl.style.display = pics.length ? "none" : "";
+      const kb = Math.round(pics.reduce((n, s) => n + s.length * 0.75, 0) / 1024);
+      noteEl.textContent = pics.length ? `${pics.length} picture${pics.length === 1 ? "" : "s"} \u00b7 ${kb} KB` : "";
+    }
+    function addPic(src) {
+      if (!src) return false;
+      if (pics.length >= NOTE_MAX_PICS) { noteEl.textContent = `${NOTE_MAX_PICS} pictures is the most in one note`; return false; }
+      pics.push(src);
+      paintPics();
+      return true;
+    }
+    paintPics();
+
+    // Paste adds a picture rather than replacing the one there.
+    wirePasteInto({
+      root: overlay,
+      button: overlay.querySelector("#scrayBugShotPaste"),
+      box: overlay.querySelector("#scrayBugPasteBox"),
+      note: noteEl,
+      onShot: (next) => { addPic(next); }
+    });
+    filesEl.addEventListener("change", async () => {
+      const list = Array.from(filesEl.files || []);
+      filesEl.value = "";
+      if (!list.length) return;
+      noteEl.textContent = "reading\u2026";
+      let skipped = 0;
+      for (const f of list) {
+        try {
+          const next = await shotFromFile(f);
+          if (!next) { skipped++; continue; }
+          if (!addPic(next)) break;
+        } catch (err) { skipped++; }
+      }
+      if (skipped) noteEl.textContent += (noteEl.textContent ? " \u00b7 " : "") + `${skipped} not an image`;
+    });
+
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeNote(); });
+    overlay.querySelector("#scrayNoteCancel").addEventListener("click", closeNote);
+    overlay.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") closeNote();
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
+    });
+    setTimeout(() => { if (noteOpen) textEl.focus(); }, 50);
+
+    async function send() {
+      const text = textEl.value.trim();
+      if (!text && !pics.length) {
+        status.className = "bad";
+        status.textContent = "Some text or a picture first.";
+        textEl.focus();
+        return;
+      }
+      sendBtn.disabled = true;
+      status.className = "";
+      status.textContent = "Sending\u2026";
+      try {
+        const res = await call("save_custom_report", {
+          text,
+          shots: pics,
+          from: (IS_NATIVE ? "native" : "picker")
+        });
+        status.className = "good";
+        status.textContent = `Saved${res.pictures ? ` with ${res.pictures} picture${res.pictures === 1 ? "" : "s"}` : ""}` +
+          (res.rejected ? ` \u00b7 ${res.rejected} not stored` : "") + ". Open it from report.php on any device:";
+        const a = document.createElement("a");
+        a.className = "notelink";
+        a.href = res.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = res.url;
+        status.appendChild(a);
+        try { if (navigator.clipboard) navigator.clipboard.writeText(res.url); } catch { /* link is enough */ }
+        push("log", `[note] saved to ${res.url}`);
+        sendBtn.textContent = "Sent \u2713";
+        setTimeout(closeNote, 4000);
+      } catch (err) {
+        status.className = "bad";
+        status.textContent = String(err && err.message ? err.message : err);
+        sendBtn.disabled = false;
+      }
+    }
+    sendBtn.addEventListener("click", send);
+  }
+
   /**
    * scrayApiCall carries the session cookie in Picker and the device key in
    * Native, and already unwraps { ok: false }. The fallback only matters on a
@@ -1307,6 +1498,8 @@ console.log("scray-bugreport.js loaded");
   // Exposed so the button is not the only way in - useful from the console,
   // from a keyboard binding, or from Native's settings modal later.
   window.scrayReportBug = openModal;
+  // Text/pics to reports (picker 15.94 / native 15.111) - the Floating Menu's second button.
+  window.scrayReportNote = openNoteModal;
   window.scrayBugLog = {
     lines: () => buf.slice(),
     snapshot,

@@ -788,7 +788,7 @@
 
 /* Jira Report - same shape as the Assign button, deliberately not sharing its
    rule so the .is-on inversion never applies to it. */
-#scrayDisguiseBugBtn {
+#scrayDisguiseBugBtn, #scrayDisguiseNoteBtn {
   width: 100%;
   padding: 4px 6px;
   margin: 0;
@@ -804,7 +804,8 @@
 #scrayDisguiseControl.is-collapsed #scrayDisguiseBody,
 #scrayDisguiseControl.is-collapsed #scrayDisguisePresets,
 #scrayDisguiseControl.is-collapsed #scrayDisguiseAssignBtn,
-#scrayDisguiseControl.is-collapsed #scrayDisguiseBugBtn {
+#scrayDisguiseControl.is-collapsed #scrayDisguiseBugBtn,
+#scrayDisguiseControl.is-collapsed #scrayDisguiseNoteBtn {
   display: none;
 }
 /* ⚙️ Collapsed, COL is not a panel - it is a button among buttons, so it is
@@ -937,7 +938,7 @@
   }
   #scrayDisguiseModeBtn,
   #scrayDisguiseAssignBtn,
-  #scrayDisguiseBugBtn { padding: 6px; }
+  #scrayDisguiseBugBtn, #scrayDisguiseNoteBtn { padding: 6px; }
   #scrayDisguiseHandle {
     min-height: 24px;
     font-size: 13px;
@@ -1608,6 +1609,19 @@
       bugBtn.title = 'File a bug or task on the SO board';
       bugBtn.addEventListener('click', () => window.scrayReportBug());
       control.appendChild(bugBtn);
+    }
+    // ---- Text/pics to reports (picker 15.94 / native 15.111) ----
+    // A note and any number of pictures, stored as a report that report.php
+    // shows - the way to get text and pictures off (or onto) the phone.
+    if (typeof window.scrayReportNote === 'function') {
+      const noteBtn = document.createElement('button');
+      noteBtn.id = 'scrayDisguiseNoteBtn';
+      noteBtn.type = 'button';
+      noteBtn.textContent = 'Text/pics to reports';
+      noteBtn.title = 'Send text and pictures to report.php, to read anywhere';
+      noteBtn.style.marginTop = '4px';
+      noteBtn.addEventListener('click', () => window.scrayReportNote());
+      control.appendChild(noteBtn);
     }
 
     backRoot.appendChild(shot);

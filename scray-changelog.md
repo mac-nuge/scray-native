@@ -4,7 +4,7 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### native 15.122 — test: Scray Picker Remote app
+### native 15.122 — stable: Scray Picker Remote app
 <!-- 2026-10-05T13:20Z -->
 - **Asked:** a way to test Native's web layer on the phone without the computer. A toggle in BBW iPlayer was ruled out (Mac always needs it as is), and so was a staging mode in the Dev app (it can't start without Metro). Going with a separate app swapped with Dev in SideStore by deactivating one and activating the other, since a free Apple ID allows 3 apps (SideStore, BBW iPlayer, and Dev or Remote).
 - **Scray Picker (Remote)** (`com.mac.scraynative.remote`, Dev's icon): built like BBW iPlayer (release config, no Metro), but loads `index.html` from the web-staging folder that deploy-web-staging.yml (15.121) fills on every push to staging. Web changes need only that deploy and a reload; Swift, shell and config changes still need a build.

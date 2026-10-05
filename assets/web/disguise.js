@@ -570,8 +570,15 @@
 /* ⚙️ 🔍 BESIDE COL IN FLS (picker 15.106 / native 15.127). The dock's own search
    button stays next to COL; in FLS its tap slides the player up (as an up-swipe
    does) and opens search - see jumpSearchBtn in ui.js. No freeze-line shadow:
-   there is no strip beside it to pass under. It fades and goes blind with COL. */
-#scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek) #scrayDisguiseDock > #jumpSearchBtn { box-shadow: none; margin-right: 6px; }
+   there is no strip beside it to pass under. It fades and goes blind with COL.
+   Tight against COL and see-through, with a shadow on the glass so it reads on
+   any picture (picker 15.107 / native 15.128). */
+#scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek) #scrayDisguiseDock > #jumpSearchBtn {
+  box-shadow: none;
+  margin-right: -4px;
+  background: transparent;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 1px rgba(0, 0, 0, 0.9);
+}
 
 /* ⚙️ THE FUSED ROW (13.121). #cornerButtons' inner .corner-btn-row is MOVED
    into the dock at build time and renamed #scrayDisguiseStrip; the shell it

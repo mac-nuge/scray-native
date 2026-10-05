@@ -5344,6 +5344,9 @@ window.scrayAdjustBookmark = scrayAdjustBookmark;
  * Runs on layout moments only (FLS layout, resize, controls shown) - never in
  * a loop. No dock box (not FLS, peeking) leaves it where it last was.
  */
+// ⚙️ How far BELOW COL's line the cluster sits, in screen px (picker 15.107 /
+// native 15.128): level with COL it crowded the 🔍 beside it. Positive is down.
+const SCRAY_BM_CLUSTER_DROP_PX = 14;
 function scrayPlaceBmCluster() {
     if (!document.body.classList.contains('manual-rotate-landscape')) return;
     const cluster = document.querySelector('.plyr-frame-bm-cluster');
@@ -5353,7 +5356,7 @@ function scrayPlaceBmCluster() {
     const a = dock.getBoundingClientRect();
     const b = bm.getBoundingClientRect();
     if (!a.height || !b.height) return;
-    const gap = (a.top + a.height / 2) - (b.top + b.height / 2);
+    const gap = (a.top + a.height / 2 + SCRAY_BM_CLUSTER_DROP_PX) - (b.top + b.height / 2);
     if (Math.abs(gap) < 1) return;
     const cur = parseFloat(cluster.dataset.shiftPx || '16');
     const next = Math.round(cur + gap);

@@ -34,6 +34,9 @@
 // picker 15.23 / native 15.32: 🎯 Stash hunt on the home view.
 // picker 15.106 / native 15.127: a third result filter, Cast - the scenes'
 // cast shape (1F 1M, 2F ...), any of the ones picked.
+// picker 15.107 / native 15.128 (browse 15.179): a performer's view has a
+// second dropdown, With - who they've worked with (from their newest 300
+// scenes), picking several shows the scenes with all of them in.
 // picker 15.26 / native 15.35: the search view filters its results by studio
 // and performer, Unblur all is a 👁 in the Search row, and in a hunt the ▶ goes
 // (the hunt bar has one) and the studio of the hunt's last match is a pill.
@@ -903,6 +906,10 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
             if (st.length) body.studio_ids = st;
             if (nets.length) body.network_ids = nets;
           }
+          // Who they've worked with (picker 15.107 / native 15.128, browse 15.179):
+          // all of the picked ones in the scene with them.
+          if (entry.withPicks && entry.withPicks.length) body.with_ids = entry.withPicks.map(x => x.id);
+          if (!more && !entry.costars) body.costars = 1;
           body.page = more ? (entry.data.page || 1) + 1 : 1;
         }
         res = await api('stash_nav', { method: 'POST', body });
@@ -926,6 +933,11 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         // The performer's studios, from the unfiltered first load. Kept across
         // a studio change so the list doesn't shrink to the one picked.
         if (entry.type === 'performer' && Array.isArray(res.studios) && !entry.studios) entry.studios = res.studios;
+        // Their co-performers, from the first load (picker 15.107 / native 15.128).
+        if (entry.type === 'performer' && Array.isArray(res.costars) && !entry.costars) {
+          entry.costars = res.costars;
+          entry.costarsFrom = res.costars_from || 0;
+        }
         // Networks come with the unfiltered first page only; keep them.
         if (entry.type === 'performer') {
           if (Array.isArray(res.networks)) entry.networks = res.networks;
@@ -1411,13 +1423,14 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
                          (e.sort === 'order' ? ' &middot; newest first' : '')) : '';
       const list = d && !n && !e.busy
         ? (d.note ? '' : '<div class="ssn-empty">' + (e.libOnly ? 'None of your files are scenes of this performer' +
-            (e.picks && e.picks.length ? ' at that studio' : '') + '.' : 'No scenes listed for this performer.') + '</div>')
+            (e.picks && e.picks.length ? ' at that studio' : '') : 'No scenes listed for this performer') +
+            (e.withPicks && e.withPicks.length ? ' with ' + esc(e.withPicks.map(x => x.name).join(' + ')) : '') + '.</div>')
         : sortedScenes(e).map(x => cardHtml(x.s, x.i, p ? p.id : null)).join('');
       const more = d && d.count != null && n < d.count && d.lastCount >= (d.per_page || 25)
         ? '<button type="button" class="ssn-loadmore" data-more' + (e.busy ? ' disabled' : '') + '>' +
             (e.busy ? 'Loading&hellip;' : 'Load more (' + n + ' of ' + d.count + ')') + '</button>'
         : '';
-      return prof + studioHtml(e) +
+      return prof + studioHtml(e) + studioHtml(e, 'with') +
         '<div class="ssn-state"><span class="ssn-h">' + label + '</span>' + sortHtml(e, 'Newest') + '</div>' +
         errHtml(e.error) + errHtml(d && d.note) +
         list + more;
@@ -1552,6 +1565,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     const DD = {
       main: { picks: 'picks',    open: 'studioOpen', term: 'studioTerm', focus: 'studioFocus' },
       sub:  { picks: 'subPicks', open: 'subOpen',    term: 'subTerm',    focus: 'subFocus' },
+      // Co-performers on a performer's view (picker 15.107 / native 15.128).
+      with: { picks: 'withPicks', open: 'withOpen',  term: 'withTerm',   focus: 'withFocus' },
       // The search view's result filters (picker 15.27 / native 15.36).
       rfs:  { picks: 'rfStudios', open: 'rfsOpen', term: 'rfsTerm', focus: 'rfsFocus' },
       rfp:  { picks: 'rfPerfs',   open: 'rfpOpen', term: 'rfpTerm', focus: 'rfpFocus' },
@@ -1580,7 +1595,37 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       }
     }
 
+    /**
+     * A performer's co-performers (picker 15.107 / native 15.128): the server's
+     * list from their newest scenes (browse 15.179), plus anyone in the casts
+     * of the scenes loaded here - most scenes together first.
+     */
+    function costarOptions(e) {
+      const me = e.data && e.data.performer ? e.data.performer.id : e.id;
+      const m = new Map();
+      (Array.isArray(e.costars) ? e.costars : []).forEach(p => {
+        if (p && p.id && p.name) m.set(p.id, { id: p.id, name: p.name, count: p.count || 0, g: p.gender_short || '' });
+      });
+      const fromServer = m.size > 0;
+      ((e.data && e.data.scenes) || []).forEach(sc => (sc.cast || []).forEach(p => {
+        if (!p || !p.id || !p.name || p.id === me) return;
+        const o = m.get(p.id) || { id: p.id, name: p.name, count: 0, g: p.gender_short || '' };
+        if (!fromServer) o.count++;
+        (p.aliases || []).forEach(a => { o.aliases = o.aliases || []; if (a && !o.aliases.includes(a)) o.aliases.push(a); });
+        m.set(p.id, o);
+      }));
+      return [...m.values()].sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
+    }
+    /** What a dropdown is called, and how its picks combine. */
+    function ddWords(e, dd) {
+      if (dd === 'sub') return { one: 'Studio', many: 'studios in this network', join: ', ', all: false };
+      if (dd === 'with') return { one: 'With', many: 'co-performers', join: ' + ', all: true, fixed: true };
+      if (e.type === 'studio') return { one: 'Performer', many: 'performers', join: ' + ', all: true };
+      return { one: 'Studio', many: 'studios', join: ', ', all: false };
+    }
+
     function ddOptions(e, dd) {
+      if (dd === 'with') return costarOptions(e);
       if (dd === 'sub') {
         const s = e.data && e.data.studio;
         if (!s || !(s.children && s.children.length)) return [];
@@ -1614,8 +1659,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     // touching the box - or the keyboard.
     function ddListInner(e, dd) {
       const K = DD[dd];
-      const one = dd === 'sub' ? 'Studio' : e.type === 'studio' ? 'Performer' : 'Studio';
-      const many = dd === 'sub' ? 'studios in this network' : e.type === 'studio' ? 'performers' : 'studios';
+      const { one, many } = ddWords(e, dd);
       const opts = ddOptions(e, dd);
       const picks = e[K.picks] || [];
       const isOn = (id) => picks.some(x => x.id === id);
@@ -1630,12 +1674,15 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
               const aka = (o.aliases || []).filter(a => !(o.as || []).includes(a));
               const akaTxt = aka.length ? '<small class="aka">aka ' + aka.slice(0, 4).map(esc).join(', ') + (aka.length > 4 ? ' +' + (aka.length - 4) : '') + '</small>' : '';
               const find = [o.name].concat(o.as || [], o.aliases || [], o.found ? [o.found] : []).join(' | ');
+              const gTxt = dd === 'with' && o.g ? ' <small class="as">' + esc(o.g) + '</small>' : '';
               return '<button type="button" class="ssn-studio-opt' + (isOn(o.id) ? ' on' : '') + (o.net ? ' net' : '') + (o.child ? ' child' : '') + '" data-dd="' + dd + '" ' +
                 (o.group ? 'data-group="' + esc(o.group) + '" ' : '') +
                 'data-studio-pick="' + esc(o.id) + '" data-studio-name="' + esc(o.name) + '" data-find="' + esc(find) + '">' +
-                '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + asTxt + akaTxt + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>';
+                '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + gTxt + asTxt + akaTxt + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>';
             }).join('') +
-            '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
+            '<div class="ssn-studio-none" hidden>No ' + (dd === 'with' ? 'co-performer' : one.toLowerCase()) + ' matches</div>' +
+            (dd === 'with' && e.costarsFrom && e.data && e.data.count > e.costarsFrom
+              ? '<div class="ssn-studio-how">From their newest ' + e.costarsFrom + ' scenes and the ones loaded here.</div>' : '') +
             // Anyone else at this studio, asked of StashDB as you type (picker 15.59 / native 15.70).
             (dd === 'main' && e.type === 'studio' && e.id
               ? '<div class="ssn-perf-status" data-perf-status hidden>' +
@@ -1648,18 +1695,19 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       const K = DD[dd];
       if (!e.data || !(e.data.performer || e.data.studio)) return '';
       // What the dropdown lists: studios on a performer, performers on a
-      // studio, sub-studios on a parent studio.
-      const one = dd === 'sub' ? 'Studio' : e.type === 'studio' ? 'Performer' : 'Studio';
-      const many = dd === 'sub' ? 'studios in this network' : e.type === 'studio' ? 'performers' : 'studios';
+      // studio, sub-studios on a parent studio, co-performers on a performer.
+      const W = ddWords(e, dd);
+      const { one, many } = W;
       const opts = ddOptions(e, dd);
       const picks = e[K.picks] || [];
       if (!opts.length && !picks.length) return '';
       const isOn = (id) => picks.some(x => x.id === id);
-      const joinWith = (dd === 'main' && e.type === 'studio') ? ' + ' : ', ';
+      const joinWith = W.join;
       // Several can be picked (picker 14.7 / native 14.11); the list stays
       // open between taps. Studios add together, performers intersect.
-      const how = (dd === 'main' && e.type === 'studio')
-        ? 'Pick several to see scenes they&rsquo;re all in together'
+      const how = W.all
+        ? (dd === 'with' ? 'Pick several to see scenes they&rsquo;re all in together, with this performer'
+                         : 'Pick several to see scenes they&rsquo;re all in together')
         : 'Pick several to see scenes from any of them';
       const plain = (n) => String(n).replace(/^⌂ /, '⌂');
       const label = !picks.length ? 'All ' + many
@@ -1679,7 +1727,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       return '<div class="ssn-studio" data-dd="' + dd + '">' +
         '<div class="ssn-studio-row">' +
           '<button type="button" class="ssn-studio-btn' + (picks.length ? ' on' : '') + '" data-dd="' + dd + '" data-studio-toggle>' +
-            (picks.length > 1 ? one + 's' : one) + ': ' + esc(label) + ' ' + (e[K.open] ? '&#9652;' : '&#9662;') + '</button>' +
+            (picks.length > 1 && !W.fixed ? one + 's' : one) + ': ' + esc(label) + ' ' + (e[K.open] ? '&#9652;' : '&#9662;') + '</button>' +
           (picks.length ? '<button type="button" data-dd="' + dd + '" data-studio-pick="" title="Show all ' + many + '">&#10005;</button>' : '') +
         '</div>' + pop +
       '</div>';

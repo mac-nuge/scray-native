@@ -1989,6 +1989,39 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Jump to Search (F)
 const jumpSearchBtn = document.getElementById("jumpSearchBtn");
+
+// ⚙️ BACK TO FLS AFTER A 🔍 SEARCH (picker 15.107 / native 15.128). When FLS's 🔍
+// slid the player up to search, Enter in the search box runs the search and
+// slides FLS back - the round trip in one keystroke. Only for a search that
+// 🔍 started: leaving the box any other way (tapping away, the sliver) ends it,
+// so a later search on the page doesn't throw you back into FLS.
+// Capture phase: the search pill stops its keydown from bubbling.
+// ⚙️ SCRAY_FLS_SEARCH_BACK_MS - the wait before FLS comes back, so the filter's
+// typing pause (150 ms in randomiser.js) has run and the keyboard has gone.
+let scraySearchFromFls = false;
+const SCRAY_FLS_SEARCH_BACK_MS = 300;
+const SCRAY_FLS_SEARCH_BOXES = '#scraySearchPillInput, #filenameSearchBox, #panelSearchBox';
+document.addEventListener('keydown', (e) => {
+    if (!scraySearchFromFls || (e.key !== 'Enter' && e.key !== 'Return')) return;
+    if (!e.target || !e.target.matches || !e.target.matches(SCRAY_FLS_SEARCH_BOXES)) return;
+    scraySearchFromFls = false;
+    setTimeout(() => {
+        const bl = document.body.classList;
+        if (!bl.contains('fls-peek') || !bl.contains('manual-rotate-landscape')) return;   // already back, or FLS gone
+        try { if (document.activeElement && document.activeElement.matches(SCRAY_FLS_SEARCH_BOXES)) document.activeElement.blur(); } catch (_) {}
+        if (typeof window.scraySetFlsPeek === 'function') window.scraySetFlsPeek(false);
+    }, SCRAY_FLS_SEARCH_BACK_MS);
+}, true);
+// Left without Enter: a search typed later is an ordinary one. A tick later,
+// so the Enter above (which blurs the box itself) is seen first.
+document.addEventListener('focusout', (e) => {
+    if (!scraySearchFromFls || !e.target || !e.target.matches || !e.target.matches(SCRAY_FLS_SEARCH_BOXES)) return;
+    setTimeout(() => {
+        const a = document.activeElement;
+        if (!(a && a.matches && a.matches(SCRAY_FLS_SEARCH_BOXES))) scraySearchFromFls = false;
+    }, 0);
+}, true);
+
 if (jumpSearchBtn) {
     jumpSearchBtn.addEventListener("click", () => {
         // ⚙️ FULLSCREEN FIRST (13.130). In FLS and MPFS the page is behind the
@@ -2010,6 +2043,8 @@ if (jumpSearchBtn) {
         if (b.contains('manual-rotate-landscape') && !b.contains('fls-peek')
             && typeof window.scraySetFlsPeek === 'function') {
             window.scraySetFlsPeek(true);
+            // Enter in the search then puts FLS back (picker 15.107 / native 15.128).
+            scraySearchFromFls = true;
         }
         // ⚙️ Peeking is not "over the picture" (13.134): the player has slid
         // aside and the page is back, so the filter behaves exactly as it does

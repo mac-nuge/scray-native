@@ -4,6 +4,18 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.108 / native 15.129 — test: Hetzner streams never wait forever
+<!-- 2026-10-05T16:30Z -->
+- **Reported:** a few Hetzner videos in Native this morning wouldn't load or got stuck, where they usually start almost at once; the same files downloaded and played fine. Couldn't be repeated later.
+- **What could do it (scray-twoway.js, identical in both apps):** none of its requests had a time limit. (1) The file's index is read before the player starts, and playVideoInline awaits that - one request that never answered meant a video that never started. (2) A piece fetch that hung was never cut off, so it never failed, never retried, and held one of the two fetch slots. (3) A piece given up on after four tries was only tried again when the video next moved - which it can't if that's the piece under the playhead. The downloader retries until it's done, which fits the download working. A slow moment on the box (it caps simultaneous connections - a conversion, a migration or another device at the same time) is a likely trigger; not confirmed.
+- **Now:**
+  - ⚙️ `INDEX_TIMEOUT` 10 s per index read, tried once more - with a fresh signed link if the old one had run out (403 / 410).
+  - ⚙️ `PREPARE_LIMIT` 12 s for the whole set-up; past it the video plays the plain way instead of waiting.
+  - ⚙️ `FRAG_TIMEOUT` 15 s per piece, body included; a time-out is a failure like any other and is retried. From the second failure of a piece, a fresh link first. A piece given up on is tried again ⚙️ `PASS_AGAIN_MS` (2 s) later regardless.
+  - **Stall watchdog** on every Hetzner play, either path: playing (not paused or ended) and not moved for ⚙️ `STALL_MS` (8 s) - from the start, so a first frame that never comes counts. Two-way: first a fresh link and the playhead's piece again (in-flight fetches dropped), then the plain path at the same spot. Plain: once, a fresh link at the same spot; after that a toast says to ⬇ Download it. Seeking and pausing reset the clock; moving again resets the stages.
+  - Every step is logged with [twoway] (time-outs, fresh links, the watchdog's stages, "moving again"), so a bug report filed at the time shows which it was. The buffer i box counts time-outs beside retries.
+- Checked: `node --check`; jsdom - the watchdog on a plain play stuck from the start (fresh link and reload at the spot, then the give-up toast), a paused video and a moving one never counted; `withTimeout` on a hung request (a retryable time-out, not an AbortError), on a seek's cancel (an AbortError, left alone) and on a quick answer. The two-way path's MediaSource can't run in jsdom - the phone is the test.
+
 ### picker 15.107 / native 15.128 / browse 15.179 — stable: FLS search tweaks, co-performer filter
 <!-- 2026-10-05T15:55Z -->
 - **Asked:** in FLS, the 🔍 closer to COL with a see-through background, the BM circles a little lower so they're clear of it, and after searching from 🔍, Enter takes you back to FLS. And on performer profiles, a filter for who they've worked with.

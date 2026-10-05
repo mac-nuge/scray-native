@@ -23,6 +23,21 @@ console.log("scray-twoway.js loaded");
 // loaded and how long seeks take - on either path, for any video.
 //
 // Everything is logged with [twoway], so it rides along in a Jira report.
+//
+// NOTHING WAITS FOREVER (picker 15.108 / native 15.129). A few Hetzner plays
+// hung for good where a download of the same file was fine - the requests here
+// had no time limit, so one slow answer from the gateway or the box could
+// stall a play outright: the index read before the player even started, or a
+// piece under the playhead (and a piece given up on was only tried again once
+// the video moved, which it couldn't). Now:
+//   - every request has a limit (INDEX_TIMEOUT / FRAG_TIMEOUT) and a timed-out
+//     one is retried like any failure, a fresh signed link from the second try;
+//   - a piece given up on is tried again PASS_AGAIN_MS later regardless;
+//   - prepare() gives up after PREPARE_LIMIT and the video plays the plain way;
+//   - a stall watchdog, on either path: a Hetzner video that should be playing
+//     and hasn't moved for STALL_MS gets a fresh link and its piece again
+//     (two-way) or a fresh link at the same spot (plain); stuck a second time,
+//     two-way falls back to the plain path, and the plain path says so.
 // =========================================
 
 (function () {
@@ -49,6 +64,12 @@ console.log("scray-twoway.js loaded");
   const BUDGET_START  = (window.ManagedMediaSource ? 60 : 120) * MB;
   const BUDGET_MIN    = 12 * MB;
   const OPEN_TIMEOUT  = 6000;   // ms for the MediaSource to open before falling back
+  // Nothing waits forever (picker 15.108 / native 15.129).
+  const INDEX_TIMEOUT = 10000;  // ms for one read of the file's index
+  const FRAG_TIMEOUT  = 15000;  // ms for one piece's range, body included
+  const PREPARE_LIMIT = 12000;  // ms for prepare() as a whole, then the plain way
+  const PASS_AGAIN_MS = 2000;   // a piece given up on is tried again after this
+  const STALL_MS      = 8000;   // playing, not moving, this long = stuck
   const STATS_EVERY   = 500;    // ms between overlay repaints
 
   const MSClass = window.ManagedMediaSource || window.MediaSource || null;
@@ -102,6 +123,27 @@ console.log("scray-twoway.js loaded");
   }
 
   function log(...a) { console.log("[twoway]", ...a); }
+
+  /**
+   * work(signal) with a time limit. The signal aborts at the limit, or when
+   * `outer` does; a time-out comes back as an ordinary error (not an
+   * AbortError, which means "we cancelled it, leave it") with .timeout set.
+   */
+  function withTimeout(ms, outer, work) {
+    const ac = new AbortController();
+    let timedOut = false;
+    const t = setTimeout(() => { timedOut = true; ac.abort(); }, ms);
+    const onOuter = () => ac.abort();
+    if (outer) { if (outer.aborted) ac.abort(); else outer.addEventListener("abort", onOuter, { once: true }); }
+    return Promise.resolve().then(() => work(ac.signal)).then(
+      (v) => { clearTimeout(t); if (outer) outer.removeEventListener("abort", onOuter); return v; },
+      (e) => {
+        clearTimeout(t);
+        if (outer) outer.removeEventListener("abort", onOuter);
+        if (timedOut) { const te = new Error(`no answer in ${Math.round(ms / 1000)} s`); te.timeout = true; throw te; }
+        throw e;
+      });
+  }
 
   // ------------------------------------------------------------------ codecs
   function findBox(u8, fourcc) {
@@ -487,13 +529,18 @@ console.log("scray-twoway.js loaded");
 
     /** One range of the file. Re-signs an expired link (and says to retry at once). */
     async read(off, len, signal) {
-      const r = await fetch(this.mediaUrl, { headers: { Range: `bytes=${off}-${off + len - 1}` }, signal });
+      // A time limit, body included (picker 15.108 / native 15.129).
+      const { r, buf } = await withTimeout(FRAG_TIMEOUT, signal, async (sig) => {
+        const r = await fetch(this.mediaUrl, { headers: { Range: `bytes=${off}-${off + len - 1}` }, signal: sig });
+        if (r.status === 403 || r.status === 410) return { r, buf: null };
+        if (r.status !== 206 && r.status !== 200) return { r, buf: null };
+        return { r, buf: await r.arrayBuffer() };
+      });
       if (r.status === 403 || r.status === 410) {
         await this.refreshUrl();
         const e = new Error(`HTTP ${r.status}`); e.retryNow = true; throw e;
       }
       if (r.status !== 206 && r.status !== 200) throw new Error(`HTTP ${r.status}`);
-      const buf = await r.arrayBuffer();
       if (buf.byteLength !== len) {
         // A 200 with the whole file means Range was ignored - fatal, not retryable.
         if (r.status === 200) { const e = new Error("the gateway ignored Range"); e.fatal = true; throw e; }
@@ -538,13 +585,33 @@ console.log("scray-twoway.js loaded");
           if (e && e.fatal) { this.fail(e.message); return; }
           if (attempt < MAX_RETRIES) {
             this.n.retries++;
+            if (e && e.timeout) this.n.timeouts = (this.n.timeouts || 0) + 1;
             log(`fragment ${i} failed (${e && e.message}) - retry ${attempt + 1}`);
-            this.later(() => { if (!this.have(i)) this.fetchSeg(i, attempt + 1); }, e && e.retryNow ? 0 : 400 * (attempt + 1));
+            // From the second failure the link itself may be the trouble: a
+            // fresh one first (picker 15.108 / native 15.129).
+            const go = () => { if (!this.have(i)) this.fetchSeg(i, attempt + 1); };
+            if (attempt >= 1 && !(e && e.retryNow)) {
+              this.refreshUrl().catch(err => log("fresh link failed:", err && err.message)).finally(() => { if (!this.dead) go(); });
+            } else {
+              this.later(go, e && e.retryNow ? 0 : 400 * (attempt + 1));
+            }
           } else {
-            log(`fragment ${i} failed ${MAX_RETRIES + 1} times - leaving it for the next pass`);
-            this.schedule();
+            log(`fragment ${i} failed ${MAX_RETRIES + 1} times - trying again in ${PASS_AGAIN_MS / 1000} s`);
+            // Not only when the video next moves - it can't, if this is the
+            // piece under the playhead (picker 15.108 / native 15.129).
+            this.later(() => this.schedule(), PASS_AGAIN_MS);
           }
         });
+    }
+
+    /** The watchdog's first go (picker 15.108 / native 15.129): drop what's in flight, a fresh link, the playhead's piece again. */
+    unstick() {
+      if (this.dead) return;
+      for (const [, ac] of this.inflight) { try { ac.abort(); } catch {} this.n.aborted++; }
+      this.inflight.clear();
+      this.refreshUrl()
+        .catch(err => log("fresh link failed:", err && err.message))
+        .finally(() => { if (!this.dead) this.schedule(); });
     }
 
     /** Something broke mid-play: go back to the plain URL at the same spot. */
@@ -634,7 +701,13 @@ console.log("scray-twoway.js loaded");
         lastNote = "not an mp4/mov"; return null;
       }
       try {
-        src = await openChunked(video, base);
+        // The whole set-up has a limit (picker 15.108 / native 15.129): the
+        // player is waiting on this, so past it the video plays the plain way.
+        let limitT = null;
+        const limit = new Promise((_, rej) => { limitT = setTimeout(() => {
+          const e = new Error(`index not read in ${PREPARE_LIMIT / 1000} s`); e.timeout = true; rej(e); }, PREPARE_LIMIT); });
+        try { src = await Promise.race([openChunked(video, base), limit]); }
+        finally { clearTimeout(limitT); }
         describeOnce(video, src.ix);
       }
       catch (e) { lastNote = "can't chunk: " + (e && e.message); log(lastNote, "-", video.filename); return null; }
@@ -671,12 +744,27 @@ console.log("scray-twoway.js loaded");
     let ix = indexCache.get(key);
     if (ix) indexCache.delete(key);
     else {
-      const read = async (off, len) => {
-        const r = await fetch(base, { headers: { Range: `bytes=${off}-${off + len - 1}` } });
+      // Each read has a limit, and is tried once more - with a fresh link if
+      // the old one had run out (picker 15.108 / native 15.129).
+      let url = base;
+      const readOnce = (off, len) => withTimeout(INDEX_TIMEOUT, null, async (sig) => {
+        const r = await fetch(url, { headers: { Range: `bytes=${off}-${off + len - 1}` }, signal: sig });
+        if (r.status === 403 || r.status === 410) { const e = new Error(`HTTP ${r.status} reading the index`); e.expired = true; throw e; }
         if (r.status !== 206) throw new Error(`HTTP ${r.status} reading the index`);
         const total = Number(((r.headers.get("Content-Range") || "").split("/")[1]) || NaN);
         if (!(total > 0)) throw new Error("no file size (Content-Range not exposed?)");
         return { buf: await r.arrayBuffer(), total };
+      });
+      const read = async (off, len) => {
+        try { return await readOnce(off, len); }
+        catch (e) {
+          log(`index read failed (${e && e.message}) - once more${e && e.expired ? " with a fresh link" : ""}`);
+          if (e && e.expired && typeof window.scrayHetznerRefresh === "function") {
+            const v = await window.scrayHetznerRefresh(video);
+            if (v && v.downloadUrl) url = v.downloadUrl;
+          }
+          return readOnce(off, len);
+        }
       };
       ix = await C.open(read);
     }
@@ -778,6 +866,91 @@ console.log("scray-twoway.js loaded");
     media.play().catch(() => {});
   }
 
+  // ---------------------------------------------------------------- watchdog
+  // picker 15.108 / native 15.129. A Hetzner video that should be playing (not
+  // paused, not ended) and whose time hasn't moved for STALL_MS - from the
+  // first frame on, so a start that never comes counts too. Seeking and
+  // pausing reset the clock.
+  //   two-way: 1st time, a fresh link and the playhead's piece again;
+  //            2nd time, the plain path at the same spot.
+  //   plain:   once, a fresh link at the same spot; after that it says so.
+  let dog = null;   // { media, video, timer, lastT, lastAt, stage, plainTried, h }
+  function dogWatch(media, video) {
+    dogUnwatch();
+    if (!media || !video || video.source !== "hetzner") return;
+    const d = { media, video, lastT: -1, lastAt: performance.now(), stage: 0, plainTried: false };
+    const moved = () => {
+      d.lastAt = performance.now();
+      if (d.stage) log(`moving again (${video.filename})`);
+      d.stage = 0;
+    };
+    d.h = {
+      timeupdate: () => { if (media.currentTime !== d.lastT) { d.lastT = media.currentTime; if (!media.paused) moved(); } },
+      playing: moved,
+      seeking: () => { d.lastAt = performance.now(); },
+      pause: () => { d.lastAt = performance.now(); },
+    };
+    for (const [ev, fn] of Object.entries(d.h)) media.addEventListener(ev, fn);
+    d.timer = setInterval(() => dogCheck(d), 1000);
+    dog = d;
+  }
+  function dogUnwatch() {
+    if (!dog) return;
+    clearInterval(dog.timer);
+    for (const [ev, fn] of Object.entries(dog.h)) dog.media.removeEventListener(ev, fn);
+    dog = null;
+  }
+  function dogCheck(d) {
+    if (dog !== d) return;
+    const m = d.media, now = performance.now();
+    if (!m.isConnected) { dogUnwatch(); return; }
+    if (m.paused || m.ended) { d.lastAt = now; return; }
+    if (now - d.lastAt < STALL_MS) return;
+    d.lastAt = now;
+    d.stage++;
+    const at = m.currentTime.toFixed(1);
+    if (session && session.media === m) {
+      if (d.stage === 1) {
+        log(`stuck at ${at} s for ${STALL_MS / 1000} s (two-way) - a fresh link and that piece again`);
+        session.unstick();
+      } else {
+        session.fail(`stuck at ${at} s twice`);
+      }
+      return;
+    }
+    if (!d.plainTried) {
+      log(`stuck at ${at} s for ${STALL_MS / 1000} s (plain) - a fresh link at the same spot`);
+      plainRetry(d);
+    } else if (d.stage < 99) {
+      log(`still stuck at ${at} s - giving up; ⬇ Download plays it from the phone`);
+      const f = window.showScoreConfirmation;
+      if (typeof f === "function") { try { f("⚠️ This video is stuck streaming - ⬇ Download it to watch", "#b8860b"); } catch {} }
+      d.stage = 99;   // said once
+    }
+  }
+  async function plainRetry(d) {
+    d.plainTried = true;
+    const m = d.media, v = d.video, at = m.currentTime;
+    let url = v.downloadUrl;
+    try {
+      if (typeof window.scrayHetznerRefresh === "function") {
+        const nv = await window.scrayHetznerRefresh(v);
+        if (nv && nv.downloadUrl) url = nv.downloadUrl;
+      }
+    } catch (e) { log("fresh link failed:", e && e.message); }
+    if (dog !== d || !m.isConnected || !url) return;
+    try {
+      m.addEventListener("loadedmetadata", () => {
+        try { if (at > 0) m.currentTime = at; } catch {}
+        m.play().catch(() => {});
+      }, { once: true });
+      while (m.firstChild) m.removeChild(m.firstChild);
+      if (m.srcObject) m.srcObject = null;
+      m.src = url;
+      m.load();
+    } catch (e) { log("plain retry failed:", e && e.message); }
+  }
+
   // ------------------------------------------------------------------ overlay
   // Works on either path, so the same file can be compared with the setting
   // on and off: seek-to-ready times, what is loaded behind and ahead.
@@ -852,7 +1025,7 @@ console.log("scray-twoway.js loaded");
       lines.push(`${snap.mode} · ${snap.frag}`);
       lines.push(`window ${snap.window} · ${snap.mb.toFixed(0)}/${snap.budget.toFixed(0)} MB`);
       lines.push(`loading ${snap.loading} · queued ${snap.queued} · done ${snap.n.fetched}`);
-      lines.push(`retry ${snap.n.retries} · cut ${snap.n.aborted} · evict ${snap.n.evicted} · dropped ${snap.n.uaEvicted}` +
+      lines.push(`retry ${snap.n.retries}${snap.n.timeouts ? ` (${snap.n.timeouts} timed out)` : ""} · cut ${snap.n.aborted} · evict ${snap.n.evicted} · dropped ${snap.n.uaEvicted}` +
                  (snap.streaming === null ? "" : snap.streaming ? " · ▶" : " · ⏸"));
     } else {
       lines.push(`progressive${lastNote ? " · " + lastNote : ""}`);
@@ -935,8 +1108,8 @@ console.log("scray-twoway.js loaded");
 
   window.scrayTwoWay = {
     prepare, attach, stop, cfg,
-    watch: (media, video) => { rescueWatch(media, video); statsWatch(media, video); },
-    unwatch: () => { rescueUnwatch(); statsUnwatch(); },
+    watch: (media, video) => { rescueWatch(media, video); statsWatch(media, video); dogWatch(media, video); },
+    unwatch: () => { rescueUnwatch(); statsUnwatch(); dogUnwatch(); },
     toggleInfo,
     get infoOn() { return infoOn(); },
     get originalUrl() { return session ? session.base : null; },

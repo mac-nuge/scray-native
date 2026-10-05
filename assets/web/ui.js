@@ -2003,6 +2003,14 @@ if (jumpSearchBtn) {
         // focus below is: iOS raises the keyboard only for a focus still inside
         // the user gesture.
         const b = document.body.classList;
+        // ⚙️ FLS: 🔍 sits beside COL (picker 15.106 / native 15.127). A tap slides
+        // the player up exactly as an up-swipe does, then searches the page as
+        // the button does while peeking - one tap instead of swipe, then 🔍.
+        // Synchronous, so the focus below is still inside the user gesture.
+        if (b.contains('manual-rotate-landscape') && !b.contains('fls-peek')
+            && typeof window.scraySetFlsPeek === 'function') {
+            window.scraySetFlsPeek(true);
+        }
         // ⚙️ Peeking is not "over the picture" (13.134): the player has slid
         // aside and the page is back, so the filter behaves exactly as it does
         // when nothing is playing - fall through to the page paths below.

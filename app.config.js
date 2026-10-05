@@ -1,4 +1,10 @@
 const IS_DEV_VARIANT = process.env.APP_VARIANT === 'development';
+// native 15.122: the Remote app - built like BBW iPlayer (release config, no
+// Metro), but its web layer loads from the web-staging folder that
+// deploy-web-staging.yml fills, so a web change merged to staging shows on the
+// phone without an IPA build. Swapped in for the Dev app in SideStore
+// (deactivate one, activate the other) - a free Apple ID allows 3 apps.
+const IS_REMOTE_VARIANT = process.env.APP_VARIANT === 'remote';
 
 // The IPA's identity is just the GitHub Actions run number, passed in as
 // IPA_BUILD_NUMBER and stored as CFBundleVersion — nothing to maintain by
@@ -23,12 +29,16 @@ const RELEASE_SPLASH = ['expo-splash-screen', {
 module.exports = ({ config }) => {
   return {
     ...config,
-    name: IS_DEV_VARIANT ? 'Scray Picker (Dev)' : 'BBW iPlayer',
+    name: IS_DEV_VARIANT ? 'Scray Picker (Dev)'
+      : IS_REMOTE_VARIANT ? 'Scray Picker (Remote)'
+      : 'BBW iPlayer',
     // native 15.101: a version per IPA build (1.0.<run number>), so SideStore
     // sees each build as an update - it compares this, and checks the IPA
     // against what its source lists. Was 1.0.0 for every build.
     version: `1.0.${buildNumber}`,
-    ...(IS_DEV_VARIANT ? {} : { icon: './assets/images/icon-release-iplayer.png' }),
+    // The Remote app keeps the Dev app's icon - only one of the two is ever
+    // installed at a time.
+    ...(IS_DEV_VARIANT || IS_REMOTE_VARIANT ? {} : { icon: './assets/images/icon-release-iplayer.png' }),
     // The offline/release app must not claim the dev-client link
     // (exp+scray-native://), or scanning Metro's QR code opens it instead of
     // Scray Picker (Dev). Listing expo-dev-client here stops the automatic
@@ -50,11 +60,22 @@ module.exports = ({ config }) => {
     ...(IS_DEV_VARIANT ? {} : { backgroundColor: '#000000' }),
     ios: {
       ...config.ios,
-      ...(IS_DEV_VARIANT ? {} : { icon: './assets/images/icon-release-iplayer.png' }),
+      ...(IS_DEV_VARIANT || IS_REMOTE_VARIANT ? {} : { icon: './assets/images/icon-release-iplayer.png' }),
       buildNumber,
-      bundleIdentifier: IS_DEV_VARIANT
-        ? 'com.mac.scraynative.dev'
+      bundleIdentifier: IS_DEV_VARIANT ? 'com.mac.scraynative.dev'
+        : IS_REMOTE_VARIANT ? 'com.mac.scraynative.remote'
         : 'com.mac.scraynative',
+      // native 15.122: where the Remote app loads its web layer from - the
+      // WEB_STAGING_URL secret, passed in by build-ios-remote.yml. Read by
+      // ScrayNativeView.loadSource; empty (every other build) = the bundled
+      // copy, as before. Kept out of the repo because the folder name is
+      // what keeps the device key it serves private.
+      ...(IS_REMOTE_VARIANT ? {
+        infoPlist: {
+          ...((config.ios && config.ios.infoPlist) || {}),
+          ScrayRemoteWebURL: process.env.SCRAY_REMOTE_WEB_URL || '',
+        },
+      } : {}),
     },
   };
 };

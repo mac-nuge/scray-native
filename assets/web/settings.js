@@ -261,6 +261,46 @@ window.scraySettings.register({
   }
 });
 
+// ---- Remote app: reload (native 15.122) -------------------------------------
+// Scray Picker (Remote) loads this page from the web-staging folder that
+// deploy-web-staging.yml fills on every push to staging. Reload picks up the
+// latest deploy without closing the app. Only registered in that app.
+if (window.SCRAY_NATIVE && window.SCRAY_NATIVE.variant === "remote") {
+  window.scraySettings.register({
+    id: "remoteReload",
+    label: "Remote app",
+    type: "custom",
+    hint: "This app loads its web layer from the staging folder. " +
+          "Reload after a deploy to see the latest.",
+    build: () => {
+      const el = document.createElement("div");
+      el.style.cssText = "display:flex;flex-direction:column;gap:8px;";
+      const where = document.createElement("div");
+      where.style.cssText = "font-size:0.75rem;color:#999;";
+      where.textContent = location.protocol === "file:"
+        ? "Showing the copy built into the app - staging didn't load (no connection, or nothing deployed yet)."
+        : "Showing the staging folder.";
+      el.appendChild(where);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "Reload now";
+      btn.style.cssText = "align-self:flex-start;width:auto;margin:0;padding:8px 14px;background:#2a2a2a;"
+        + "color:#fff;border:1px solid #555;border-radius:4px;font-size:0.9rem;";
+      // From the bundled fallback, a plain reload would only reload the
+      // bundled file - go back to the start so the app tries staging again.
+      btn.addEventListener("click", () => {
+        const base = window.SCRAY_NATIVE && window.SCRAY_NATIVE.remoteWebURL;
+        if (location.protocol === "file:" && base) location.href = base + "/index.html";
+        else location.reload();
+      });
+      el.appendChild(btn);
+      return { el, value: () => null, focus: () => btn.focus() };
+    },
+    get: () => "",
+    set: () => {}
+  });
+}
+
 // ---- Setting 1: Picker URL -------------------------------------------------
 window.scraySettings.register({
   id: "pickerUrl",

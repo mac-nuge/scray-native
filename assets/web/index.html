@@ -132,12 +132,16 @@
     // Picker / browser: "v10.0 disguise overlay"
     // Dev IPA:          "dipa b42 web 10.0 disguise overlay"
     // Prd IPA:          "pipa b42 web 10.0 disguise overlay"
+    // Remote IPA:       "ripa b3 web 10.0 ..." from the web-staging folder,
+    //                   "ripa b3 bundled web 10.0 ..." when it fell back to
+    //                   the copy in the IPA (native 15.122)
     function composeVersionLabel(versionText) {
       const n = window.SCRAY_NATIVE;
       if (!n || !n.build) return `v${versionText}`;
       const { number, description } = splitWebVersion(versionText);
-      const prefix = n.variant === 'dev' ? 'dipa' : 'pipa';
-      return `${prefix} b${n.build} web ${number}${description ? ' ' + description : ''}`;
+      const prefix = n.variant === 'dev' ? 'dipa' : n.variant === 'remote' ? 'ripa' : 'pipa';
+      const where = n.variant === 'remote' && location.protocol === 'file:' ? 'bundled web' : 'web';
+      return `${prefix} b${n.build} ${where} ${number}${description ? ' ' + description : ''}`;
     }
 
     async function setAppVersionFromFile() {

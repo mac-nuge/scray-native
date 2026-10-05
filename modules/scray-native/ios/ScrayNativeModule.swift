@@ -14,14 +14,10 @@ public class ScrayNativeModule: Module {
     }
 
     View(ScrayNativeView.self) {
+        // native 15.122: the view decides where the page comes from (the
+        // Remote app loads it from the web-staging folder) - see loadSource.
         Prop("source") { (view: ScrayNativeView, path: String) in
-            if path.hasPrefix("http") {
-                if let url = URL(string: path) {
-                    view.webView.load(URLRequest(url: url))
-                }
-            } else if let url = Bundle.main.url(forResource: "web/" + path, withExtension: nil) {
-                view.webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
-            }
+            view.loadSource(path)
         }
     }
 

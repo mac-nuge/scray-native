@@ -4,7 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### native 15.121 — test: staging web deploy workflow
+### native 15.122 — test: Scray Picker Remote app
+<!-- 2026-10-05T13:20Z -->
+- **Asked:** a way to test Native's web layer on the phone without the computer. A toggle in BBW iPlayer was ruled out (Mac always needs it as is), and so was a staging mode in the Dev app (it can't start without Metro). Going with a separate app swapped with Dev in SideStore by deactivating one and activating the other, since a free Apple ID allows 3 apps (SideStore, BBW iPlayer, and Dev or Remote).
+- **Scray Picker (Remote)** (`com.mac.scraynative.remote`, Dev's icon): built like BBW iPlayer (release config, no Metro), but loads `index.html` from the web-staging folder that deploy-web-staging.yml (15.121) fills on every push to staging. Web changes need only that deploy and a reload; Swift, shell and config changes still need a build.
+- **app.config.js:** `APP_VARIANT=remote` - name, bundle ID, and Info.plist `ScrayRemoteWebURL` from `SCRAY_REMOTE_WEB_URL`. **build-ios-remote.yml (new):** the release workflow with that variant, `SCRAY_REMOTE_WEB_URL` from the `WEB_STAGING_URL` secret, and its own SideStore entry (`ripa`, `icon-rmt.png`).
+- **ScrayNativeView.swift:** `loadSource` takes over from the module's `source` prop. A bare file name loads from `ScrayRemoteWebURL` when set (only the Remote app), else the bundled copy as before. A failed staging load (no connection, error page, empty folder) falls back to the bundled copy. `SCRAY_NATIVE.variant` is now `remote` for that app, and carries `remoteWebURL`.
+- **Web (Native only):** version line reads `ripa bN web ...`, or `ripa bN bundled web ...` when it fell back. Settings has a Remote app row in that app only, with Reload now (which retries staging when on the fallback copy). Picker has no equivalent and doesn't need one.
+- Checked: app.config.js for all three variants (name, bundle ID, Info.plist); jsdom on settings.js (row only in the Remote app, staging and fallback wording) and on the version label for dev/prd/remote. The Swift wasn't compiled here; the first Remote build is the compile check.
+- Watch for: the Remote app's web data (basket, history, settings) is separate from the other apps', as it's a different app with a different page origin.
+
+### native 15.121 — stable: staging web deploy workflow
 <!-- 2026-10-05T12:30Z -->
 - **Asked:** be able to test Native's web layer from the phone without the computer (Metro + `npx serve`) or a 15-minute IPA build. Plan in the "Scray Remote Workflow Playbook" doc, phase 2.
 - **Change (.github/workflows/deploy-web-staging.yml, new):** on any push to `staging` touching `assets/web/**` (or run by hand), copies `assets/web` to the hidden web-staging folder on macnguyen.com (`WEB_STAGING_DIR` secret), over the same SSH login as the SideStore publish. Writes `scray-key.js` and `version.js` the way the IPA builds do, so the key stays out of the public repo, plus an `.htaccess` with no folder listing and no-cache on html/js/css/json so a reload always gets the latest. Unpacks next to the live folder and swaps it in, so a half-uploaded set is never served.

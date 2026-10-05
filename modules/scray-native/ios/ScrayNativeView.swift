@@ -146,13 +146,19 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
         let info = Bundle.main.infoDictionary ?? [:]
         let shortVersion = (info["CFBundleShortVersionString"] as? String) ?? "0.0.0"
         let bundleBuild = (info["CFBundleVersion"] as? String) ?? "0"
-        let isDevVariant = (Bundle.main.bundleIdentifier ?? "").hasSuffix(".dev")
+        let bundleId = Bundle.main.bundleIdentifier ?? ""
+        // native 15.122: "remote" for Scray Picker (Remote), which loads its
+        // web layer from the web-staging folder (see loadSource).
+        let variant = bundleId.hasSuffix(".dev") ? "dev"
+            : bundleId.hasSuffix(".remote") ? "remote"
+            : "prd"
         let nativeInfoJS = """
         window.SCRAY_NATIVE = {
-          variant: "\(isDevVariant ? "dev" : "prd")",
+          variant: "\(variant)",
           version: "\(shortVersion)",
           build: "\(bundleBuild)",
-          buildId: "\(BuildInfo.id)"
+          buildId: "\(BuildInfo.id)",
+          remoteWebURL: "\(ScrayNativeView.remoteBase ?? "")"
         };
         """
         config.userContentController.addUserScript(
@@ -168,7 +174,8 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
         // ✅ Without a UI delegate, WKWebView silently ignores alert()/confirm()
         // and confirm() returns false
         webView.uiDelegate = self
-        // Only for webViewWebContentProcessDidTerminate below (13.180).
+        // For webViewWebContentProcessDidTerminate (13.180) and the Remote
+        // app falling back to the bundled copy (native 15.122), below.
         webView.navigationDelegate = self
         addSubview(webView)
         ScrayNativeView.current = self
@@ -454,6 +461,80 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
         default:
             reject(id: id, error: "Unknown action: \(action)")
         }
+    }
+
+    // MARK: - Loading the page (native 15.122)
+
+    /// The page the app asked for - "index.html", or the dev server's URL.
+    private var sourcePath: String?
+    /// True while the Remote app's staging load is in flight, so a failure
+    /// falls back to the bundled copy rather than leaving a blank screen.
+    private var loadingRemote = false
+
+    /// The Remote app's web-staging address (Info.plist ScrayRemoteWebURL,
+    /// from the WEB_STAGING_URL secret at build time). nil in every other
+    /// build, which then loads the bundled copy exactly as before.
+    private static let remoteBase: String? = {
+        let raw = (Bundle.main.object(forInfoDictionaryKey: "ScrayRemoteWebURL") as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty, URL(string: raw) != nil else { return nil }
+        return raw.hasSuffix("/") ? String(raw.dropLast()) : raw
+    }()
+
+    /// Called by the module's `source` prop. A full http(s) address (the dev
+    /// server) loads as given; a bare file name loads from the web-staging
+    /// folder in the Remote app, otherwise from the copy in the IPA.
+    func loadSource(_ path: String) {
+        sourcePath = path
+        if path.hasPrefix("http") {
+            loadingRemote = false
+            if let url = URL(string: path) { webView.load(URLRequest(url: url)) }
+            return
+        }
+        if let base = Self.remoteBase, let url = URL(string: base + "/" + path) {
+            loadingRemote = true
+            webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+            return
+        }
+        loadBundled(path)
+    }
+
+    private func loadBundled(_ path: String) {
+        loadingRemote = false
+        if let url = Bundle.main.url(forResource: "web/" + path, withExtension: nil) {
+            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        }
+    }
+
+    /// No network, a missing folder, a server error: show the copy built into
+    /// the IPA instead (its version line then shows the build's web version,
+    /// which is how to tell).
+    private func fallBackToBundled(_ why: String) {
+        guard loadingRemote, let path = sourcePath else { return }
+        NSLog("[ScrayNative] web-staging load failed (\(why)) - showing the bundled copy")
+        loadBundled(path)
+    }
+
+    func webView(_ webView: WKWebView,
+                 didFailProvisionalNavigation navigation: WKNavigation!,
+                 withError error: Error) {
+        fallBackToBundled(error.localizedDescription)
+    }
+
+    func webView(_ webView: WKWebView,
+                 decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if loadingRemote, navigationResponse.isForMainFrame,
+           let http = navigationResponse.response as? HTTPURLResponse, http.statusCode >= 400 {
+            decisionHandler(.cancel)
+            fallBackToBundled("HTTP \(http.statusCode)")
+            return
+        }
+        decisionHandler(.allow)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        loadingRemote = false
     }
 
     // MARK: - WKNavigationDelegate (web process killed)

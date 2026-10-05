@@ -4,7 +4,7 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### native 15.126 — test: Remote app recognised after SideStore
+### native 15.126 — stable: Remote app recognised after SideStore
 <!-- 2026-10-05T14:58Z -->
 - **Reported:** no Remote app row (Reload now) in Settings, in the Remote app.
 - **Cause:** SideStore re-signs with a free Apple ID and adds the team ID to the end of the bundle identifier (`com.mac.scraynative.remote.<TEAMID>`). ScrayNativeView.swift decided the variant with `hasSuffix(".remote")` / `hasSuffix(".dev")`, so the Remote app reported `prd`: no Settings row, `pipa` in the version line, and 15.125's separate database not used - so it still shared `scray_picker` with Picker in its browser, and 15.125's Picker recovery would have had the two wiping each other's library.
@@ -12,7 +12,7 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 - **Swift (ScrayNativeView.swift, next build):** the variant is found by the identifier's parts (`dev` / `remote` anywhere) or a staging address, so it's right at the source too. The Dev app had the same miss and will read `dipa` again.
 - Checked: the head snippet and db.js's name against prd-with-staging-address (→ remote, `scray_native`), plain prd and dev (unchanged).
 
-### picker 15.105 / native 15.125 — test: separate database for the Remote app
+### picker 15.105 / native 15.125 — stable: separate database for the Remote app
 <!-- 2026-10-05T14:30Z -->
 - **Reported:** history not syncing in Picker - Picker opened in the Remote app's in-app browser. Its bug report: `[history] ready - 2 in the shared list, 0 playable here`, 0 videos in view, and every library read (history, basket sync, local play, sync pull) failing with `VersionError: ... lower version than the existing version`. History itself was syncing; Picker had no library to show it against.
 - **Cause:** the Remote app (native 15.122) loads Native's web layer from the web-staging folder on macnguyen.com - the same site as Picker - and its in-app browser shares that site's storage. Both apps call their IndexedDB `scray_picker`. Native's is v11, so it upgraded Picker's v9 database there to its own layout (v11's upgrade wipes it), and Picker's v9 open then fails every time. Only Picker inside the Remote app is affected; Safari, desktop and BBW iPlayer's browser are on other storage.
@@ -29,7 +29,7 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 - Swift, so it needs an IPA build (Remote and BBW iPlayer); the web layer is unchanged apart from VERSION.
 - Not compiled here - the next build is the compile check.
 
-### picker 15.104 / native 15.123 / browse 15.177 — test: universal history, last 100
+### picker 15.104 / native 15.123 / browse 15.177 — stable: universal history, last 100
 <!-- 2026-10-05T13:48Z -->
 - **Reported:** history isn't saving. Native's bug report (15.120, BBW iPlayer) shows `Saving history failed: QuotaExceededError` from `flushHistorySave`: localStorage was full, so the write of the whole list failed every time and history silently stopped moving.
 - **Why it filled up:** history was up to 500 whole video records (tags, bookmarks, URLs and all), rewritten on every play, alongside the stash, name-map and hunt caches. The stash names cache's v1 copy (`scray_stash_names_v1`) was also still there, unread since picker 15.57 / native 15.68.

@@ -4,6 +4,16 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.106 / native 15.127 / browse 15.178 — test: never folder, cast filter, FLS search
+<!-- 2026-10-05T15:08Z -->
+- **Asked:** (1) in Stash hunt, Never for a video's whole folder as well as the video; (2) a cast shape filter (1F 1M etc.) wherever there's a list of Stash results; (3) in FLS, a 🔍 next to COL that slides the video up (as swiping up does) and opens search, in one tap.
+- **Never for a folder (scray-stash-hunt.js, both apps; api.php):** 🚫 Never (the bar's and the swipe option's) now asks: 🚫 Just this file, or 📁 The whole folder · n unmatched files - the file's folder and every folder inside it. A file at the top level has no folder, so it goes straight to Never as before. The folder's files leave the pool (and the bulk check's + Next) at once; the scope sheet's 🚫 Hidden tab lists hidden folders first, each with Put back. Server: its own app_state row, `stash_hunt_never_folders` ([{folder, at}], folder as the hunt shows it, no leading *); `stash_hunt_get` returns `folders`, `stash_hunt_never` takes `add_folders` / `remove_folders`. An empty folder is refused, so it can never hide the whole library. An older api.php is detected (no `folders` in its answer) and the app says it needs updating instead of pretending.
+- **Cast filter:** a third result filter, **Cast**, beside Studio and Performer - from the scenes' `gender_mix` ("1F 1M", "2F"; a scene with no cast listed is "No cast"), any of the shapes picked. In: the apps' Stash search (scray-stash-nav.js), the hunt's bulk check (scray-stash-hunt.js, counted per file, like the others), and data-explorer's search and bulk check (scray-stash-search.js). Combines with Studio and Performer; the "Nothing in these results…" line names it.
+  - Not added: bulk-stash.html, migrate.html and stash-review.html show cast shape on their cards but have no result filters at all.
+- **FLS 🔍 (disguise.js, ui.js, both apps):** the dock's own search button stays beside COL in FLS (everything else in the dock is still hidden there). Its tap in FLS calls `scraySetFlsPeek(true)` - the up-swipe - then carries on as the button does while peeking: the search pill, or the main search box, focused in the same tap so the keyboard comes up. It fades and goes blind with COL. MPFS and the page are unchanged.
+- Checked: `node --check` on every JS file, `php -l`; jsdom on the hunt - folder Never from the bar (the ask, the count, the API call, the next card from outside the folder), the Hidden tab and Put back, a stored rule keeping a parent folder's files out; the cast filter's counts and passes (any of, with No cast, combined with a studio) in the apps' search and the bulk check.
+- Watch for: whether 🔍 sits clear of the BM circles in FLS (they're level with COL); the FLS tap and keyboard on the phone, which jsdom can't show.
+
 ### native 15.126 — stable: Remote app recognised after SideStore
 <!-- 2026-10-05T14:58Z -->
 - **Reported:** no Remote app row (Reload now) in Settings, in the Remote app.

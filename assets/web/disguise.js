@@ -566,7 +566,12 @@
    native 15.6). flex-end puts it back at the right edge, exactly where it sits
    outside FLS. */
 #scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek) #scrayDisguiseDock { display: flex; justify-content: flex-end; }
-#scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek) #scrayDisguiseDock > :not(#scrayDisguiseControl) { display: none !important; }
+#scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek) #scrayDisguiseDock > :not(#scrayDisguiseControl):not(#jumpSearchBtn) { display: none !important; }
+/* ⚙️ 🔍 BESIDE COL IN FLS (picker 15.106 / native 15.127). The dock's own search
+   button stays next to COL; in FLS its tap slides the player up (as an up-swipe
+   does) and opens search - see jumpSearchBtn in ui.js. No freeze-line shadow:
+   there is no strip beside it to pass under. It fades and goes blind with COL. */
+#scrayDisguise.is-fs:not(.is-mpfs):not(.is-peek) #scrayDisguiseDock > #jumpSearchBtn { box-shadow: none; margin-right: 6px; }
 
 /* ⚙️ THE FUSED ROW (13.121). #cornerButtons' inner .corner-btn-row is MOVED
    into the dock at build time and renamed #scrayDisguiseStrip; the shell it

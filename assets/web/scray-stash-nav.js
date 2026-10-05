@@ -32,6 +32,8 @@
 // picker 14.24 / native 14.36 (browse 14.38): In library on every profile,
 // plus Indexxx and Eporner links.
 // picker 15.23 / native 15.32: 🎯 Stash hunt on the home view.
+// picker 15.106 / native 15.127: a third result filter, Cast - the scenes'
+// cast shape (1F 1M, 2F ...), any of the ones picked.
 // picker 15.26 / native 15.35: the search view filters its results by studio
 // and performer, Unblur all is a 👁 in the Search row, and in a hunt the ▶ goes
 // (the hunt bar has one) and the studio of the hunt's last match is a pill.
@@ -1162,15 +1164,21 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (!k) return;
       e[DD[dd].picks] = list.some(x => x.k === k) ? list.filter(x => x.k !== k) : list.concat([{ k, name }]);
     }
+    // Cast shape (picker 15.106 / native 15.127): the scene's gender_mix,
+    // "1F 1M", "2F" - any of the picked shapes passes. A scene with no cast
+    // listed is "No cast".
+    const shapeOf = (c) => String((c && c.gender_mix) || '').trim() || 'No cast';
     function rfPass(e, c) {
-      const sts = rfList(e, 'rfs'), pfs = rfList(e, 'rfp');
+      const sts = rfList(e, 'rfs'), pfs = rfList(e, 'rfp'), cfs = rfList(e, 'rfc');
       if (sts.length && !sts.some(x => x.k === ck(c.studio))) return false;
       if (pfs.length && !pfs.every(x => (c.cast || []).some(p => ck(p.name) === x.k))) return false;
+      if (cfs.length && !cfs.some(x => x.k === ck(shapeOf(c)))) return false;
       return true;
     }
     function rfCounts(e) {
-      const st = new Map(), pf = new Map();
+      const st = new Map(), pf = new Map(), cs = new Map();
       ((e.data && e.data.scenes) || []).forEach(c => {
+        { const nm = shapeOf(c), k = ck(nm); const x = cs.get(k) || { k, name: nm, n: 0 }; x.n++; cs.set(k, x); }
         if (c.studio) { const k = ck(c.studio); const x = st.get(k) || { k, name: c.studio, n: 0 }; x.n++; st.set(k, x); }
         const seen = new Set();
         (c.cast || []).forEach(p => {
@@ -1184,20 +1192,20 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         });
       });
       const order = (m) => [...m.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
-      return { rfs: order(st), rfp: order(pf) };
+      return { rfs: order(st), rfp: order(pf), rfc: order(cs) };
     }
     function rfilterHtml(e) {
       const n = e.data ? e.data.scenes.length : 0;
-      if (!n && !rfList(e, 'rfs').length && !rfList(e, 'rfp').length) return '';
+      if (!n && !rfList(e, 'rfs').length && !rfList(e, 'rfp').length && !rfList(e, 'rfc').length) return '';
       const counts = rfCounts(e);
-      const open = e.rfsOpen ? 'rfs' : e.rfpOpen ? 'rfp' : '';
-      const LBL = { rfs: ['Studio', 'studios'], rfp: ['Performer', 'performers'] };
+      const open = e.rfsOpen ? 'rfs' : e.rfpOpen ? 'rfp' : e.rfcOpen ? 'rfc' : '';
+      const LBL = { rfs: ['Studio', 'studios'], rfp: ['Performer', 'performers'], rfc: ['Cast', 'casts'] };
       const btn = (dd) => {
         const picks = rfList(e, dd);
         const [one, many] = LBL[dd];
         const label = !picks.length ? 'All ' + many + ' (' + counts[dd].length + ')'
-          : picks.length <= 2 ? picks.map(x => x.name).join(dd === 'rfs' ? ', ' : ' + ')
-          : picks.slice(0, 2).map(x => x.name).join(dd === 'rfs' ? ', ' : ' + ') + ' +' + (picks.length - 2);
+          : picks.length <= 2 ? picks.map(x => x.name).join(dd !== 'rfp' ? ', ' : ' + ')
+          : picks.slice(0, 2).map(x => x.name).join(dd !== 'rfp' ? ', ' : ' + ') + ' +' + (picks.length - 2);
         return '<button type="button" class="ssn-studio-btn' + (picks.length ? ' on' : '') + '" data-rf-toggle="' + dd + '" ' +
             'title="' + (picks.length ? (picks.length > 1 ? one + 's' : one) + ': ' + esc(picks.map(x => x.name).join(', ')) : 'Filter the results by ' + one.toLowerCase()) + '">' +
             esc(label) + ' ' + (open === dd ? '&#9652;' : '&#9662;') + '</button>' +
@@ -1213,6 +1221,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         opts.sort((a, b) => (isOn(b.k) ? 1 : 0) - (isOn(a.k) ? 1 : 0));
         pop = '<div class="ssn-studio-pop">' +
           '<div class="ssn-studio-how">' + (open === 'rfs' ? 'Pick several to see scenes from any of them'
+                                        : open === 'rfc' ? 'Cast shape - pick several to see scenes with any of them'
                                                          : 'Pick several to see scenes they&rsquo;re all in together') + '</div>' +
           '<div class="ssn-dd-top"><input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
             'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + ' in the results&hellip;" value="' + esc(e[DD[open].term] || '') + '">' +
@@ -1237,7 +1246,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       // One wrapper, named after the open list, so paintStudioList narrows it
       // and the repaint gives its box the keyboard back.
       return '<div class="ssn-studio ssn-rfilter" data-dd="' + (open || 'rfs') + '">' +
-        '<div class="ssn-rf-row">' + btn('rfs') + btn('rfp') + '</div>' + pop + '</div>';
+        '<div class="ssn-rf-row">' + btn('rfs') + btn('rfp') + btn('rfc') + '</div>' + pop + '</div>';
     }
 
     // The studio pills' menu (picker 15.27 / native 15.36), like a performer
@@ -1287,7 +1296,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         ev.stopPropagation();
         m.remove();
         if (finished || top() !== e) return;
-        if (b.dataset.pm === 'filter') { e.rfsOpen = e.rfpOpen = false; rfToggle(e, dd, name); paint(false, true); }
+        if (b.dataset.pm === 'filter') { e.rfsOpen = e.rfpOpen = e.rfcOpen = false; rfToggle(e, dd, name); paint(false, true); }
         else if (b.dataset.pm === 'page') push({ type: perf ? 'performer' : 'studio', id: '', name, sceneId: '' });
         else if (b.dataset.pm === 'words') {
           // In or out of the words, then the search runs with them.
@@ -1314,13 +1323,14 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       const all = e.data ? e.data.scenes.length : 0;
       const shown = e.data ? sortedScenes(e).filter(x => rfPass(e, x.s)) : [];
       const n = shown.length;
-      const sts = rfList(e, 'rfs'), pfs = rfList(e, 'rfp');
-      const filtered = !!(sts.length || pfs.length);
+      const sts = rfList(e, 'rfs'), pfs = rfList(e, 'rfp'), cfs = rfList(e, 'rfc');
+      const filtered = !!(sts.length || pfs.length || cfs.length);
       const label = e.data ? (all ? (filtered ? n + ' of ' + all : all) + ' result' + (all === 1 ? '' : 's') : '') : '';
       let none = '';
       if (e.data && all && !n && filtered) {
         const b = (x) => '<b>' + esc(x.name) + '</b>';
-        const what = [sts.length ? 'from ' + sts.map(b).join(' or ') : '', pfs.length ? 'with ' + pfs.map(b).join(' and ') : '']
+        const what = [sts.length ? 'from ' + sts.map(b).join(' or ') : '', pfs.length ? 'with ' + pfs.map(b).join(' and ') : '',
+                      cfs.length ? 'with a ' + cfs.map(b).join(' or ') + ' cast' : '']
           .filter(Boolean).join(' ');
         const bits = ['<span>Nothing in these results ' + what + '.</span>'];
         // A page to go to instead - three at most.
@@ -1544,7 +1554,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       sub:  { picks: 'subPicks', open: 'subOpen',    term: 'subTerm',    focus: 'subFocus' },
       // The search view's result filters (picker 15.27 / native 15.36).
       rfs:  { picks: 'rfStudios', open: 'rfsOpen', term: 'rfsTerm', focus: 'rfsFocus' },
-      rfp:  { picks: 'rfPerfs',   open: 'rfpOpen', term: 'rfpTerm', focus: 'rfpFocus' }
+      rfp:  { picks: 'rfPerfs',   open: 'rfpOpen', term: 'rfpTerm', focus: 'rfpFocus' },
+      rfc:  { picks: 'rfCasts',   open: 'rfcOpen', term: 'rfcTerm', focus: 'rfcFocus' }   // cast shape (picker 15.106 / native 15.127)
     };
 
     // Done (picker 15.31 / native 15.40): closes the list it sits in - beside
@@ -2190,10 +2201,10 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (btn.dataset.rfToggle) {
         const e = top();
         if (!e || e.type !== 'search') return;
-        const dd = btn.dataset.rfToggle, other = dd === 'rfs' ? 'rfp' : 'rfs';
+        const dd = btn.dataset.rfToggle;
         e[DD[dd].open] = !e[DD[dd].open];
         e[DD[dd].focus] = e[DD[dd].open];
-        e[DD[other].open] = false;
+        ['rfs', 'rfp', 'rfc'].forEach(o => { if (o !== dd) e[DD[o].open] = false; });
         paint(false, true);
         return;
       }
@@ -2211,8 +2222,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (btn.hasAttribute('data-rfclear')) {
         const e = top();
         if (!e) return;
-        e.rfStudios = []; e.rfPerfs = [];
-        e.rfsOpen = e.rfpOpen = false;
+        e.rfStudios = []; e.rfPerfs = []; e.rfCasts = [];
+        e.rfsOpen = e.rfpOpen = e.rfcOpen = false;
         paint(false, true);
         return;
       }

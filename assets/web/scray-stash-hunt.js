@@ -64,6 +64,10 @@
 // search's order (S.sort), so it carries both ways until the hunt is closed.
 // picker 15.48 / native 15.59: the 🎯 scope button in the bar wraps (a size
 // smaller) instead of cutting off the scope and the count left.
+// picker 15.106 / native 15.127: 🚫 Never asks - just this file, or the whole
+// folder it's in (and the folders inside it). Hidden folders are listed first
+// on the scope's Hidden tab, with Put back. Kept on the server with the files
+// (stash_hunt_never add_folders / remove_folders, browse 15.178).
 // picker 15.46 / native 15.57: the swipe options run 🚫 Never, 📁, ⏭ Next, 🏷,
 // ✏️ Details - Never and Details swapped.
 // picker 15.45 / native 15.56: the mark for Next is 55% of the card's width.
@@ -221,6 +225,7 @@
       scope: loadScope(),
       pool: [],                 // unmatched, not never - scope is applied when picking
       never: new Map(),         // key -> { key, name, at }
+      neverFolders: [],         // [{ folder, at }] - whole folders, and the ones below (picker 15.106 / native 15.127)
       neverLoaded: false,
       seen: new Set(),          // keys already offered this run
       cur: null,                // { video, key, matched, auto, loaded }
@@ -241,12 +246,22 @@
     try {
       const r = await api('stash_hunt_get');
       S.never = new Map((r.items || []).map(it => [it.key, it]));
+      S.neverFolders = Array.isArray(r.folders) ? r.folders.filter(f => f && f.folder) : [];
       S.neverLoaded = true;
     } catch (err) {
       console.warn('[hunt] never list unavailable:', err && err.message);
       toast('⚠️ Couldn’t load the never list - hidden files may come up', '#b8860b');
     }
   }
+
+  /** The never-folder rule covering this folder (it, or one above it), if any. */
+  function neverFolderFor(dir) {
+    const f = lower(dir);
+    if (!f || !S || !S.neverFolders.length) return null;
+    return S.neverFolders.find(r => { const q = lower(r.folder); return q && (f === q || f.startsWith(q + '/')); }) || null;
+  }
+  /** On the never list - itself, or its folder (picker 15.106 / native 15.127). */
+  const isNever = (v) => !!S && (S.never.has(keyOf(v)) || !!neverFolderFor(v.__huntFolder != null ? v.__huntFolder : folderOf(v)));
 
   async function buildPool() {
     if (typeof window.scrayLoadStashState === 'function') {
@@ -263,6 +278,7 @@
       seen.add(k);
       if (matchedNow(v) || S.never.has(k)) return;
       v.__huntFolder = folderOf(v);
+      if (neverFolderFor(v.__huntFolder)) return;
       v.__huntTags = tagsOf(v);
       pool.push(v);
     });
@@ -305,7 +321,83 @@
     advance();
   }
 
-  async function never() {
+  /**
+   * 🚫 Never asks which (picker 15.106 / native 15.127): this file, or every
+   * file in its folder and the folders below it. A file at the top level has
+   * no folder to hide, so it goes straight to the file.
+   */
+  function never() {
+    if (!S || !S.cur) return;
+    const v = S.cur.video;
+    const dir = v.__huntFolder != null ? v.__huntFolder : folderOf(v);
+    if (!dir) return neverFile();
+    ensureCss();
+    document.getElementById('stashHuntNeverAsk')?.remove();
+    const q = lower(dir);
+    const n = S.pool.filter(x => { const f = lower(x.__huntFolder); return (f === q || f.startsWith(q + '/')) && !matchedNow(x); }).length;
+    const ask = document.createElement('div');
+    ask.id = 'stashHuntNeverAsk';
+    ask.innerHTML =
+      '<div class="shn">' +
+        '<h3>🚫 Never show…</h3>' +
+        '<button type="button" data-n="file" class="shn-file">🚫 Just this file</button>' +
+        '<button type="button" data-n="folder" class="shn-folder">📁 The whole folder · ' + plural(Math.max(n, 1), 'unmatched file') +
+          '<small>' + esc(dir) + ' (and the folders inside it)</small></button>' +
+        '<button type="button" data-n="cancel" class="shn-cancel">Cancel</button>' +
+      '</div>';
+    document.body.appendChild(ask);
+    clearOfDock(ask, SHEET_PAD);
+    ask.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-n]');
+      if (!b && e.target !== ask) return;
+      e.stopPropagation();
+      ask.remove();
+      if (!b || !S || !S.cur || S.cur.video !== v) return;
+      if (b.dataset.n === 'file') neverFile();
+      else if (b.dataset.n === 'folder') neverFolder(dir);
+    });
+  }
+
+  async function neverFolder(dir) {
+    if (!S || !S.cur) return;
+    const rule = { folder: dir, at: new Date().toISOString() };
+    S.neverFolders = S.neverFolders.filter(r => lower(r.folder) !== lower(dir)).concat([rule]);
+    const before = S.pool.length;
+    S.pool = S.pool.filter(x => !neverFolderFor(x.__huntFolder));
+    const gone = before - S.pool.length;
+    S.stats.never += Math.max(gone, 1);
+    S.stats.streak = 0;
+    noteSeen(S.cur.video, 'never');
+    const device = window.SCRAY_SYNC && window.SCRAY_SYNC.DEVICE_ID;
+    api('stash_hunt_never', { method: 'POST', body: { add_folders: [dir], device } })
+      .then((r) => {
+        // An api.php from before browse 15.178 ignores add_folders - say so rather than pretend.
+        if (r && !Array.isArray(r.folders)) throw new Error('the server needs updating (browse 15.178)');
+        toast('📁 ' + lastSeg(dir) + ' won’t come up again (' + plural(Math.max(gone, 1), 'file') + ') - undo under the scope’s Hidden tab');
+      })
+      .catch(err => {
+        if (S) S.neverFolders = S.neverFolders.filter(r => r !== rule);
+        toast('⚠️ Couldn’t save Never for the folder: ' + (err.message || err), '#dc3545');
+        if (S) buildPool();
+      });
+    advance();
+  }
+
+  async function unNeverFolder(dir) {
+    const device = window.SCRAY_SYNC && window.SCRAY_SYNC.DEVICE_ID;
+    try {
+      const r = await api('stash_hunt_never', { method: 'POST', body: { remove_folders: [dir], device } });
+      if (S) {
+        S.neverFolders = Array.isArray(r.folders) ? r.folders : S.neverFolders.filter(x => lower(x.folder) !== lower(dir));
+        await buildPool();
+      }
+      toast('↩︎ ' + lastSeg(dir) + ' is back in the hunt');
+    } catch (err) {
+      toast('⚠️ Couldn’t undo: ' + (err.message || err), '#dc3545');
+    }
+  }
+
+  async function neverFile() {
     if (!S || !S.cur) return;
     const cur = S.cur;
     const item = { key: cur.key, name: cur.video.filename || cur.key, at: new Date().toISOString() };
@@ -394,6 +486,15 @@
 #stashHuntSheet .shs-hid { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #f0f0f0; }
 #stashHuntSheet .shs-hid .n { flex: 1 1 auto; min-width: 0; word-break: break-word; font-size: .8rem; }
 #stashHuntSheet .shs-empty { padding: 14px 10px; color: #888; font-size: .82rem; }
+#stashHuntSheet .shs-hidf .n small { color: #999; }
+#stashHuntNeverAsk { position: fixed; inset: 0; z-index: 2147483647; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: calc(env(safe-area-inset-top, 0px) + 12px) 14px calc(env(safe-area-inset-bottom, 0px) + 12px); }
+#stashHuntNeverAsk .shn { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 8px; background: #fff; color: #222; border-radius: 14px; padding: 14px; box-sizing: border-box; text-align: left; }
+#stashHuntNeverAsk h3 { margin: 0 0 2px; font-size: 1.05rem; }
+#stashHuntNeverAsk button { width: 100%; margin: 0; padding: 11px 12px; font-size: .92rem; line-height: 1.25; text-align: left; border: 1px solid #ccc; border-radius: 9px; background: #f4f4f6; color: #222; cursor: pointer; }
+#stashHuntNeverAsk button small { display: block; margin-top: 3px; font-size: .74rem; color: #777; word-break: break-word; }
+#stashHuntNeverAsk .shn-file { background: #fdecee; border-color: #f1aeb5; color: #a71d2a; font-weight: 600; }
+#stashHuntNeverAsk .shn-folder { background: #f3efff; border-color: #cbbef5; color: #5b3fd1; font-weight: 600; }
+#stashHuntNeverAsk .shn-cancel { text-align: center; }
 #stashHuntSheet .shs-foot { display: flex; gap: 8px; margin-top: 10px; }
 #stashHuntSheet .shs-foot .go { flex: 1 1 auto; background: #6f42c1; border-color: #6f42c1; color: #fff; font-weight: 700; }
 #stashModal .sh-card { position: relative; z-index: 2; will-change: transform; }
@@ -1446,30 +1547,36 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
   // native 15.76, Duration diff) has been picked.
   const bulkOrder = () => (S && (S.sort === 'match' || S.sort === 'dur')) ? S.sort : 'order';
   // ---- studio / performer filter (picker 15.102 / native 15.120) -------------
+  // + Cast (cast shape, picker 15.106 / native 15.127).
   // Over every file's results at once, the way the single search filters its
   // own (picker 15.26 / native 15.35): any of the studios picked, all of the
   // performers picked together. Each row then shows its scene from those only,
   // so a near miss from another studio or cast drops out; a row with nothing
   // left says so. Kept on the sheet, so Search all again and + Next keep it.
   const bkk = (x) => String(x == null ? '' : x).normalize('NFC').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
-  const bulkRf = (B) => (B && B.rf) || { rfs: [], rfp: [] };
-  const bulkRfOn = (B) => { const f = bulkRf(B); return !!(f.rfs.length || f.rfp.length); };
+  // Cast shape (picker 15.106 / native 15.127): any of the shapes picked.
+  const bkShape = (c) => String((c && c.gender_mix) || '').trim() || 'No cast';
+  const bulkRf = (B) => { const f = (B && B.rf) || { rfs: [], rfp: [] }; if (!f.rfc) f.rfc = []; return f; };
+  const bulkRfOn = (B) => { const f = bulkRf(B); return !!(f.rfs.length || f.rfp.length || f.rfc.length); };
   function bulkRfPass(B, c) {
     const f = bulkRf(B);
     if (f.rfs.length && !f.rfs.some(x => x.k === bkk(c.studio))) return false;
     if (f.rfp.length && !f.rfp.every(x => (c.cast || []).some(p => bkk(p && p.name) === x.k))) return false;
+    if (f.rfc.length && !f.rfc.some(x => x.k === bkk(bkShape(c)))) return false;
     return true;
   }
   /** The results with the ones the filter leaves out blanked - so a card keeps its place in StashDB's list. */
   const passOnly = (scenes) => (scenes || []).map(c => (c && bulkRfPass(bulk, c) ? c : null));
   /** Studios and performers across every file's results: how many files have them. */
   function bulkRfCounts(B) {
-    const st = new Map(), pf = new Map();
+    const st = new Map(), pf = new Map(), cs = new Map();
     B.rows.forEach(r => {
       if (!r.scenes || !r.scenes.length || r.st === 'done' || r.st === 'fpmatch' || r.st === 'q') return;
-      const ss = new Set(), ps = new Set();
+      const ss = new Set(), ps = new Set(), shs = new Set();
       r.scenes.forEach(c => {
         if (!c) return;
+        const shn = bkShape(c), shk = bkk(shn);
+        if (!shs.has(shk)) { shs.add(shk); const x = cs.get(shk) || { k: shk, name: shn, n: 0 }; x.n++; cs.set(shk, x); }
         const sk = bkk(c.studio);
         if (sk && !ss.has(sk)) { ss.add(sk); const x = st.get(sk) || { k: sk, name: c.studio, n: 0 }; x.n++; st.set(sk, x); }
         (c.cast || []).forEach(p => {
@@ -1483,7 +1590,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       });
     });
     const order = (m) => [...m.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
-    return { rfs: order(st), rfp: order(pf) };
+    return { rfs: order(st), rfp: order(pf), rfc: order(cs) };
   }
   const pickCard = (scenes) => { const s = passOnly(scenes); return bulkOrder() === 'match' ? bestOf(s) : bulkOrder() === 'dur' ? closestOf(s) : firstOf(s); };
   /** Every row's shown scene again, after the order or the filter changed. */
@@ -1513,18 +1620,18 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     if (!B || !sheet) return;
     const f = bulkRf(B);
     const counts = bulkRfCounts(B);
-    const LBL = { rfs: ['Studio', 'studios'], rfp: ['Performer', 'performers'] };
+    const LBL = { rfs: ['Studio', 'studios'], rfp: ['Performer', 'performers'], rfc: ['Cast', 'casts'] };
     const btn = (dd) => {
       const picks = f[dd];
       const [, many] = LBL[dd];
       const label = !picks.length ? 'All ' + many + ' (' + counts[dd].length + ')'
-        : picks.length <= 2 ? picks.map(x => x.name).join(dd === 'rfs' ? ', ' : ' + ')
-        : picks.slice(0, 2).map(x => x.name).join(dd === 'rfs' ? ', ' : ' + ') + ' +' + (picks.length - 2);
+        : picks.length <= 2 ? picks.map(x => x.name).join(dd !== 'rfp' ? ', ' : ' + ')
+        : picks.slice(0, 2).map(x => x.name).join(dd !== 'rfp' ? ', ' : ' + ') + ' +' + (picks.length - 2);
       return '<button type="button" data-b="rf_' + dd + '" class="' + (picks.length ? 'on' : '') + '">' + esc(label) + ' ' + (B.rfOpen === dd ? '▴' : '▾') + '</button>' +
         (picks.length ? '<button type="button" class="x" data-b="rfx_' + dd + '" title="All ' + many + '">✕</button>' : '');
     };
     const btns = sheet.querySelector('.shb-rfbtns');
-    if (btns) btns.innerHTML = btn('rfs') + btn('rfp');
+    if (btns) btns.innerHTML = btn('rfs') + btn('rfp') + btn('rfc');
     if (!withPop) return;
     const pop = sheet.querySelector('.shb-rfpop');
     if (!pop) return;
@@ -1538,7 +1645,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     const box = pop.querySelector('.shb-rffind');
     const term = box ? box.value : '';
     pop.hidden = false;
-    pop.innerHTML = '<div class="how">' + (dd === 'rfs' ? 'Pick several to see scenes from any of them' : 'Pick several to see scenes they’re all in together') +
+    pop.innerHTML = '<div class="how">' + (dd === 'rfs' ? 'Pick several to see scenes from any of them'
+        : dd === 'rfc' ? 'Cast shape - pick several to see scenes with any of them' : 'Pick several to see scenes they’re all in together') +
         ' - for every file at once. The number is how many files have them in their results.</div>' +
       '<div class="top"><input class="shb-rffind" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="Search ' +
         LBL[dd][1] + ' in the results…" value="' + esc(term) + '"><button type="button" data-b="rfdone">Done</button></div>' +
@@ -1559,7 +1667,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
   function bulkRfWords(B) {
     const f = bulkRf(B);
     return [f.rfs.length ? 'from ' + f.rfs.map(x => x.name).join(' or ') : '',
-            f.rfp.length ? 'with ' + f.rfp.map(x => x.name).join(' and ') : ''].filter(Boolean).join(' ');
+            f.rfp.length ? 'with ' + f.rfp.map(x => x.name).join(' and ') : '',
+            f.rfc.length ? 'with a ' + f.rfc.map(x => x.name).join(' or ') + ' cast' : ''].filter(Boolean).join(' ');
   }
   /**
    * Where a row sits when sorted by confidence (picker 15.50 / native 15.61):
@@ -2157,7 +2266,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
   function bulkRest(B) {
     if (!B || !B.all) return [];
     const have = new Set(B.rows.map(r => r.key));
-    return B.all.filter(v => !have.has(keyOf(v)) && !matchedNow(v) && !(S && S.never.has(keyOf(v))));
+    return B.all.filter(v => !have.has(keyOf(v)) && !matchedNow(v) && !isNever(v));
   }
   /** The next 60 join the list and are checked; what's above stays as it is. */
   function moreBulk() {
@@ -2307,14 +2416,15 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (b && (b.dataset.rfpick != null || /^rf/.test(b.dataset.b || ''))) {
         e.stopPropagation();
         const busy = B.submitting || B.renaming || preAsk(B);
-        if (!B.rf) B.rf = { rfs: [], rfp: [] };
+        if (!B.rf) B.rf = { rfs: [], rfp: [], rfc: [] };
+        if (!B.rf.rfc) B.rf.rfc = [];
         const k = b.dataset.b || '';
-        if (k === 'rf_rfs' || k === 'rf_rfp') { B.rfOpen = B.rfOpen === k.slice(3) ? '' : k.slice(3); paintBulkRf(sheet, true); return; }
+        if (k === 'rf_rfs' || k === 'rf_rfp' || k === 'rf_rfc') { B.rfOpen = B.rfOpen === k.slice(3) ? '' : k.slice(3); paintBulkRf(sheet, true); return; }
         if (k === 'rfdone') { B.rfOpen = ''; paintBulkRf(sheet, true); return; }
         if (busy) return;
-        if (k === 'rfx_rfs' || k === 'rfx_rfp') { B.rf[k.slice(4)] = []; recardBulk(B); paintBulkRf(sheet, true); return; }
+        if (k === 'rfx_rfs' || k === 'rfx_rfp' || k === 'rfx_rfc') { B.rf[k.slice(4)] = []; recardBulk(B); paintBulkRf(sheet, true); return; }
         if (b.dataset.rfpick != null) {
-          const dd = b.dataset.dd === 'rfp' ? 'rfp' : 'rfs';
+          const dd = b.dataset.dd === 'rfp' ? 'rfp' : b.dataset.dd === 'rfc' ? 'rfc' : 'rfs';
           const name = b.dataset.rfpick, kk = bkk(name);
           if (!kk) return;
           const list = B.rf[dd];
@@ -2653,13 +2763,19 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (i >= 0) arr.splice(i, 1); else arr.push(x);
     };
 
+    const hiddenCount = () => S.never.size + S.neverFolders.length;
     function listHtml() {
       const q = lower(find);
       if (tab === 'hidden') {
+        // Whole folders first (picker 15.106 / native 15.127).
+        const fold = S.neverFolders.filter(r => !q || lower(r.folder).includes(q))
+          .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+          .map(r => '<div class="shs-hid shs-hidf"><span class="n">📁 ' + esc(r.folder) + ' <small>whole folder</small></span>' +
+            '<button type="button" data-unf="' + esc(r.folder) + '">Put back</button></div>').join('');
         const items = [...S.never.values()].filter(it => !q || lower(it.name).includes(q))
           .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
-        if (!items.length) return '<div class="shs-empty">' + (S.never.size ? 'None match.' : 'Nothing hidden. 🚫 Never on a file puts it here.') + '</div>';
-        return items.slice(0, ROW_CAP).map(it =>
+        if (!items.length && !fold) return '<div class="shs-empty">' + (hiddenCount() ? 'None match.' : 'Nothing hidden. 🚫 Never on a file puts it - or its folder - here.') + '</div>';
+        return fold + items.slice(0, ROW_CAP).map(it =>
           '<div class="shs-hid"><span class="n">' + esc(it.name || it.key) + '</span>' +
           '<button type="button" data-un="' + esc(it.key) + '">Put back</button></div>').join('') +
           (items.length > ROW_CAP ? '<div class="shs-empty">…and ' + (items.length - ROW_CAP) + ' more - type to narrow.</div>' : '');
@@ -2698,7 +2814,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
           '<div class="shs-tabs">' +
             '<button type="button" data-tab="folders" class="' + (tab === 'folders' ? 'on' : '') + '">📁 Folders' + (draft.folders.length ? ' (' + draft.folders.length + ')' : '') + '</button>' +
             '<button type="button" data-tab="tags" class="' + (tab === 'tags' ? 'on' : '') + '">🏷 Tags' + (draft.tags.length ? ' (' + draft.tags.length + ')' : '') + '</button>' +
-            '<button type="button" data-tab="hidden" class="' + (tab === 'hidden' ? 'on' : '') + '">🚫 Hidden (' + S.never.size + ')</button>' +
+            '<button type="button" data-tab="hidden" class="' + (tab === 'hidden' ? 'on' : '') + '">🚫 Hidden (' + hiddenCount() + ')</button>' +
           '</div>' +
           '<input class="shs-find" type="search" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="' +
             (tab === 'hidden' ? 'find a hidden file…' : tab === 'tags' ? 'find a tag…' : 'find a folder…') + '" value="' + esc(findVal) + '">' +
@@ -2732,7 +2848,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         const t = b.dataset.tab;
         if (t === 'folders') b.textContent = '📁 Folders' + (draft.folders.length ? ' (' + draft.folders.length + ')' : '');
         if (t === 'tags') b.textContent = '🏷 Tags' + (draft.tags.length ? ' (' + draft.tags.length + ')' : '');
-        if (t === 'hidden') b.textContent = '🚫 Hidden (' + S.never.size + ')';
+        if (t === 'hidden') b.textContent = '🚫 Hidden (' + hiddenCount() + ')';
       });
     }
 
@@ -2749,6 +2865,13 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       const b = e.target.closest('button');
       if (!b) return;
       if (b.dataset.tab) { tab = b.dataset.tab; find = ''; paint(); return; }
+      if (b.dataset.unf) {
+        b.disabled = true;
+        await unNeverFolder(b.dataset.unf);
+        if (!S) return;
+        openSheet({ note, tab: 'hidden', draft });
+        return;
+      }
       if (b.dataset.un) {
         b.disabled = true;
         await unNever(b.dataset.un);

@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.124 — test: no swipe-back on Picker pages
+<!-- 2026-10-05T14:12Z -->
+- **Asked:** in Picker inside Native's in-app browser, a swipe in from the left edge should open the history panel, as it does in Safari - instead the browser took it as swipe-back and went to the last page.
+- **Change (ScrayBrowser.swift):** swipe-back (`allowsBackForwardNavigationGestures`) is switched off while the tab is on one of Picker's pages - the home address's host and folder (`isPickerPage`) - and back on for every other site. Set whenever the tab's address changes and when a tab is brought to the front. The toolbar's back button still goes back.
+- Swift, so it needs an IPA build (Remote and BBW iPlayer); the web layer is unchanged apart from VERSION.
+- Not compiled here - the next build is the compile check.
+
 ### picker 15.104 / native 15.123 / browse 15.177 — test: universal history, last 100
 <!-- 2026-10-05T13:48Z -->
 - **Reported:** history isn't saving. Native's bug report (15.120, BBW iPlayer) shows `Saving history failed: QuotaExceededError` from `flushHistorySave`: localStorage was full, so the write of the whole list failed every time and history silently stopped moving.

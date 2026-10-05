@@ -937,6 +937,28 @@ final class ScrayBrowserViewController: UIViewController,
         return wv
     }
 
+    /// Picker's own pages - the home address and anything in its folder
+    /// (native 15.124). Their left-edge swipe opens the history panel, so the
+    /// browser's swipe-back is switched off there; the toolbar's back button
+    /// still works. Every other site keeps swipe-back.
+    private func isPickerPage(_ url: URL?) -> Bool {
+        guard let url = url,
+              let host = url.host?.lowercased(),
+              host == homeURL.host?.lowercased() else { return false }
+        var dir = homeURL.path
+        if !dir.hasSuffix("/") {
+            // ".../index.php" -> ".../"; ".../sp-staging" -> ".../sp-staging/"
+            dir = homeURL.pathExtension.isEmpty ? dir + "/" : homeURL.deletingLastPathComponent().path + "/"
+        }
+        let path = url.path.hasSuffix("/") || !url.pathExtension.isEmpty ? url.path : url.path + "/"
+        return path.lowercased().hasPrefix(dir.lowercased())
+    }
+
+    private func applySwipeBack(_ wv: WKWebView) {
+        let allow = !isPickerPage(wv.url)
+        if wv.allowsBackForwardNavigationGestures != allow { wv.allowsBackForwardNavigationGestures = allow }
+    }
+
     @discardableResult
     private func addTab(url: URL?,
                         configuration: WKWebViewConfiguration? = nil,
@@ -1197,6 +1219,7 @@ final class ScrayBrowserViewController: UIViewController,
 
     private func bindObservations(to wv: WKWebView) {
         observations.forEach { $0.invalidate() }
+        applySwipeBack(wv)   // a tab whose page changed while it wasn't showing
         observations = [
             wv.observe(\.estimatedProgress, options: [.new]) { [weak self] w, _ in
                 self?.progressView.progress = Float(w.estimatedProgress)
@@ -1208,7 +1231,8 @@ final class ScrayBrowserViewController: UIViewController,
                 self.reloadButton.setImage(UIImage(systemName: symbol, withConfiguration: Self.toolbarSymbol), for: .normal)
             },
             wv.observe(\.title, options: [.new]) { [weak self] _, _ in self?.refreshChrome() },
-            wv.observe(\.url, options: [.new]) { [weak self] _, _ in
+            wv.observe(\.url, options: [.new]) { [weak self] w, _ in
+                self?.applySwipeBack(w)   // off on Picker's pages (native 15.124)
                 self?.refreshChrome()
                 self?.persistTabs()
                 self?.showChrome()      // a new page starts with its controls

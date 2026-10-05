@@ -4,7 +4,7 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### picker 15.107 / native 15.128 / browse 15.179 — test: FLS search tweaks, co-performer filter
+### picker 15.107 / native 15.128 / browse 15.179 — stable: FLS search tweaks, co-performer filter
 <!-- 2026-10-05T15:55Z -->
 - **Asked:** in FLS, the 🔍 closer to COL with a see-through background, the BM circles a little lower so they're clear of it, and after searching from 🔍, Enter takes you back to FLS. And on performer profiles, a filter for who they've worked with.
 - **FLS 🔍 (disguise.js):** 2 px from COL (was 12) and transparent, with a dark glow on the glass so it reads on any picture.
@@ -13,7 +13,6 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 - **Co-performer filter:** a performer's view in the apps' navigator (scray-stash-nav.js) has a second dropdown under Studio - **With: All co-performers** - listing who they've worked with, most scenes together first, with each one's gender. Picking several shows the scenes with all of them in (and the performer); it combines with Studio, In library and Load more. data-explorer's profiles (scray-stash-profiles.js) have the same as a **With** list under Studios.
   - Server (api.php `stash_nav` op `performer`): `with_ids` - the scene query becomes INCLUDES_ALL of the performer and them (the in-library list checks the same by id); `costars: 1` on the first page returns `costars` [{id, name, gender_short, count}] from their newest 300 scenes (one request, three aliased pages of 100, cast only) and `costars_from`. The list says so when they have more scenes than that; the casts of the scenes loaded fill in either way.
 - Checked: `node --check` on every file, `php -l`; jsdom - the navigator on a performer (the first request asks for costars, the With list in order with counts and genders, a pick re-asks with `with_ids` and the label and count follow); the FLS return (Enter after 🔍 → peek then back; leaving the box first, then a later Enter, stays on the page).
-- Not done yet: Load more on Stash search - the server already asks StashDB for 100; waiting to hear where only 4 show.
 
 ### picker 15.106 / native 15.127 / browse 15.178 — test: never folder, cast filter, FLS search
 <!-- 2026-10-05T15:08Z -->

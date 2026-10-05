@@ -1,13 +1,63 @@
 console.log("history.js loaded, version X");
 
 // ===== history.js =====
+/* =========================================
+   One history for every player (picker 15.104 / native 15.123 / browse 15.177)
+
+   The list lives on the server (api.php play_history_*), newest 100 plays,
+   shared by Picker and every Native install. This device keeps:
+     historyEntries  [{ hid, key, at }] - the shared list as last seen, with
+                     this device's unsent changes on top. A few KB in
+                     localStorage, so it shows straight away on start.
+     historyOutbox   changes not yet on the server - plays, REM, CLR ALL - in
+                     order, kept across restarts and sent when there's a
+                     connection.
+     historyVideos   what the panel, H< and the player walk: the entries this
+                     library can play, as copies of its video records. An
+                     entry for a file this device doesn't have (played in
+                     Picker from OneDrive, say) isn't shown here but stays in
+                     the shared list for the players that do have it.
+
+   It used to be up to 500 whole video records in localStorage, saved on every
+   play. On a phone with full storage that write failed (QuotaExceededError)
+   and history silently stopped saving. The old list is sent up once, on the
+   first start with this version, then removed.
+   ========================================= */
+const HISTORY_MAX = 100;                          // ⚙️ the server keeps the same
+const HISTORY_LS_KEY = "scray_history_v2";        // slim entries
+const HISTORY_OUTBOX_KEY = "scray_history_outbox_v1";
+const HISTORY_LEGACY_KEY = "scray_history";       // the old full-record list
+const HISTORY_PULL_THROTTLE_MS = 5000;            // ⚙️
+
+function historyReadLs(k, fallback) {
+try { const v = JSON.parse(localStorage.getItem(k) || "null"); return v == null ? fallback : v; }
+catch (e) { return fallback; }
+}
+
+let historyEntries = (historyReadLs(HISTORY_LS_KEY, []) || []).filter(e => e && e.key);
+let historyOutbox  = (historyReadLs(HISTORY_OUTBOX_KEY, []) || []).filter(o => o && o.op);
 let   // (P) play link
-historyVideos = JSON.parse(localStorage.getItem("scray_history") || "[]");
+historyVideos = [];
 let selectedHistoryIds = new Set();
+
+// The library's records by key, for turning entries into playable videos.
+let historyLibrary = new Map();
+let historyLibraryAt = 0;
+let historyUnresolvedSig = "";
 
 // ✅ Export globally IMMEDIATELY
 window.historyVideos = historyVideos;
 window.selectedHistoryIds = selectedHistoryIds;
+
+/** Same key the basket and the server use: the stored key wins over the filename. */
+function historyKeyFor(v) {
+if (!v) return "";
+if (v.videoKey) return v.videoKey;
+if (typeof window.scrayKeyFor === "function") { const k = window.scrayKeyFor(v); if (k) return k; }
+return typeof window.scrayVideoKey === "function"
+    ? window.scrayVideoKey(v.filename || "")
+    : String(v.filename || "").normalize("NFC").trim().toLowerCase();
+}
 
 // ✅ Generate unique ID for each history entry
 function generateHistoryId() {
@@ -30,12 +80,9 @@ selectedHistoryIds.clear();
 renderHistory();
 }
 
-// ✅ PERFORMANCE (native 13.182): saving writes up to 500 full video records
-// to localStorage in one synchronous JSON.stringify - and it ran on every
-// play, right as the new video was loading, and again on every bookmark or
-// score save. Saves are now gathered into one write a moment later. Anything
-// pending is written straight away if the app is backgrounded or the page is
-// reloaded (Refresh page included), so nothing is lost.
+// Local save: only the slim entries and the outbox - a few KB - batched a
+// moment after the change, and written at once if the app is backgrounded or
+// the page reloaded.
 const HISTORY_SAVE_DELAY_MS = 1500; // ⚙️
 let historySaveTimer = null;
 let historySavePending = false;
@@ -46,12 +93,18 @@ historySaveTimer = null;
 if (!historySavePending) return;
 historySavePending = false;
 try {
-    localStorage.setItem("scray_history", JSON.stringify(historyVideos));
+    localStorage.setItem(HISTORY_OUTBOX_KEY, JSON.stringify(historyOutbox));
+    localStorage.setItem(HISTORY_LS_KEY, JSON.stringify(historyEntries));
 } catch (err) {
     console.error("Saving history failed:", err);
 }
 }
 
+/**
+ * Called after anything changes history - here, and by the other files after
+ * they patch a history item in place (bookmarks, a rename). Those patches live
+ * on the copies in memory; what's stored is only which files, in what order.
+ */
 function saveHistory() {
 window.historyVideos = historyVideos;
 historySavePending = true;
@@ -65,6 +118,177 @@ if (document.hidden) flushHistorySave();
 window.addEventListener("pagehide", flushHistorySave);
 
 /**
+ * historyEntries -> historyVideos. A copy already made for an entry is kept,
+ * so whatever the other files patched onto it (bookmarks, score) stays.
+ */
+function rebuildHistoryVideos() {
+const prev = new Map(historyVideos.map(v => [v.historyId, v]));
+const out = [];
+historyEntries.forEach(e => {
+    const had = prev.get(e.hid);
+    if (had && historyKeyFor(had) === e.key) { had.playedAt = e.at; out.push(had); return; }
+    const lib = historyLibrary.get(e.key);
+    if (!lib) return;
+    out.push({ ...lib, historyId: e.hid, playedAt: e.at });
+});
+const changed = out.length !== historyVideos.length || out.some((v, i) => v !== historyVideos[i]);
+historyVideos = out;
+window.historyVideos = historyVideos;
+if (changed && typeof resetHistoryPlayIndex === "function") resetHistoryPlayIndex();
+return changed;
+}
+
+function historyUnresolvedKeys() {
+const shown = new Set(historyVideos.map(v => v.historyId));
+return historyEntries.filter(e => !shown.has(e.hid)).map(e => e.key);
+}
+
+/**
+ * Read the library into historyLibrary. Only when an entry can't be shown and
+ * the set of those has changed since the last read - so a file that's on
+ * another device only doesn't cost a full library read on every pull.
+ */
+async function historyIndexLibrary(force = false) {
+const missing = historyUnresolvedKeys();
+const sig = missing.join("\n");
+if (!force && (!missing.length || sig === historyUnresolvedSig)) return false;
+const getAll = window.getAllVideosRaw || window.getAllVideos;   // 🔒 private rows are hidden at render
+if (typeof getAll !== "function") return false;
+let all = [];
+try { all = (await getAll()) || []; } catch (e) { console.warn("[history] library read failed:", e); return false; }
+const map = new Map();
+all.forEach(v => { const k = historyKeyFor(v); if (k && !map.has(k)) map.set(k, v); });
+historyLibrary = map;
+historyLibraryAt = Date.now();
+rebuildHistoryVideos();
+historyUnresolvedSig = historyUnresolvedKeys().join("\n");
+return true;
+}
+
+/* ---------- server sync ---------- */
+let historyReady = false;
+let historyPushTimer = null;
+let historyPushInFlight = null;
+let historyLastPullAt = 0;
+
+function historyApp() { return "native"; }
+function historyDevice() { return (window.SCRAY_SYNC && window.SCRAY_SYNC.DEVICE_ID) || ""; }
+
+function queueHistoryOp(op) {
+historyOutbox.push(op);
+saveHistory();
+scheduleHistoryPush();
+}
+
+function scheduleHistoryPush(delay = HISTORY_SAVE_DELAY_MS) {
+clearTimeout(historyPushTimer);
+historyPushTimer = setTimeout(() => { historyPushTimer = null; pushHistory(); }, delay);
+}
+
+/** The server's list replaces ours - unless more changes are waiting to go. */
+async function applyServerHistory(list) {
+if (historyOutbox.length || historyPushTimer) return;
+const next = (Array.isArray(list) ? list : [])
+    .filter(e => e && e.hid && e.key)
+    .map(e => ({ hid: String(e.hid), key: String(e.key), at: Number(e.at) || 0 }))
+    .slice(0, HISTORY_MAX);
+const sigOf = (l) => l.map(e => `${e.hid}@${e.at}`).join("|");
+if (sigOf(next) === sigOf(historyEntries)) return;
+historyEntries = next;
+rebuildHistoryVideos();
+saveHistory();
+await historyIndexLibrary();
+renderHistory();
+}
+
+async function pushHistory() {
+if (historyPushInFlight || !historyOutbox.length || typeof window.scrayApiCall !== "function") return;
+const sending = historyOutbox.slice(0, 500);
+historyPushInFlight = (async () => {
+    try {
+        const res = await window.scrayApiCall("play_history_apply", {
+            method: "POST",
+            body: { ops: sending, device: historyDevice(), app: historyApp() },
+        });
+        historyOutbox.splice(0, sending.length);
+        saveHistory();
+        if (!historyOutbox.length) await applyServerHistory(res.entries);
+    } catch (err) {
+        // Offline or the server said no: it stays in the outbox for next time.
+        console.warn("[history] sync failed - kept for next time:", err.message || err);
+        return "failed";
+    }
+})();
+const r = await historyPushInFlight;
+historyPushInFlight = null;
+if (r !== "failed" && historyOutbox.length) scheduleHistoryPush(0);
+}
+
+async function pullHistory({ force = false } = {}) {
+if (typeof window.scrayApiCall !== "function") return;
+if (!force && Date.now() - historyLastPullAt < HISTORY_PULL_THROTTLE_MS) return;
+historyLastPullAt = Date.now();
+if (historyOutbox.length) { pushHistory(); return; }   // its answer is the list
+try {
+    const res = await window.scrayApiCall("play_history_get");
+    await applyServerHistory(res.entries);
+} catch (err) {
+    console.warn("[history] pull failed:", err.message || err);
+}
+}
+
+/** The first start with the shared list: send this device's old one up, then drop it. */
+function migrateLegacyHistory() {
+let legacy = null;
+try { legacy = JSON.parse(localStorage.getItem(HISTORY_LEGACY_KEY) || "null"); } catch (e) { legacy = null; }
+if (!Array.isArray(legacy)) {
+    try { localStorage.removeItem(HISTORY_LEGACY_KEY); } catch (e) {}
+    return;
+}
+const have = new Set(historyEntries.map(e => e.hid));
+const adds = legacy.slice(0, HISTORY_MAX)
+    .map(v => ({ op: "add", hid: v.historyId || generateHistoryId(), key: historyKeyFor(v), at: Number(v.playedAt) || 0 }))
+    .filter(o => o.key && o.at && !have.has(o.hid))
+    .reverse();                                   // oldest first, as they were played
+// Its records will do until the library has been read.
+legacy.forEach(v => { const k = historyKeyFor(v); if (k && !historyLibrary.has(k)) historyLibrary.set(k, v); });
+historyEntries = historyEntries
+    .concat(adds.map(o => ({ hid: o.hid, key: o.key, at: o.at })))
+    .sort((a, b) => b.at - a.at)
+    .slice(0, HISTORY_MAX);
+historyOutbox = historyOutbox.concat(adds);
+// Gone before anything is written, which is what frees the space.
+try { localStorage.removeItem(HISTORY_LEGACY_KEY); } catch (e) {}
+historySavePending = true;
+flushHistorySave();
+console.log(`[history] ${adds.length} entr${adds.length === 1 ? "y" : "ies"} from this device's old history queued for the shared list`);
+}
+
+async function initHistorySync() {
+migrateLegacyHistory();
+rebuildHistoryVideos();
+await historyIndexLibrary(true);
+renderHistory();
+historyReady = true;
+if (historyOutbox.length) await pushHistory();
+else await pullHistory({ force: true });
+console.log(`[history] ready - ${historyEntries.length} in the shared list, ${historyVideos.length} playable here`);
+}
+
+window.addEventListener("focus", () => { if (historyReady) pullHistory(); });
+document.addEventListener("visibilitychange", () => {
+if (historyReady && document.visibilityState === "visible") pullHistory();
+});
+window.addEventListener("online", () => { if (historyReady) pushHistory(); });
+
+window.scrayHistorySync = {
+pull: pullHistory,
+push: pushHistory,
+reindex: () => historyIndexLibrary(true).then(() => renderHistory()),
+state: () => ({ entries: historyEntries.length, shown: historyVideos.length, outbox: historyOutbox.length, libraryAt: historyLibraryAt }),
+};
+
+/**
  * Drop every history entry for a file that no longer exists on the device.
  *
  * Has to live here: historyVideos is a module-level `let` and window.historyVideos
@@ -76,6 +300,14 @@ window.addEventListener("pagehide", flushHistorySave);
 function removeFromHistoryByVideoId(oneDriveId) {
 if (!oneDriveId) return 0;
 const before = historyVideos.length;
+// Only from what this device shows (15.123): the plays stay in the shared
+// list, for the players that still have the file. Its record leaves the
+// library map too, so a rebuild doesn't bring the row back.
+historyVideos.forEach(v => {
+    if ((v.oneDriveId ?? v.idFromAPI) !== oneDriveId) return;
+    const k = historyKeyFor(v);
+    if (historyLibrary.get(k) && (historyLibrary.get(k).oneDriveId ?? historyLibrary.get(k).idFromAPI) === oneDriveId) historyLibrary.delete(k);
+});
 historyVideos = historyVideos.filter(v => (v.oneDriveId ?? v.idFromAPI) !== oneDriveId);
 const removed = before - historyVideos.length;
 if (!removed) return 0;
@@ -139,7 +371,9 @@ const totalDiv = document.createElement("div");
 totalDiv.className = "history-total-size";
 totalDiv.style.fontSize = "0.85rem";
 totalDiv.style.padding = "6px";
-totalDiv.textContent = `Total size: ${formatFileSize(totalSize)}`;
+// Plays this library can't show (another player's files) are still in the shared list (15.123).
+const elsewhere = historyEntries.length - historyVideos.length;
+totalDiv.textContent = `Total size: ${formatFileSize(totalSize)}` + (elsewhere > 0 ? ` · ${elsewhere} more on other players` : "");
 historyList.appendChild(totalDiv);
 
 // Column header - no size column in the panel, and not sortable: history
@@ -347,7 +581,8 @@ updateHistoryCount();
 updateHistoryHighlights();
 }
 
-// ✅ Allow duplicates BUT NOT consecutive - only add if different from last played
+// ✅ Allow duplicates BUT NOT consecutive - only add if different from last played.
+// Goes into the shared list (15.123): shown here at once, sent a moment later.
 function addToHistory(video) {
 let oneDriveId = video.oneDriveId ?? video.idFromAPI ?? null;
 let driveId = video.driveId ?? null;
@@ -362,37 +597,43 @@ if ((!oneDriveId || !driveId) && video.webUrl) {
     } catch {}
 }
 
-// ✅ Check if last played video is the same - if so, just update timestamp
-if (historyVideos.length > 0) {
-    const lastPlayed = historyVideos[0];
-    if (lastPlayed.oneDriveId === oneDriveId) {
-        // Same video as last time - just update timestamp
-        lastPlayed.playedAt = Date.now();
-        window.historyVideos = historyVideos;
-        saveHistory();
-        renderHistory();
-        console.log(`Updated timestamp for already-recent video: ${video.filename}`);
-        return; // ✅ Don't add duplicate
-    }
+const key = historyKeyFor(video);
+if (!key) return;
+const now = Date.now();
+// The freshest record for this key - it's playing, so this library has it.
+historyLibrary.set(key, { ...video, oneDriveId, driveId });
+
+// ✅ Same video as the last one played (on any player): just move its time on.
+const last = historyEntries[0];
+if (last && last.key === key) {
+    last.at = now;
+    const shown = historyVideos.find(v => v.historyId === last.hid);
+    if (shown) shown.playedAt = now;
+    else rebuildHistoryVideos();
+    queueHistoryOp({ op: "add", hid: last.hid, key, at: now });
+    renderHistory();
+    console.log(`Updated timestamp for already-recent video: ${video.filename}`);
+    return; // ✅ Don't add duplicate
 }
 
 // ✅ Different video - add to beginning with unique ID and timestamp
-historyVideos.unshift({ 
-    ...video, 
-    oneDriveId, 
+const hid = generateHistoryId();
+historyEntries.unshift({ hid, key, at: now });
+historyVideos.unshift({
+    ...video,
+    oneDriveId,
     driveId,
-    historyId: generateHistoryId(), // ✅ Unique ID for this history entry
-    playedAt: Date.now()
+    historyId: hid, // ✅ Unique ID for this history entry
+    playedAt: now
 });
 
-
-// Keep only last 500 items
-if (historyVideos.length > 500) {
-historyVideos = historyVideos.slice(0, 500);
-}
+// Keep only the last HISTORY_MAX - the server keeps the same
+if (historyEntries.length > HISTORY_MAX) historyEntries = historyEntries.slice(0, HISTORY_MAX);
+const keep = new Set(historyEntries.map(e => e.hid));
+historyVideos = historyVideos.filter(v => keep.has(v.historyId));
 
 window.historyVideos = historyVideos;
-saveHistory();
+queueHistoryOp({ op: "add", hid, key, at: now });
 renderHistory();
 console.log(`Added to history: ${video.filename}`);
 }
@@ -404,13 +645,21 @@ const isOpening = open ?? !panel.classList.contains("history-open");
 panel.classList.toggle("history-open", isOpening);
 // Rows are only built while the panel is open (13.182) - catch up now.
 if (isOpening && historyRowsStale) renderHistory();
+// ...and with what the other players have added since (15.123).
+if (isOpening && historyReady) {
+    pullHistory();
+    historyIndexLibrary().then((did) => { if (did) renderHistory(); });
+}
 }
 
+// Clears the shared list - every player's (15.123). A play elsewhere after
+// this moment stays.
 function clearHistory() {
+historyEntries = [];
 historyVideos = [];
 window.historyVideos = historyVideos;
 resetHistoryPlayIndex(); // ✅ Reset play index when history clears
-saveHistory();
+queueHistoryOp({ op: "clear", at: Date.now() });
 renderHistory();
 console.log("History cleared");
 }
@@ -668,6 +917,24 @@ window.showHistoryTagSelector = showHistoryTagSelector;
 
 
 window.addEventListener("DOMContentLoaded", () => {
+// Behind scrayWatch so the READY toast waits for it, like basket sync.
+if (typeof window.scrayWatch === "function") window.scrayWatch("history sync", () => initHistorySync());
+else initHistorySync();
+
+// The library changed (a scan, a Hetzner fetch): plays from other players may
+// be playable here now.
+const syncLib = window.scraySyncLibrary;
+if (typeof syncLib === "function" && !syncLib.__historyWrapped) {
+    const wrapped = async function (...args) {
+        const r = await syncLib.apply(this, args);
+        if (historyReady) historyIndexLibrary(true).then(() => renderHistory()).catch(() => {});
+        return r;
+    };
+    wrapped.__historyWrapped = true;
+    wrapped.__basketWrapped = syncLib.__basketWrapped;
+    window.scraySyncLibrary = wrapped;
+}
+
 document.getElementById("historyToggleBtn")?.addEventListener("click", () => toggleHistory());
 
 document.getElementById("playHistorySequenceBtn")?.addEventListener("click", () => {
@@ -698,11 +965,14 @@ document.getElementById("historyMoreBtn")?.addEventListener("click", (e) => {
                  alert("No history items selected to remove");
                  return;
              }
+             // From the shared list too (15.123), so every player loses them.
+             const hids = [...selectedHistoryIds];
+             historyEntries = historyEntries.filter(e => !selectedHistoryIds.has(e.hid));
              historyVideos = historyVideos.filter(v => !selectedHistoryIds.has(v.historyId));
              window.historyVideos = historyVideos;
              resetHistoryPlayIndex(); // ✅ Reset play index when history changes
              clearHistorySelection();
-             saveHistory();
+             queueHistoryOp({ op: "remove", hids });
              renderHistory();
          }
      },
@@ -724,7 +994,7 @@ document.getElementById("historyMoreBtn")?.addEventListener("click", (e) => {
            label: "CLR ALL - Clear Entire History",
            color: "#f44336",
            onClick: () => {
-               if (confirm("Clear entire history?")) {
+               if (confirm("Clear entire history?\n\nHistory is shared, so this clears it on every player.")) {
                    clearHistory();
                }
            }

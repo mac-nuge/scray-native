@@ -910,6 +910,11 @@ window.scrayStashNames = (function () {
   const CACHE_KEY = "scray_stash_names_v2";
   const TTL_MS    = 10 * 60 * 1000;
 
+  // The v1 copy was never removed, and it is one of the larger things in
+  // localStorage - on a full phone it helped push history saves over the
+  // quota (native 15.123). Nothing reads it.
+  try { localStorage.removeItem("scray_stash_names_v1"); } catch { /* storage unavailable */ }
+
   let rows     = {};
   let asMap    = {};   // performer name (lower-case) -> names they were credited as
   let sig      = null;

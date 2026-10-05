@@ -17,7 +17,13 @@
 * getAllVideos() joins both stores into the same flat shape the rest of
 * the app already expects.
 */
-const DB_NAME = "scray_picker";
+// The Remote app (native 15.122) loads this web layer from macnguyen.com -
+// the same site as Picker, and its in-app browser shares that site's storage.
+// Under one name, this v11 database replaced Picker's v9 one there and Picker
+// could no longer open its library (VersionError). The Remote app keeps its
+// own (native 15.125). BBW iPlayer and Dev load from the app / the dev server,
+// so they keep the name they have always had.
+const DB_NAME = (window.SCRAY_NATIVE && window.SCRAY_NATIVE.variant === "remote") ? "scray_native" : "scray_picker";
 const DB_VERSION = 11; // v11: videoKey index + inCatalogue flag for filename-key sync.
                        // Intentional full wipe - rescan the device library after
                        // this ships; metadata comes back from the server.

@@ -4,6 +4,16 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.105 / native 15.125 — test: separate database for the Remote app
+<!-- 2026-10-05T14:30Z -->
+- **Reported:** history not syncing in Picker - Picker opened in the Remote app's in-app browser. Its bug report: `[history] ready - 2 in the shared list, 0 playable here`, 0 videos in view, and every library read (history, basket sync, local play, sync pull) failing with `VersionError: ... lower version than the existing version`. History itself was syncing; Picker had no library to show it against.
+- **Cause:** the Remote app (native 15.122) loads Native's web layer from the web-staging folder on macnguyen.com - the same site as Picker - and its in-app browser shares that site's storage. Both apps call their IndexedDB `scray_picker`. Native's is v11, so it upgraded Picker's v9 database there to its own layout (v11's upgrade wipes it), and Picker's v9 open then fails every time. Only Picker inside the Remote app is affected; Safari, desktop and BBW iPlayer's browser are on other storage.
+- **Native (db.js):** in the Remote app only (`SCRAY_NATIVE.variant === 'remote'`) the database is `scray_native`. BBW iPlayer and Dev keep `scray_picker`, so nothing changes for them. The Remote app starts with an empty database once - its library comes back from the server and a phone folder Refresh.
+- **Picker (db.js):** a `VersionError` on open means the database is another app's newer one; it is deleted and opened afresh at v9, and the sync pulls the library back from the server (the database is a cache). Waits if another page still holds it.
+- Still shared between the two in that browser: small localStorage settings (device ID, the basket's local copy, history's slim list) - each app's basket and history still come from its own server rows, so they stay right.
+- Ruled out: serving web-staging from its own subdomain or `www.` - it would separate everything but needs hosting and secret changes and a Remote rebuild, for little gain over this.
+- Checked: `node --check`; with fake-indexeddb in jsdom - Native (no variant) makes `scray_picker` v11, Picker then recovers to its own v9 with its stores, Native as Remote opens `scray_native`, and Picker's next open doesn't reset again.
+
 ### native 15.124 — test: no swipe-back on Picker pages
 <!-- 2026-10-05T14:12Z -->
 - **Asked:** in Picker inside Native's in-app browser, a swipe in from the left edge should open the history panel, as it does in Safari - instead the browser took it as swipe-back and went to the last page.

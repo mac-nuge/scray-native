@@ -1,0 +1,101 @@
+# Copies assets/web to the hidden web-staging folder on macnguyen.com, so the
+# Remote app (and Safari) can load the latest web layer without an IPA build.
+# Runs on every push to staging that touches the web layer, or by hand.
+#
+# Secrets: WEB_STAGING_DIR (server path, no trailing slash), SCRAY_API_KEY,
+# and the SIDESTORE_SSH_KEY / HOST / PORT / USER login the IPA builds use.
+# WEB_STAGING_URL is only used by the Remote app build, not here.
+
+permissions:
+  contents: read
+
+name: Deploy web to staging
+on:
+  push:
+    branches: [staging]
+    paths:
+      - 'assets/web/**'
+      - '.github/workflows/deploy-web-staging.yml'
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits for the current one to finish.
+concurrency:
+  group: web-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets
+        env:
+          SS_SSH_KEY: ${{ secrets.SIDESTORE_SSH_KEY }}
+          SS_HOST: ${{ secrets.SIDESTORE_HOST }}
+          SS_USER: ${{ secrets.SIDESTORE_USER }}
+          WEB_DIR: ${{ secrets.WEB_STAGING_DIR }}
+          API_KEY: ${{ secrets.SCRAY_API_KEY }}
+        run: |
+          missing=""
+          [ -z "$SS_SSH_KEY" ] && missing="$missing SIDESTORE_SSH_KEY"
+          [ -z "$SS_HOST" ] && missing="$missing SIDESTORE_HOST"
+          [ -z "$SS_USER" ] && missing="$missing SIDESTORE_USER"
+          [ -z "$WEB_DIR" ] && missing="$missing WEB_STAGING_DIR"
+          [ -z "$API_KEY" ] && missing="$missing SCRAY_API_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repo secrets:$missing"
+            exit 1
+          fi
+
+      - name: Generate web scray-key.js
+        run: |
+          echo "// Auto-generated at deploy time — do not edit or commit" > assets/web/scray-key.js
+          echo "window.SCRAY_API_KEY = \"${{ secrets.SCRAY_API_KEY }}\";" >> assets/web/scray-key.js
+
+      - name: Generate web version.js
+        run: |
+          VERSION_TEXT="$(cat assets/web/VERSION 2>/dev/null | tr -d '\r\n')"
+          if [ -z "$VERSION_TEXT" ]; then
+            VERSION_TEXT="$(date -u +%Y%m%d)-$(echo ${{ github.sha }} | cut -c1-7)"
+          fi
+          echo "// Auto-generated at deploy time — do not edit or commit" > assets/web/version.js
+          echo "window.SCRAY_VERSION = \"$VERSION_TEXT\";" >> assets/web/version.js
+          echo "### web staging: $VERSION_TEXT" >> $GITHUB_STEP_SUMMARY
+
+      - name: Write .htaccess (no listing, never cached)
+        run: |
+          printf '%s\n' \
+            'Options -Indexes' \
+            '<IfModule mod_headers.c>' \
+            '  <FilesMatch "\.(html|js|css|json)$">' \
+            '    Header set Cache-Control "no-cache, must-revalidate"' \
+            '  </FilesMatch>' \
+            '</IfModule>' > assets/web/.htaccess
+
+      - name: Upload and swap in
+        env:
+          SS_SSH_KEY: ${{ secrets.SIDESTORE_SSH_KEY }}
+          SS_HOST: ${{ secrets.SIDESTORE_HOST }}
+          SS_PORT: ${{ secrets.SIDESTORE_PORT }}
+          SS_USER: ${{ secrets.SIDESTORE_USER }}
+          WEB_DIR: ${{ secrets.WEB_STAGING_DIR }}
+        run: |
+          SS_PORT="${SS_PORT:-22}"
+          WEB_DIR="${WEB_DIR%/}"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SS_SSH_KEY" > ~/.ssh/webstaging && chmod 600 ~/.ssh/webstaging
+          ssh-keyscan -p "$SS_PORT" "$SS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          OPTS="-i $HOME/.ssh/webstaging -o IdentitiesOnly=yes -o BatchMode=yes"
+
+          # Unpacked next to the live folder, then swapped in, so a reload
+          # never sees a half-uploaded set.
+          tar czf - --exclude='.DS_Store' -C assets/web . | \
+            ssh $OPTS -p "$SS_PORT" "$SS_USER@$SS_HOST" "set -e
+              rm -rf '$WEB_DIR.new' '$WEB_DIR.old'
+              mkdir -p '$WEB_DIR.new'
+              tar xzf - -C '$WEB_DIR.new'
+              if [ -d '$WEB_DIR' ]; then mv '$WEB_DIR' '$WEB_DIR.old'; fi
+              mv '$WEB_DIR.new' '$WEB_DIR'
+              rm -rf '$WEB_DIR.old'"
+          echo "Deployed to the web-staging folder." >> $GITHUB_STEP_SUMMARY

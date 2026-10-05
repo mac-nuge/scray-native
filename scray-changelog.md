@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.121 — test: staging web deploy workflow
+<!-- 2026-10-05T12:30Z -->
+- **Asked:** be able to test Native's web layer from the phone without the computer (Metro + `npx serve`) or a 15-minute IPA build. Plan in the "Scray Remote Workflow Playbook" doc, phase 2.
+- **Change (.github/workflows/deploy-web-staging.yml, new):** on any push to `staging` touching `assets/web/**` (or run by hand), copies `assets/web` to the hidden web-staging folder on macnguyen.com (`WEB_STAGING_DIR` secret), over the same SSH login as the SideStore publish. Writes `scray-key.js` and `version.js` the way the IPA builds do, so the key stays out of the public repo, plus an `.htaccess` with no folder listing and no-cache on html/js/css/json so a reload always gets the latest. Unpacks next to the live folder and swaps it in, so a half-uploaded set is never served.
+- Not yet used by any app: the Remote app variant (phase 3) is what will load it. Until then, open `<WEB_STAGING_URL>/index.html` in Safari to check a deploy landed (no native features there).
+- Watch for: the folder name is the only thing protecting the device key served there; if it leaks, rename the folder, update the secrets and rotate `SCRAY_API_KEY`.
+
 ### picker 15.102 / native 15.120 / browse 15.176 — test: studio and performer filter in the bulk check
 <!-- 2026-10-04T19:40Z -->
 - **Asked:** in Stash hunt's bulk check (data-explorer, Native and Picker), a filter for studio and performer, to weed out the mismatches.

@@ -20,6 +20,19 @@
 <!-- Excel Online uses existing MSAL authentication -->
 
   <script>
+  // Which app this is, settled before anything reads it (native 15.126).
+  // SideStore re-signs with a free Apple ID and adds the team ID to the end of
+  // the bundle identifier (com.mac.scraynative.remote.ABCDE12345), so Swift's
+  // hasSuffix(".remote") test missed and the Remote app said "prd" - no
+  // Remote app row in Settings, and the Remote database name (15.125) unused.
+  // Only the Remote build carries a staging address, so that decides it.
+  (function () {
+    var n = window.SCRAY_NATIVE;
+    if (n && n.remoteWebURL && n.variant !== "remote") n.variant = "remote";
+  })();
+  </script>
+
+  <script>
   const cacheBustVer = Date.now();
   // Load common styles first, then index-specific overrides
   document.write(`<link rel="stylesheet" href="style.css?v=${cacheBustVer}">`);

@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.126 — test: Remote app recognised after SideStore
+<!-- 2026-10-05T14:58Z -->
+- **Reported:** no Remote app row (Reload now) in Settings, in the Remote app.
+- **Cause:** SideStore re-signs with a free Apple ID and adds the team ID to the end of the bundle identifier (`com.mac.scraynative.remote.<TEAMID>`). ScrayNativeView.swift decided the variant with `hasSuffix(".remote")` / `hasSuffix(".dev")`, so the Remote app reported `prd`: no Settings row, `pipa` in the version line, and 15.125's separate database not used - so it still shared `scray_picker` with Picker in its browser, and 15.125's Picker recovery would have had the two wiping each other's library.
+- **Web (index.html, no build needed):** first thing in the head, before any script reads it, `SCRAY_NATIVE.variant` becomes `remote` whenever `remoteWebURL` is set - only the Remote build carries a staging address. The Settings row, the `ripa` version line and the `scray_native` database follow.
+- **Swift (ScrayNativeView.swift, next build):** the variant is found by the identifier's parts (`dev` / `remote` anywhere) or a staging address, so it's right at the source too. The Dev app had the same miss and will read `dipa` again.
+- Checked: the head snippet and db.js's name against prd-with-staging-address (→ remote, `scray_native`), plain prd and dev (unchanged).
+
 ### picker 15.105 / native 15.125 — test: separate database for the Remote app
 <!-- 2026-10-05T14:30Z -->
 - **Reported:** history not syncing in Picker - Picker opened in the Remote app's in-app browser. Its bug report: `[history] ready - 2 in the shared list, 0 playable here`, 0 videos in view, and every library read (history, basket sync, local play, sync pull) failing with `VersionError: ... lower version than the existing version`. History itself was syncing; Picker had no library to show it against.

@@ -149,8 +149,11 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
         let bundleId = Bundle.main.bundleIdentifier ?? ""
         // native 15.122: "remote" for Scray Picker (Remote), which loads its
         // web layer from the web-staging folder (see loadSource).
-        let variant = bundleId.hasSuffix(".dev") ? "dev"
-            : bundleId.hasSuffix(".remote") ? "remote"
+        // native 15.126: SideStore adds the team ID after the identifier
+        // (com.mac.scraynative.remote.ABCDE12345), so match the part anywhere.
+        let parts = bundleId.lowercased().split(separator: ".").map(String.init)
+        let variant = parts.contains("dev") ? "dev"
+            : (parts.contains("remote") || ScrayNativeView.remoteBase != nil) ? "remote"
             : "prd"
         let nativeInfoJS = """
         window.SCRAY_NATIVE = {

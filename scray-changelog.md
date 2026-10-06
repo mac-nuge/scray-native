@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.111 / native 15.132 — test: history toggle clear of pills
+<!-- 2026-10-06T20:05Z -->
+- **Reported (testing 15.110 / 15.131):** the floating pills sit over the new Both / Videos / States toggle - with a few filters armed they wrap to a second row and cover it completely. And no states showed woven in.
+- **Woven - working, nothing new played yet:** a play only notes its state from 15.110 on, and the first screenshot's plays were all from before it; the next one (gdp · soft) wove in as it should. Checked too that the server keeps each play's id (play_history_apply only moves a known hid's time on), so the weave lasts through syncs - except a play folded into another device's row for the same video, which takes that row's id and so has no state.
+- **Earlier plays (history.js):** 15.109 / 15.130 saved states without noting their plays, but each state's time is its last play's to within a few ms - once per device, that play (the closest within ⚙️ 250 ms) gets its state back, so each of those states weaves in once. Flag: `scray_history_state_backfill_v1`.
+- **Clear of the pills (history.js, identical in both apps):** `#floatingTagPillsBar` is fixed across the top of the screen, over the panel. While the panel is open, its top is now padded down to just below the bar (⚙️ `HISTORY_PILLS_GAP_PX` 6), so the toggle and the rows start where the pills end. A ResizeObserver on the bar (and resize / rotation) keeps it following as the pills wrap or change; no bar, no padding; closed, the padding goes.
+- Checked: `node --check`; jsdom on both copies - the backfill (each state to its own play, not a later one 2 s off; flag set), the padding at open, following the bar to a second row, gone on close, none with the bar hidden; the 15.110 weave test again. jsdom has no layout, so the bar's size was stubbed - the phone is the test of where it lands.
+
 ### picker 15.110 / native 15.131 — test: states woven into history, view toggle
 <!-- 2026-10-06T19:30Z -->
 - **Asked (after testing 15.109 / 15.130):** weave the states in among the videos in the order they happened; a toggle at the top of the history panel for videos only, states only or both; and the floating pills were covering the panel's S.ALL and ... buttons - remove them and make ... the toggle.

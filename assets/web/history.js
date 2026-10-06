@@ -322,7 +322,7 @@ return removed;
 window.removeFromHistoryByVideoId = removeFromHistoryByVideoId;
 
 /* =========================================
-   History states (picker 15.109 / native 15.130)
+   History states (picker 15.109 / native 15.130, woven in picker 15.110 / native 15.131)
 
    A state is what you'd filtered the list down to: the include picks of every
    class (tags, studios, performers, Stash tags, notes), studio groups, note
@@ -332,26 +332,59 @@ window.removeFromHistoryByVideoId = removeFromHistoryByVideoId;
    HISTORY_STATE_CONTEXTS: the main list and X / > / <, the randomiser) - not
    from history or the basket, which don't play from the filters.
 
-   Shown at the top of the history panel, newest first; playing from a state
-   again moves it back to the top and counts the play. Tap one to put those
-   filters and that search back - replacing the picks and search armed now.
-   Excludes, file types, score, orientation and the Stash / BM toggles are left
-   as they are. × forgets one; ... > CLR STATES forgets them all.
+   Each play made from a state notes which one (historyStateHids, entry id ->
+   state id), so the panel can WEAVE them: a state's row sits above the run of
+   plays made from it, in the order they happened. The toggle at the top of
+   the panel (where ... was) picks what it shows: Both (woven), Videos (the
+   plays alone) or States (each state once, newest first, with how many plays
+   and how long ago).
+
+   Tap a state to put those filters and that search back - replacing the picks
+   and search armed now. Excludes, file types, score, orientation and the
+   Stash / BM toggles are left as they are. × forgets one (everywhere it shows).
+   The one matching what's armed now has a green edge.
 
    Kept on this device only (localStorage) - the shared play list on the
-   server has no room for them.
+   server has no room for them, so a play made on another player has no state.
    ========================================= */
 const HISTORY_STATES_KEY = "scray_history_states_v1";
+const HISTORY_STATE_HIDS_KEY = "scray_history_state_hids_v1";
+const HISTORY_VIEW_KEY = "scray_history_view_v1";
 const HISTORY_STATES_MAX = 20;                                // ⚙️ kept
-const HISTORY_STATES_SHOWN = 4;                               // ⚙️ shown before "more"
 const HISTORY_STATE_CONTEXTS = new Set(["main", "random"]);   // ⚙️ plays that commit one
+const HISTORY_VIEWS = [                                       // ⚙️ the toggle, in order
+    { id: "both",   label: "Both"   },
+    { id: "videos", label: "Videos" },
+    { id: "states", label: "States" },
+];
 
 let historyStates = (historyReadLs(HISTORY_STATES_KEY, []) || []).filter(s => s && s.sig && s.inc);
-let historyStatesExpanded = false;
+let historyStateHids = historyReadLs(HISTORY_STATE_HIDS_KEY, {}) || {};
+if (typeof historyStateHids !== "object" || Array.isArray(historyStateHids)) historyStateHids = {};
+let historyView = (() => {
+    try { const v = localStorage.getItem(HISTORY_VIEW_KEY); return HISTORY_VIEWS.some(o => o.id === v) ? v : "both"; }
+    catch (e) { return "both"; }
+})();
 
 function saveHistoryStates() {
 try { localStorage.setItem(HISTORY_STATES_KEY, JSON.stringify(historyStates)); }
 catch (err) { console.warn("[history] saving states failed:", err); }
+}
+
+function saveHistoryStateHids() {
+// Only the entries still in history.
+const live = new Set(historyEntries.map(e => e.hid));
+Object.keys(historyStateHids).forEach(h => { if (!live.has(h)) delete historyStateHids[h]; });
+try { localStorage.setItem(HISTORY_STATE_HIDS_KEY, JSON.stringify(historyStateHids)); }
+catch (err) { console.warn("[history] saving state plays failed:", err); }
+}
+
+/** The latest play of an entry decides its state - none, if it had none. */
+function noteHistoryStatePlay(hid, stateId) {
+if (!hid) return;
+if (stateId) historyStateHids[hid] = stateId;
+else delete historyStateHids[hid];
+saveHistoryStateHids();
 }
 
 /** File types are a standing setting (mp4 on open), not a filter you play from. */
@@ -404,22 +437,24 @@ st.sig = historyStateSig(st);
 return st;
 }
 
-/** Called by addToHistory with the play's list context. */
+function historyCurrentSig() {
+const cur = captureHistoryState();
+return cur ? cur.sig : "";
+}
+
+/** Called by addToHistory with the play's list context. Returns the state's id, or null. */
 function commitHistoryState(listContext) {
-if (!HISTORY_STATE_CONTEXTS.has(listContext)) return;
+if (!HISTORY_STATE_CONTEXTS.has(listContext)) return null;
 const st = captureHistoryState();
-if (!st) return;
+if (!st) return null;
 const now = Date.now();
 const had = historyStates.find(s => s.sig === st.sig);
+const id = had ? had.id : `state-${now}-${Math.random().toString(36).slice(2, 8)}`;
 historyStates = historyStates.filter(s => s.sig !== st.sig);
-historyStates.unshift({
-    ...st,
-    id: had ? had.id : `state-${now}-${Math.random().toString(36).slice(2, 8)}`,
-    at: now,
-    plays: ((had && had.plays) || 0) + 1,
-});
+historyStates.unshift({ ...st, id, at: now, plays: ((had && had.plays) || 0) + 1 });
 if (historyStates.length > HISTORY_STATES_MAX) historyStates = historyStates.slice(0, HISTORY_STATES_MAX);
 saveHistoryStates();
+return id;
 }
 
 /** Put a state's filters and search back, in place of what's armed now. */
@@ -482,14 +517,13 @@ if (typeof window.syncFullscreenFilterPill === "function") window.syncFullscreen
 function forgetHistoryState(id) {
 historyStates = historyStates.filter(s => s.id !== id);
 saveHistoryStates();
-refreshHistoryStatesStrip();
+renderHistory();
 }
 
 function clearHistoryStates() {
 historyStates = [];
-historyStatesExpanded = false;
 saveHistoryStates();
-refreshHistoryStatesStrip();
+renderHistory();
 }
 
 function historyAgo(at) {
@@ -500,88 +534,118 @@ if (s < 86400) return `${Math.floor(s / 3600)}h`;
 return `${Math.floor(s / 86400)}d`;
 }
 
-/** The states block at the top of the panel, or null when there are none. */
-function buildHistoryStatesStrip() {
-if (!historyStates.length) return null;
-const wrap = document.createElement("div");
-wrap.className = "history-states";
+/**
+ * One state's row. `woven`: it's heading a run of plays in Both, where the
+ * plays below already say when - so no count or time on it.
+ */
+function buildHistoryStateRow(st, { woven = false, curSig = "" } = {}) {
+const row = document.createElement("div");
+row.className = "history-state" + (woven ? " is-woven" : "") + (st.sig === curSig ? " is-active" : "");
+row.dataset.sig = st.sig;
 
-const head = document.createElement("div");
-head.className = "history-states-head";
-head.textContent = `States (${historyStates.length})`;
-wrap.appendChild(head);
-
-const cur = captureHistoryState();
-const curSig = cur ? cur.sig : "";
-const shown = historyStatesExpanded ? historyStates : historyStates.slice(0, HISTORY_STATES_SHOWN);
-
-shown.forEach(st => {
-    const row = document.createElement("div");
-    row.className = "history-state" + (st.sig === curSig ? " is-active" : "");
-
-    const go = document.createElement("button");
-    go.type = "button";
-    go.className = "history-state-go";
-    go.title = "Put these filters back";
-    const pill = (kind, text) => {
-        const p = document.createElement("span");
-        p.className = `history-state-pill hsp-${kind}`;
-        p.textContent = text;
-        go.appendChild(p);
-    };
-    historyStateClasses().forEach(k => (st.inc[k] || []).forEach(v => pill(k, v)));
-    (st.parents || []).forEach(v => pill("studio", `${v} ▸`));
-    (st.kw || []).forEach(v => pill("notekeyword", v));
-    if (historyStateTerms(st) > 1) pill(st.intersect ? "and" : "or", st.intersect ? "ALL" : "ANY");
-    if (st.q) pill("search", `🔍 ${st.q}`);
+const go = document.createElement("button");
+go.type = "button";
+go.className = "history-state-go";
+go.title = "Put these filters back";
+const pill = (kind, text) => {
+    const p = document.createElement("span");
+    p.className = `history-state-pill hsp-${kind}`;
+    p.textContent = text;
+    go.appendChild(p);
+};
+historyStateClasses().forEach(k => (st.inc[k] || []).forEach(v => pill(k, v)));
+(st.parents || []).forEach(v => pill("studio", `${v} ▸`));
+(st.kw || []).forEach(v => pill("notekeyword", v));
+if (historyStateTerms(st) > 1) pill(st.intersect ? "and" : "or", st.intersect ? "ALL" : "ANY");
+if (st.q) pill("search", `🔍 ${st.q}`);
+if (!woven) {
     const meta = document.createElement("span");
     meta.className = "history-state-meta";
     meta.textContent = `${st.plays || 1}▶ · ${historyAgo(st.at)}`;
     go.appendChild(meta);
-    go.addEventListener("click", (e) => {
-        e.stopPropagation();
-        applyHistoryState(st);
-        toggleHistory(false);
-        const ok = window.showScoreConfirmation || (typeof showScoreConfirmation === "function" ? showScoreConfirmation : null);
-        if (ok) ok("✅ State applied");
-    });
-    row.appendChild(go);
-
-    const x = document.createElement("button");
-    x.type = "button";
-    x.className = "history-state-x";
-    x.title = "Forget this state";
-    x.textContent = "×";
-    x.addEventListener("click", (e) => { e.stopPropagation(); forgetHistoryState(st.id); });
-    row.appendChild(x);
-
-    wrap.appendChild(row);
-});
-
-if (historyStates.length > HISTORY_STATES_SHOWN) {
-    const more = document.createElement("button");
-    more.type = "button";
-    more.className = "history-states-more";
-    more.textContent = historyStatesExpanded ? "Fewer" : `+${historyStates.length - HISTORY_STATES_SHOWN} more`;
-    more.addEventListener("click", (e) => {
-        e.stopPropagation();
-        historyStatesExpanded = !historyStatesExpanded;
-        refreshHistoryStatesStrip();
-    });
-    wrap.appendChild(more);
 }
+go.addEventListener("click", (e) => {
+    e.stopPropagation();
+    applyHistoryState(st);
+    toggleHistory(false);
+    const ok = window.showScoreConfirmation || (typeof showScoreConfirmation === "function" ? showScoreConfirmation : null);
+    if (ok) ok("✅ State applied");
+});
+row.appendChild(go);
+
+const x = document.createElement("button");
+x.type = "button";
+x.className = "history-state-x";
+x.title = "Forget this state";
+x.textContent = "×";
+x.addEventListener("click", (e) => { e.stopPropagation(); forgetHistoryState(st.id); });
+row.appendChild(x);
+return row;
+}
+
+/** The States view: each state once, newest first. */
+function buildHistoryStatesList() {
+const wrap = document.createElement("div");
+wrap.className = "history-states";
+if (!historyStates.length) {
+    const none = document.createElement("div");
+    none.className = "history-states-empty";
+    none.textContent = "No states yet - play a video with a filter or search armed and it shows here.";
+    wrap.appendChild(none);
+    return wrap;
+}
+const curSig = historyCurrentSig();
+historyStates.forEach(st => wrap.appendChild(buildHistoryStateRow(st, { curSig })));
 return wrap;
 }
 
-/** Just the states block - its "active" mark follows the filters, not the plays. */
-function refreshHistoryStatesStrip() {
+/** The green edge follows the filters, which change with the panel shut. */
+function refreshHistoryStateMarks() {
+const curSig = historyCurrentSig();
+document.querySelectorAll("#historyList .history-state").forEach(r => {
+    r.classList.toggle("is-active", !!curSig && r.dataset.sig === curSig);
+});
+}
+
+/* ---------- the toggle (where S.ALL and ... were) ---------- */
+function setHistoryView(v) {
+if (!HISTORY_VIEWS.some(o => o.id === v) || v === historyView) return;
+historyView = v;
+try { localStorage.setItem(HISTORY_VIEW_KEY, v); } catch (e) {}
+syncHistoryViewToggle();
+renderHistory();
 const list = document.getElementById("historyList");
-if (!list || !historyPanelIsOpen()) return;
-const old = list.querySelector(":scope > .history-states");
-const next = buildHistoryStatesStrip();
-if (old && next) old.replaceWith(next);
-else if (old) old.remove();
-else if (next) list.insertBefore(next, list.firstChild);
+if (list) list.scrollTop = 0;
+}
+
+function syncHistoryViewToggle() {
+document.querySelectorAll("#historyPanel .history-view-toggle button").forEach(b => {
+    const on = b.dataset.view === historyView;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+});
+}
+
+function buildHistoryViewToggle() {
+const tools = document.querySelector("#historyPanel .history-tools");
+if (!tools) return;
+// The old buttons, if a page still carries them.
+tools.querySelectorAll("#historySelectAllBtn, #historyMoreBtn").forEach(b => b.remove());
+if (tools.querySelector(".history-view-toggle")) { syncHistoryViewToggle(); return; }
+const seg = document.createElement("div");
+seg.className = "history-view-toggle";
+seg.setAttribute("role", "group");
+seg.setAttribute("aria-label", "Show in history");
+HISTORY_VIEWS.forEach(o => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.view = o.id;
+    b.textContent = o.label;
+    b.addEventListener("click", (e) => { e.stopPropagation(); setHistoryView(o.id); });
+    seg.appendChild(b);
+});
+tools.appendChild(seg);
+syncHistoryViewToggle();
 }
 
 function injectHistoryStatesCss() {
@@ -589,9 +653,15 @@ if (document.getElementById("scray-history-states-css")) return;
 const css = document.createElement("style");
 css.id = "scray-history-states-css";
 css.textContent = `
-#historyList .history-states { padding: 6px; margin-bottom: 6px; background: #eef1f5; border-bottom: 1px solid #d5dae1; }
-#historyList .history-states-head { font-size: 0.72rem; font-weight: bold; color: #555; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 4px 2px; }
+#historyPanel .history-tools { justify-content: flex-end; }
+#historyPanel .history-view-toggle { display: flex; flex: 0 0 50%; max-width: 50%; margin-left: auto; border-radius: 4px; overflow: hidden; background: #6c757d; }
+#historyPanel .history-view-toggle button { flex: 1 1 0; min-width: 0; margin: 0; padding: 8px 2px; border: 0; border-radius: 0; background: transparent; color: #e9ecef; font-size: 0.75rem; font-weight: normal; white-space: nowrap; cursor: pointer; }
+#historyPanel .history-view-toggle button + button { border-left: 1px solid rgba(255,255,255,0.18); }
+#historyPanel .history-view-toggle button.is-on { background: #222; color: #fff; font-weight: bold; }
+#historyList .history-states { padding: 6px; }
+#historyList .history-states-empty { padding: 12px 6px; font-size: 0.85rem; color: #777; }
 #historyList .history-state { display: flex; align-items: stretch; background: #fff; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; margin-bottom: 4px; }
+#historyList .history-state.is-woven { margin: 8px 4px 2px; background: #eef1f5; border-color: #c9d0d9; }
 #historyList .history-state.is-active { border-color: #28a745; box-shadow: inset 0 0 0 1px #28a745; }
 #historyList .history-state-go { flex: 1; min-width: 0; min-height: 34px; margin: 0; padding: 4px 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 3px; background: none; border: 0; text-align: left; font: inherit; color: inherit; cursor: pointer; }
 #historyList .history-state-pill { font-size: 0.75rem; line-height: 1.5; padding: 0 7px; border-radius: 10px; color: #fff; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
@@ -606,7 +676,7 @@ css.textContent = `
 #historyList .hsp-search { background: #fff; color: #222; border: 1px solid #999; }
 #historyList .history-state-meta { margin-left: auto; padding-left: 6px; font-size: 0.7rem; color: #888; white-space: nowrap; }
 #historyList .history-state-x { margin: 0; width: 34px; flex: 0 0 34px; padding: 0; border: 0; border-left: 1px solid #eee; background: #fafafa; color: #999; font-size: 1.05rem; cursor: pointer; }
-#historyList .history-states-more { margin: 0; padding: 2px 8px; font-size: 0.75rem; background: none; border: 0; color: #007bff; cursor: pointer; }
+#historyList .history-state.is-woven .history-state-x { background: transparent; border-left-color: #d5dae1; }
 `;
 document.head.appendChild(css);
 }
@@ -617,6 +687,8 @@ capture: captureHistoryState,
 apply: applyHistoryState,
 forget: forgetHistoryState,
 clear: clearHistoryStates,
+view: () => historyView,
+setView: setHistoryView,
 };
 
 function updateHistoryCount() {
@@ -662,9 +734,16 @@ const historyList = document.getElementById("historyList");
 if (!historyList) return;
 historyList.innerHTML = '';
 
-// Filter states (15.109 / 15.130) above the plays.
-const statesEl = buildHistoryStatesStrip();
-if (statesEl) historyList.appendChild(statesEl);
+// States only (15.110 / 15.131): each state once, no plays.
+if (historyView === "states") {
+    historyList.appendChild(buildHistoryStatesList());
+    updateHistoryCount();
+    return;
+}
+// Both: a state's row above the run of plays made from it (15.110 / 15.131).
+const weave = historyView === "both";
+const curSig = weave ? historyCurrentSig() : "";
+let lastStateId = null;
 
 // 🔒 Private folders stay out while locked (picker 15.62 / native 15.73).
 const totalSize = historyVideos.reduce((acc, v) => acc + ((window.scrayPrivate && window.scrayPrivate.hides(v)) ? 0 : (v.sizeBytes || 0)), 0);
@@ -686,6 +765,12 @@ if (typeof window.scrayBuildListHeader === 'function') {
 
 historyVideos.forEach((video, idx) => {
 if (window.scrayPrivate && window.scrayPrivate.hides(video)) return;   // 🔒 (picker 15.62 / native 15.73)
+if (weave) {
+    const sid = historyStateHids[video.historyId] || null;
+    const st = sid && sid !== lastStateId ? historyStates.find(s => s.id === sid) : null;
+    if (st) historyList.appendChild(buildHistoryStateRow(st, { woven: true, curSig }));
+    lastStateId = sid;
+}
 
 // ✅ Compact buttons with overflow menu
 const buttons = [
@@ -887,7 +972,7 @@ updateHistoryHighlights();
 // Goes into the shared list (15.123): shown here at once, sent a moment later.
 function addToHistory(video, listContext = null) {
 // The filters it was played from become a state (15.109 / 15.130).
-commitHistoryState(listContext);
+const stateId = commitHistoryState(listContext);
 
 let oneDriveId = video.oneDriveId ?? video.idFromAPI ?? null;
 let driveId = video.driveId ?? null;
@@ -915,6 +1000,7 @@ if (last && last.key === key) {
     const shown = historyVideos.find(v => v.historyId === last.hid);
     if (shown) shown.playedAt = now;
     else rebuildHistoryVideos();
+    noteHistoryStatePlay(last.hid, stateId);
     queueHistoryOp({ op: "add", hid: last.hid, key, at: now });
     renderHistory();
     console.log(`Updated timestamp for already-recent video: ${video.filename}`);
@@ -938,6 +1024,7 @@ const keep = new Set(historyEntries.map(e => e.hid));
 historyVideos = historyVideos.filter(v => keep.has(v.historyId));
 
 window.historyVideos = historyVideos;
+noteHistoryStatePlay(hid, stateId);
 queueHistoryOp({ op: "add", hid, key, at: now });
 renderHistory();
 console.log(`Added to history: ${video.filename}`);
@@ -951,7 +1038,7 @@ panel.classList.toggle("history-open", isOpening);
 // Rows are only built while the panel is open (13.182) - catch up now.
 if (isOpening && historyRowsStale) renderHistory();
 // The states' active mark follows the filters, which change with the panel shut.
-else if (isOpening) refreshHistoryStatesStrip();
+else if (isOpening) refreshHistoryStateMarks();
 // ...and with what the other players have added since (15.123).
 if (isOpening && historyReady) {
     pullHistory();
@@ -966,6 +1053,8 @@ historyEntries = [];
 historyVideos = [];
 window.historyVideos = historyVideos;
 resetHistoryPlayIndex(); // ✅ Reset play index when history clears
+historyStateHids = {};
+saveHistoryStateHids();
 queueHistoryOp({ op: "clear", at: Date.now() });
 renderHistory();
 console.log("History cleared");
@@ -1253,72 +1342,9 @@ if (typeof window.playHistorySequence === 'function') {
 }
 });
 
-document.getElementById("historySelectAllBtn")?.addEventListener("click", () => {
- historyVideos.forEach(v => selectedHistoryIds.add(v.historyId));
- renderHistory();
-});
-
-// ✅ Overflow menu button for history
-document.getElementById("historyMoreBtn")?.addEventListener("click", (e) => {
-   const subset = historyVideos.filter(v => selectedHistoryIds.has(v.historyId));
-   
-   const actions = [
-       {
-           label: "CLR - Clear Selection",
-           onClick: () => clearHistorySelection()
-       },
-       {
-         label: "REM - Remove Selected",
-         onClick: () => {
-             if (!selectedHistoryIds.size) {
-                 alert("No history items selected to remove");
-                 return;
-             }
-             // From the shared list too (15.123), so every player loses them.
-             const hids = [...selectedHistoryIds];
-             historyEntries = historyEntries.filter(e => !selectedHistoryIds.has(e.hid));
-             historyVideos = historyVideos.filter(v => !selectedHistoryIds.has(v.historyId));
-             window.historyVideos = historyVideos;
-             resetHistoryPlayIndex(); // ✅ Reset play index when history changes
-             clearHistorySelection();
-             queueHistoryOp({ op: "remove", hids });
-             renderHistory();
-         }
-     },
-       {
-           label: "CSV - Export to CSV",
-           onClick: () => {
-               if (!subset.length) {
-                   alert("No history items selected to export");
-                   return;
-               }
-               exportHistorySubsetToCSV(subset);
-           }
-       },
-       {
-           label: "TAG - Filter by Tags",
-           onClick: () => showHistoryTagSelector()
-       },
-       {
-           label: "CLR STATES - Forget Filter States",
-           onClick: () => {
-               if (!historyStates.length) { alert("No filter states to forget"); return; }
-               if (confirm(`Forget all ${historyStates.length} filter states?\n\nOnly on this device - the plays stay.`)) clearHistoryStates();
-           }
-       },
-       {
-           label: "CLR ALL - Clear Entire History",
-           color: "#f44336",
-           onClick: () => {
-               if (confirm("Clear entire history?\n\nHistory is shared, so this clears it on every player.")) {
-                   clearHistory();
-               }
-           }
-       }
-   ];
-   
-   showContextMenu(actions, e);
-});
+// S.ALL and ... are gone (15.110 / 15.131); the Both / Videos / States toggle
+// sits where ... was, clear of the floating pills.
+buildHistoryViewToggle();
 
 renderHistory();
 

@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.110 / native 15.131 — test: states woven into history, view toggle
+<!-- 2026-10-06T19:30Z -->
+- **Asked (after testing 15.109 / 15.130):** weave the states in among the videos in the order they happened; a toggle at the top of the history panel for videos only, states only or both; and the floating pills were covering the panel's S.ALL and ... buttons - remove them and make ... the toggle.
+- **Woven (history.js, identical in both apps):** each play made from a state now notes which one (`historyStateHids`, entry id -> state id, localStorage `scray_history_state_hids_v1`, pruned to the entries still in history and emptied by CLR ALL). In **Both**, a state's row sits above the run of plays made from it, newest first - so the same state shows again wherever you went back to it, and a play from the basket, history or another player breaks the run. Its row there has no count or time (the plays under it say when). The same video played twice in a row from a different state moves to that state.
+- **Toggle:** **Both · Videos · States** where ... was - the right half of the bar, clear of the pills. Videos is the plays as before; States is each state once, newest first, with plays ▶ and how long ago (and a line saying how to make one when there are none). Remembered on the device (`scray_history_view_v1`), Both to start. Built by history.js into `.history-tools`, so the bookmarks page (and Picker's basket checkout) get it too.
+- **Removed:** S.ALL and ... - and so the panel's CLR (selection), REM, CSV, TAG, CLR ALL and CLR STATES menu - from index, bookmarks and basket checkout. × on a state still forgets it (everywhere it shows); the functions behind the old menu are still there, just not on a button.
+- Checked: `node --check`; jsdom on both copies - a run of plays from one state, a basket play, a search state, back to the first state and a play from history weave in that order with the right rows; Videos and States views (each once, with counts); the toggle's mark and its stored choice; applying from States (filters swapped, panel shut, toast) and the green edge moving when reopened; × removing a state's woven rows but not its plays; the same video replayed from another state moving under it; the empty States line; CLR ALL emptying the play map.
+
 ### picker 15.109 / native 15.130 — test: history filter states
 <!-- 2026-10-06T19:06Z -->
 - **Asked:** remember search / filter combinations as states in the history panel, to tap and put back - but only once a video has been played from them; picking filters alone shouldn't save anything.

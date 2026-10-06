@@ -11155,7 +11155,7 @@ const previewOnly = !!(opts && opts.preview);
 
 // 📝 ADD TO HISTORY IMMEDIATELY (before attempting play)
 if (!previewOnly && typeof window.addToHistory === 'function') {
-window.addToHistory(video);
+window.addToHistory(video, listContext);   // listContext: filter states (15.109 / 15.130)
 }
 
 // Open a watch session. Nothing is recorded here - view_count and

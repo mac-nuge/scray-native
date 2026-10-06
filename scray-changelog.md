@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.109 / native 15.130 — test: history filter states
+<!-- 2026-10-06T19:06Z -->
+- **Asked:** remember search / filter combinations as states in the history panel, to tap and put back - but only once a video has been played from them; picking filters alone shouldn't save anything.
+- **How it works (history.js, identical in both apps):** a state is the include picks of every class (tags, studios, performers, Stash tags, notes), studio groups, note keywords, the ALL / ANY switches, and the search term. `addToHistory` now gets the play's list context (player.js passes it) and commits what's armed only for ⚙️ `HISTORY_STATE_CONTEXTS` - `main` (the list, X / > / <) and `random` - so plays from history, the basket or anywhere else save nothing. With nothing armed there's no state; file types alone don't count (mp4 on open is a setting, not a filter you play from).
+- **In the panel:** a **States** block above the plays, newest first, each as its coloured pills (search as 🔍 term) with plays ▶ and how long ago. Playing from the same state again moves it to the top and counts the play (search compared without case). The one matching what's armed now has a green edge. Tap one to put its picks and search back in place of the current ones - the tag dropdowns are set to match so a later pick doesn't bring the old tags back; excludes, file types, score, orientation and the Stash / BM toggles are left as they are. The panel shuts and a ✅ State applied shows. × forgets one; ... > **CLR STATES** forgets them all.
+- ⚙️ `HISTORY_STATES_MAX` 20 kept, ⚙️ `HISTORY_STATES_SHOWN` 4 shown before +n more.
+- Kept on this device only (localStorage `scray_history_states_v1`) - the shared play list on the server has no room for them, so Picker and Native each have their own.
+- Checked: `node --check`; jsdom on both copies - arming filters commits nothing, plays from history / basket / no context commit nothing, a play from main or random commits, the same state again doesn't duplicate (plays counted, search case ignored), file type alone isn't a state, the panel block and its active mark (moving after a state is applied with the panel shut), tapping one (picks replaced, search cleared, file types left, dropdowns synced, panel shut, toast), ×, the 20 cap and +n more.
+
 ### picker 15.108 / native 15.129 — test: Hetzner streams never wait forever
 <!-- 2026-10-05T16:30Z -->
 - **Reported:** a few Hetzner videos in Native this morning wouldn't load or got stuck, where they usually start almost at once; the same files downloaded and played fine. Couldn't be repeated later.

@@ -322,7 +322,8 @@ return removed;
 window.removeFromHistoryByVideoId = removeFromHistoryByVideoId;
 
 /* =========================================
-   History states (picker 15.109 / native 15.130, woven in picker 15.110 / native 15.131)
+   History states (picker 15.109 / native 15.130, woven in picker 15.110 / native 15.131,
+   clear of the pills in picker 15.111 / native 15.132)
 
    A state is what you'd filtered the list down to: the include picks of every
    class (tags, studios, performers, Stash tags, notes), studio groups, note
@@ -364,6 +365,30 @@ if (typeof historyStateHids !== "object" || Array.isArray(historyStateHids)) his
 let historyView = (() => {
     try { const v = localStorage.getItem(HISTORY_VIEW_KEY); return HISTORY_VIEWS.some(o => o.id === v) ? v : "both"; }
     catch (e) { return "both"; }
+})();
+
+// 15.109 / 15.130 saved states without noting their plays. Each state's time
+// is its last play's, to the millisecond or two, so that play gets its state
+// back - once per device (15.111 / 15.132).
+(() => {
+    const FLAG = "scray_history_state_backfill_v1";
+    try { if (localStorage.getItem(FLAG)) return; } catch (e) { return; }
+    let n = 0;
+    historyStates.forEach(st => {
+        // The closest play, and only a close one - the two times are taken a few ms apart.
+        let e = null, best = 250;   // ⚙️ ms
+        historyEntries.forEach(x => {
+            if (historyStateHids[x.hid]) return;
+            const d = Math.abs((Number(x.at) || 0) - (Number(st.at) || 0));
+            if (d <= best) { best = d; e = x; }
+        });
+        if (e) { historyStateHids[e.hid] = st.id; n++; }
+    });
+    try {
+        localStorage.setItem(HISTORY_STATE_HIDS_KEY, JSON.stringify(historyStateHids));
+        localStorage.setItem(FLAG, "1");
+    } catch (e) {}
+    if (n) console.log(`[history] ${n} earlier play${n === 1 ? "" : "s"} matched to their state`);
 })();
 
 function saveHistoryStates() {
@@ -647,6 +672,40 @@ HISTORY_VIEWS.forEach(o => {
 tools.appendChild(seg);
 syncHistoryViewToggle();
 }
+
+
+/* ---------- clear of the floating pills (15.111 / 15.132) ----------
+   #floatingTagPillsBar is fixed across the top of the screen, over the
+   panel, and wraps to as many rows as there are pills. While the panel is
+   open its top is padded down to just below the bar, so the toggle and the
+   rows start where the pills end - and follow them as they change. */
+const HISTORY_PILLS_GAP_PX = 6;   // ⚙️ between the pills and the toggle
+let historyPillsObserver = null;
+
+function syncHistoryPanelClearance() {
+const panel = document.getElementById("historyPanel");
+if (!panel) return;
+let pad = 0;
+const bar = document.getElementById("floatingTagPillsBar");
+if (panel.classList.contains("history-open") && bar) {
+    const b = bar.getBoundingClientRect();
+    const p = panel.getBoundingClientRect();
+    if (b.height > 0 && getComputedStyle(bar).display !== "none" && getComputedStyle(bar).visibility !== "hidden") {
+        pad = Math.max(0, Math.ceil(b.bottom - p.top + HISTORY_PILLS_GAP_PX));
+    }
+}
+panel.style.boxSizing = pad ? "border-box" : "";
+panel.style.paddingTop = pad ? `${pad}px` : "";
+}
+
+function watchHistoryPillsBar() {
+const bar = document.getElementById("floatingTagPillsBar");
+if (!bar || historyPillsObserver || typeof ResizeObserver !== "function") return;
+historyPillsObserver = new ResizeObserver(() => { if (historyPanelIsOpen()) syncHistoryPanelClearance(); });
+historyPillsObserver.observe(bar);
+}
+window.addEventListener("resize", () => { if (historyPanelIsOpen()) syncHistoryPanelClearance(); });
+window.addEventListener("orientationchange", () => setTimeout(syncHistoryPanelClearance, 300));
 
 function injectHistoryStatesCss() {
 if (document.getElementById("scray-history-states-css")) return;
@@ -1035,6 +1094,7 @@ const panel = document.getElementById("historyPanel");
 if (!panel) return;
 const isOpening = open ?? !panel.classList.contains("history-open");
 panel.classList.toggle("history-open", isOpening);
+syncHistoryPanelClearance();   // below the floating pills (15.111 / 15.132)
 // Rows are only built while the panel is open (13.182) - catch up now.
 if (isOpening && historyRowsStale) renderHistory();
 // The states' active mark follows the filters, which change with the panel shut.
@@ -1345,6 +1405,7 @@ if (typeof window.playHistorySequence === 'function') {
 // S.ALL and ... are gone (15.110 / 15.131); the Both / Videos / States toggle
 // sits where ... was, clear of the floating pills.
 buildHistoryViewToggle();
+watchHistoryPillsBar();
 
 renderHistory();
 
@@ -1427,6 +1488,7 @@ if (historyPanel) {
         if (isSwiping && touchStartX - touchEndX > 50) {
             e.preventDefault();
             historyPanel.classList.remove("history-open");
+            syncHistoryPanelClearance();
         }
         
         // Reset

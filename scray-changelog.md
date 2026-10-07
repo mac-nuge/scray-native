@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.114 / native 15.135 — test: picture viewer keeps rotation, no full screen
+<!-- 2026-10-07T09:56Z -->
+- **Asked (testing 15.113 / 15.134):** the full-screen button for pictures doesn't work and isn't needed - remove it; and once a picture is rotated, keep that rotation while swiping through the rest.
+- **Full screen gone (scray-image-viewer.js):** the ⛶ button, its F key and the code behind it. In the apps it never could work - iOS only lets a video go full screen - and the viewer already fills the screen; a single tap still hides the bars. The bar is now ‹ ⟲ ⟳ − + ›.
+- **Rotation kept:** moving to another picture (swipe, ‹ ›, arrow keys) keeps the quarter-turn and refits the new picture for it; zoom still resets per picture. Closing the viewer forgets it - the next open starts upright.
+- **Browse:** its copy of the viewer is untouched; it catches up the next time browse moves.
+- Checked: `node --check`; headless Chromium - six buttons in the bar, R then next keeps 90° with the new picture refitted, a fresh open is upright, and the rest of the viewer suite.
+
 ### picker 15.113 / native 15.134 — test: picture viewer clear of the dock
 <!-- 2026-10-07T09:52Z -->
 - **Reported (testing 15.112 / 15.133):** in the apps the corner dock - X, R, H, Xn, Xb, 🔍, BM, 🌐, COL - sat on top of the picture viewer's bottom bar, so the two rows of buttons clashed.

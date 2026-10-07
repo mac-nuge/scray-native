@@ -6,9 +6,11 @@
 // when one is played this opens instead of the video player.
 //
 //   - pinch, wheel or double-tap to zoom (up to 8x), drag to pan when zoomed
-//   - ⟲ / ⟳ rotate a quarter turn (R / Shift+R)
-//   - ⛶ full screen (the browser's own where it has one; on an iPhone, where
-//     only <video> can go full screen, it hides the bars instead)
+//   - ⟲ / ⟳ rotate a quarter turn (R / Shift+R); the turn stays as you swipe
+//     on through the pictures, until the viewer closes (picker 15.114 /
+//     native 15.135)
+//   (The ⛶ full-screen button went in picker 15.114 / native 15.135 - it did
+//   nothing in the apps, and the viewer fills the screen anyway.)
 //   - swipe left / right (or ‹ › and the arrow keys) for the next / previous
 //     picture in the list it was opened from; swipe down or Esc to close
 //   - a single tap shows / hides the bars
@@ -146,7 +148,6 @@ html.siv-open #cornerButtons{display:none!important}
       mkBtn('⟳', 'Rotate right (R)', () => rotate(90)),
       mkBtn('−', 'Zoom out (-)', () => zoomBy(1 / 1.6)),
       mkBtn('+', 'Zoom in (+)', () => zoomBy(1.6)),
-      mkBtn('⛶', 'Full screen (F)', toggleFullscreen),
       nextBtn
     );
 
@@ -341,7 +342,6 @@ html.siv-open #cornerButtons{display:none!important}
     else if (k === 'ArrowRight' || k === 'PageDown' || k === ' ') go(1);
     else if (k === 'ArrowLeft' || k === 'PageUp') go(-1);
     else if (k === 'r' || k === 'R') rotate(e.shiftKey ? -90 : 90);
-    else if (k === 'f' || k === 'F') toggleFullscreen();
     else if (k === '+' || k === '=') zoomBy(1.6);
     else if (k === '-' || k === '_') zoomBy(1 / 1.6);
     else if (k === '0') resetView(true);
@@ -390,24 +390,6 @@ html.siv-open #cornerButtons{display:none!important}
   }
 
   function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
-  function toggleFullscreen() {
-    if (fsElement()) {
-      (document.exitFullscreen || document.webkitExitFullscreen || function () {}).call(document);
-      return;
-    }
-    const req = root.requestFullscreen || root.webkitRequestFullscreen;
-    if (req) {
-      try {
-        const r = req.call(root);
-        if (r && typeof r.then === 'function') r.then(() => setBare(true)).catch(() => setBare(!bare));
-        else setBare(true);
-        return;
-      } catch (_) { /* falls through */ }
-    }
-    // iPhone: only <video> goes full screen. The overlay already fills the
-    // screen, so "full screen" means nothing on it but the picture.
-    setBare(!bare);
-  }
 
   // ---------------------------------------------------------------- items
   async function urlFor(it) {
@@ -443,7 +425,9 @@ html.siv-open #cornerButtons{display:none!important}
     const it = S.items[S.index];
     const seq = ++loadSeq;
     paintHead();
-    rot = 0; scale = 1; tx = from ? from * W() * 0.25 : 0; ty = 0;
+    // The turn is kept (picker 15.114 / native 15.135): rotate once and every
+    // picture you swipe to comes up the same way round. fit() sizes for it.
+    scale = 1; tx = from ? from * W() * 0.25 : 0; ty = 0;
     img.style.opacity = '0';
     img.removeAttribute('src');
     noteEl.textContent = 'Loading…';
@@ -505,6 +489,7 @@ html.siv-open #cornerButtons{display:none!important}
     S = { items, index: Math.max(0, Math.min(items.length - 1, (opts.index | 0))), onShow: opts.onShow, onClose: opts.onClose };
     if (!wasOpen) {
       setBare(false);
+      rot = 0;                         // a fresh open starts upright
       root.style.background = '';
       // Opened from a player in the browser's own full screen (a desktop
       // MPFS): only that element is drawn, so the viewer goes inside it.

@@ -14,9 +14,19 @@
 //   - a single tap shows / hides the bars
 //
 // The same file is copied into scray-picker, scray-native/assets/web and
-// scray-browse: keep the three in step. It touches nothing at load - player.js
-// and friends load from <head> via document.write, before <body> exists - and
-// builds its overlay the first time it opens.
+// scray-browse: keep the three in step. (picker 15.113 / native 15.134 added
+// the dock handling below; browse has no dock, so its copy catches up the next
+// time browse itself moves.)
+//
+// THE DOCK (picker 15.113 / native 15.134). disguise.js's corner dock - X, R,
+// H, Xn, Xb, 🔍, BM, 🌐, COL - sits above everything, the viewer included, so
+// it landed on the viewer's bar. While a picture is open the dock keeps COL
+// only, as it does in FLS (the rest would only play things under the viewer),
+// and the viewer's bar / title row move clear of wherever COL is.
+//
+// It touches nothing at load - player.js and friends load from <head> via
+// document.write, before <body> exists - and builds its overlay the first
+// time it opens.
 //
 //   scrayImageViewer.open({ items, index, onShow, onClose })
 //       items: [{ name, sub?, url? | load: async () => url }]
@@ -79,6 +89,10 @@
   border-radius:9px;max-width:80%;text-align:center;pointer-events:none}
 .siv-note:empty{display:none}
 .siv.siv-bare .siv-top,.siv.siv-bare .siv-bar,.siv.siv-bare .siv-side{opacity:0;pointer-events:none}
+/* The dock while a picture is open: COL only, at the right (see THE DOCK). */
+html.siv-open #scrayDisguiseDock > :not(#scrayDisguiseControl){display:none!important}
+html.siv-open #scrayDisguiseDock{justify-content:flex-end!important}
+html.siv-open #cornerButtons{display:none!important}
 .siv-inline{display:block;max-width:100%;max-height:100%;margin:auto;object-fit:contain;cursor:zoom-in;image-orientation:from-image}
 `;
     (document.head || document.documentElement).appendChild(st);
@@ -144,6 +158,8 @@
 
     root.append(stage, sidePrev, sideNext, top, bar, noteEl);
     root._side = [sidePrev, sideNext];
+    root._top = top;
+    root._bar = bar;
 
     stage.addEventListener('pointerdown', onDown);
     stage.addEventListener('pointermove', onMove);
@@ -336,7 +352,31 @@
     if (used) e.preventDefault();
   }
 
+  /**
+   * Keep the bars clear of the dock's COL (see THE DOCK): in the lower half of
+   * the screen (a phone) the bottom bar sits above it; in the upper half
+   * (desktop) the title row stops short of it. No COL showing, no change.
+   */
+  function clearDock() {
+    if (!root || !S) return;
+    root._bar.style.bottom = '';
+    root._top.style.paddingRight = '';
+    const col = document.getElementById('scrayDisguiseControl');
+    if (!col) return;
+    const r = col.getBoundingClientRect();
+    if (!r.width || !r.height || getComputedStyle(col).visibility === 'hidden') return;
+    const vh = window.innerHeight, vw = window.innerWidth;
+    if (r.top + r.height / 2 > vh / 2) {
+      // Only when they'd actually meet: the bar is centred, COL is in a corner.
+      const b = root._bar.getBoundingClientRect();
+      if (r.left < b.right + 6 && r.right > b.left - 6) root._bar.style.bottom = (vh - r.top + 10) + 'px';
+    } else if (r.left > vw / 2) {
+      root._top.style.paddingRight = (vw - r.left + 8) + 'px';
+    }
+  }
+
   function onResize() {
+    clearDock();
     if (!S || !img.naturalWidth) return;
     fit();
     clamp();
@@ -473,6 +513,8 @@
       if (fsEl && fsEl.tagName !== 'VIDEO') host = fsEl;
       else if (fsEl) { try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (_) { /* fine */ } }
       host.appendChild(root);
+      document.documentElement.classList.add('siv-open');
+      requestAnimationFrame(clearDock);
       savedOverflow = document.documentElement.style.overflow;
       document.documentElement.style.overflow = 'hidden';
       document.addEventListener('keydown', onKey, true);
@@ -497,6 +539,7 @@
     document.removeEventListener('fullscreenchange', onResize);
     document.removeEventListener('webkitfullscreenchange', onResize);
     document.documentElement.style.overflow = savedOverflow || '';
+    document.documentElement.classList.remove('siv-open');
     img.removeAttribute('src');
     if (root.parentNode) root.parentNode.removeChild(root);
     if (typeof s.onClose === 'function') { try { s.onClose(s.items[s.index], s.index); } catch (err) { console.warn('[image-viewer] onClose', err); } }

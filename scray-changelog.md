@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.113 / native 15.134 — test: picture viewer clear of the dock
+<!-- 2026-10-07T09:52Z -->
+- **Reported (testing 15.112 / 15.133):** in the apps the corner dock - X, R, H, Xn, Xb, 🔍, BM, 🌐, COL - sat on top of the picture viewer's bottom bar, so the two rows of buttons clashed.
+- **Why:** the dock lives in disguise.js's layer at the very top of the stacking order (2147483647), above the viewer (2147483000) - deliberately, so COL is never covered. The viewer didn't know it was there.
+- **Fix (scray-image-viewer.js, identical in both apps):** while a picture is open, `html.siv-open` trims the dock to COL alone at the right, as FLS does - the others would only play things underneath the viewer - and hides `#cornerButtons`. The viewer then measures COL: in the lower half of the screen (phone) its bar lifts above COL if they'd meet; in the upper half (desktop) the title row stops short of it. Re-measured on resize / rotation; closing puts the dock back as it was.
+- **Browse:** its copy of the viewer is left as it was (no dock there); it picks this up the next time browse moves.
+- Checked: headless Chromium with the real disguise.js at phone landscape, phone portrait and desktop - the dock down to COL, no overlap with the bar or the counter, the bar lifted in portrait (46 px), the dock restored on close; the 15.112 viewer suite again.
+
 ### picker 15.112 / native 15.133 / browse 15.186 — test: pictures in the library
 <!-- 2026-10-07T08:43Z -->
 - **Asked:** manage and view pictures across the suite, in the apps and on the Scray pages - upload them with Upload/Folders, migrate them, a TYPE filter that shows which types are pictures (shaded differently), and play/preview showing the picture with pinch zoom, full screen, rotate and swipe to the next one.

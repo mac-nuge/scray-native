@@ -273,6 +273,8 @@
     (all || []).forEach(v => {
       if (!v || !v.filename) return;
       if (v.inCatalogue === false) return;     // phone-only: no catalogue row to match onto
+      // A picture (native 15.133) is never a StashDB scene.
+      if (typeof window.scrayIsImageFile === 'function' && window.scrayIsImageFile(v)) return;
       const k = keyOf(v);
       if (!k || seen.has(k)) return;
       seen.add(k);

@@ -1,6 +1,7 @@
 import ExpoModulesCore
 import WebKit
 import AVFoundation
+import ImageIO
 
 // Proxy exists because WKUserContentController needs a handler registered
 // *before* the WKWebView is created (its configuration is copied at init time),
@@ -256,6 +257,19 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
                     if let rate = try? await track.load(.estimatedDataRate) {
                         bitrate = Double(rate)
                     }
+                }
+
+                // A picture (native 15.133) has no video track: its pixel size
+                // comes from ImageIO, turned for an EXIF orientation of 5-8.
+                if width == nil,
+                   BookmarkStore.imageExtensions.contains(fileURL.pathExtension.lowercased()),
+                   let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
+                   let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                   let pixelWidth = (props[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+                   let pixelHeight = (props[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue {
+                    let turned = ((props[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1) >= 5
+                    width = turned ? pixelHeight : pixelWidth
+                    height = turned ? pixelWidth : pixelHeight
                 }
 
                 var sizeBytes: Int64?

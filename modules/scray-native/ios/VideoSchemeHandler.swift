@@ -132,6 +132,10 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
                 if let s = parts.first, let sVal = Int64(s) { start = sVal }
                 if parts.count > 1, let e = Int64(parts[1]) { end = e }
                 statusCode = 206
+            } else if BookmarkStore.imageExtensions.contains((file.path as NSString).pathExtension.lowercased()) {
+                // A picture (native 15.133): an <img> never asks for the rest,
+                // so it gets the whole file in one 200, not the first chunk.
+                statusCode = 200
             } else {
                 end = min(fileSize - 1, Self.initialChunk - 1)
                 statusCode = fileSize > Self.initialChunk ? 206 : 200
@@ -239,6 +243,16 @@ class VideoSchemeHandler: NSObject, WKURLSchemeHandler {
         case "mov": return "video/quicktime"
         case "mkv": return "video/x-matroska"
         case "avi": return "video/x-msvideo"
+        // Pictures (native 15.133), so the image viewer's <img> gets a real type.
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        case "heic": return "image/heic"
+        case "heif": return "image/heif"
+        case "bmp": return "image/bmp"
+        case "tif", "tiff": return "image/tiff"
+        case "avif": return "image/avif"
         default: return "video/mp4"
         }
     }

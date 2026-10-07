@@ -1037,6 +1037,19 @@ function scrayFileTypeOf(video) {
 window.scrayFileTypeOf = scrayFileTypeOf;
 
 /**
+ * Picture types (native 15.133). Pictures sit in the library beside the videos - the
+ * same rows, filters, basket, uploads and migration. These are the TYPE chips
+ * and pills shaded as pictures, and what player.js opens in the image viewer
+ * (scray-image-viewer.js) instead of the video player. Kept in step with the
+ * viewer's IMAGE_EXT and api.php's SCRAY_IMAGE_EXT.
+ */
+window.SCRAY_IMAGE_TYPES = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'tif', 'tiff', 'avif'];
+function scrayIsImageType(ext) { return window.SCRAY_IMAGE_TYPES.includes(String(ext || '').toLowerCase()); }
+function scrayIsImageFile(video) { return scrayIsImageType(scrayFileTypeOf(video)); }
+window.scrayIsImageType = scrayIsImageType;
+window.scrayIsImageFile = scrayIsImageFile;
+
+/**
  * Add one term to a class and re-run the filter.
  *
  * This is what the list-row chips and the stash modal call. It replaces the
@@ -1797,6 +1810,9 @@ async function showTagCloudModal(kind) {
        names.sort(scrayCloudSort === 'alpha'
            ? (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })
            : (a, b) => (counts.get(b) - counts.get(a)) || a.localeCompare(b));
+       // TYPE: the picture types after the video ones (native 15.133). sort is stable,
+       // so each group keeps the order just chosen.
+       if (kind === 'filetype') names.sort((a, b) => scrayIsImageType(a) - scrayIsImageType(b));
 
        // What "Select all shown" means, kept here so it can never disagree
        // with what is actually painted.
@@ -1827,6 +1843,8 @@ async function showTagCloudModal(kind) {
            const btn = document.createElement('button');
            btn.type = 'button';
            btn.className = 'tag-selection-item scray-cloud-item scray-cloud-' + kind;
+           // A picture type is shaded apart from the video ones (native 15.133).
+           if (kind === 'filetype' && scrayIsImageType(name)) btn.classList.add('scray-cloud-image');
            btn.textContent = name;
            // Found by a credited-as name: say which (picker 15.57 / native 15.68).
            const asHit = asHitOf(name);
@@ -2647,6 +2665,7 @@ window.SCRAY_FACET_CLASSES.forEach(kind => {
    Array.from(set).forEach(val => {
        const fPill = document.createElement("span");
        fPill.className = "floating-tag-pill " + meta.pill;
+       if (kind === "filetype" && scrayIsImageType(val)) fPill.classList.add("is-image");
        fPill.textContent = val;
        fPill.title = "Click to remove this filter";
        fPill.addEventListener("click", () => {
@@ -2668,6 +2687,7 @@ window.SCRAY_FACET_CLASSES.forEach(kind => {
    Array.from(exSet).forEach(val => {
        const xPill = document.createElement("span");
        xPill.className = "floating-tag-pill floating-tag-fexclude fx-" + kind;
+       if (kind === "filetype" && scrayIsImageType(val)) xPill.classList.add("is-image");
        xPill.textContent = "\u2212 " + val;
        xPill.title = "Excluded - click to stop excluding it";
        xPill.addEventListener("click", () => {

@@ -5,10 +5,15 @@ class BookmarkStore {
 
     /// What the library scan counts as a video. Widened in native 15.77 now
     /// that VLC plays what AVFoundation can't (ScrayVLCPlayer.swift).
-    static let videoExtensions: Set<String> = [
+    /// Pictures (native 15.133): listed beside the videos, and opened in the
+    /// web layer's image viewer (scray-image-viewer.js) instead of a player.
+    static let imageExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp", "tif", "tiff", "avif"
+    ]
+    static let videoExtensions: Set<String> = Set<String>([
         "mp4", "mkv", "mov", "m4v", "avi",
         "wmv", "asf", "flv", "mpg", "mpeg", "rm", "rmvb", "webm"
-    ]
+    ]).union(BookmarkStore.imageExtensions)
     private var resolvedRoot: URL?
     private var didAttemptResolve = false
 

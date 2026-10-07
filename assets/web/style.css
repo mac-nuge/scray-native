@@ -8498,3 +8498,15 @@ body.fullscreen-active:not(.fls-peek) #bulkActionBar { display: none !important;
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.35; }
 }
+
+/* 🖼 PICTURES (native 15.133). Picture types in the TYPE cloud and the pills bar are
+   shaded pink, apart from the slate video types, so it's plain at a glance
+   which chips are pictures. The image viewer's own styles live in
+   scray-image-viewer.js, which injects them the first time it opens. */
+.scray-cloud-item.scray-cloud-image          { background: #fce4ec; color: #880e4f; box-shadow: inset 3px 0 0 #d81b60; }
+.scray-cloud-item.scray-cloud-image::before  { content: "🖼"; font-size: 0.85em; }
+.scray-cloud-item.scray-cloud-image:hover    { background: #f8bbd0; color: #880e4f; }
+.scray-cloud-item.scray-cloud-image.is-on    { background: #d81b60; color: #fff; }
+.scray-cloud-item.scray-cloud-image.is-ex    { background: #f94144; color: #fff; box-shadow: none; }
+.floating-tag-filetype.is-image              { background-color: #d81b60; }
+.floating-tag-fexclude.fx-filetype.is-image  { border-left-color: #d81b60; }

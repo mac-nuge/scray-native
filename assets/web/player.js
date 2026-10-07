@@ -10965,7 +10965,69 @@ function scrayKeepPlayedRowAbovePlayer(video) {
     }, SCRAY_ROW_SETTLE_MS[SCRAY_ROW_SETTLE_MS.length - 1] + 100);
 }
 
+// ========================
+// PICTURES (native 15.133)
+// ========================
+// A picture in the library opens in the image viewer (scray-image-viewer.js)
+// instead of the video player: pinch / double-tap zoom, rotate, full screen,
+// and swiping walks the PICTURES of the list it was played from - the videos
+// in that list are stepped over. Each picture shown becomes the playing file
+// (green row, history, and where < and > walk on from once the viewer
+// closes), the way a video does. There is no watch time, so no view is
+// counted. Any video playing is paused, not stopped.
+function scrayPlayImage(video, listContext = null, index = null, opts = {}) {
+    if (listContext === 'history') {
+        const placed = scrayPlaceHistoryPlay(video, index);
+        currentListContext = placed.context;
+        currentVideoIndex = placed.index;
+    } else {
+        currentListContext = listContext;
+        currentVideoIndex = index;
+    }
+    try { window.plyrPlayer?.pause?.(); } catch (err) { /* nothing playing */ }
+    const previewOnly = !!(opts && opts.preview);
+    const fullList = (currentListContext !== null && Array.isArray(getVideoListByContext())) ? getVideoListByContext() : [];
+    const idOf = v => (v ? (v.oneDriveId ?? v.idFromAPI ?? v.filename ?? null) : null);
+    let pics = fullList.filter(v => v && window.scrayIsImageFile(v));
+    let at = pics.indexOf(video);
+    if (at < 0 && idOf(video) != null) at = pics.findIndex(v => idOf(v) === idOf(video));
+    if (at < 0) { pics = [video]; at = 0; }
+    const items = pics.map(v => ({
+        video: v,
+        name: v.filename || v.name || '',
+        sub: v.path || '',
+        load: async () => { await refreshVideoBeforeUse(v); return v.downloadUrl; }
+    }));
+    let first = true;
+    const opened = window.scrayImageViewer.open({
+        items,
+        index: at,
+        onShow: (it) => {
+            const v = it.video;
+            window.currentPlayingVideo = v;
+            if (!first) {
+                const li = fullList.indexOf(v);
+                if (li >= 0) currentVideoIndex = li;
+            }
+            window.scrayMarkPlayingRows?.();
+            if (!previewOnly && typeof window.addToHistory === 'function') {
+                window.addToHistory(v, first ? listContext : currentListContext);
+            }
+            first = false;
+        }
+    });
+    console.log(`[player] picture ${video.filename || video.name} opened in the image viewer (${at + 1}/${pics.length})`);
+    return opened;
+}
+window.scrayPlayImage = scrayPlayImage;
+
 async function playVideoInline(video, listContext = null, index = null, startAt = null, opts = {}) {
+// 🖼 A picture opens in the image viewer instead (native 15.133) - see scrayPlayImage.
+// The token bump makes a video still waiting out its preview delay give way.
+if (video && window.scrayImageViewer && typeof window.scrayIsImageFile === 'function' && window.scrayIsImageFile(video)) {
+    window.scrayPlayRequestToken = (window.scrayPlayRequestToken || 0) + 1;
+    return scrayPlayImage(video, listContext, index, opts);
+}
 // MPB: note where the played row is before any play-path scrolling (13.177).
 scrayKeepPlayedRowAbovePlayer(video);
 // ⚙️ Where to start this video, in seconds. Stashed here and applied once on

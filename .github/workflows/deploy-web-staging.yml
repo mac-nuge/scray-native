@@ -2,7 +2,7 @@
 # Remote app (and Safari) can load the latest web layer without an IPA build.
 # Runs on every push to staging that touches the web layer, or by hand.
 #
-# Secrets: WEB_STAGING_DIR (server path, no trailing slash), SCRAY_API_KEY,
+# Secrets: WEB_STAGING_DIR (server path, no trailing slash),
 # and the SIDESTORE_SSH_KEY / HOST / PORT / USER login the IPA builds use.
 # WEB_STAGING_URL is only used by the Remote app build, not here.
 
@@ -35,24 +35,24 @@ jobs:
           SS_HOST: ${{ secrets.SIDESTORE_HOST }}
           SS_USER: ${{ secrets.SIDESTORE_USER }}
           WEB_DIR: ${{ secrets.WEB_STAGING_DIR }}
-          API_KEY: ${{ secrets.SCRAY_API_KEY }}
         run: |
           missing=""
           [ -z "$SS_SSH_KEY" ] && missing="$missing SIDESTORE_SSH_KEY"
           [ -z "$SS_HOST" ] && missing="$missing SIDESTORE_HOST"
           [ -z "$SS_USER" ] && missing="$missing SIDESTORE_USER"
           [ -z "$WEB_DIR" ] && missing="$missing WEB_STAGING_DIR"
-          [ -z "$API_KEY" ] && missing="$missing SCRAY_API_KEY"
           if [ -n "$missing" ]; then
             echo "::error::Missing repo secrets:$missing"
             exit 1
           fi
 
       - name: Generate web scray-key.js
+        # native 15.136: no key is built in any more - each phone signs in for
+        # its own (scray-device-key.js). The empty file keeps index.html's
+        # script list loading as before. The SCRAY_API_KEY secret is unused.
         run: |
-          echo "// Auto-generated at deploy time — do not edit or commit" > assets/web/scray-key.js
-          echo "window.SCRAY_API_KEY = \"${{ secrets.SCRAY_API_KEY }}\";" >> assets/web/scray-key.js
-
+          echo "// Auto-generated at deploy time - do not edit or commit. Empty since native 15.136: phones sign in." > assets/web/scray-key.js
+          echo "window.SCRAY_API_KEY = \"\";" >> assets/web/scray-key.js
       - name: Generate web version.js
         run: |
           VERSION_TEXT="$(cat assets/web/VERSION 2>/dev/null | tr -d '\r\n')"

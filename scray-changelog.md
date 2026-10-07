@@ -4,7 +4,7 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### native 15.136 / browse 15.188 — test: phones sign in, box trash
+### native 15.136 / browse 15.188 — stable: phones sign in, box trash
 <!-- 2026-10-07T15:45Z -->
 - **Asked:** step 4 of the security plan. Native's one shared device key was built into every IPA and the web-staging folder, so it was public, and it could delete box copies for good. Mac chose: each phone keeps its own key in the app's own storage (no Swift, no IPA build for Remote and Dev); a sign-in sheet with Later rather than blocking the app; and a phone's Delete moves box copies to a trash folder, emptied from browse.
 - **Signing in (api.php `device_pair`, new `scray-devices.php`):** the password and, with 2FA on, a code, swapped for a key of the phone's own (`sd_` + 64 hex). It runs before the key check, shares login.php's one-a-second-per-IP stamp, and its codes count towards 2FA's lockout, so it's no faster a way to guess. Only a SHA-256 of each key is kept, in `scray-data/scray_devices.json`. last_used is rewritten at most every 5 minutes. A per-device key gets exactly the shared key's `device` tier and SCRAY_PRIVILEGED rules, so nothing else needed to know about it. New `device_whoami` (any key) and `device_signout` (a device key, for itself).

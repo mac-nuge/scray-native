@@ -8510,3 +8510,9 @@ body.fullscreen-active:not(.fls-peek) #bulkActionBar { display: none !important;
 .scray-cloud-item.scray-cloud-image.is-ex    { background: #f94144; color: #fff; box-shadow: none; }
 .floating-tag-filetype.is-image              { background-color: #d81b60; }
 .floating-tag-fexclude.fx-filetype.is-image  { border-left-color: #d81b60; }
+
+/* Umbrella VIDEO / IMAGES switches at the top of the TYPE cloud (native 15.137). */
+.scray-cloud-umbrellas                          { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
+.scray-cloud-umbrella                           { font-weight: 600; }
+.scray-cloud-umbrella-video.is-on               { background: #546e7a; border-color: #546e7a; color: #fff; }
+.scray-cloud-umbrella-image.is-on               { background: #d81b60; border-color: #d81b60; color: #fff; }

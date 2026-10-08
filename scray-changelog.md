@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.115 / native 15.137 / browse 15.191 — test: video and images type filters
+<!-- 2026-10-08T12:43Z -->
+- **Asked:** in Data explorer and the apps, anywhere there's a file type filter, two umbrella filters - Video and Images - with Images off by default.
+- **Apps (randomiser.js, style.css; picker and native alike):** the TYPE cloud has a **Video** and an **Images** switch above the individual types, each with the number of files under it. Images start off, so pictures stay out of every list - and out of the pool the play buttons draw from - until Images is switched on. Video is every file that is not a picture, extension-less files included. They are plain on/off switches applied with AND alongside the rest, not filter terms: no pill, and Clear all leaves them as they are. Not kept between visits - a fresh load starts with Images off again.
+- **Data explorer (data-explorer.html):** a SHOW row, VIDEO and IMAGES, ahead of the TYPE chips, folded into the same `wrapWithType` query as the chips (a `NOT IN` the picture list while Images is off; `IN` when only Images is on; nothing at all when both are off).
+- **Picking a picture type by name** (JPG, PNG... chip) switches Images on, so a click on a type is never answered with an empty list. Excluding one does not.
+- **Worth knowing:** both switches off shows nothing - that is the literal reading, not a bug. The picture list is the same one as everywhere else (jpg jpeg png gif webp heic heif bmp tif tiff avif); if it grows, it grows in randomiser.js, data-explorer.html, scray-image-viewer.js and api.php together. Migrate and Bulk stash have their own copy of the type chips and were not changed.
+
 ### native 15.136 / browse 15.188 — stable: phones sign in, box trash
 <!-- 2026-10-07T15:45Z -->
 - **Asked:** step 4 of the security plan. Native's one shared device key was built into every IPA and the web-staging folder, so it was public, and it could delete box copies for good. Mac chose: each phone keeps its own key in the app's own storage (no Swift, no IPA build for Remote and Dev); a sign-in sheet with Later rather than blocking the app; and a phone's Delete moves box copies to a trash folder, emptied from browse.

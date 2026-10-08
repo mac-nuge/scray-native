@@ -2435,7 +2435,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
   // which would lose your place: the modal just steps aside and playback
   // carries on from where it was.
   // ⚙️ How far in a preview opens. Wholesale uses the same quarter.
-  const PREVIEW_START_FRACTION = 0.25;
+  const PREVIEW_START_SECONDS = 5;      // previews open this far in (never past half of a short clip)
   let pv = null;   // { overlay: [elements], same, displayWas: [displays] }
 
   function ensurePreviewCss() {
@@ -2569,8 +2569,8 @@ body.fullscreen-active #ssnPvBar { display: none; }
     }
     const durationSec = Number(video.durationMs) > 0 ? video.durationMs / 1000
                       : (Number(video.duration) > 0 ? Number(video.duration) : 0);
-    const startAt = durationSec > 0 ? durationSec * PREVIEW_START_FRACTION : null;
-    window.lastPlayLabel = 'Preview' + (startAt != null ? ' @ ' + Math.round(PREVIEW_START_FRACTION * 100) + '%' : '');
+    const startAt = durationSec > 0 ? Math.min(PREVIEW_START_SECONDS, durationSec * 0.5) : null;
+    window.lastPlayLabel = 'Preview' + (startAt != null ? ' @ ' + Math.round(startAt) + 's' : '');
     try {
       Promise.resolve(player.play(video, null, null, startAt, { preview: true }))
         .catch(err => console.error('[stash] preview failed:', err));

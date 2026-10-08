@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.116 / native 15.138 / browse 15.202 — test: previews start at 5 seconds
+<!-- 2026-10-08T20:05Z -->
+- **Asked:** previews should start about 5 seconds in rather than part way (25%); Shift+Enter to copy the VLC link only for files that need VLC.
+- **Previews (picker and native alike):** the stash-nav preview and, in picker, wholesale-mode's now open **5 seconds in** (never past the middle of a clip shorter than 10 s); the loading label reads `Preview @ 5s`. A file with no measured duration still opens at the start, as before. The random play (X^T) keeps its random point - it is not a preview.
+- **Browse previews:** mp4-match, data-explorer, migrate, bulk-stash, stash-review and stash-manual previews seek to 5 s in instead of 33% (data-explorer and migrate's from-start option is unchanged).
+- **mp4-match.html, Shift+Enter (browse 15.200):** copies the VLC stream link only for the formats a browser can't play (wmv, avi, flv…); on a file that previews in the browser it now previews, like Enter. The Keys list says so.
+
 ### picker 15.115 / native 15.137 / browse 15.191 — test: video and images type filters
 <!-- 2026-10-08T12:43Z -->
 - **Asked:** in Data explorer and the apps, anywhere there's a file type filter, two umbrella filters - Video and Images - with Images off by default.

@@ -1050,6 +1050,22 @@ window.scrayIsImageType = scrayIsImageType;
 window.scrayIsImageFile = scrayIsImageFile;
 
 /**
+ * Umbrella TYPE filters (native 15.137): VIDEO and IMAGES, above the individual types in the
+ * TYPE cloud. Each is on or off; a file shows when the umbrella it falls under is on.
+ * Images start OFF, so pictures stay out of the list until IMAGES is switched on
+ * (or one picture type is picked by name, which switches it on). Video is
+ * everything that is not a picture, files with no extension included. Not kept
+ * between visits, and not a filter term: it is the list's default, so Clear all
+ * leaves it alone.
+ */
+window.scrayTypeUmbrella = window.scrayTypeUmbrella || { video: true, image: false };
+function scrayTypeUmbrellaPasses(video) {
+   const u = window.scrayTypeUmbrella;
+   return scrayIsImageFile(video) ? !!u.image : !!u.video;
+}
+window.scrayTypeUmbrellaPasses = scrayTypeUmbrellaPasses;
+
+/**
  * Add one term to a class and re-run the filter.
  *
  * This is what the list-row chips and the stash modal call. It replaces the
@@ -1559,6 +1575,13 @@ async function showTagCloudModal(kind) {
 
    const grid = document.createElement('div');
    grid.className = 'tag-selection-grid scray-cloud-grid' + (kind === 'note' ? ' scray-cloud-note-grid' : '');
+   // TYPE only: the VIDEO / IMAGES umbrella switches, above the individual types (native 15.137).
+   let umbRow = null;
+   if (kind === 'filetype') {
+       umbRow = document.createElement('div');
+       umbRow.className = 'scray-cloud-umbrellas';
+       content.appendChild(umbRow);
+   }
    content.appendChild(grid);
 
    let counts = new Map();
@@ -1765,7 +1788,31 @@ async function showTagCloudModal(kind) {
        paintXapp();
    }
 
+   function renderUmbrella() {
+       if (!umbRow) return;
+       umbRow.innerHTML = '';
+       let nVideo = 0, nImage = 0;
+       counts.forEach((n, ext) => { if (scrayIsImageType(ext)) nImage += n; else nVideo += n; });
+       [['video', 'Video', nVideo], ['image', 'Images', nImage]].forEach(row => {
+           const k = row[0];
+           const on = !!window.scrayTypeUmbrella[k];
+           const b = document.createElement('button');
+           b.type = 'button';
+           b.className = 'scray-cloud-toggle scray-cloud-umbrella scray-cloud-umbrella-' + k + (on ? ' is-on' : '');
+           b.title = (k === 'image' ? 'Pictures' : 'Everything that is not a picture')
+                   + (on ? ' \u2014 showing (tap to hide)' : ' \u2014 hidden (tap to show)');
+           b.textContent = row[1] + ' (' + row[2] + ')';
+           b.addEventListener('click', () => {
+               window.scrayTypeUmbrella[k] = !window.scrayTypeUmbrella[k];
+               scrayRefreshFilters();
+               renderUmbrella();
+           });
+           umbRow.appendChild(b);
+       });
+   }
+
    function renderGrid() {
+       renderUmbrella();
        grid.innerHTML = '';
        let names = Array.from(counts.keys());
 
@@ -1880,6 +1927,11 @@ async function showTagCloudModal(kind) {
                    refresh = scraySetExcluded(kind, name, true);
                } else {
                    set.add(name);
+                   // Asking for a picture type by name means pictures are wanted (native 15.137).
+                   if (kind === 'filetype' && scrayIsImageType(name) && !window.scrayTypeUmbrella.image) {
+                       window.scrayTypeUmbrella.image = true;
+                       renderUmbrella();
+                   }
                }
 
                paintItem(btn, name);
@@ -3437,6 +3489,11 @@ if (keywordsOn) videos = videos.filter(scrayVideoPassesNoteKeywords);
 const fileTypePicks = (window.scrayFacetFilters || {}).filetype;
 if (fileTypePicks && fileTypePicks.size) {
    videos = videos.filter(rec => fileTypePicks.has(scrayFileTypeOf(rec)));
+}
+
+// Umbrella VIDEO / IMAGES switches (native 15.137), AND with the rest. Skipped while both are on.
+if (window.scrayTypeUmbrella && !(window.scrayTypeUmbrella.video && window.scrayTypeUmbrella.image)) {
+   videos = videos.filter(scrayTypeUmbrellaPasses);
 }
 
 // Filter by exclude tags, if passed

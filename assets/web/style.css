@@ -8466,6 +8466,7 @@ body.scray-bulk-mode #taggedVideosContainer li.lc-row {
 #bulkActionBar .bulk-refresh { background: #17a2b8; }
 #bulkActionBar .bulk-delete  { background: #f44336; }
 #bulkActionBar .bulk-stash   { background: #6c5ce7; }
+#bulkActionBar .bulk-ohash   { background: #0fa3a3; }   /* picker 15.117 / native 15.139 */
 #bulkActionBar .bulk-convert { background: #fd7e14; }   /* picker 15.88 / native 15.105 */
 #bulkActionBar .bulk-clear   { background: #333; }
 #bulkActionBar .bulk-all     { background: #f5c518; color: #000; }

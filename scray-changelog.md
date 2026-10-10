@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.140 — test: name updates after a match
+<!-- 2026-10-10T08:06Z -->
+- **Asked:** in native, after a stash match, update the rendered name in the list straight away - Refresh data still has to be pressed.
+- **Why:** a match gives the file a studio / performer name on the server, but every list is drawn from the cached name table (`scrayStashNames`) and keeps printing the filename until that table is re-fetched. Only the Stash modal's manual attach did that re-fetch (`afterAttach`); a fingerprint match made when the modal opens, the hunt, and the new bulk OH check only turned the S button purple.
+- **Fix (local-scores-cache.js):** `scrayNoteStashMatch` - which every one of those paths already calls when a match lands - now schedules `scrayStashNames.refresh(true)` when a file goes from unmatched to matched. It is signature-gated, repaints the lists itself when the names moved, and is debounced (400 ms), so a bulk run of matches costs one refresh, not one each. A file that was already matched, or an unmatch, does not trigger it.
+- **Picker:** not changed - it has the same path (`scrayNoteStashMatch` in excel-sheets.js) and would want the same few lines if it shows the same stale names.
+- Checked: `node --check`. Not run in the app.
+
 ### picker 15.117 / native 15.139 / browse 15.215 — test: ohash quick match on add
 <!-- 2026-10-10T08:04Z -->
 - **Asked:** as files are added to the catalogue, check their ohash in Stash straight away for a quick match, and if there is no immediate match leave it; and in bulk select, where S is only the manual stash, add another option that checks the ohash in Stash for all the selected files.

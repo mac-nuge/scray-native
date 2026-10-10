@@ -4,6 +4,24 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.140 — test: name updates after a match
+<!-- 2026-10-10T08:06Z -->
+- **Asked:** in native, after a stash match, update the rendered name in the list straight away - Refresh data still has to be pressed.
+- **Why:** a match gives the file a studio / performer name on the server, but every list is drawn from the cached name table (`scrayStashNames`) and keeps printing the filename until that table is re-fetched. Only the Stash modal's manual attach did that re-fetch (`afterAttach`); a fingerprint match made when the modal opens, the hunt, and the new bulk OH check only turned the S button purple.
+- **Fix (local-scores-cache.js):** `scrayNoteStashMatch` - which every one of those paths already calls when a match lands - now schedules `scrayStashNames.refresh(true)` when a file goes from unmatched to matched. It is signature-gated, repaints the lists itself when the names moved, and is debounced (400 ms), so a bulk run of matches costs one refresh, not one each. A file that was already matched, or an unmatch, does not trigger it.
+- **Picker:** not changed - it has the same path (`scrayNoteStashMatch` in excel-sheets.js) and would want the same few lines if it shows the same stale names.
+- Checked: `node --check`. Not run in the app.
+
+### picker 15.117 / native 15.139 / browse 15.215 — test: ohash quick match on add
+<!-- 2026-10-10T08:04Z -->
+- **Asked:** as files are added to the catalogue, check their ohash in Stash straight away for a quick match, and if there is no immediate match leave it; and in bulk select, where S is only the manual stash, add another option that checks the ohash in Stash for all the selected files.
+- **Bulk select (scray-bulk-select.js, style.css; picker and native alike):** a new **OH** button beside S. It runs the Stash modal's own lookup (`stash_scene`, force off) over the selection, two files at a time, with the count on the bar running `3/20`, then reports `✅ ohash check: 4 matched, 16 not found`. Files already matched, and phone-only files (no catalogue row to match onto), are skipped and counted. The files it matched are unticked and the rest stay selected, so S is one tap away for those. Force stays off on purpose: a forced re-check would re-ask StashDB and, on a miss, un-match the file; a file StashDB has already turned down is not asked again either (the modal's Re-check is for that).
+- **On add (api.php `scrayCatalogueItems` and `upload_done`; browse):** new OneDrive / Hetzner copies are fingerprinted and asked of StashDB in one call straight after they are catalogued, by the new `scrayQuickStashMatch`. That covers a Picker / Native fetch (`catalogue`), ☁ Rescan OneDrive (the same function) and uploads. A single exact scene is stored as the modal stores it (`stash_scenes`, `stash_matches` oshash / matched, the instance's stash_id), so S goes purple and the file leaves the hunt pool. No match, several scenes, or a scene you had unmatched by hand: left alone - only the cached oshash is kept, with no "asked, nothing there" stamp, so the modal, the hunt and the bulk job still see the file as never asked.
+- **Bounds:** more than 25 new files in one call is an import, not a handful of fresh files, and is left to the stash_bulk job (each file costs a Graph token and two range reads, which would slow the scan). The fingerprinting stops after 15 s, and any failure is swallowed (`error_log`) so a catalogue call never fails over a lookup. The reply carries `quick: { checked, matched, left }`.
+- **Not touched:** markers are not fetched on add - timestamp.trade is still asked the first time the modal opens on the file, as before. Nothing is submitted to StashDB and no names are guessed; these are exact-fingerprint matches only, the same auto-match the modal makes.
+- **Worth knowing:** only `catalogue`, ☁ Rescan OneDrive and `upload_done` are hooked. Hetzner rescan and the migrate / convert / stitch outputs are not. A file that is added while StashDB or Graph is down is simply left; OH in bulk select or the hunt picks it up later.
+- Checked: `node --check` on scray-bulk-select.js (identical in picker and native); `php -l` on api.php; a stubbed run of `scrayQuickStashMatch` - an exact hit stored and linked, a miss, an ambiguous pair and a hand-unmatched scene left with only the oshash cached, a file with no download URL left, a phone copy and an already-matched file skipped, 26 new files left to the bulk job. Not run against real StashDB / Graph, or in the apps.
+
 ### picker 15.116 / native 15.138 / browse 15.202 — test: previews start at 5 seconds
 <!-- 2026-10-08T20:05Z -->
 - **Asked:** previews should start about 5 seconds in rather than part way (25%); Shift+Enter to copy the VLC link only for files that need VLC.

@@ -325,11 +325,31 @@ function scrayNoteStashMatch(video, matched = true, hasMarkers = false) {
     if (!scrayStashMatched) { scrayStashMatched = new Set(); scrayStashMarked = new Set(); }
     const k = scrayStashKeyFor(video);
     if (!k) return;
+    const wasMatched = scrayStashMatched.has(k);
     if (matched) scrayStashMatched.add(k); else scrayStashMatched.delete(k);
     if (hasMarkers) scrayStashMarked.add(k); else scrayStashMarked.delete(k);
     scrayRefreshStashButtons();
+    // native 15.140: a NEW match gives the file a studio / performer name, but
+    // the lists were drawn from the cached name table and went on printing the
+    // filename until Refresh data. Re-fetch the table (signature-gated; it
+    // repaints the lists itself when something changed). Wherever the match
+    // came from - the modal opening, the hunt, a bulk check - and once for a
+    // run of them, not once each.
+    if (matched && !wasMatched) scrayScheduleStashNamesRefresh();
 }
 window.scrayNoteStashMatch = scrayNoteStashMatch;
+
+let scrayStashNamesTimer = 0;
+function scrayScheduleStashNamesRefresh() {
+    clearTimeout(scrayStashNamesTimer);
+    scrayStashNamesTimer = setTimeout(() => {
+        try {
+            if (window.scrayStashNames && typeof window.scrayStashNames.refresh === 'function') {
+                Promise.resolve(window.scrayStashNames.refresh(true)).catch(() => { /* lists catch up on the next refresh */ });
+            }
+        } catch (e) { /* names stay as they were */ }
+    }, 400);
+}
 
 function scrayApplyStashButtonColour(spec, video) {
     if (!spec) return spec;

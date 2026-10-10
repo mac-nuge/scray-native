@@ -20,6 +20,12 @@
 //
 // The history and basket lists have their own tick on the number
 // (cfg.select) - they are not in SCRAY_BULK_LISTS, so the two never meet.
+//
+// picker 15.117 / native 15.139: OH beside S. S is still the manual Stash form;
+// OH checks every selected file's ohash (fingerprint) against Stash in one go -
+// the same quick lookup the Stash modal does on open - and matches the ones
+// Stash knows. The files it matched are unticked, the rest stay selected, so S
+// is one tap away for those.
 
 (function scrayBulkSelect() {
   if (window.__scrayBulkSelectBound) return;
@@ -48,6 +54,7 @@
   let lastPoint = null;
   let edgeRaf = 0;
   let bar = null;
+  let ohashBusy = false;           // a bulk ohash check is running
 
   const containers = () => SCRAY_BULK_LISTS
     .map(id => document.getElementById(id))
@@ -108,6 +115,7 @@
       <button type="button" class="bulk-btn bulk-basket" data-bulk="basket" title="Add to the basket">B</button>
       <button type="button" class="bulk-btn bulk-refresh" data-bulk="refresh" title="Refresh data">Ref</button>
       <button type="button" class="bulk-btn bulk-stash" data-bulk="stash" title="Edit stash details (studio, performers, tags)">S</button>
+      <button type="button" class="bulk-btn bulk-ohash" data-bulk="ohash" title="Check every selected file's ohash in Stash for a quick match">OH</button>
       <button type="button" class="bulk-btn bulk-convert" data-bulk="convert" title="Convert to MP4 (files on the Hetzner box)">MP4</button>
       <button type="button" class="bulk-btn bulk-delete" data-bulk="delete" title="Delete" aria-label="Delete">${BIN_SVG}</button>
       <button type="button" class="bulk-btn bulk-clear" data-bulk="close" title="Turn bulk select off">✕</button>`;
@@ -153,8 +161,8 @@
       const everything = n > 0 && n >= listVideos().length;
       all.textContent = everything ? 'Select none' : 'Select all';
     }
-    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-stash, .bulk-delete')
-      .forEach(b => { b.disabled = n === 0; });
+    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-stash, .bulk-ohash, .bulk-delete')
+      .forEach(b => { b.disabled = n === 0 || (b.classList.contains('bulk-ohash') && ohashBusy); });
     placeBar();
   }
 
@@ -398,6 +406,7 @@
     }
 
     if (what === 'stash') { await openBulkStash(videos); return; }
+    if (what === 'ohash') { await bulkOhashCheck(videos); return; }
 
     // Convert to MP4 (picker 15.88 / native 15.105, scray-convert-bulk.js):
     // the box files among the selection, one set of settings for all.
@@ -418,6 +427,95 @@
       // Its own confirmation, its own progress, and it removes the rows.
       await window.showBulkDeleteModal(videos);
       clearSelection();
+    }
+  }
+
+  /**
+   * Bulk ohash check (picker 15.117 / native 15.139).
+   *
+   * Asks the server's stash_scene - the lookup the Stash modal runs when it
+   * opens: fingerprint the file, ask StashDB, and store the match if exactly
+   * one scene claims it - for each selected file, two at a time. force is off,
+   * so a file already matched is never re-asked (it is skipped here), and one
+   * StashDB has already turned down is not asked again either: that is what
+   * Re-check in the modal is for. A miss changes nothing, and nothing is
+   * submitted - it only takes the matches the fingerprint gives outright.
+   */
+  async function bulkOhashCheck(videos) {
+    if (ohashBusy) return;
+    if (typeof window.scrayApiCall !== 'function') { alert('Stash lookup is not available here.'); return; }
+    const keyOf = (v) => v.videoKey || (window.scrayVideoKey ? window.scrayVideoKey(v.filename) : '');
+    const matchedAlready = (v) => typeof window.scrayHasStashMatch === 'function' && window.scrayHasStashMatch(v);
+
+    let phoneOnly = 0, had = 0;
+    const seen = new Set();
+    const todo = [];
+    for (const v of videos) {
+      const key = keyOf(v);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      if (v.inCatalogue === false) { phoneOnly++; continue; }   // no catalogue row to match onto
+      if (matchedAlready(v)) { had++; continue; }
+      todo.push({ v, key });
+    }
+    if (!todo.length) {
+      const why = [had ? `${had} already matched` : '', phoneOnly ? `${phoneOnly} only on this phone` : '']
+        .filter(Boolean).join(', ');
+      say(`Nothing to check${why ? ` (${why})` : ''}`);
+      return;
+    }
+
+    ohashBusy = true;
+    paintBar();
+    const count = bar?.querySelector('#bulkCount');
+    let done = 0, hit = 0, miss = 0, noCopy = 0, failed = 0;
+    const matched = [];
+    const tick = () => { if (count) count.textContent = `${done}/${todo.length}`; };
+    tick();
+
+    let next = 0;
+    const worker = async () => {
+      while (next < todo.length) {
+        const { v, key } = todo[next++];
+        try {
+          const r = await window.scrayApiCall('stash_scene', { method: 'POST', body: { video_key: key, force: false } });
+          if (r && r.stash_id) {
+            hit++;
+            matched.push(v);
+            if (typeof window.scrayNoteStashMatch === 'function') {
+              try { window.scrayNoteStashMatch(v, true, Array.isArray(r.markers) && r.markers.length > 0); } catch (e) { /* colour catches up */ }
+            }
+          } else if (r && !r.oshash) noCopy++;
+          else miss++;
+        } catch (err) {
+          console.warn('[bulk] ohash check failed for', v.filename, err);
+          failed++;
+        }
+        done++;
+        tick();
+      }
+    };
+    try {
+      await Promise.all([worker(), worker()]);
+    } finally {
+      ohashBusy = false;
+    }
+
+    // Matched ones are done with; the rest stay selected for S.
+    matched.forEach(v => selected.delete(idOf(v)));
+    paintAll();
+
+    const bits = [`${hit} matched`];
+    if (miss) bits.push(`${miss} not found`);
+    if (noCopy) bits.push(`${noCopy} with no OneDrive or Hetzner copy`);
+    if (failed) bits.push(`${failed} failed`);
+    if (had) bits.push(`${had} already matched`);
+    if (phoneOnly) bits.push(`${phoneOnly} only on this phone`);
+    say(`${failed ? '⚠️' : hit ? '✅' : '🔎'} ohash check: ${bits.join(', ')}`, failed ? '#c0392b' : undefined);
+    if (hit && typeof window.filterDisplayedByFilename === 'function') {
+      window.skipSearchScroll = true;
+      window.skipPanelAutoOpen = true;
+      window.filterDisplayedByFilename();
     }
   }
 

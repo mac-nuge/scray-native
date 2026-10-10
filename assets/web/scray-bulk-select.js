@@ -549,11 +549,10 @@
     if (had) bits.push(`${had} already matched`);
     if (phoneOnly) bits.push(`${phoneOnly} only on this phone`);
     say(`${failed ? '⚠️' : hit ? '✅' : '🔎'} ohash check: ${bits.join(', ')}`, failed ? '#c0392b' : undefined);
-    if (hit && typeof window.filterDisplayedByFilename === 'function') {
-      window.skipSearchScroll = true;
-      window.skipPanelAutoOpen = true;
-      window.filterDisplayedByFilename();
-    }
+    // No re-filter here (picker 15.121 / native 15.143): that rebuilt the list
+    // from the first 25 and closed whatever was open. The S buttons turn in
+    // place (scrayNoteStashMatch), and the names table refresh it schedules
+    // repaints with the list's depth, scroll and open groups kept.
   }
 
   /**

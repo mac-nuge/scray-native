@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.121 / native 15.143 — test: quick check leaves the list alone
+<!-- 2026-10-10T08:19Z -->
+- **Reported:** after the bulk ohash check the list reset, and an expanded part closed again. Wanted: leave it as it is.
+- **Cause (scray-bulk-select.js, picker and native alike):** the check ended with a full `filterDisplayedByFilename()`, the call that serves a new search - it rebuilds the list from the first 25, so anything opened further down closed and the scroll jumped. It was there from 15.117 (the manual Stash form has the same line, unchanged here).
+- **Fix:** that call is gone. A match already turns its S button in place, and the names table refresh it schedules (15.140 / 15.118) repaints through `refreshAllLists`, which keeps the list's depth, scroll and open groups - so the name appears and the list stays where it was. The result pop-up and the Quick check / Manual edit sheet are unchanged.
+- Checked: `node --check`; jsdom run of the real file - Quick check on two files matches one, leaves the other selected and no longer calls the re-filter. Not run in the apps.
+
 ### picker 15.120 / native 15.142 — test: non-binary performers in the list
 <!-- 2026-10-10T08:16Z -->
 - **Asked:** only female performers show in the list - include non-binary now too.

@@ -21,11 +21,11 @@
 // The history and basket lists have their own tick on the number
 // (cfg.select) - they are not in SCRAY_BULK_LISTS, so the two never meet.
 //
-// picker 15.117 / native 15.139: OH beside S. S is still the manual Stash form;
-// OH checks every selected file's ohash (fingerprint) against Stash in one go -
-// the same quick lookup the Stash modal does on open - and matches the ones
-// Stash knows. The files it matched are unticked, the rest stay selected, so S
-// is one tap away for those.
+// picker 15.117 / native 15.139: a bulk ohash (fingerprint) check against Stash
+// - the same quick lookup the Stash modal does on open - matching the ones
+// Stash knows. The files it matched are unticked, the rest stay selected.
+// picker 15.119 / native 15.141: no button of its own - S asks which: Quick
+// check (that ohash check) or Manual edit (the Stash details form).
 
 (function scrayBulkSelect() {
   if (window.__scrayBulkSelectBound) return;
@@ -114,8 +114,7 @@
       <button type="button" class="bulk-btn bulk-all" data-bulk="all" title="Select every file in the list">Select all</button>
       <button type="button" class="bulk-btn bulk-basket" data-bulk="basket" title="Add to the basket">B</button>
       <button type="button" class="bulk-btn bulk-refresh" data-bulk="refresh" title="Refresh data">Ref</button>
-      <button type="button" class="bulk-btn bulk-stash" data-bulk="stash" title="Edit stash details (studio, performers, tags)">S</button>
-      <button type="button" class="bulk-btn bulk-ohash" data-bulk="ohash" title="Check every selected file's ohash in Stash for a quick match">OH</button>
+      <button type="button" class="bulk-btn bulk-stash" data-bulk="stash" title="Stash: quick ohash check, or edit the details by hand">S</button>
       <button type="button" class="bulk-btn bulk-convert" data-bulk="convert" title="Convert to MP4 (files on the Hetzner box)">MP4</button>
       <button type="button" class="bulk-btn bulk-delete" data-bulk="delete" title="Delete" aria-label="Delete">${BIN_SVG}</button>
       <button type="button" class="bulk-btn bulk-clear" data-bulk="close" title="Turn bulk select off">✕</button>`;
@@ -161,8 +160,8 @@
       const everything = n > 0 && n >= listVideos().length;
       all.textContent = everything ? 'Select none' : 'Select all';
     }
-    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-stash, .bulk-ohash, .bulk-delete')
-      .forEach(b => { b.disabled = n === 0 || (b.classList.contains('bulk-ohash') && ohashBusy); });
+    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-stash, .bulk-delete')
+      .forEach(b => { b.disabled = n === 0 || (b.classList.contains('bulk-stash') && ohashBusy); });
     placeBar();
   }
 
@@ -405,8 +404,12 @@
       return;
     }
 
-    if (what === 'stash') { await openBulkStash(videos); return; }
-    if (what === 'ohash') { await bulkOhashCheck(videos); return; }
+    if (what === 'stash') {
+      const pick = await askStashMode(videos.length);
+      if (pick === 'quick') await bulkOhashCheck(videos);
+      else if (pick === 'manual') await openBulkStash(videos);
+      return;
+    }
 
     // Convert to MP4 (picker 15.88 / native 15.105, scray-convert-bulk.js):
     // the box files among the selection, one set of settings for all.
@@ -428,6 +431,40 @@
       await window.showBulkDeleteModal(videos);
       clearSelection();
     }
+  }
+
+  /**
+   * What S does with the selection (picker 15.119 / native 15.141): a small
+   * sheet asking for a quick ohash check or a manual edit. Resolves 'quick',
+   * 'manual', or '' when dismissed. Sits clear of the corner-button dock.
+   */
+  function askStashMode(count) {
+    return new Promise(resolve => {
+      document.getElementById('bulkStashChoice')?.remove();
+      const modal = document.createElement('div');
+      modal.className = 'basket-json-modal';
+      modal.id = 'bulkStashChoice';
+      modal.style.cssText = 'transform:none;z-index:2147483647;padding:20px 20px 120px;';
+      modal.innerHTML =
+        '<div class="basket-json-modal-content" style="transform:none;max-width:360px;">' +
+          '<h3>Stash ' + count + ' file' + (count === 1 ? '' : 's') + '</h3>' +
+          '<div style="display:flex;flex-direction:column;gap:8px;">' +
+            '<button type="button" class="modal-btn modal-btn-primary" data-pick="quick" ' +
+              'style="flex:0 0 auto;margin:0;">&#128270; Quick check <small style="font-weight:normal;">(ohash in Stash)</small></button>' +
+            '<button type="button" class="modal-btn modal-btn-secondary" data-pick="manual" ' +
+              'style="flex:0 0 auto;margin:0;">&#9998; Manual edit</button>' +
+            '<button type="button" class="modal-btn modal-btn-secondary" data-pick="" ' +
+              'style="flex:0 0 auto;margin:0;opacity:.75;">Cancel</button>' +
+          '</div>' +
+        '</div>';
+      const done = (v) => { modal.remove(); resolve(v); };
+      modal.addEventListener('click', (e) => {
+        const b = e.target?.closest?.('[data-pick]');
+        if (b) { done(b.dataset.pick); return; }
+        if (e.target === modal) done('');
+      });
+      document.body.appendChild(modal);
+    });
   }
 
   /**

@@ -4,6 +4,12 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.119 / native 15.141 — test: S asks quick check or manual
+<!-- 2026-10-10T08:10Z -->
+- **Asked:** don't add a separate OH button - fold it into S, which just asks whether it's a quick stash check or a manual edit.
+- **Bulk select (scray-bulk-select.js, style.css; picker and native alike):** the OH button from 15.117 / 15.139 is gone. **S** now opens a small sheet - **Quick check** (the bulk ohash check, unchanged) or **Manual edit** (the Stash details form, unchanged) - with Cancel, and a tap outside also dismisses it. The sheet sits clear of the corner dock. S is disabled while a quick check is running.
+- Checked: `node --check`; a jsdom run of the real file - no OH button, S opens the sheet, Quick check runs `stash_scene` per file and leaves the unmatched one selected, Manual edit opens the form, Cancel changes nothing. Not run in the apps.
+
 ### native 15.140 — test: name updates after a match
 <!-- 2026-10-10T08:06Z -->
 - **Asked:** in native, after a stash match, update the rendered name in the list straight away - Refresh data still has to be pressed.

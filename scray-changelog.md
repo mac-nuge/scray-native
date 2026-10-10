@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.120 / native 15.142 — test: non-binary performers in the list
+<!-- 2026-10-10T08:16Z -->
+- **Asked:** only female performers show in the list - include non-binary now too.
+- **Change (scray-config.js, `scrayStashNames`; picker and native alike):** `performerList` - what names every row, the player title and the wholesale / preview lines - is now the women followed by the non-binary performers. The server already sent them (the cast minus the women, each with its gender code, so `NB:name`); the client was filing them under "others", which only the filter cloud's All switch read. The search text (`performers`) includes them too, so searching a non-binary performer's name finds the file.
+- **Left as it was:** the filter cloud's **Female** switch (`performerListF`) is still women only, and Male and All are unchanged. **Rename suggestions** (scray-clean-name.js) are pinned to the women only, so no suggested file name changes - the filename convention is "female performers". If non-binary performers should go in file names too, it is one word in each app's `cleanNameParts`.
+- **Browse:** nothing to change; the server rows were already right.
+- Checked: `node --check`; the real scray-config.js loaded in jsdom with a cast of F, NB, M and TF - list is the F then NB, the Female list is F only, All has all four, in picker and native. Not run in the apps.
+
 ### picker 15.119 / native 15.141 — test: S asks quick check or manual
 <!-- 2026-10-10T08:10Z -->
 - **Asked:** don't add a separate OH button - fold it into S, which just asks whether it's a quick stash check or a manual edit.

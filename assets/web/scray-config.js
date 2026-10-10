@@ -1001,6 +1001,7 @@ window.scrayStashNames = (function () {
         : [];
 
     const maleList  = [];
+    const nbList    = [];   // picker 15.120 / native 15.142: shown with the women
     const otherList = [];
     String(r[5] || "").trim().toLowerCase().split(",").forEach(entry => {
       const bit = entry.trim();
@@ -1013,6 +1014,7 @@ window.scrayStashNames = (function () {
       const name = (at === -1 ? bit : bit.slice(at + 1)).trim();
       if (!name) return;
       if (code === "m" || code === "tm") maleList.push(name);
+      else if (code === "nb") nbList.push(name);
       else otherList.push(name);
     });
 
@@ -1025,15 +1027,18 @@ window.scrayStashNames = (function () {
       // performer, and re-splitting a joined string at the call site would
       // put the comma handling in six places instead of one.
       //
-      // performerList stays FEMALE-ONLY. It is what names every row in every
-      // list, and widening it here would silently rewrite the display text of
-      // the whole catalogue. The filter cloud asks for performerListAll.
-      performerList: femaleList,
+      // performerList is what names every row in every list: the women, then
+      // the non-binary performers (picker 15.120 / native 15.142; it was
+      // female-only before). performerListF stays women only - the filter
+      // cloud's Female switch - and the filter cloud's All asks for
+      // performerListAll. The rename suggestion (scray-clean-name.js) still
+      // reads the women only, so file names are unchanged.
+      performerList: femaleList.concat(nbList),
       performerListF: femaleList,
       performerListM: maleList,
-      performerListAll: femaleList.concat(maleList, otherList),
+      performerListAll: femaleList.concat(nbList, maleList, otherList),
       stashTagList,
-      performers,
+      performers: femaleList.concat(nbList).join(", "),
       title,
       durationSec: (typeof r[3] === "number" && r[3] > 0) ? r[3] : null,
       markers: r[4] || 0

@@ -195,7 +195,7 @@
     return cleanNameFrom({
       parent:     noParent ? '' : (attrs.parent || ''),
       studio:     p.studio,
-      performers: p.performerList || [],
+      performers: p.performerListF || p.performerList || [],   // women only: file names don't take the non-binary performers shown in the list (picker 15.120 / native 15.142)
       title:      p.title,
       height:     video.height,
       filename:   video.filename

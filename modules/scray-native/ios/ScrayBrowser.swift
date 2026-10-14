@@ -111,6 +111,26 @@ private final class ScrayBrowserMessageProxy: NSObject, WKScriptMessageHandler {
 }
 
 // ============================================================================
+// Streams (native 15.144): an .m3u8 address a page asked for, the page it was
+// asked from (what the site will expect as the Referer) and the browser's name
+// as that page sees it. Kept per web view; the bag holds its web view weakly so
+// a web view that is gone, and whose address gets reused, can't pass its list
+// on to a new one.
+// ============================================================================
+
+private struct ScrayDetectedStream {
+    let url: String
+    let frame: String
+    let agent: String
+}
+
+private final class ScrayStreamBag {
+    weak var webView: WKWebView?
+    var items: [ScrayDetectedStream] = []
+    init(webView: WKWebView) { self.webView = webView }
+}
+
+// ============================================================================
 
 final class ScrayBrowserTab {
     let webView: WKWebView
@@ -285,6 +305,12 @@ final class ScrayBrowserViewController: UIViewController,
     /// Destinations for downloads being resumed — a resumed transfer must go
     /// back to the same partial file, and must not re-prompt.
     private var resumeDestinations: [ObjectIdentifier: URL] = [:]
+    /// The .m3u8 streams the page in each tab has asked for (native 15.144),
+    /// cleared when the tab loads a new page. See the STREAMS section.
+    private var streamBags: [ObjectIdentifier: ScrayStreamBag] = [:]
+    /// ⚙️ Streams kept per page. The first ones a player asks for are the ones
+    /// worth saving; a page that keeps asking for more is mostly noise.
+    private static let STREAMS_PER_TAB = 8
 
     init(homeURL: URL) {
         self.homeURL = homeURL
@@ -299,6 +325,7 @@ final class ScrayBrowserViewController: UIViewController,
         scrollObservation?.invalidate()
         webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayDownload")
         webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayBridge")
+        webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayStream")
     }
 
     override func viewDidLoad() {
@@ -335,6 +362,8 @@ final class ScrayBrowserViewController: UIViewController,
 
         messageProxy.target = self
         config.userContentController.add(messageProxy, name: "scrayDownload")
+        // Streams (native 15.144): pages tell us when they ask for an .m3u8.
+        config.userContentController.add(messageProxy, name: "scrayStream")
 
         // Picker's Wholesale page runs HERE, not in Native's own web view, so
         // without this it has no way to see what is actually on the device.
@@ -353,6 +382,12 @@ final class ScrayBrowserViewController: UIViewController,
         )
         config.userContentController.addUserScript(
             WKUserScript(source: Self.downloadShimJS,
+                         injectionTime: .atDocumentStart,
+                         forMainFrameOnly: false)
+        )
+        // Every frame, since a player usually lives in an iframe. See streamShimJS.
+        config.userContentController.addUserScript(
+            WKUserScript(source: Self.streamShimJS,
                          injectionTime: .atDocumentStart,
                          forMainFrameOnly: false)
         )
@@ -1585,6 +1620,18 @@ final class ScrayBrowserViewController: UIViewController,
         // What goes here instead is whatever Browser Controls puts in the menu.
         for c in controlsLayout.controls(in: .menu) { sheet.addAction(menuAction(for: c)) }
 
+        // Streams (native 15.144): only once a page in this tab has asked for an .m3u8.
+        if let wv = currentWebView {
+            let found = streams(for: wv)
+            if !found.isEmpty {
+                let save = UIAlertAction(title: found.count == 1 ? "Save Stream to Library…"
+                                                                 : "Save Stream to Library… (\(found.count))",
+                                         style: .default) { [weak self] _ in self?.saveStreamTapped() }
+                save.setValue(UIImage(systemName: "arrow.down.circle"), forKey: "image")
+                sheet.addAction(save)
+            }
+        }
+
         // Favourites (native 14.8). Offered for a real web page only.
         if let url = currentTab?.displayURL, (url.scheme ?? "").hasPrefix("http") {
             let already = isFavourite(url)
@@ -1644,6 +1691,207 @@ final class ScrayBrowserViewController: UIViewController,
 
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         presentSafely(sheet)
+    }
+
+    // MARK: - Streams (native 15.144)
+    //
+    // Spots an .m3u8 (HLS) stream a page plays and offers to save it to the
+    // library: ⋯ → Save Stream to Library. The phone only passes the address
+    // on (stream_start in api.php, with the device key); the gateway copies the
+    // stream into an MP4 on the box, and converter.html shows how it's going.
+    // Nothing is downloaded on the phone, so a long video is no trouble.
+    //
+    // What can't be seen: a stream the page hands to the system player itself
+    // (a plain <video src> set from a script is caught; one the page never
+    // names is not), and a DRM stream - which the server can't read either.
+
+    /// Runs in every frame at document start. Reports a playlist address from:
+    /// fetch and XMLHttpRequest (hls.js and most players ask for it that way,
+    /// matched by name or by the response saying it is a playlist), and
+    /// <video>/<audio>/<source> elements (their src, set in the page or by a
+    /// script). Each address once per frame. It reports; it never changes what
+    /// the page gets.
+    private static let streamShimJS = #"""
+    (function () {
+      if (window.__scrayStreamShim) return;
+      window.__scrayStreamShim = true;
+
+      var seen = {};
+      var NAMED = /\.m3u8(?:$|[?#])/i;
+      var TYPED = /mpegurl/i;
+
+      function report(raw, byType) {
+        try {
+          if (!raw || typeof raw !== 'string') return;
+          var abs = new URL(raw, location.href).href;
+          if (!/^https?:/i.test(abs)) return;
+          if (!byType && !NAMED.test(abs)) return;
+          if (seen[abs]) return;
+          seen[abs] = 1;
+          window.webkit.messageHandlers.scrayStream.postMessage({
+            url: abs,
+            page: location.href.split('#')[0],
+            agent: navigator.userAgent
+          });
+        } catch (e) {}
+      }
+
+      var realFetch = window.fetch;
+      if (typeof realFetch === 'function') {
+        window.fetch = function (input) {
+          var p = realFetch.apply(this, arguments);
+          try {
+            var u = typeof input === 'string' ? input : (input && input.url);
+            report(u, false);
+            p.then(function (r) {
+              try { if (r && TYPED.test(r.headers.get('content-type') || '')) report(r.url || u, true); } catch (e) {}
+            }, function () {});
+          } catch (e) {}
+          return p;
+        };
+      }
+
+      var realOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (method, url) {
+        try {
+          var u = String(url);
+          report(u, false);
+          this.addEventListener('load', function () {
+            try { if (TYPED.test(this.getResponseHeader('content-type') || '')) report(this.responseURL || u, true); } catch (e) {}
+          });
+        } catch (e) {}
+        return realOpen.apply(this, arguments);
+      };
+
+      var MEDIA = /^(VIDEO|AUDIO|SOURCE)$/;
+      var desc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+      if (desc && desc.set) {
+        Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+          configurable: true,
+          enumerable: desc.enumerable,
+          get: desc.get,
+          set: function (v) { report(String(v), false); return desc.set.call(this, v); }
+        });
+      }
+
+      function scan(root) {
+        try {
+          var els = root.querySelectorAll ? root.querySelectorAll('video, audio, source') : [];
+          for (var i = 0; i < els.length; i++) report(els[i].getAttribute('src'), false);
+        } catch (e) {}
+      }
+      document.addEventListener('DOMContentLoaded', function () { scan(document); });
+      new MutationObserver(function (muts) {
+        for (var i = 0; i < muts.length; i++) {
+          var m = muts[i];
+          if (m.type === 'attributes') {
+            if (MEDIA.test(m.target.tagName)) report(m.target.getAttribute('src'), false);
+          } else {
+            for (var j = 0; j < m.addedNodes.length; j++) {
+              var n = m.addedNodes[j];
+              if (n.nodeType !== 1) continue;
+              if (MEDIA.test(n.tagName)) report(n.getAttribute('src'), false);
+              scan(n);
+            }
+          }
+        }
+      }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['src'] });
+    })();
+    """#
+
+    private func streams(for webView: WKWebView) -> [ScrayDetectedStream] {
+        guard let bag = streamBags[ObjectIdentifier(webView)], bag.webView === webView else { return [] }
+        return bag.items
+    }
+
+    /// A page said it asked for a playlist. Kept for the tab; the first time
+    /// in a page, a toast says where to find it.
+    private func handleStreamMessage(_ message: WKScriptMessage) {
+        guard let webView = message.webView,
+              let body = message.body as? [String: Any],
+              let raw = body["url"] as? String,
+              let scheme = URL(string: raw)?.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else { return }
+        let key = ObjectIdentifier(webView)
+        let bag: ScrayStreamBag
+        if let existing = streamBags[key], existing.webView === webView {
+            bag = existing
+        } else {
+            bag = ScrayStreamBag(webView: webView)
+            streamBags[key] = bag
+        }
+        guard !bag.items.contains(where: { $0.url == raw }), bag.items.count < Self.STREAMS_PER_TAB else { return }
+        bag.items.append(ScrayDetectedStream(url: raw,
+                                             frame: (body["page"] as? String) ?? "",
+                                             agent: (body["agent"] as? String) ?? ""))
+        if bag.items.count == 1, webView === currentWebView {
+            flash("Stream found - ⋯ then Save Stream to Library")
+        }
+    }
+
+    /// The menu line: the stream itself when there is one, a choice when there are several.
+    private func saveStreamTapped() {
+        guard let wv = currentWebView else { return }
+        let found = streams(for: wv)
+        guard !found.isEmpty else {
+            flash("No stream found on this page yet - start the video first")
+            return
+        }
+        if found.count == 1 { askStreamName(found[0]); return }
+        let sheet = UIAlertController(title: "Which stream?",
+                                      message: "One that lists several qualities (often the first found) is saved at its best.",
+                                      preferredStyle: .actionSheet)
+        sheet.popoverPresentationController?.sourceView = moreButton
+        sheet.popoverPresentationController?.sourceRect = moreButton.bounds
+        for (i, s) in found.enumerated() {
+            sheet.addAction(UIAlertAction(title: "\(i + 1). \(streamLabel(s.url))", style: .default) { [weak self] _ in
+                self?.askStreamName(s)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        presentSafely(sheet)
+    }
+
+    /// host/last/two/parts - enough to tell playlists apart without a token-long address.
+    private func streamLabel(_ raw: String) -> String {
+        guard let u = URL(string: raw) else { return raw }
+        let tail = u.path.split(separator: "/").suffix(2).joined(separator: "/")
+        return (u.host ?? "") + (tail.isEmpty ? "" : "/" + tail)
+    }
+
+    /// The name starts as the page's title; the server tidies it and adds
+    /// " (2)" if the library already has one of that name.
+    private func askStreamName(_ s: ScrayDetectedStream) {
+        let title = (currentWebView?.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let alert = UIAlertController(title: "Save Stream to Library",
+                                      message: "The server copies it into an MP4 in the Streams folder of your library.",
+                                      preferredStyle: .alert)
+        alert.addTextField {
+            $0.text = title
+            $0.placeholder = "Name"
+            $0.clearButtonMode = .whileEditing
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+            let typed = (alert?.textFields?.first?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            self?.queueStream(s, name: typed.isEmpty ? title : typed, title: title)
+        })
+        presentSafely(alert)
+    }
+
+    private func queueStream(_ s: ScrayDetectedStream, name: String, title: String) {
+        flash("Sending to the server…")
+        let body: [String: Any] = ["url": s.url, "referer": s.frame, "user_agent": s.agent,
+                                   "name": name, "title": title, "by": "native-browser"]
+        ScrayBrowserSync.shared.call("stream_start", body) { [weak self] r in
+            switch r {
+            case .success(let j):
+                let out = ((j["job"] as? [String: Any])?["out_name"] as? String) ?? name
+                self?.flash("Queued: \(out)")
+            case .failure(let e):
+                self?.showAlert(title: "Couldn't save the stream", message: e.localizedDescription)
+            }
+        }
     }
 
     // MARK: - History and logins backup (native 14.29) - see ScrayBrowserSync.swift
@@ -1883,6 +2131,11 @@ final class ScrayBrowserViewController: UIViewController,
             }
         }
         decisionHandler(.allow)
+    }
+
+    /// A new page in this tab: the streams the last one asked for aren't this one's (native 15.144).
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        streamBags[ObjectIdentifier(webView)] = nil
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -2539,6 +2792,10 @@ final class ScrayBrowserViewController: UIViewController,
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == "scrayBridge" {
             handleBridgeMessage(message)
+            return
+        }
+        if message.name == "scrayStream" {
+            handleStreamMessage(message)
             return
         }
 

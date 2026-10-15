@@ -260,6 +260,66 @@ enum ScrayStreamJS {
     return o;
   }
 
+  // Makes the timeline gapless. Segment timestamps in the stream can jump - an
+  // ad or intro spliced in, a clock restart, the 33-bit wrap - and the joiner
+  // then writes fragments that overlap or sit hours apart, so the file shows as
+  // a day long and plays black. Each fragment's start time (tfdt) is rewritten
+  // to begin where the track's previous fragment ended. Only the first fragment
+  // of a track keeps its own start, so audio and video stay in step.
+  function retime(u8, next) {
+    var dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    var o = 0;
+    function box(at) { return { size: dv.getUint32(at), type: String.fromCharCode(u8[at + 4], u8[at + 5], u8[at + 6], u8[at + 7]) }; }
+    while (o + 8 <= u8.length) {
+      var b = box(o);
+      if (b.size < 8 || o + b.size > u8.length) break;
+      if (b.type === 'moof') {
+        var p = o + 8, end = o + b.size;
+        while (p + 8 <= end) {
+          var c = box(p);
+          if (c.size < 8) break;
+          if (c.type === 'traf') {
+            var id = 0, defDur = 0, dur = 0, tfdtAt = -1, ver = 0;
+            var q = p + 8, qend = p + c.size;
+            while (q + 8 <= qend) {
+              var d = box(q);
+              if (d.size < 8) break;
+              if (d.type === 'tfhd') {
+                var fl = dv.getUint32(q + 8) & 0xffffff, r = q + 12;
+                id = dv.getUint32(r); r += 4;
+                if (fl & 0x1) r += 8;
+                if (fl & 0x2) r += 4;
+                if (fl & 0x8) defDur = dv.getUint32(r);
+              } else if (d.type === 'tfdt') {
+                tfdtAt = q + 12; ver = u8[q + 8];
+              } else if (d.type === 'trun') {
+                var tf = dv.getUint32(q + 8) & 0xffffff, n = dv.getUint32(q + 12), t = q + 16;
+                if (tf & 0x1) t += 4;
+                if (tf & 0x4) t += 4;
+                var per = ((tf & 0x100) ? 4 : 0) + ((tf & 0x200) ? 4 : 0) + ((tf & 0x400) ? 4 : 0) + ((tf & 0x800) ? 4 : 0);
+                for (var k = 0; k < n; k++) {
+                  dur += (tf & 0x100) ? dv.getUint32(t + k * per) : defDur;
+                }
+              }
+              q += d.size;
+            }
+            if (tfdtAt >= 0 && id) {
+              var start = ver === 1 ? dv.getUint32(tfdtAt) * 4294967296 + dv.getUint32(tfdtAt + 4) : dv.getUint32(tfdtAt);
+              if (next[id] !== undefined) {
+                start = next[id];
+                if (ver === 1) { dv.setUint32(tfdtAt, Math.floor(start / 4294967296)); dv.setUint32(tfdtAt + 4, start >>> 0); }
+                else if (start < 4294967296) dv.setUint32(tfdtAt, start);
+              }
+              next[id] = start + dur;
+            }
+          }
+          p += c.size;
+        }
+      }
+      o += b.size;
+    }
+  }
+
   function waitIfPaused(job) {
     if (!job.paused) return Promise.resolve();
     return new Promise(function (res) { job.resume = res; });
@@ -267,7 +327,7 @@ enum ScrayStreamJS {
 
   function run(job) {
     var segs = job.plan.segs, n = segs.length;
-    var started = 0, flight = {}, wrote = 0, tm = null, sentInit = false, mode = null, cur = null;
+    var started = 0, flight = {}, wrote = 0, tm = null, sentInit = false, mode = null, cur = null, nextStart = {};
 
     function launch(upTo) {
       while (started < n && started <= upTo) {
@@ -302,6 +362,7 @@ enum ScrayStreamJS {
       cur = null;
       tm.push(u8);
       tm.flush();
+      if (cur) retime(cur, nextStart);
       return cur || new Uint8Array(0);
     }
 

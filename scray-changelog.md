@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.148 — test: spread the browser toolbar
+<!-- 2026-10-15T16:19Z -->
+- **Asked:** the buttons along the bottom of the in-app browser sit together against the right edge; spread them evenly across the bar, with more room between them, as they are hard to press.
+- **Change (ScrayBrowser.swift, `applyControlsLayout` - needs an IPA build):** the bottom bar held one stack of buttons after a single flexible space, so they bunched at the right. Each button is now its own bar item with a flexible space on both sides, so the gaps between buttons and the margins at either end are all the same width, however many buttons Browser Controls puts at the bottom. The buttons themselves, their order and what Browser Controls lets you move are unchanged; the top row is untouched.
+- **Watch for:** with many buttons on a narrow phone the gaps get small, as they must; fewer buttons at the bottom gives more room each. The bar is still 44 pt tall.
+- Checked: Swift parses clean (tree-sitter). Not compiled or run - UIKit lays out bar items itself, so the first IPA build is the real test.
+
 ### native 15.147 — test: upload a saved stream to the library
 <!-- 2026-10-15T16:04Z -->
 - **Asked:** Download Stream now works on the phone, but Save Stream to Library (the server copy) still fails with `ffprobe couldn't read the file: <the stream>: Invalid data found when processing input`. Could the phone's download just be sent to the server?

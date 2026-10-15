@@ -260,64 +260,247 @@ enum ScrayStreamJS {
     return o;
   }
 
-  // Makes the timeline gapless. Segment timestamps in the stream can jump - an
-  // ad or intro spliced in, a clock restart, the 33-bit wrap - and the joiner
-  // then writes fragments that overlap or sit hours apart, so the file shows as
-  // a day long and plays black. Each fragment's start time (tfdt) is rewritten
-  // to begin where the track's previous fragment ended. Only the first fragment
-  // of a track keeps its own start, so audio and video stay in step.
-  function retime(u8, next) {
-    var dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
-    var o = 0;
-    function box(at) { return { size: dv.getUint32(at), type: String.fromCharCode(u8[at + 4], u8[at + 5], u8[at + 6], u8[at + 7]) }; }
-    while (o + 8 <= u8.length) {
-      var b = box(o);
-      if (b.size < 8 || o + b.size > u8.length) break;
-      if (b.type === 'moof') {
-        var p = o + 8, end = o + b.size;
-        while (p + 8 <= end) {
-          var c = box(p);
-          if (c.size < 8) break;
-          if (c.type === 'traf') {
-            var id = 0, defDur = 0, dur = 0, tfdtAt = -1, ver = 0;
-            var q = p + 8, qend = p + c.size;
-            while (q + 8 <= qend) {
-              var d = box(q);
-              if (d.size < 8) break;
-              if (d.type === 'tfhd') {
-                var fl = dv.getUint32(q + 8) & 0xffffff, r = q + 12;
-                id = dv.getUint32(r); r += 4;
-                if (fl & 0x1) r += 8;
-                if (fl & 0x2) r += 4;
-                if (fl & 0x8) defDur = dv.getUint32(r);
-              } else if (d.type === 'tfdt') {
-                tfdtAt = q + 12; ver = u8[q + 8];
-              } else if (d.type === 'trun') {
-                var tf = dv.getUint32(q + 8) & 0xffffff, n = dv.getUint32(q + 12), t = q + 16;
-                if (tf & 0x1) t += 4;
-                if (tf & 0x4) t += 4;
-                var per = ((tf & 0x100) ? 4 : 0) + ((tf & 0x200) ? 4 : 0) + ((tf & 0x400) ? 4 : 0) + ((tf & 0x800) ? 4 : 0);
-                for (var k = 0; k < n; k++) {
-                  dur += (tf & 0x100) ? dv.getUint32(t + k * per) : defDur;
-                }
-              }
-              q += d.size;
-            }
-            if (tfdtAt >= 0 && id) {
-              var start = ver === 1 ? dv.getUint32(tfdtAt) * 4294967296 + dv.getUint32(tfdtAt + 4) : dv.getUint32(tfdtAt);
-              if (next[id] !== undefined) {
-                start = next[id];
-                if (ver === 1) { dv.setUint32(tfdtAt, Math.floor(start / 4294967296)); dv.setUint32(tfdtAt + 4, start >>> 0); }
-                else if (start < 4294967296) dv.setUint32(tfdtAt, start);
-              }
-              next[id] = start + dur;
-            }
-          }
-          p += c.size;
-        }
-      }
-      o += b.size;
+  // ---- A plain MP4 from the joiner's fragments -------------------------------
+  // mux.js writes a fragmented MP4 whose header says every duration is the
+  // maximum (about a day) and whose fragment times follow the stream's own
+  // clock. Players that trust the header show a day-long file, and a jump in
+  // the stream's clock leaves a hole they sit in, showing black. So the media
+  // bytes are copied as they arrive into a plain MP4: ftyp, one big mdat, and a
+  // moov written at the end from the real sample sizes and durations. Time is
+  // then just each sample's duration after the last, whatever the clock did.
+  function boxes(u8, from, to) {
+    var out = [], dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength), o = from;
+    while (o + 8 <= to) {
+      var size = dv.getUint32(o);
+      if (size < 8 || o + size > to) break;
+      out.push({ type: String.fromCharCode(u8[o + 4], u8[o + 5], u8[o + 6], u8[o + 7]), start: o, end: o + size });
+      o += size;
     }
+    return out;
+  }
+
+  function be32(n) { return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]; }
+
+  function mk(type, parts) {
+    var arr = parts.map(function (p) { return p instanceof Uint8Array ? p : Uint8Array.from(p); });
+    var len = 8;
+    arr.forEach(function (a) { len += a.length; });
+    var out = new Uint8Array(len), dv = new DataView(out.buffer);
+    dv.setUint32(0, len);
+    for (var i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+    var o = 8;
+    arr.forEach(function (a) { out.set(a, o); o += a.length; });
+    return out;
+  }
+
+  function makeProgressive() {
+    var ftyp = null, moov = null, moovBytes = null, tracks = {}, order = [];
+    var pos = 0, ftypLen = 0, started = false;
+
+    function readInit(u8, list) {
+      list.forEach(function (b) {
+        if (b.type === 'ftyp') { ftyp = u8.slice(b.start, b.end); }
+        else if (b.type === 'moov') {
+          moovBytes = u8.slice(b.start, b.end);
+          boxes(moovBytes, 8, moovBytes.length).forEach(function (t) {
+            if (t.type !== 'trak') return;
+            var dv = new DataView(moovBytes.buffer, moovBytes.byteOffset, moovBytes.byteLength);
+            var id = 0, scale = 0, video = false;
+            boxes(moovBytes, t.start + 8, t.end).forEach(function (c) {
+              if (c.type === 'tkhd') id = dv.getUint32(c.start + 20);
+              if (c.type === 'mdia') {
+                boxes(moovBytes, c.start + 8, c.end).forEach(function (m) {
+                  if (m.type === 'mdhd') scale = dv.getUint32(m.start + 20);
+                  if (m.type === 'minf') {
+                    boxes(moovBytes, m.start + 8, m.end).forEach(function (x) { if (x.type === 'vmhd') video = true; });
+                  }
+                });
+              }
+            });
+            tracks[id] = { id: id, scale: scale, video: video, dur: [], size: [], cts: [], key: [], chunks: [], total: 0, hasCts: false, negCts: false };
+            order.push(id);
+          });
+        }
+      });
+      if (!ftyp || !moovBytes || !order.length) throw new Error('The joiner gave no header');
+      ftypLen = ftyp.length;
+    }
+
+    // Takes the joiner's output (its first call carries the header) and returns
+    // the bytes to write now: for the first call the ftyp and the mdat header
+    // too, then just the samples' own bytes.
+    function add(u8) {
+      var list = boxes(u8, 0, u8.length), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+      if (!ftyp) readInit(u8, list);
+      var out = [];
+      if (!started) {
+        started = true;
+        out.push(ftyp);
+        out.push(Uint8Array.from([0, 0, 0, 1, 0x6d, 0x64, 0x61, 0x74, 0, 0, 0, 0, 0, 0, 0, 0]));
+        pos = ftypLen + 16;
+      }
+      list.forEach(function (b) {
+        if (b.type !== 'moof') return;
+        boxes(u8, b.start + 8, b.end).forEach(function (traf) {
+          if (traf.type !== 'traf') return;
+          var id = 0, defDur = 0, defSize = 0, defFlags = 0;
+          boxes(u8, traf.start + 8, traf.end).forEach(function (c) {
+            if (c.type === 'tfhd') {
+              var fl = dv.getUint32(c.start + 8) & 0xffffff, r = c.start + 12;
+              id = dv.getUint32(r); r += 4;
+              if (fl & 0x1) r += 8;
+              if (fl & 0x2) r += 4;
+              if (fl & 0x8) { defDur = dv.getUint32(r); r += 4; }
+              if (fl & 0x10) { defSize = dv.getUint32(r); r += 4; }
+              if (fl & 0x20) { defFlags = dv.getUint32(r); r += 4; }
+            } else if (c.type === 'trun') {
+              var t = tracks[id];
+              if (!t) return;
+              var ver = u8[c.start + 8], tf = dv.getUint32(c.start + 8) & 0xffffff;
+              var n = dv.getUint32(c.start + 12), q = c.start + 16, dataOff = 0, firstFlags = null;
+              if (tf & 0x1) { dataOff = dv.getInt32(q); q += 4; }
+              if (tf & 0x4) { firstFlags = dv.getUint32(q); q += 4; }
+              var total = 0;
+              for (var k = 0; k < n; k++) {
+                var d = defDur, sz = defSize, fg = defFlags, co = 0;
+                if (tf & 0x100) { d = dv.getUint32(q); q += 4; }
+                if (tf & 0x200) { sz = dv.getUint32(q); q += 4; }
+                if (tf & 0x400) { fg = dv.getUint32(q); q += 4; } else if (k === 0 && firstFlags !== null) fg = firstFlags;
+                if (tf & 0x800) { co = ver === 1 ? dv.getInt32(q) : dv.getUint32(q); q += 4; }
+                if (co) t.hasCts = true;
+                if (co < 0) t.negCts = true;
+                t.dur.push(d); t.size.push(sz); t.cts.push(co); t.key.push((fg & 0x10000) === 0);
+                t.total += d;
+                total += sz;
+              }
+              var begin = b.start + dataOff;
+              if (begin < 0 || begin + total > u8.length) throw new Error('A fragment pointed outside itself');
+              if (n > 0) t.chunks.push({ first: t.size.length - n, n: n, off: pos });
+              out.push(u8.subarray(begin, begin + total));
+              pos += total;
+            }
+          });
+        });
+      });
+      var len = 0;
+      out.forEach(function (a) { len += a.length; });
+      var all = new Uint8Array(len), o = 0;
+      out.forEach(function (a) { all.set(a, o); o += a.length; });
+      return all;
+    }
+
+    function runs(values, same) {
+      var out = [];
+      for (var i = 0; i < values.length; i++) {
+        var last = out[out.length - 1];
+        if (last && same(last.v, values[i])) last.n++; else out.push({ v: values[i], n: 1 });
+      }
+      return out;
+    }
+
+    function table(type, version, entries) {
+      var body = [0, 0, 0, 0].slice();
+      body[0] = version;
+      var parts = [Uint8Array.from(body), Uint8Array.from(be32(entries.length))];
+      var flat = [];
+      entries.forEach(function (e) { e.forEach(function (x) { flat.push.apply(flat, be32(x >>> 0)); }); });
+      parts.push(Uint8Array.from(flat));
+      return mk(type, parts);
+    }
+
+    function patched(u8, box, at, value) {
+      var c = u8.slice(box.start, box.end);
+      if (c[8] !== 0) throw new Error('Unexpected header version');
+      new DataView(c.buffer).setUint32(at, value);
+      return c;
+    }
+
+    function trakFor(t, mdhdScale, movieScale) {
+      var dvm = new DataView(moovBytes.buffer, moovBytes.byteOffset, moovBytes.byteLength);
+      var trak = boxes(moovBytes, 8, moovBytes.length).filter(function (b) {
+        if (b.type !== 'trak') return false;
+        var hit = false;
+        boxes(moovBytes, b.start + 8, b.end).forEach(function (c) { if (c.type === 'tkhd' && dvm.getUint32(c.start + 20) === t.id) hit = true; });
+        return hit;
+      })[0];
+      var movieDur = Math.round(t.total * movieScale / t.scale);
+
+      // sample tables
+      var stts = table('stts', 0, runs(t.dur, function (a, b) { return a === b; }).map(function (r) { return [r.n, r.v]; }));
+      var parts = [];
+      var stsd = null;
+      boxes(moovBytes, trak.start + 8, trak.end).forEach(function (c) {
+        if (c.type !== 'mdia') return;
+        boxes(moovBytes, c.start + 8, c.end).forEach(function (m) {
+          if (m.type !== 'minf') return;
+          boxes(moovBytes, m.start + 8, m.end).forEach(function (x) {
+            if (x.type !== 'stbl') return;
+            boxes(moovBytes, x.start + 8, x.end).forEach(function (y) { if (y.type === 'stsd') stsd = moovBytes.slice(y.start, y.end); });
+          });
+        });
+      });
+      parts.push(stsd);
+      parts.push(stts);
+      if (t.hasCts) {
+        parts.push(table('ctts', t.negCts ? 1 : 0, runs(t.cts, function (a, b) { return a === b; }).map(function (r) { return [r.n, r.v]; })));
+      }
+      if (t.video) {
+        var keys = [];
+        t.key.forEach(function (k, i) { if (k) keys.push([i + 1]); });
+        if (keys.length && keys.length < t.key.length) parts.push(table('stss', 0, keys));
+      }
+      var perChunk = runs(t.chunks.map(function (c) { return c.n; }), function (a, b) { return a === b; });
+      var firstChunk = 1, stsc = [];
+      perChunk.forEach(function (r) { stsc.push([firstChunk, r.v, 1]); firstChunk += r.n; });
+      parts.push(table('stsc', 0, stsc));
+      var szFlat = [];
+      t.size.forEach(function (z) { szFlat.push.apply(szFlat, be32(z)); });
+      parts.push(mk('stsz', [Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 0]), Uint8Array.from(be32(t.size.length)), Uint8Array.from(szFlat)]));
+      if (pos < 4294967296) {
+        parts.push(table('stco', 0, t.chunks.map(function (c) { return [c.off]; })));
+      } else {
+        var co = [];
+        t.chunks.forEach(function (c) { co.push.apply(co, be32(Math.floor(c.off / 4294967296))); co.push.apply(co, be32(c.off >>> 0)); });
+        parts.push(mk('co64', [Uint8Array.from([0, 0, 0, 0]), Uint8Array.from(be32(t.chunks.length)), Uint8Array.from(co)]));
+      }
+      var stbl = mk('stbl', parts);
+
+      function rebuild(parent, fn) {
+        return mk(parent.type, boxes(moovBytes, parent.start + 8, parent.end).map(function (c) { return fn(c) || moovBytes.slice(c.start, c.end); }));
+      }
+      var newTrak = rebuild(trak, function (c) {
+        if (c.type === 'tkhd') return patched(moovBytes, c, 28, movieDur);
+        if (c.type === 'mdia') {
+          return rebuild(c, function (m) {
+            if (m.type === 'mdhd') return patched(moovBytes, m, 24, t.total);
+            if (m.type === 'minf') return rebuild(m, function (x) { if (x.type === 'stbl') return stbl; });
+          });
+        }
+      });
+      return { trak: newTrak, movieDur: movieDur };
+    }
+
+    // The bytes that end the file, and the 8 bytes that go back into the mdat header.
+    function finish() {
+      var dvm = new DataView(moovBytes.buffer, moovBytes.byteOffset, moovBytes.byteLength);
+      var kids = boxes(moovBytes, 8, moovBytes.length);
+      var mvhd = kids.filter(function (b) { return b.type === 'mvhd'; })[0];
+      var movieScale = dvm.getUint32(mvhd.start + 20);
+      var built = order.map(function (id) { return trakFor(tracks[id], tracks[id].scale, movieScale); });
+      var movieDur = 0;
+      built.forEach(function (b) { if (b.movieDur > movieDur) movieDur = b.movieDur; });
+      var out = [patched(moovBytes, mvhd, 24, movieDur)];
+      built.forEach(function (b) { out.push(b.trak); });
+      var mdatSize = pos - ftypLen;
+      var patch = new Uint8Array(8), pv = new DataView(patch.buffer);
+      pv.setUint32(0, Math.floor(mdatSize / 4294967296));
+      pv.setUint32(4, mdatSize >>> 0);
+      var kinds = [];
+      order.forEach(function (id) { kinds.push(tracks[id].video ? 'video' : 'audio'); });
+      return { moov: mk('moov', out), patchAt: ftypLen + 8, patch: patch, seconds: movieDur / movieScale, kinds: kinds };
+    }
+
+    return { add: add, finish: finish };
   }
 
   function waitIfPaused(job) {
@@ -327,7 +510,7 @@ enum ScrayStreamJS {
 
   function run(job) {
     var segs = job.plan.segs, n = segs.length;
-    var started = 0, flight = {}, wrote = 0, tm = null, sentInit = false, mode = null, cur = null, nextStart = {};
+    var started = 0, flight = {}, wrote = 0, tm = null, sentInit = false, mode = null, cur = null, prog = null;
 
     function launch(upTo) {
       while (started < n && started <= upTo) {
@@ -362,8 +545,9 @@ enum ScrayStreamJS {
       cur = null;
       tm.push(u8);
       tm.flush();
-      if (cur) retime(cur, nextStart);
-      return cur || new Uint8Array(0);
+      if (!cur) return new Uint8Array(0);
+      if (!prog) prog = makeProgressive();
+      return prog.add(cur);
     }
 
     function loop(i) {
@@ -393,8 +577,20 @@ enum ScrayStreamJS {
     loop(0).then(function () {
       if (job.dead) return;
       if (wrote === 0) throw new Error('Nothing could be read from this stream');
-      delete jobs[job.id];
-      post({ phase: 'done', id: job.id });
+      var info = '';
+      var tail = Promise.resolve();
+      if (prog) {
+        var f = prog.finish();
+        var m = Math.floor(f.seconds / 60), sec = Math.round(f.seconds % 60);
+        info = (m >= 60 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : m + ' min ' + sec + ' s') + ' · ' + f.kinds.join(' + ');
+        tail = send(job, f.moov).then(function () { return b64(f.patch); }).then(function (data) {
+          post({ phase: 'patch', id: job.id, offset: f.patchAt, base64: data });
+        });
+      }
+      return tail.then(function () {
+        delete jobs[job.id];
+        post({ phase: 'done', id: job.id, info: info });
+      });
     }).catch(function (e) {
       if (job.dead) return;
       fail(job.id, (e && e.message) || e);

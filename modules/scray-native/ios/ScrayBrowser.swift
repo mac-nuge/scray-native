@@ -338,6 +338,7 @@ final class ScrayBrowserViewController: UIViewController,
     private var pendingStreams: [String: PendingStream] = [:]
     /// Stream downloads in flight: once one is saved, offer to upload it (native 15.147).
     private var streamJobIDs: Set<String> = []
+    private var streamInfo: [String: String] = [:]
 
     init(homeURL: URL) {
         self.homeURL = homeURL
@@ -2158,9 +2159,9 @@ final class ScrayBrowserViewController: UIViewController,
 
     /// A saved stream: the server can't fetch these (it isn't signed in as you),
     /// but the phone's own copy can go to the library through the Upload sheet.
-    private func offerUpload(of saved: URL) {
+    private func offerUpload(of saved: URL, info: String? = nil) {
         let alert = UIAlertController(title: "Upload to library?",
-                                      message: "\(saved.lastPathComponent) is saved on this phone. Send it to your Hetzner library now?",
+                                      message: "\(saved.lastPathComponent) is saved on this phone" + (info.map { " (\($0))" } ?? "") + ". Send it to your Hetzner library now?",
                                       preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Not now", style: .cancel))
         alert.addAction(UIAlertAction(title: "Upload…", style: .default) { [weak self] _ in
@@ -3187,7 +3188,20 @@ final class ScrayBrowserViewController: UIViewController,
             job.receivedBytes += Int64(data.count)
             refreshDownloadBar()
 
+        case "patch":
+            // The finished header's real size, written back into the file once
+            // the rest is in place.
+            guard let job = jobs.first(where: { $0.id == id }),
+                  let handle = job.handle,
+                  let base64 = body["base64"] as? String,
+                  let data = Data(base64Encoded: base64),
+                  let offset = (body["offset"] as? NSNumber)?.uint64Value else { return }
+            try? handle.seek(toOffset: offset)
+            try? handle.write(contentsOf: data)
+            _ = try? handle.seekToEnd()
+
         case "done":
+            if let info = body["info"] as? String, !info.isEmpty { streamInfo[id] = info }
             guard let idx = jobs.firstIndex(where: { $0.id == id }) else { return }
             let job = jobs.remove(at: idx)
             try? job.handle?.close()
@@ -3198,6 +3212,7 @@ final class ScrayBrowserViewController: UIViewController,
             let reason = body["message"] as? String ?? "Unknown error"
             pendingStreams.removeValue(forKey: id)
             streamJobIDs.remove(id)
+            streamInfo.removeValue(forKey: id)
             ScrayDownloadCenter.shared.fail(id: id, message: reason)
             discardJob(id: id)
             showAlert(title: "Download failed", message: reason)
@@ -3631,7 +3646,7 @@ final class ScrayBrowserViewController: UIViewController,
                 if let id = jobID { ScrayDownloadCenter.shared.finish(id: id, savedURL: saved) }
                 self.libraryNeedsRefresh = true
                 self.flash("Saved \(saved.lastPathComponent)")
-                if let id = jobID, self.streamJobIDs.remove(id) != nil { self.offerUpload(of: saved) }
+                if let id = jobID, self.streamJobIDs.remove(id) != nil { self.offerUpload(of: saved, info: self.streamInfo.removeValue(forKey: id)) }
                 return
             }
             self.exportingTempFiles.append(fileURL)

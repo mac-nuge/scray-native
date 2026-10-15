@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.149 — test: fit the browser toolbar
+<!-- 2026-10-15T18:21Z -->
+- **Asked:** after 15.148 the bottom buttons ran off both sides on an iPhone 17 Pro; shrink them to fit.
+- **Cause:** 15.148 gave every button its own bar item. On the newer iOS each bar item is drawn in its own round glass bubble, bigger than the 34 pt button inside it, so the row of bubbles was wider than the screen.
+- **Change (ScrayBrowser.swift - needs an IPA build):** back to one bar item holding one stack, now as wide as the bar less 56 pt for the margins and the glass (`TOOLBAR_SIDE_ROOM`), with the buttons spread by equal spacing, so the gaps are even and it ends inside the screen. The buttons' 34 pt width (home's 36) is now a strong preference, not a rule, so if more buttons are at the bottom than fit, they all shrink a little instead of overflowing. The stack is sized again whenever the screen width changes (`viewDidLayoutSubviews`), which also covers the first layout, when the width isn't known yet.
+- **If it is still off:** the 56 pt allowance is one constant; send a screenshot and I'll tune it. Moving a button to the top row in Browser Controls also frees room.
+- Checked: Swift parses clean (tree-sitter). Not compiled or run - UIKit sizes the bar item itself, so the IPA build is the real test.
+
 ### native 15.148 — test: spread the browser toolbar
 <!-- 2026-10-15T16:19Z -->
 - **Asked:** the buttons along the bottom of the in-app browser sit together against the right edge; spread them evenly across the bar, with more room between them, as they are hard to press.

@@ -122,6 +122,9 @@ private struct ScrayDetectedStream {
     let url: String
     let frame: String
     let agent: String
+    /// The frame that reported it, so an on-phone download can run in the
+    /// same frame the player does (native 15.145).
+    let frameInfo: WKFrameInfo?
 }
 
 private final class ScrayStreamBag {
@@ -311,6 +314,15 @@ final class ScrayBrowserViewController: UIViewController,
     /// ⚙️ Streams kept per page. The first ones a player asks for are the ones
     /// worth saving; a page that keeps asking for more is mostly noise.
     private static let STREAMS_PER_TAB = 8
+
+    /// An on-phone stream download between "Download" and the page reporting
+    /// that it has read the playlist (native 15.145).
+    private struct PendingStream {
+        let name: String
+        let frame: WKFrameInfo?
+        let webView: WKWebView
+    }
+    private var pendingStreams: [String: PendingStream] = [:]
 
     init(homeURL: URL) {
         self.homeURL = homeURL
@@ -1624,6 +1636,11 @@ final class ScrayBrowserViewController: UIViewController,
         if let wv = currentWebView {
             let found = streams(for: wv)
             if !found.isEmpty {
+                let dl = UIAlertAction(title: found.count == 1 ? "Download Stream…"
+                                                               : "Download Stream… (\(found.count))",
+                                       style: .default) { [weak self] _ in self?.downloadStreamTapped() }
+                dl.setValue(UIImage(systemName: "arrow.down.to.line"), forKey: "image")
+                sheet.addAction(dl)
                 let save = UIAlertAction(title: found.count == 1 ? "Save Stream to Library…"
                                                                  : "Save Stream to Library… (\(found.count))",
                                          style: .default) { [weak self] _ in self?.saveStreamTapped() }
@@ -1823,29 +1840,35 @@ final class ScrayBrowserViewController: UIViewController,
         guard !bag.items.contains(where: { $0.url == raw }), bag.items.count < Self.STREAMS_PER_TAB else { return }
         bag.items.append(ScrayDetectedStream(url: raw,
                                              frame: (body["page"] as? String) ?? "",
-                                             agent: (body["agent"] as? String) ?? ""))
+                                             agent: (body["agent"] as? String) ?? "",
+                                             frameInfo: message.frameInfo))
         if bag.items.count == 1, webView === currentWebView {
-            flash("Stream found - ⋯ then Save Stream to Library")
+            flash("Stream found - ⋯ then Download Stream")
         }
     }
 
     /// The menu line: the stream itself when there is one, a choice when there are several.
-    private func saveStreamTapped() {
+    private func saveStreamTapped() { chooseStream { [weak self] in self?.askStreamName($0) } }
+
+    /// ⋯ → Download Stream: the phone fetches it itself and it lands in Downloads.
+    private func downloadStreamTapped() { chooseStream { [weak self] in self?.askDeviceStreamName($0) } }
+
+    private func chooseStream(_ then: @escaping (ScrayDetectedStream) -> Void) {
         guard let wv = currentWebView else { return }
         let found = streams(for: wv)
         guard !found.isEmpty else {
             flash("No stream found on this page yet - start the video first")
             return
         }
-        if found.count == 1 { askStreamName(found[0]); return }
+        if found.count == 1 { then(found[0]); return }
         let sheet = UIAlertController(title: "Which stream?",
                                       message: "One that lists several qualities (often the first found) is saved at its best.",
                                       preferredStyle: .actionSheet)
         sheet.popoverPresentationController?.sourceView = moreButton
         sheet.popoverPresentationController?.sourceRect = moreButton.bounds
         for (i, s) in found.enumerated() {
-            sheet.addAction(UIAlertAction(title: "\(i + 1). \(streamLabel(s.url))", style: .default) { [weak self] _ in
-                self?.askStreamName(s)
+            sheet.addAction(UIAlertAction(title: "\(i + 1). \(streamLabel(s.url))", style: .default) { _ in
+                then(s)
             })
         }
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -1891,6 +1914,119 @@ final class ScrayBrowserViewController: UIViewController,
             case .failure(let e):
                 self?.showAlert(title: "Couldn't save the stream", message: e.localizedDescription)
             }
+        }
+    }
+
+    // MARK: On-phone stream download (native 15.145)
+    //
+    // The page that played the stream fetches it (see ScrayStreamJS), so it
+    // works where the server copy cannot - addresses and cookies tied to this
+    // phone. The result comes back over the "scrayDownload" bridge as an
+    // ordinary download: Downloads list, progress bar, pause, cancel, and
+    // delivery to the download folder all come from the blob route above.
+
+    private func askDeviceStreamName(_ s: ScrayDetectedStream) {
+        let title = (currentWebView?.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let alert = UIAlertController(title: "Download Stream",
+                                      message: "Saved on this phone as an MP4, like any other download.",
+                                      preferredStyle: .alert)
+        alert.addTextField {
+            $0.text = title
+            $0.placeholder = "Name"
+            $0.clearButtonMode = .whileEditing
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Download", style: .default) { [weak self, weak alert] _ in
+            let typed = (alert?.textFields?.first?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            self?.startDeviceStream(s, name: typed.isEmpty ? title : typed)
+        })
+        presentSafely(alert)
+    }
+
+    private func startDeviceStream(_ s: ScrayDetectedStream, name raw: String) {
+        guard let wv = currentWebView else { return }
+        var name = raw
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: "\\", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { name = "stream" }
+        if !name.lowercased().hasSuffix(".mp4") { name += ".mp4" }
+
+        let id = "st" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12))
+        pendingStreams[id] = PendingStream(name: name, frame: s.frameInfo, webView: wv)
+        flash("Reading the stream…")
+
+        // Both scripts go into the frame that played the stream, once.
+        // mux.js is wrapped so a page that has its own AMD loader (define) or
+        // CommonJS names can't make it register there instead of on window.
+        let boot = "if (!window.__scrayStreamDL) {\n(function () { var define, exports, module;\n"
+            + ScrayStreamJS.mux + "\n}).call(window);\n" + ScrayStreamJS.downloader + "\n}\n;0"
+        let call = "window.__scrayStreamDL.prepare(\(jsLiteral(id)), \(jsLiteral(s.url)));0"
+        evalInFrame(wv, s.frameInfo, boot) { [weak self] ok in
+            guard let self = self else { return }
+            guard ok else {
+                self.pendingStreams.removeValue(forKey: id)
+                self.showAlert(title: "Download failed",
+                               message: "The page that played the stream has gone. Start the video again, then retry.")
+                return
+            }
+            self.evalInFrame(wv, s.frameInfo, call)
+        }
+    }
+
+    private func jsLiteral(_ s: String) -> String {
+        guard let d = try? JSONSerialization.data(withJSONObject: [s]),
+              let j = String(data: d, encoding: .utf8) else { return "''" }
+        return String(j.dropFirst().dropLast())
+    }
+
+    /// Runs script in the given frame when there is one (a player is usually in
+    /// an iframe, and its cookies and origin are the point), else the page.
+    fileprivate func evalInFrame(_ webView: WKWebView?, _ frame: WKFrameInfo?, _ js: String,
+                                 done: ((Bool) -> Void)? = nil) {
+        DispatchQueue.main.async {
+            guard let webView = webView else { done?(false); return }
+            if let frame = frame {
+                webView.evaluateJavaScript(js, in: frame, in: .page) { result in
+                    if case .failure = result { done?(false) } else { done?(true) }
+                }
+            } else {
+                webView.evaluateJavaScript(js) { _, error in done?(error == nil) }
+            }
+        }
+    }
+
+    /// The page has read the playlist: check the name against the download
+    /// folder, open the file, and tell the page to start.
+    private func streamReady(id: String, body: [String: Any]) {
+        guard let p = pendingStreams.removeValue(forKey: id) else { return }
+        let estimate = (body["estimate"] as? NSNumber)?.int64Value ?? 0
+        let stop = "window.__scrayDownloadCancel && window.__scrayDownloadCancel('\(id)')"
+        checkClash(filename: p.name, incomingSize: estimate) { [weak self] outcome in
+            guard let self = self else { return }
+            if case .cancel = outcome {
+                self.evalInFrame(p.webView, p.frame, stop)
+                return
+            }
+            guard let url = self.makeTempDestination(filename: p.name),
+                  FileManager.default.createFile(atPath: url.path, contents: nil),
+                  let handle = try? FileHandle(forWritingTo: url) else {
+                self.evalInFrame(p.webView, p.frame, stop)
+                self.showAlert(title: "Download failed", message: "Couldn't open a temporary file.")
+                return
+            }
+            if let overwrite = outcome.overwrite { self.presetOverwrite[url.path] = overwrite }
+            let job = ScrayDownloadJob(id: id, filename: p.name)
+            job.totalBytes = estimate
+            job.fileURL = url
+            job.handle = handle
+            job.webView = p.webView
+            job.frame = p.frame
+            ScrayDownloadCenter.shared.begin(id: id, filename: p.name, total: estimate)
+            self.jobs.append(job)
+            self.refreshDownloadBar()
+            self.evalInFrame(p.webView, p.frame, "window.__scrayStreamDL.go('\(id)');0")
         }
     }
 
@@ -2836,6 +2972,17 @@ final class ScrayBrowserViewController: UIViewController,
                 webView?.evaluateJavaScript("window.__scrayDownloadStart('\(escaped)')")
             }
 
+        case "sready":
+            streamReady(id: id, body: body)
+
+        case "sprogress":
+            // The page's running guess at the finished size, so the bar means
+            // something although the stream never says how big it is.
+            guard let job = jobs.first(where: { $0.id == id }) else { return }
+            let estimate = (body["estimate"] as? NSNumber)?.int64Value ?? 0
+            if estimate > 0 { job.totalBytes = max(estimate, job.receivedBytes + 1) }
+            refreshDownloadBar()
+
         case "chunk":
             guard let job = jobs.first(where: { $0.id == id }),
                   let base64 = body["base64"] as? String,
@@ -2853,6 +3000,7 @@ final class ScrayBrowserViewController: UIViewController,
 
         case "error":
             let reason = body["message"] as? String ?? "Unknown error"
+            pendingStreams.removeValue(forKey: id)
             ScrayDownloadCenter.shared.fail(id: id, message: reason)
             discardJob(id: id)
             showAlert(title: "Download failed", message: reason)
@@ -2930,7 +3078,7 @@ final class ScrayBrowserViewController: UIViewController,
 
         if let webView = job.webView {
             let escaped = job.id.replacingOccurrences(of: "'", with: "")
-            webView.evaluateJavaScript("window.__scrayDownloadPause && window.__scrayDownloadPause('\(escaped)')")
+            evalInFrame(webView, job.frame, "window.__scrayDownloadPause && window.__scrayDownloadPause('\(escaped)')")
             job.pausedInPage = true
             ScrayDownloadCenter.shared.pause(id: id)
             return
@@ -2976,7 +3124,7 @@ final class ScrayBrowserViewController: UIViewController,
 
         if let webView = job.webView {
             let escaped = job.id.replacingOccurrences(of: "'", with: "")
-            webView.evaluateJavaScript("window.__scrayDownloadResume && window.__scrayDownloadResume('\(escaped)')")
+            evalInFrame(webView, job.frame, "window.__scrayDownloadResume && window.__scrayDownloadResume('\(escaped)')")
             job.pausedInPage = false
             ScrayDownloadCenter.shared.resume(id: id)
             return
@@ -3089,7 +3237,7 @@ final class ScrayBrowserViewController: UIViewController,
         }
         if let webView = job.webView {
             let escaped = job.id.replacingOccurrences(of: "'", with: "")
-            webView.evaluateJavaScript("window.__scrayDownloadCancel && window.__scrayDownloadCancel('\(escaped)')")
+            evalInFrame(webView, job.frame, "window.__scrayDownloadCancel && window.__scrayDownloadCancel('\(escaped)')")
         }
         ScrayDownloadCenter.shared.cancel(id: job.id)
         discardJob(id: job.id)

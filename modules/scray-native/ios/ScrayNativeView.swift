@@ -69,6 +69,20 @@ class ScrayNativeView: ExpoView, WKScriptMessageHandler, WKUIDelegate, WKNavigat
         }
     }
 
+    /// Open the Upload sheet with a file the in-app browser just saved already
+    /// ticked (native 15.147). Called after the browser has gone; the sheet waits
+    /// a few seconds for the folder rescan to list the file.
+    func showUploadSheet(named name: String) {
+        let escaped = name
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.webView.evaluateJavaScript(
+                "window.scrayShowUploadSheet && window.scrayShowUploadSheet(null, '\(escaped)');"
+            )
+        }
+    }
+
     /// Play a catalogue key. Called by ScrayBrowser after it dismisses itself,
     /// so the player is already on screen by the time this lands.
     /// Hand a StashDB scene URL to an open stash modal. Called by ScrayBrowser

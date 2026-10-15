@@ -336,6 +336,8 @@ final class ScrayBrowserViewController: UIViewController,
         let webView: WKWebView
     }
     private var pendingStreams: [String: PendingStream] = [:]
+    /// Stream downloads in flight: once one is saved, offer to upload it (native 15.147).
+    private var streamJobIDs: Set<String> = []
 
     init(homeURL: URL) {
         self.homeURL = homeURL
@@ -2130,6 +2132,20 @@ final class ScrayBrowserViewController: UIViewController,
         }
     }
 
+    /// A saved stream: the server can't fetch these (it isn't signed in as you),
+    /// but the phone's own copy can go to the library through the Upload sheet.
+    private func offerUpload(of saved: URL) {
+        let alert = UIAlertController(title: "Upload to library?",
+                                      message: "\(saved.lastPathComponent) is saved on this phone. Send it to your Hetzner library now?",
+                                      preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Not now", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Upload…", style: .default) { [weak self] _ in
+            let name = saved.lastPathComponent
+            self?.dismiss(animated: true) { ScrayNativeView.current?.showUploadSheet(named: name) }
+        })
+        presentSafely(alert)
+    }
+
     private func jsLiteral(_ s: String) -> String {
         guard let d = try? JSONSerialization.data(withJSONObject: [s]),
               let j = String(data: d, encoding: .utf8) else { return "''" }
@@ -2179,6 +2195,7 @@ final class ScrayBrowserViewController: UIViewController,
             job.webView = p.webView
             job.frame = p.frame
             ScrayDownloadCenter.shared.begin(id: id, filename: p.name, total: estimate)
+            self.streamJobIDs.insert(id)
             self.jobs.append(job)
             self.refreshDownloadBar()
             self.evalInFrame(p.webView, p.frame, "window.__scrayStreamDL.go('\(id)');0")
@@ -3156,6 +3173,7 @@ final class ScrayBrowserViewController: UIViewController,
         case "error":
             let reason = body["message"] as? String ?? "Unknown error"
             pendingStreams.removeValue(forKey: id)
+            streamJobIDs.remove(id)
             ScrayDownloadCenter.shared.fail(id: id, message: reason)
             discardJob(id: id)
             showAlert(title: "Download failed", message: reason)
@@ -3589,6 +3607,7 @@ final class ScrayBrowserViewController: UIViewController,
                 if let id = jobID { ScrayDownloadCenter.shared.finish(id: id, savedURL: saved) }
                 self.libraryNeedsRefresh = true
                 self.flash("Saved \(saved.lastPathComponent)")
+                if let id = jobID, self.streamJobIDs.remove(id) != nil { self.offerUpload(of: saved) }
                 return
             }
             self.exportingTempFiles.append(fileURL)

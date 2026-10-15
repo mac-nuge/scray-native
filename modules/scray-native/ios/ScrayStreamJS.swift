@@ -1,4 +1,5 @@
 import Foundation
+import WebKit
 
 // ============================================================================
 // On-phone stream download (native 15.145).
@@ -12,13 +13,21 @@ import Foundation
 // uses, so the Downloads list, progress bar, pause and cancel all just work.
 //
 // Neither script is injected up front: ScrayBrowser evaluates them in the
-// frame only when a stream download is asked for.
+// frame, in the world above, only when a stream download is asked for. Every
+// request goes through the app (ScrayBrowser.handleStreamFetch) so the page's
+// cross-origin rules do not apply.
 //
 // mux.js 6.3.0 (mux-mp4.min.js), Apache-2.0, (c) Brightcove, Inc.
 // https://github.com/videojs/mux.js
 // ============================================================================
 
 enum ScrayStreamJS {
+
+    /// The scripts run in a world of their own, and the "scrayFetch" handler
+    /// exists only there. A web page's own scripts live in the page world, so
+    /// they cannot see this code, call the handler, or borrow the cookies it
+    /// attaches - without that, any page could use it to read other sites as you.
+    static let world = WKContentWorld.world(name: "scray-stream")
 
     /// The downloader. Defines window.__scrayStreamDL; see its own comments.
     static let downloader = #"""
@@ -47,18 +56,30 @@ enum ScrayStreamJS {
     return out;
   }
 
-  function getText(url, signal) {
-    return fetch(url, { credentials: 'include', cache: 'no-store', signal: signal }).then(function (r) {
-      if (!r.ok) throw new Error('The playlist answered HTTP ' + r.status);
-      return r.text();
+  // Every request goes through the app (the "scrayFetch" handler), not the
+  // page's own fetch: the page is not allowed to read another site's files,
+  // while the app can ask as this phone - its cookies, the page's referer and
+  // browser name, and any token header the player was seen sending.
+  function native(job, url, range, text) {
+    return window.webkit.messageHandlers.scrayFetch.postMessage({
+      id: job.id, url: url, range: range ? range.start + '-' + range.end : '', text: !!text,
+      referer: location.href, origin: location.origin, agent: navigator.userAgent, headers: job.headers
     });
   }
 
+  function fromB64(s) {
+    var bin = atob(s), n = bin.length, u = new Uint8Array(n);
+    for (var i = 0; i < n; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  }
+
+  function getText(url, job) { return native(job, url, null, true); }
+
   // Master playlist: the best quality. Media playlist: its segments.
-  function plan(url, signal) {
+  function plan(url, job) {
     var hops = 0, bandwidth = 0;
     function step(u) {
-      return getText(u, signal).then(function (text) {
+      return getText(u, job).then(function (text) {
         if (text.replace(/^﻿/, '').indexOf('#EXTM3U') !== 0) {
           throw new Error('That address did not return a playlist');
         }
@@ -128,13 +149,8 @@ enum ScrayStreamJS {
     return { start: start, end: start + len - 1 };
   }
 
-  function bytesOf(url, range, signal) {
-    var headers = {};
-    if (range) headers.Range = 'bytes=' + range.start + '-' + range.end;
-    return fetch(url, { credentials: 'include', cache: 'no-store', headers: headers, signal: signal }).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.arrayBuffer();
-    }).then(function (b) { return new Uint8Array(b); });
+  function bytesOf(url, range, job) {
+    return native(job, url, range, false).then(fromB64);
   }
 
   function withRetry(fn, job) {
@@ -162,11 +178,13 @@ enum ScrayStreamJS {
 
   function fetchSegment(job, i) {
     var seg = job.plan.segs[i];
-    return withRetry(function () { return bytesOf(seg.url, seg.range, job.abort.signal); }, job).then(function (data) {
+    return withRetry(function () { return bytesOf(seg.url, seg.range, job); }, job).catch(function (e) {
+      throw new Error('Part ' + (i + 1) + ' of ' + job.plan.segs.length + ' (' + new URL(seg.url).host + '): ' + ((e && e.message) || e));
+    }).then(function (data) {
       if (!seg.key) return data;
       var k = seg.key;
       if (!job.keys[k.url]) {
-        job.keys[k.url] = withRetry(function () { return bytesOf(k.url, null, job.abort.signal); }, job).then(function (raw) {
+        job.keys[k.url] = withRetry(function () { return bytesOf(k.url, null, job); }, job).then(function (raw) {
           return crypto.subtle.importKey('raw', raw, { name: 'AES-CBC' }, false, ['decrypt']);
         });
       }
@@ -296,7 +314,7 @@ enum ScrayStreamJS {
         return waitIfPaused(job).then(function () {
           if (job.dead) return;
           var parts = [];
-          if (i === 0 && job.plan.map) parts.push(bytesOf(job.plan.map.url, job.plan.map.range, job.abort.signal));
+          if (i === 0 && job.plan.map) parts.push(bytesOf(job.plan.map.url, job.plan.map.range, job));
           return Promise.all(parts).then(function (pre) {
             var out = convert(u8);
             if (pre.length) out = concat(pre[0], out);
@@ -324,10 +342,10 @@ enum ScrayStreamJS {
 
   window.__scrayStreamDL = {
     // Read the playlist and report what is there; nothing is saved yet.
-    prepare: function (id, url) {
-      var job = { id: id, abort: new AbortController(), paused: false, dead: false, keys: {}, plan: null };
+    prepare: function (id, url, headers) {
+      var job = { id: id, abort: { abort: function () {} }, paused: false, dead: false, keys: {}, plan: null, headers: headers || {} };
       jobs[id] = job;
-      plan(url, job.abort.signal).then(function (p) {
+      plan(url, job).then(function (p) {
         if (job.dead) return;
         job.plan = p;
         var est = (p.bandwidth && p.duration) ? Math.round(p.bandwidth / 8 * p.duration) : 0;

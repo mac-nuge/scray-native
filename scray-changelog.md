@@ -4,6 +4,16 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.146 — test: stream download fetches through the app
+<!-- 2026-10-15T15:37Z -->
+- **Asked:** Download Stream (15.145) failed on the phone with `Could not read the stream: Load failed`, while FetchV saves the same signed-in stream. The user offered diagnostics.
+- **Cause (inferred from the message):** `Load failed` is WebKit's wording for a page-side `fetch` that was blocked. The player in the page can use the stream because Safari plays HLS natively, which has no cross-origin rule; the downloader's own `fetch` is a cross-origin read of the CDN and is refused unless the CDN sends CORS headers. FetchV is a browser extension, which is exempt. Not confirmed on the phone - the new error text below will say if it was something else.
+- **Change (ScrayBrowser.swift, ScrayStreamJS.swift - needs an IPA build):** the downloader no longer calls `fetch`. Every playlist, key and segment request goes to a new handler, `scrayFetch`, and the app makes it with URLSession: the signed-in cookies from the browser's own cookie store (domain, path, secure and expiry matched, so login cookies are included), the page's address as Referer and Origin, the page's browser name, byte ranges, and any token-style header the player was seen sending with the playlist request (`Authorization`, `X-...`, `token...`, `auth...`, `api-key` - captured by the stream shim from fetch and XHR). The page's own cross-origin and CSP rules no longer apply.
+- **Kept safe:** the downloader and the handler now live in a separate script world (`WKContentWorld` named scray-stream). A web page's own scripts are in the page world, so they can't see the code, call `scrayFetch`, or use it to read other sites with your cookies. The handler also refuses anything unless a stream download is waiting or running, and only http(s).
+- **Errors say where it broke:** `HTTP 403 from <host> - the site did not accept this request (sign-in or token)`, `Part 7 of 120 (<host>): ...`, and the network error text with the host.
+- **Not covered:** a site that checks something other than cookies, referer, browser name and those headers (a per-request signature the player computes, say); a redirect to another host does not carry the cookies on.
+- Checked: the real downloader through a stand-in for the handler against local HLS - master playlist, a server that insists on the right Referer and browser name, AES-128, fragmented MP4: MP4s that ffprobe reads and ffmpeg decodes with no errors; a 404 and a live playlist and H.265 give the messages above. The stream shim run in jsdom, 20 checks including the new header capture. The Swift parses clean (tree-sitter) and was **not compiled or run**.
+
 ### native 15.145 — test: download streams on the phone
 <!-- 2026-10-15T05:39Z -->
 - **Asked:** the server copy of a stream (15.144) failed - `ffprobe couldn't read the file: <the stream>: Invalid data found when processing input` - while the FetchV extension saves the same video. Also: show a progress bar in the browser like an ordinary download.

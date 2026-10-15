@@ -110,6 +110,16 @@ private final class ScrayBrowserMessageProxy: NSObject, WKScriptMessageHandler {
     }
 }
 
+/// Same idea for handlers that answer the page (WKScriptMessageHandlerWithReply).
+private final class ScrayBrowserReplyProxy: NSObject, WKScriptMessageHandlerWithReply {
+    weak var target: ScrayBrowserViewController?
+    func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage,
+                               replyHandler: @escaping (Any?, String?) -> Void) {
+        guard let target = target else { replyHandler(nil, "The browser was closed"); return }
+        target.handleStreamFetch(message, reply: replyHandler)
+    }
+}
+
 // ============================================================================
 // Streams (native 15.144): an .m3u8 address a page asked for, the page it was
 // asked from (what the site will expect as the Referer) and the browser's name
@@ -125,6 +135,8 @@ private struct ScrayDetectedStream {
     /// The frame that reported it, so an on-phone download can run in the
     /// same frame the player does (native 15.145).
     let frameInfo: WKFrameInfo?
+    /// Token-style headers the player was seen sending with the playlist request (15.145).
+    var headers: [String: String] = [:]
 }
 
 private final class ScrayStreamBag {
@@ -203,6 +215,7 @@ final class ScrayBrowserViewController: UIViewController,
 
     private var webConfig: WKWebViewConfiguration!
     private let messageProxy = ScrayBrowserMessageProxy()
+    private let replyProxy = ScrayBrowserReplyProxy()
     /// Serves scray-video:// in this browser too, so Wholesale can preview a
     /// file that is already on the device without going near the network.
     private let videoSchemeHandler = VideoSchemeHandler()
@@ -338,6 +351,8 @@ final class ScrayBrowserViewController: UIViewController,
         webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayDownload")
         webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayBridge")
         webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayStream")
+        webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayDownload", contentWorld: ScrayStreamJS.world)
+        webConfig?.userContentController.removeScriptMessageHandler(forName: "scrayFetch", contentWorld: ScrayStreamJS.world)
     }
 
     override func viewDidLoad() {
@@ -376,6 +391,10 @@ final class ScrayBrowserViewController: UIViewController,
         config.userContentController.add(messageProxy, name: "scrayDownload")
         // Streams (native 15.144): pages tell us when they ask for an .m3u8.
         config.userContentController.add(messageProxy, name: "scrayStream")
+        // On-phone stream download (native 15.145): its own world, see ScrayStreamJS.
+        replyProxy.target = self
+        config.userContentController.add(messageProxy, contentWorld: ScrayStreamJS.world, name: "scrayDownload")
+        config.userContentController.addScriptMessageHandler(replyProxy, contentWorld: ScrayStreamJS.world, name: "scrayFetch")
 
         // Picker's Wholesale page runs HERE, not in Native's own web view, so
         // without this it has no way to see what is actually on the device.
@@ -1737,29 +1756,45 @@ final class ScrayBrowserViewController: UIViewController,
       var NAMED = /\.m3u8(?:$|[?#])/i;
       var TYPED = /mpegurl/i;
 
-      function report(raw, byType) {
+      // Token-style headers a player sends with its playlist request (a bearer
+      // token, an X- header). Kept so the app can send them too.
+      var KEEP = /^(authorization|x-[a-z0-9-]+|token[a-z0-9-]*|auth[a-z0-9-]*|api-key)$/i;
+      function pick(h) {
+        var out = {}, n = 0;
+        function add(k, v) { if (n < 12 && KEEP.test(k) && typeof v === 'string') { out[k] = v; n++; } }
+        try {
+          if (!h) return null;
+          if (typeof h.forEach === 'function' && !Array.isArray(h)) h.forEach(function (v, k) { add(k, v); });
+          else if (Array.isArray(h)) h.forEach(function (p) { if (p && p.length > 1) add(String(p[0]), String(p[1])); });
+          else Object.keys(h).forEach(function (k) { add(k, String(h[k])); });
+        } catch (e) {}
+        return n ? out : null;
+      }
+
+      function report(raw, byType, hdrs) {
         try {
           if (!raw || typeof raw !== 'string') return;
           var abs = new URL(raw, location.href).href;
           if (!/^https?:/i.test(abs)) return;
           if (!byType && !NAMED.test(abs)) return;
-          if (seen[abs]) return;
-          seen[abs] = 1;
+          if (seen[abs] && !(hdrs && !seen[abs].h)) return;
+          seen[abs] = { h: !!hdrs };
           window.webkit.messageHandlers.scrayStream.postMessage({
             url: abs,
             page: location.href.split('#')[0],
-            agent: navigator.userAgent
+            agent: navigator.userAgent,
+            headers: hdrs || undefined
           });
         } catch (e) {}
       }
 
       var realFetch = window.fetch;
       if (typeof realFetch === 'function') {
-        window.fetch = function (input) {
+        window.fetch = function (input, init) {
           var p = realFetch.apply(this, arguments);
           try {
             var u = typeof input === 'string' ? input : (input && input.url);
-            report(u, false);
+            report(u, false, pick((init && init.headers) || (input && input.headers)));
             p.then(function (r) {
               try { if (r && TYPED.test(r.headers.get('content-type') || '')) report(r.url || u, true); } catch (e) {}
             }, function () {});
@@ -1768,10 +1803,22 @@ final class ScrayBrowserViewController: UIViewController,
         };
       }
 
+      var realSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+      XMLHttpRequest.prototype.setRequestHeader = function (k, v) {
+        try { (this.__scrayH = this.__scrayH || {})[k] = String(v); } catch (e) {}
+        return realSetHeader.apply(this, arguments);
+      };
+      var realSend = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.send = function () {
+        try { if (this.__scrayU && this.__scrayH) report(this.__scrayU, false, pick(this.__scrayH)); } catch (e) {}
+        return realSend.apply(this, arguments);
+      };
+
       var realOpen = XMLHttpRequest.prototype.open;
       XMLHttpRequest.prototype.open = function (method, url) {
         try {
           var u = String(url);
+          this.__scrayU = u;
           report(u, false);
           this.addEventListener('load', function () {
             try { if (TYPED.test(this.getResponseHeader('content-type') || '')) report(this.responseURL || u, true); } catch (e) {}
@@ -1837,11 +1884,22 @@ final class ScrayBrowserViewController: UIViewController,
             bag = ScrayStreamBag(webView: webView)
             streamBags[key] = bag
         }
-        guard !bag.items.contains(where: { $0.url == raw }), bag.items.count < Self.STREAMS_PER_TAB else { return }
-        bag.items.append(ScrayDetectedStream(url: raw,
-                                             frame: (body["page"] as? String) ?? "",
-                                             agent: (body["agent"] as? String) ?? "",
-                                             frameInfo: message.frameInfo))
+        var headers: [String: String] = [:]
+        if let h = body["headers"] as? [String: Any] {
+            for (k, v) in h { if let v = v as? String, headers.count < 12 { headers[k] = String(v.prefix(2000)) } }
+        }
+        // A second report for a playlist already held only adds the headers.
+        if let i = bag.items.firstIndex(where: { $0.url == raw }) {
+            if !headers.isEmpty { bag.items[i].headers = headers }
+            return
+        }
+        guard bag.items.count < Self.STREAMS_PER_TAB else { return }
+        var item = ScrayDetectedStream(url: raw,
+                                       frame: (body["page"] as? String) ?? "",
+                                       agent: (body["agent"] as? String) ?? "",
+                                       frameInfo: message.frameInfo)
+        item.headers = headers
+        bag.items.append(item)
         if bag.items.count == 1, webView === currentWebView {
             flash("Stream found - ⋯ then Download Stream")
         }
@@ -1962,7 +2020,9 @@ final class ScrayBrowserViewController: UIViewController,
         // CommonJS names can't make it register there instead of on window.
         let boot = "if (!window.__scrayStreamDL) {\n(function () { var define, exports, module;\n"
             + ScrayStreamJS.mux + "\n}).call(window);\n" + ScrayStreamJS.downloader + "\n}\n;0"
-        let call = "window.__scrayStreamDL.prepare(\(jsLiteral(id)), \(jsLiteral(s.url)));0"
+        let headerJSON = (try? JSONSerialization.data(withJSONObject: s.headers))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let call = "window.__scrayStreamDL.prepare(\(jsLiteral(id)), \(jsLiteral(s.url)), \(headerJSON));0"
         evalInFrame(wv, s.frameInfo, boot) { [weak self] ok in
             guard let self = self else { return }
             guard ok else {
@@ -1972,6 +2032,101 @@ final class ScrayBrowserViewController: UIViewController,
                 return
             }
             self.evalInFrame(wv, s.frameInfo, call)
+        }
+    }
+
+    // The page asks the app to fetch for it (see ScrayStreamJS). Only a stream
+    // download that is waiting or running may ask, and only from the world the
+    // downloader runs in, which a web page cannot reach.
+
+    private static let streamSession: URLSession = {
+        let c = URLSessionConfiguration.ephemeral
+        c.httpShouldSetCookies = false
+        c.httpCookieStorage = nil
+        c.requestCachePolicy = .reloadIgnoringLocalCacheData
+        c.timeoutIntervalForRequest = 60
+        return URLSession(configuration: c)
+    }()
+
+    private static func streamHeaderOK(_ name: String) -> Bool {
+        let l = name.lowercased()
+        return l == "authorization" || l == "api-key" || l.hasPrefix("x-") || l.hasPrefix("token") || l.hasPrefix("auth")
+    }
+
+    /// The cookies a browser would send to this address: domain, path, secure, expiry.
+    private static func cookie(_ c: HTTPCookie, matches url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        var domain = c.domain.lowercased()
+        if domain.hasPrefix(".") {
+            domain.removeFirst()
+            if !(host == domain || host.hasSuffix("." + domain)) { return false }
+        } else if host != domain {
+            return false
+        }
+        if c.isSecure && url.scheme?.lowercased() != "https" { return false }
+        if let exp = c.expiresDate, exp < Date() { return false }
+        let path = url.path.isEmpty ? "/" : url.path
+        let cp = c.path.isEmpty ? "/" : c.path
+        return cp == "/" || path == cp || path.hasPrefix(cp.hasSuffix("/") ? cp : cp + "/")
+    }
+
+    fileprivate func handleStreamFetch(_ message: WKScriptMessage, reply: @escaping (Any?, String?) -> Void) {
+        func answer(_ value: Any?, _ error: String?) { DispatchQueue.main.async { reply(value, error) } }
+
+        guard let body = message.body as? [String: Any],
+              let id = body["id"] as? String,
+              pendingStreams[id] != nil || jobs.contains(where: { $0.id == id }) else {
+            answer(nil, "No stream download is waiting")
+            return
+        }
+        guard let raw = body["url"] as? String, let url = URL(string: raw),
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else {
+            answer(nil, "Not a web address")
+            return
+        }
+        let wantText = (body["text"] as? Bool) ?? false
+
+        var request = URLRequest(url: url, timeoutInterval: 60)
+        request.httpShouldHandleCookies = false
+        if let ua = body["agent"] as? String, !ua.isEmpty { request.setValue(ua, forHTTPHeaderField: "User-Agent") }
+        if let ref = body["referer"] as? String, ref.hasPrefix("http") { request.setValue(ref, forHTTPHeaderField: "Referer") }
+        if let origin = body["origin"] as? String, origin.hasPrefix("http") { request.setValue(origin, forHTTPHeaderField: "Origin") }
+        if let range = body["range"] as? String, !range.isEmpty, range.allSatisfy({ $0.isNumber || $0 == "-" }) {
+            request.setValue("bytes=" + range, forHTTPHeaderField: "Range")
+        }
+        if let extra = body["headers"] as? [String: Any] {
+            for (k, v) in extra { if let v = v as? String, Self.streamHeaderOK(k) { request.setValue(v, forHTTPHeaderField: k) } }
+        }
+
+        guard let store = message.webView?.configuration.websiteDataStore.httpCookieStore else {
+            answer(nil, "The browser page has gone")
+            return
+        }
+        store.getAllCookies { cookies in
+            var req = request
+            let mine = cookies.filter { Self.cookie($0, matches: url) }
+            if !mine.isEmpty {
+                for (k, v) in HTTPCookie.requestHeaderFields(with: mine) { req.setValue(v, forHTTPHeaderField: k) }
+            }
+            Self.streamSession.dataTask(with: req) { data, response, error in
+                if let error = error {
+                    answer(nil, "\(error.localizedDescription) (\(host))")
+                    return
+                }
+                guard let http = response as? HTTPURLResponse, let data = data else {
+                    answer(nil, "No answer from \(host)")
+                    return
+                }
+                guard (200...299).contains(http.statusCode) else {
+                    let hint = (http.statusCode == 401 || http.statusCode == 403)
+                        ? " - the site did not accept this request (sign-in or token)" : ""
+                    answer(nil, "HTTP \(http.statusCode) from \(host)\(hint)")
+                    return
+                }
+                if wantText { answer(String(decoding: data, as: UTF8.self), nil) }
+                else { answer(data.base64EncodedString(), nil) }
+            }.resume()
         }
     }
 
@@ -1988,7 +2143,7 @@ final class ScrayBrowserViewController: UIViewController,
         DispatchQueue.main.async {
             guard let webView = webView else { done?(false); return }
             if let frame = frame {
-                webView.evaluateJavaScript(js, in: frame, in: .page) { result in
+                webView.evaluateJavaScript(js, in: frame, in: ScrayStreamJS.world) { result in
                     if case .failure = result { done?(false) } else { done?(true) }
                 }
             } else {

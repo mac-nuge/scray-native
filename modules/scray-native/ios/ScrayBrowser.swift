@@ -505,6 +505,9 @@ final class ScrayBrowserViewController: UIViewController,
     private static let TOOLBAR_SYMBOL_POINTS: CGFloat = 15
     private static let TOOLBAR_TITLE_POINTS: CGFloat = 14
     private static let TOOLBAR_ITEM_GAP: CGFloat = 2
+    /// Taken off the bar's width for the margins and the glass around the buttons (15.149).
+    private static let TOOLBAR_SIDE_ROOM: CGFloat = 56
+    private var lastBottomBarWidth: CGFloat = 0
     private static let TOOLBAR_BUTTON_WIDTH: CGFloat = 34
     private static let TOOLBAR_BUTTON_HEIGHT: CGFloat = 34
     private static var toolbarSymbol: UIImage.Configuration {
@@ -518,7 +521,9 @@ final class ScrayBrowserViewController: UIViewController,
 
         homeButton.setImage(UIImage(systemName: "house"), for: .normal)
         homeButton.addTarget(self, action: #selector(homeTapped), for: .touchUpInside)
-        homeButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        let homeWidth = homeButton.widthAnchor.constraint(equalToConstant: 36)
+        homeWidth.priority = UILayoutPriority(999)      // may give way when the bar is crowded (15.149)
+        homeWidth.isActive = true
         homeButton.heightAnchor.constraint(equalToConstant: Self.TOOLBAR_BUTTON_HEIGHT).isActive = true
 
         // ⋯ sits up by the address with home and downloads (native 15.8; it
@@ -639,13 +644,20 @@ final class ScrayBrowserViewController: UIViewController,
             // trayButton pins its own size in ScrayDownloads; match it there.
             // homeButton has its own width, above.
             if b === trayButton || b === homeButton { continue }
-            b.widthAnchor.constraint(equalToConstant: Self.TOOLBAR_BUTTON_WIDTH).isActive = true
+            // 999, not required: when more buttons are at the bottom than fit,
+            // they all shrink a little instead of running off the edges (15.149).
+            let width = b.widthAnchor.constraint(equalToConstant: Self.TOOLBAR_BUTTON_WIDTH)
+            width.priority = UILayoutPriority(999)
+            width.isActive = true
             b.heightAnchor.constraint(equalToConstant: Self.TOOLBAR_BUTTON_HEIGHT).isActive = true
         }
-        // One group, right-aligned (native 14.50). Which buttons, and in what
-        // order, is the controls layout's call: applyControlsLayout fills it.
+        // One group (native 14.50), spread across the whole bar (15.148, 15.149):
+        // equal gaps, and it shrinks the buttons rather than overflow. Which
+        // buttons, and in what order, is the controls layout's call:
+        // applyControlsLayout fills it.
         navStack.axis = .horizontal
         navStack.alignment = .center
+        navStack.distribution = .equalSpacing
         navStack.spacing = Self.TOOLBAR_ITEM_GAP
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
@@ -784,6 +796,13 @@ final class ScrayBrowserViewController: UIViewController,
         }
     }
 
+    /// The stack is as wide as the bar, so it is laid again when the width
+    /// changes - first layout, rotation, split view (native 15.149).
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if abs(view.bounds.width - lastBottomBarWidth) > 0.5, view.bounds.width > 0 { applyControlsLayout() }
+    }
+
     private func applyControlsLayout() {
         let top = controlsLayout.controls(in: .top)
         let bottom = controlsLayout.controls(in: .bottom)
@@ -798,19 +817,24 @@ final class ScrayBrowserViewController: UIViewController,
             headerStack.addArrangedSubview(b)
         }
 
-        // Spread evenly across the bar (native 15.148): a flexible space either
-        // side of every button, so the gaps - and the margins - are all equal and
-        // each button is well clear of its neighbours. It used to be one stack
-        // pushed against the right edge.
-        var items: [UIBarButtonItem] = []
+        // Spread across the bar (native 15.148). One bar item - a flexible space
+        // and a bar item per button gave every button its own glass bubble,
+        // which ran off the sides (15.149) - holding a stack as wide as the bar
+        // less its margins, with equal gaps between the buttons.
+        for v in navStack.arrangedSubviews {
+            navStack.removeArrangedSubview(v)
+            v.removeFromSuperview()
+        }
         for c in bottom {
             let b = controlButton(for: c)
             b.isHidden = false
-            items.append(UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil))
-            items.append(UIBarButtonItem(customView: b))
+            navStack.addArrangedSubview(b)
         }
-        if !items.isEmpty { items.append(UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)) }
-        toolbar.items = items
+        lastBottomBarWidth = view.bounds.width
+        let room = max(120, view.bounds.width - Self.TOOLBAR_SIDE_ROOM)
+        navStack.frame = CGRect(x: 0, y: 0, width: room, height: Self.TOOLBAR_BUTTON_HEIGHT)
+        navStack.layoutIfNeeded()
+        toolbar.items = bottom.isEmpty ? [] : [UIBarButtonItem(customView: navStack)]
         toolbarHeight.constant = chromeCollapsed ? 0 : toolbarShownHeight
         view.setNeedsLayout()
         refreshChrome()

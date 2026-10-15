@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.151 — test: stream download real mp4 length
+<!-- 2026-10-15T19:22Z -->
+- **Asked:** Download Stream still gave a black video 24 hours long. FetchV does a second step that builds the MP4 from all the pieces; the same is needed here.
+- **Cause:** the joiner writes a fragmented MP4 whose header says every track lasts the maximum (about a day), and its fragment times follow the stream's own clock. Players that trust the header show 24 hours, and a jump in the stream's clock leaves a gap they sit in, showing black.
+- **Change (ScrayStreamJS.swift, ScrayBrowser.swift - needs an IPA build):** the downloader now copies the media bytes into a plain MP4 as they arrive and, at the end, writes a proper header (real sample sizes, durations, key frames, offsets) after them, then goes back and fills in the size of the data block. Time is each sample after the last, whatever the stream's clock did. The 15.150 timestamp rewrite is gone as it is not needed. Streams that are already MP4 are unchanged.
+- **Also:** the Upload to library prompt now shows the saved length and what it holds (for example 35 min 52 s, video + audio), so you can see at once if it is wrong.
+- Checked: in Node, master playlist (20.00 s, 500 video + 861 audio frames, picture not black), AES-128 (12.00 s), spliced-clock stream (12.24 s, decodes), fragmented MP4 (12.02 s); header at the end, no errors on a full decode. Swift parses clean; not compiled.
+
 ### native 15.150 — test: stream download timeline fix
 <!-- 2026-10-15T18:25Z -->
 - **Asked:** a stream saved with Download Stream played as a black video 24 hours 15 minutes long (the player showed 35:52 / 24:15:28 near the start).

@@ -497,11 +497,15 @@
   // One modal, three steps. State lives in `S` for the life of the sheet.
   let S = null;
 
-  async function openSheet(video) {
+  // `nameHint` (native 15.147): a file just saved by the in-app browser. It may
+  // not be in the library list yet - the browser's closing rescans the folder -
+  // so the list is re-read for a few seconds, and the file is ticked once found.
+  async function openSheet(video, nameHint) {
     closeSheet();
     S = { step: "files", ticked: new Set(), files: [], filter: "", q: "", targets: null, account: null, path: null,
           folders: null, loading: false, error: null, needsBuild: false, quota: {}, mk: null, note: null };
-    const start = localId(video);
+    const mine = S;
+    const start = video ? localId(video) : null;
     if (start) S.ticked.add(start);
 
     const modal = document.createElement("div");
@@ -521,6 +525,17 @@
       const all = await window.getAllVideos();
       S.files = all.filter(isPhoneOnly).sort((a, b) => String(a.filename).localeCompare(String(b.filename)));
       if (start && !S.files.some(v => localId(v) === start) && isPhoneOnly(video)) S.files.unshift(video);
+      if (nameHint) {
+        const want = String(nameHint).toLowerCase();
+        const find = () => S.files.find(v => String(v.filename).toLowerCase() === want);
+        for (let n = 0; n < 10 && !find() && S === mine; n++) {
+          await new Promise(r => setTimeout(r, 1000));
+          const again = await window.getAllVideos();
+          S.files = again.filter(isPhoneOnly).sort((a, b) => String(a.filename).localeCompare(String(b.filename)));
+        }
+        const hit = S === mine ? find() : null;
+        if (hit) S.ticked.add(localId(hit));
+      }
     } catch (err) {
       S.error = `Couldn't read the phone's files: ${err.message}`;
     }

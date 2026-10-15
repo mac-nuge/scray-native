@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.147 — test: upload a saved stream to the library
+<!-- 2026-10-15T16:04Z -->
+- **Asked:** Download Stream now works on the phone, but Save Stream to Library (the server copy) still fails with `ffprobe couldn't read the file: <the stream>: Invalid data found when processing input`. Could the phone's download just be sent to the server?
+- **Why the server copy fails:** the gateway fetches the playlist with no sign-in, so a stream that needs one answers with a page, not a playlist - the same thing ffprobe is reporting. The gateway can't be signed in as you, so this is not something to fix on the server; the phone is the one place the sign-in exists.
+- **Change (ScrayBrowser.swift, ScrayNativeView.swift, assets/web/scray-upload.js - Swift, so needs an IPA build):** when a Download Stream finishes and lands in the download folder, an alert asks **Upload to library?**. **Upload…** closes the browser and opens the existing Upload sheet in Native with that file ticked. From there it is the usual Upload: pick Hetzner, a folder, go. `scrayShowUploadSheet(video, nameHint)` takes the file name; the browser's closing rescans the download folder, so the sheet re-reads the list for up to ten seconds before ticking it. **Not now** just leaves the file in the folder; the Upload sheet can still be opened by hand later.
+- **Left as it was:** Save Stream to Library (server copy) stays, for streams that need no sign-in. No server change, nothing to upload to the host or gateway.
+- **Limit:** needs a download folder set (without one the file goes to the Files export sheet and there is nothing to hand on). The file is matched by name; if the folder already had one of that name and "keep both" renamed it, the sheet opens with nothing ticked.
+- Checked: `node --check scray-upload.js`; Swift parses clean (tree-sitter). Not run in the app.
+
 ### native 15.146 — test: stream download fetches through the app
 <!-- 2026-10-15T15:37Z -->
 - **Asked:** Download Stream (15.145) failed on the phone with `Could not read the stream: Load failed`, while FetchV saves the same signed-in stream. The user offered diagnostics.

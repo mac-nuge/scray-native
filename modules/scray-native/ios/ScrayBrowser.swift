@@ -798,19 +798,19 @@ final class ScrayBrowserViewController: UIViewController,
             headerStack.addArrangedSubview(b)
         }
 
-        for v in navStack.arrangedSubviews {
-            navStack.removeArrangedSubview(v)
-            v.removeFromSuperview()
-        }
+        // Spread evenly across the bar (native 15.148): a flexible space either
+        // side of every button, so the gaps - and the margins - are all equal and
+        // each button is well clear of its neighbours. It used to be one stack
+        // pushed against the right edge.
+        var items: [UIBarButtonItem] = []
         for c in bottom {
             let b = controlButton(for: c)
             b.isHidden = false
-            navStack.addArrangedSubview(b)
+            items.append(UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil))
+            items.append(UIBarButtonItem(customView: b))
         }
-        // A fresh bar item each time, so the toolbar measures the new width.
-        navStack.frame.size = navStack.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-        let flex = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
-        toolbar.items = bottom.isEmpty ? [] : [flex, UIBarButtonItem(customView: navStack)]
+        if !items.isEmpty { items.append(UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)) }
+        toolbar.items = items
         toolbarHeight.constant = chromeCollapsed ? 0 : toolbarShownHeight
         view.setNeedsLayout()
         refreshChrome()

@@ -17,6 +17,8 @@ final class ScrayDownloadJob {
 
     /// blob:/data: route — the page streaming chunks over the bridge.
     weak var webView: WKWebView?
+    /// On-phone stream downloads run in the frame that played the stream (native 15.145).
+    var frame: WKFrameInfo?
 
     /// http(s) route. Held as AnyObject so this class needn't be gated on
     /// iOS 14.5 just to store a WKDownload.

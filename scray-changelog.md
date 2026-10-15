@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.150 — test: stream download timeline fix
+<!-- 2026-10-15T18:25Z -->
+- **Asked:** a stream saved with Download Stream played as a black video 24 hours 15 minutes long (the player showed 35:52 / 24:15:28 near the start).
+- **Cause (inferred):** the stream's own segment timestamps jump partway through - an ad or intro spliced in, a clock restart, or the 33-bit wrap that comes at about 26.5 hours, which is close to the length shown. mux.js writes each fragment's start time from those timestamps, so the finished file had fragments hours apart (or on top of each other) and the player sat in the empty gap, showing black. I couldn't see the stream; this fits the symptom and I reproduced the same fault with a test stream whose later segments are stamped a day later: before the fix the fragments all started at 0 and the file was read as 4 s; the fix gives 12 s.
+- **Change (ScrayStreamJS.swift, the downloader - needs an IPA build):** after the joiner makes each fragment, its start time (`tfdt`) is rewritten to begin where that track's previous fragment ended, using the fragment's own sample durations (`trun`, or the track default in `tfhd`). The first fragment of each track keeps its own start, so audio and video stay in step. The file's timeline is now gapless whatever the stream's timestamps do. Fragmented-MP4 streams are written as they come and are not changed.
+- **Cost:** a join between two segments where the stream's own clock restarted can be a frame or two out; a null decode of the test file warns about timestamps at the joins and plays through.
+- Checked: the downloader in Node on the jump stream (12.18 s, continuous 0-12 s, decodes), and again on a master playlist, AES-128 and fragmented MP4 (20.04 s, 12.03 s, 12.02 s, no errors). Swift not touched beyond the embedded script. Not run in the app.
+
 ### native 15.149 — test: fit the browser toolbar
 <!-- 2026-10-15T18:21Z -->
 - **Asked:** after 15.148 the bottom buttons ran off both sides on an iPhone 17 Pro; shrink them to fit.

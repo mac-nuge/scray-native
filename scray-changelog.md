@@ -4,6 +4,12 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.152 — test: save stream to library via phone
+<!-- 2026-10-16T06:45Z -->
+- **Asked:** Download Stream works on the phone but Save Stream to Library fails on the server (ffprobe: Invalid data found when processing input, because the server cannot sign in to the site). Use the same on-phone download and just send the file to the server.
+- **Change (ScrayBrowser.swift - needs an IPA build):** Save Stream to Library now runs the same on-phone download as Download Stream, then opens the library upload sheet for the saved file straight away, with no extra prompt. The server no longer fetches the stream itself. Download Stream is unchanged and still asks before uploading.
+- Checked: Swift parses clean; not compiled or run.
+
 ### native 15.151 — test: stream download real mp4 length
 <!-- 2026-10-15T19:22Z -->
 - **Asked:** Download Stream still gave a black video 24 hours long. FetchV does a second step that builds the MP4 from all the pieces; the same is needed here.

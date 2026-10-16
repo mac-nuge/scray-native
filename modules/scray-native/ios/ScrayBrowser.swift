@@ -339,6 +339,8 @@ final class ScrayBrowserViewController: UIViewController,
     /// Stream downloads in flight: once one is saved, offer to upload it (native 15.147).
     private var streamJobIDs: Set<String> = []
     private var streamInfo: [String: String] = [:]
+    /// Streams to send on to the library the moment they are saved (native 15.152).
+    private var streamToLibrary: Set<String> = []
 
     init(homeURL: URL) {
         self.homeURL = homeURL
@@ -1933,7 +1935,7 @@ final class ScrayBrowserViewController: UIViewController,
     }
 
     /// The menu line: the stream itself when there is one, a choice when there are several.
-    private func saveStreamTapped() { chooseStream { [weak self] in self?.askStreamName($0) } }
+    private func saveStreamTapped() { chooseStream { [weak self] in self?.askDeviceStreamName($0, toLibrary: true) } }
 
     /// ⋯ → Download Stream: the phone fetches it itself and it lands in Downloads.
     private func downloadStreamTapped() { chooseStream { [weak self] in self?.askDeviceStreamName($0) } }
@@ -2010,10 +2012,12 @@ final class ScrayBrowserViewController: UIViewController,
     // ordinary download: Downloads list, progress bar, pause, cancel, and
     // delivery to the download folder all come from the blob route above.
 
-    private func askDeviceStreamName(_ s: ScrayDetectedStream) {
+    private func askDeviceStreamName(_ s: ScrayDetectedStream, toLibrary: Bool = false) {
         let title = (currentWebView?.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let alert = UIAlertController(title: "Download Stream",
-                                      message: "Saved on this phone as an MP4, like any other download.",
+        let alert = UIAlertController(title: toLibrary ? "Save Stream to Library" : "Download Stream",
+                                      message: toLibrary
+                                          ? "The phone downloads it as an MP4, then sends it to your library."
+                                          : "Saved on this phone as an MP4, like any other download.",
                                       preferredStyle: .alert)
         alert.addTextField {
             $0.text = title
@@ -2021,14 +2025,14 @@ final class ScrayBrowserViewController: UIViewController,
             $0.clearButtonMode = .whileEditing
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Download", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: toLibrary ? "Save" : "Download", style: .default) { [weak self, weak alert] _ in
             let typed = (alert?.textFields?.first?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            self?.startDeviceStream(s, name: typed.isEmpty ? title : typed)
+            self?.startDeviceStream(s, name: typed.isEmpty ? title : typed, toLibrary: toLibrary)
         })
         presentSafely(alert)
     }
 
-    private func startDeviceStream(_ s: ScrayDetectedStream, name raw: String) {
+    private func startDeviceStream(_ s: ScrayDetectedStream, name raw: String, toLibrary: Bool = false) {
         guard let wv = currentWebView else { return }
         var name = raw
             .replacingOccurrences(of: "/", with: "-")
@@ -2040,6 +2044,7 @@ final class ScrayBrowserViewController: UIViewController,
 
         let id = "st" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12))
         pendingStreams[id] = PendingStream(name: name, frame: s.frameInfo, webView: wv)
+        if toLibrary { streamToLibrary.insert(id) }
         flash("Reading the stream…")
 
         // Both scripts go into the frame that played the stream, once.
@@ -2159,6 +2164,11 @@ final class ScrayBrowserViewController: UIViewController,
 
     /// A saved stream: the server can't fetch these (it isn't signed in as you),
     /// but the phone's own copy can go to the library through the Upload sheet.
+    private func sendToLibrary(_ saved: URL) {
+        let name = saved.lastPathComponent
+        dismiss(animated: true) { ScrayNativeView.current?.showUploadSheet(named: name) }
+    }
+
     private func offerUpload(of saved: URL, info: String? = nil) {
         let alert = UIAlertController(title: "Upload to library?",
                                       message: "\(saved.lastPathComponent) is saved on this phone" + (info.map { " (\($0))" } ?? "") + ". Send it to your Hetzner library now?",
@@ -3213,6 +3223,7 @@ final class ScrayBrowserViewController: UIViewController,
             pendingStreams.removeValue(forKey: id)
             streamJobIDs.remove(id)
             streamInfo.removeValue(forKey: id)
+            streamToLibrary.remove(id)
             ScrayDownloadCenter.shared.fail(id: id, message: reason)
             discardJob(id: id)
             showAlert(title: "Download failed", message: reason)
@@ -3646,7 +3657,11 @@ final class ScrayBrowserViewController: UIViewController,
                 if let id = jobID { ScrayDownloadCenter.shared.finish(id: id, savedURL: saved) }
                 self.libraryNeedsRefresh = true
                 self.flash("Saved \(saved.lastPathComponent)")
-                if let id = jobID, self.streamJobIDs.remove(id) != nil { self.offerUpload(of: saved, info: self.streamInfo.removeValue(forKey: id)) }
+                if let id = jobID, self.streamJobIDs.remove(id) != nil {
+                    let info = self.streamInfo.removeValue(forKey: id)
+                    if self.streamToLibrary.remove(id) != nil { self.sendToLibrary(saved) }
+                    else { self.offerUpload(of: saved, info: info) }
+                }
                 return
             }
             self.exportingTempFiles.append(fileURL)

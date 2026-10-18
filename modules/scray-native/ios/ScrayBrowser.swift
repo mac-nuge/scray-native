@@ -2030,6 +2030,80 @@ final class ScrayBrowserViewController: UIViewController,
             self?.startDeviceStream(s, name: typed.isEmpty ? title : typed, toLibrary: toLibrary)
         })
         presentSafely(alert)
+
+        // Native 15.157: the picture size goes on the end of the suggestion
+        // (" 1080p"). It comes from the stream's own playlist, so the prompt is
+        // up straight away and the box fills in a moment later - and only if
+        // you haven't typed in it by then, or the name already says a size.
+        if !title.isEmpty, !Self.nameMentionsResolution(title) {
+            probeStreamHeight(s) { [weak alert] height in
+                guard let height = height, let field = alert?.textFields?.first, field.text == title else { return }
+                field.text = title + " \(height)p"
+            }
+        }
+    }
+
+    /// The height of the best picture a stream offers, read from its master
+    /// playlist the way the downloader will choose it (highest BANDWIDTH). A
+    /// plain media playlist doesn't say, so that gives nil and the name is left
+    /// alone. Any failure or a slow answer is nil as well.
+    private func probeStreamHeight(_ s: ScrayDetectedStream, completion: @escaping (Int?) -> Void) {
+        guard let url = URL(string: s.url), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let store = currentWebView?.configuration.websiteDataStore.httpCookieStore else {
+            completion(nil)
+            return
+        }
+        var request = URLRequest(url: url, timeoutInterval: 8)
+        request.httpShouldHandleCookies = false
+        if !s.agent.isEmpty { request.setValue(s.agent, forHTTPHeaderField: "User-Agent") }
+        if s.frame.hasPrefix("http") { request.setValue(s.frame, forHTTPHeaderField: "Referer") }
+        for (k, v) in s.headers where Self.streamHeaderOK(k) { request.setValue(v, forHTTPHeaderField: k) }
+        store.getAllCookies { cookies in
+            var req = request
+            let mine = cookies.filter { Self.cookie($0, matches: url) }
+            if !mine.isEmpty {
+                for (k, v) in HTTPCookie.requestHeaderFields(with: mine) { req.setValue(v, forHTTPHeaderField: k) }
+            }
+            Self.streamSession.dataTask(with: req) { data, response, _ in
+                var height: Int? = nil
+                if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                   let data = data, data.count < 2_000_000 {
+                    height = Self.streamBestHeight(inPlaylist: String(decoding: data, as: UTF8.self))
+                }
+                DispatchQueue.main.async { completion(height) }
+            }.resume()
+        }
+    }
+
+    /// The RESOLUTION of the variant with the highest BANDWIDTH (the first, if
+    /// several tie - as the downloader picks), as its shorter side, so a tall
+    /// 1080x1920 clip is 1080 like a wide 1920x1080 one.
+    static func streamBestHeight(inPlaylist text: String) -> Int? {
+        guard text.contains("#EXT-X-STREAM-INF") else { return nil }
+        func capture(_ pattern: String, _ s: String) -> [String]? {
+            guard let re = try? NSRegularExpression(pattern: pattern),
+                  let m = re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) else { return nil }
+            return (1..<m.numberOfRanges).compactMap { i in Range(m.range(at: i), in: s).map { r in String(s[r]) } }
+        }
+        var bestBandwidth = -1
+        var bestSide: Int? = nil
+        for line in text.components(separatedBy: .newlines) where line.hasPrefix("#EXT-X-STREAM-INF") {
+            let bw = Int(capture(#"(?:^|[:,])BANDWIDTH=(\d+)"#, line)?.first ?? "")
+                ?? Int(capture(#"AVERAGE-BANDWIDTH=(\d+)"#, line)?.first ?? "") ?? 0
+            guard bw > bestBandwidth else { continue }
+            bestBandwidth = bw
+            if let wh = capture(#"RESOLUTION=(\d+)x(\d+)"#, line), wh.count == 2, let w = Int(wh[0]), let h = Int(wh[1]) {
+                bestSide = min(w, h)
+            } else {
+                bestSide = nil
+            }
+        }
+        return bestSide
+    }
+
+    /// True when a name already says its size (1080p, 720p, 4k...).
+    static func nameMentionsResolution(_ name: String) -> Bool {
+        name.range(of: #"(?i)(?<![0-9])(2160|1440|1080|720|480|360)p(?![a-z])|\b[48]k\b"#, options: .regularExpression) != nil
     }
 
     private func startDeviceStream(_ s: ScrayDetectedStream, name raw: String, toLibrary: Bool = false) {

@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.122 / native 15.161 / browse 15.258 — test: parent choice on renames
+<!-- 2026-10-18T08:55Z -->
+- **Asked:** on the Match N files - and rename them to their suggested names? question (and everywhere else a rename is offered as the suggested name), let me choose with or without the parent, and show previews.
+- **Change - the bulk check's question (scray-stash-hunt.js, picker and native):** the question now has a With parent / Without parent toggle above All / Choose / Match only, and lists every file's current name struck through with the name it would get. Flipping the toggle changes the rows' ✎ → names, the list and the counts at once, and starts a Choose selection over. The same toggle is on the Choose list and on the Rename the files just matched? question that follows a match when the server isn't doing the job. The choice is remembered on this device (`scray_rename_parent_v1`). A file with no parent has only the one name; a file that already has the parent-less name is left alone in Without mode instead of getting the parent put back. The rename after a match uses the same choice (showRenameModal `auto: 'suggested'` takes `noParent`).
+- **Single-file renames (scray-stash-hunt.js, file-operations.js):** the hunt's past-match bar and the Stash modal's Rename too? each get a second button, ✎ − parent, with its own two taps - the name it would give is shown before the second tap - for a file that has a parent.
+- **Bulk MP4 convert (scray-convert-bulk.js):** a third Names choice, Suggested names, without the parent, beside Suggested names; each file's row already shows the new name. `scrayConvertBulk.open` takes an optional `suggestNoParent(item)`.
+- **Helpers (scray-clean-name.js):** `scrayCleanNameNoParentFor(video, scene)`, `scrayRenameParentMode()` / `scraySetRenameParentMode()`, `scrayCleanNameForMode()`.
+- Checked: `node --check` on every changed file; the picker and native copies are the same patch (picker's hunt file differs only by offsets). Not run in the apps or the pages.
+
 ### native 15.160 — test: bulk search and rename fit
 <!-- 2026-10-18T08:48Z -->
 - **Asked:** (1) in Native's bulk Stash, add a bulk search like the data explorer's - first result for each file, the same sort options, and a way to open one file's own search (adapted from the explorer and the hunt's bulk check); (2) the bulk Rename window's Rename / Cancel buttons sat under the corner-button dock (screenshot).

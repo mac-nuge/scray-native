@@ -640,6 +640,12 @@
 #stashHuntBulk .shb-ask button { flex: 1 1 0; }
 #stashHuntBulk .shb-ask .go { background: #6f42c1; border-color: #6f42c1; color: #fff; font-weight: 700; }
 #stashHuntBulk .shb-ask .go:disabled { opacity: .5; }
+#stashHuntBulk .shb-ask .shb-pm { flex: 1 1 100%; display: flex; border: 1px solid #6f42c1; border-radius: 7px; overflow: hidden; }
+#stashHuntBulk .shb-ask .shb-pm button { border: none; border-radius: 0; margin: 0; background: #fff; color: #5b3fd1; }
+#stashHuntBulk .shb-ask .shb-pm button.on { background: #6f42c1; color: #fff; font-weight: 700; }
+#stashHuntBulk .shb-ask .shb-prev { flex: 1 1 100%; max-height: 22vh; overflow-y: auto; -webkit-overflow-scrolling: touch; font-size: .72rem; line-height: 1.3; word-break: break-word; border-top: 1px solid #d9cffa; padding-top: 4px; }
+#stashHuntBulk .shb-ask .shb-prev div { padding: 3px 0; border-bottom: 1px solid #ece6fc; }
+#stashHuntBulk .shb-ask .shb-prev s { color: #888; }
 #stashHuntBulk .shb-foot { display: flex; gap: 8px; margin-top: 10px; }
 #stashHuntBulk .shb-prog { margin: 8px 0 0; }
 #stashHuntBulk .shb-prog-bar { height: 8px; border-radius: 4px; background: #e8e8ee; overflow: hidden; }
@@ -1378,7 +1384,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
   // in the hunt; the rename modal when there's no suggestion) and 🗑 Delete.
   function inspectHandle(m0, video) {
     let m = m0, gone = false;
-    let renArm = null, renTimer = null, renBusy = false;
+    let renArm = null, renArmNp = false, renTimer = null, renBusy = false;
     return {
       mount(modal) {
         ensureCss();
@@ -1393,9 +1399,12 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
             '<div class="sh-acts">' +
               '<button type="button" data-h="play" title="Preview in the player">▶</button>' +
               '<button type="button" data-h="edit" title="Correct the Stash details by hand">✏️</button>' +
-              '<button type="button" data-h="ren" class="sh-ren' + (renArm ? ' armed' : '') + '" title="' +
+              '<button type="button" data-h="ren" class="sh-ren' + (renArm && !renArmNp ? ' armed' : '') + '" title="' +
                 (hasSug() ? 'Rename to the suggested name (two taps)' : 'Rename the file') + '">' +
-                (renBusy ? 'Renaming…' : renArm ? 'Tap again to rename: ' + esc(renArm) : '✎ Rename') + '</button>' +
+                (renBusy ? 'Renaming…' : renArm && !renArmNp ? 'Tap again to rename: ' + esc(renArm) : '✎ Rename') + '</button>' +
+              // Without the parent (native 15.161): its own two taps, the name shown before the second.
+              (hasNp() && !renBusy ? '<button type="button" data-h="renp" class="sh-ren' + (renArm && renArmNp ? ' armed' : '') + '" title="Rename to the suggested name without the parent (two taps)">' +
+                (renArm && renArmNp ? 'Tap again to rename: ' + esc(renArm) : '✎ − parent') + '</button>' : '') +
               // By hand too (picker 15.92 / native 15.109) - Rename already is when there's no suggestion.
               (hasSug() && !renBusy ? '<button type="button" data-h="renm" class="sh-ren" title="Edit the name in the rename modal">✍️ Edit name</button>' : '') +
             '</div>';
@@ -1406,6 +1415,12 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         };
         const sugOf = () => (window.scrayCleanNameSuggestion ? window.scrayCleanNameSuggestion(video) : null);
         function hasSug() { return !!sugOf(); }
+        // The suggestion without the parent: only for a file that has one, and not the name it already has.
+        const npOf = () => {
+          const n = window.scrayCleanNameNoParent ? window.scrayCleanNameNoParent(video) : null;
+          return (n && window.scrayCleanNameDiffers) ? window.scrayCleanNameDiffers(n, video.filename) : null;
+        };
+        function hasNp() { return !!npOf(); }
         /** The rename modal on top, to edit by hand; the list follows if the name changes. */
         const renameByHand = async () => {
           if (renBusy || typeof window.showRenameModal !== 'function') return;
@@ -1423,14 +1438,16 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
             if (bar.isConnected) paint();
           }, 400);
         };
-        const rename = async () => {
+        const rename = async (np) => {
           if (renBusy || typeof window.showRenameModal !== 'function') return;
+          np = !!np;
           const keyBefore = keyOf(video);
-          const sug = sugOf();
+          const sug = np ? npOf() : sugOf();
           // No suggestion (already named to suit, say): by hand.
           if (!sug) { renameByHand(); return; }
-          if (!renArm) {
+          if (!renArm || renArmNp !== np) {
             renArm = sug;
+            renArmNp = np;
             clearTimeout(renTimer);
             renTimer = setTimeout(() => { renArm = null; if (bar.isConnected) paint(); }, 3000);
             paint();
@@ -1441,7 +1458,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
           renBusy = true;
           paint();
           try {
-            const res = await window.showRenameModal(video, { auto: 'suggested' });
+            const res = await window.showRenameModal(video, { auto: 'suggested', noParent: np });
             if (res && res.ok) renamedFile(video, keyBefore);
           } catch (e) {
             console.error('[hunt] rename to the suggestion failed:', e);
@@ -1458,7 +1475,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
             case 'back': closeModal(); break;
             case 'play': if (window.scrayStashNav) window.scrayStashNav.preview(video, modal); break;
             case 'edit': if (typeof modal.scrayOpenDetails === 'function') modal.scrayOpenDetails(); break;
-            case 'ren': rename(); break;
+            case 'ren': rename(false); break;
+            case 'renp': rename(true); break;
             case 'renm': renameByHand(); break;
             case 'del': deleteVideo(video, closeModal); break;
           }
@@ -1509,6 +1527,34 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
   const BULK_PAR = 2;      // lookups at once
   let bulk = null;         // the check in progress / on screen
   const bulkable = () => !!(S && (S.scope.folders.length || S.scope.tags.length));
+
+  // ---- the name a rename question offers (native 15.161) ---------------------
+  // With the parent (r.sug, the full suggestion) or without it (r.npAny, the
+  // parent-less name, null for a file with no parent): one choice, kept on this
+  // device, shown as a toggle on every rename question with the names it gives.
+  const pmode = () => (typeof window.scrayRenameParentMode === 'function' ? window.scrayRenameParentMode() : 'with');
+  function nameOf(r) {
+    if (!r || !r.v) return null;
+    if (pmode() === 'without' && r.npAny && typeof window.scrayCleanNameDiffers === 'function') {
+      return window.scrayCleanNameDiffers(r.npAny, r.v.filename);
+    }
+    return r.sug || null;
+  }
+  /** With / Without parent, only when some file here has a parent to leave out. */
+  function pmHtml(rows) {
+    if (!rows.some(r => r.npAny)) return '';
+    const m = pmode(), n = rows.filter(r => r.npAny).length;
+    return '<div class="shb-pm" title="' + n + ' of these ' + (n === 1 ? 'has' : 'have') + ' a parent studio">' +
+      '<button type="button" data-b="pmwith" class="' + (m === 'with' ? 'on' : '') + '">With parent</button>' +
+      '<button type="button" data-b="pmwithout" class="' + (m === 'without' ? 'on' : '') + '">Without parent</button></div>';
+  }
+  /** Each file's name now and the one it would get, for the question to show. */
+  function prevHtml(rows) {
+    const items = rows.map(r => ({ r, n: nameOf(r) })).filter(x => x.n);
+    if (!items.length) return '';
+    return '<div class="shb-prev">' + items.map(x =>
+      '<div><s>' + esc(x.r.v.filename || '') + '</s><br>→ ' + esc(x.n) + '</div>').join('') + '</div>';
+  }
 
   const clock = (sec) => {
     sec = Math.max(0, Math.round(+sec || 0));
@@ -1746,8 +1792,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     const hsP = (t) => (h && fileT ? h.html(t, fileT, kinds ? { perf: kinds.perf } : null) : esc(t));
     const file = '<div class="shb-file">' + fileLineHtml(v, sceneT) + '</div>';
     const tickable = (r.st === 'found' || r.st === 'fail') && !(bulk && (bulk.submitting || preAsk(bulk)));
-    const renPick = !!(bulk && ((bulk.ask === 'pick' && r.st === 'done' && r.sug && !r.rst) ||
-                                (bulk.ask === 'prepick' && inPending(bulk, r) && r.sug)));
+    const renPick = !!(bulk && ((bulk.ask === 'pick' && r.st === 'done' && nameOf(r) && !r.rst) ||
+                                (bulk.ask === 'prepick' && inPending(bulk, r) && nameOf(r))));
     let body = '';
     if (r.card && (r.st === 'found' || r.st === 'sub' || r.st === 'done' || r.st === 'fail' || r.st === 'q')) {
       const c = r.card;
@@ -1782,16 +1828,16 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     }
     // After matching (picker 15.38 / native 15.47): the suggested name.
     let ren = '';
-    if (bulk && preAsk(bulk) && inPending(bulk, r) && r.sug) {
+    if (bulk && preAsk(bulk) && inPending(bulk, r) && nameOf(r)) {
       // Before handing over (picker 15.76 / native 15.96): the name it would get.
       ren = '<span class="shb-ren"' + (bulk.ask === 'prepick' && !r.ren ? ' style="opacity:.45;text-decoration:line-through"' : '') +
-            '>✎ → ' + esc(r.sug) + '</span>';
+            '>✎ → ' + esc(nameOf(r)) + '</span>';
     } else if (r.st === 'done' || r.st === 'q') {
-      if (r.rst === 'q') ren = '<span class="shb-ren">✎ Then renamed to ' + esc(r.newName || r.sug || '') + '</span>';
+      if (r.rst === 'q') ren = '<span class="shb-ren">✎ Then renamed to ' + esc(r.newName || nameOf(r) || '') + '</span>';
       else if (r.rst === 'renamed') ren = '<span class="shb-ren ok">✎ Renamed to ' + esc(r.newName || '') + '</span>';
       else if (r.rst === 'renaming') ren = '<span class="shb-ren">✎ Renaming…</span>';
       else if (r.rst === 'rfail') ren = '<span class="shb-ren bad">✎ Rename failed' + (r.rnote ? ': ' + esc(r.rnote) : '') + '</span>';
-      else if (r.sug) ren = '<span class="shb-ren">✎ → ' + esc(r.sug) + '</span>';
+      else if (nameOf(r)) ren = '<span class="shb-ren">✎ → ' + esc(nameOf(r)) + '</span>';
     }
     const status = {
       wait: '<span class="shb-st">Waiting…</span>',
@@ -1879,29 +1925,31 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     if (again) again.disabled = !!(B.running || B.submitting || B.renaming);
     // Rename the ones just matched? (picker 15.38 / native 15.47)
     const ask = sheet.querySelector('.shb-ask');
-    const can = B.rows.filter(r => r.st === 'done' && r.sug && !r.rst);
+    const can = B.rows.filter(r => r.st === 'done' && nameOf(r) && !r.rst);
+    const canAll = B.rows.filter(r => r.st === 'done' && (r.sug || r.npAny) && !r.rst);
     if (preAsk(B)) {
       // Asked BEFORE matching now (picker 15.76 / native 15.96): the match and
       // the rename go to the server together, so the names are settled first -
       // from the scene each file is being matched to.
       const pend = B.pending || [];
-      const named = pend.filter(r => r.sug);
+      const named = pend.filter(r => nameOf(r));
       ask.hidden = false;
       if (B.ask === 'prepick') {
         const n = named.filter(r => r.ren).length;
-        ask.innerHTML = '<span>Tap the ones to rename as well.</span>' +
+        ask.innerHTML = '<span>Tap the ones to rename as well.</span>' + pmHtml(pend) +
           '<button type="button" data-b="qback">Back</button>' +
           '<button type="button" data-b="qgo" class="go">✓ Match ' + pend.length + (n ? ' · ✎ rename ' + n : '') + '</button>';
       } else {
         ask.innerHTML = '<span>Match ' + plural(pend.length, 'file') + ' - and rename ' +
             (named.length === pend.length ? (pend.length === 1 ? 'it' : 'them') : named.length + ' of them') +
             ' to ' + (named.length === 1 ? 'its' : 'their') + ' suggested name' + (named.length === 1 ? '' : 's') + '?</span>' +
+          pmHtml(pend) + prevHtml(pend) +
           '<button type="button" data-b="qall" class="go">All</button>' +
           '<button type="button" data-b="qpick">Choose</button>' +
           '<button type="button" data-b="qnone">Match only</button>' +
           '<button type="button" data-b="qback">Back</button>';
       }
-    } else if (!B.ask || (!can.length && !B.renaming)) {
+    } else if (!B.ask || (!canAll.length && !B.renaming)) {
       ask.hidden = true;
       if (B.ask && !B.renaming) B.ask = null;
     } else if (B.renaming) {
@@ -1910,12 +1958,13 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     } else if (B.ask === 'pick') {
       const n = can.filter(r => r.ren).length;
       ask.hidden = false;
-      ask.innerHTML = '<span>Tap the ones to rename to their suggested names.</span>' +
+      ask.innerHTML = '<span>Tap the ones to rename to their suggested names.</span>' + pmHtml(canAll) +
         '<button type="button" data-b="rnone">Skip</button>' +
         '<button type="button" data-b="rgo" class="go"' + (n ? '' : ' disabled') + '>✎ Rename ' + (n ? n : '') + '</button>';
     } else {
       ask.hidden = false;
       ask.innerHTML = '<span>Rename the ' + plural(can.length, 'file') + ' just matched to ' + (can.length === 1 ? 'its' : 'their') + ' suggested name' + (can.length === 1 ? '' : 's') + '?</span>' +
+        pmHtml(canAll) + prevHtml(can) +
         '<button type="button" data-b="rall" class="go">All</button>' +
         '<button type="button" data-b="rpick">Choose</button>' +
         '<button type="button" data-b="rnone">None</button>';
@@ -2015,7 +2064,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     const items = [];
     for (const r of list) {
       const v = r.v;
-      const ren = renames.includes(r) && !!r.sug;
+      const newName = nameOf(r);
+      const ren = renames.includes(r) && !!newName;
       const phone = local(v);
       let also = [];
       // Native: the box copy linked to a phone file is renamed with it, as the
@@ -2024,7 +2074,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         try { also = (await window.scrayHetznerLinkedCopies(v)).map(h => ({ video_key: keyOf(h), local_id: h.oneDriveId || null })); } catch (e) { also = []; }
       }
       items.push({ video_key: r.key, filename: v.filename || '', stash_id: r.card.stash_id,
-                   new_name: ren ? r.sug : null, local_id: v.oneDriveId || v.idFromAPI || null, phone, also });
+                   new_name: ren ? newName : null, local_id: v.oneDriveId || v.idFromAPI || null, phone, also });
     }
     let job = null;
     try {
@@ -2050,8 +2100,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     list.forEach((r, i) => {
       r.job = job.job_id; r.jobIdx = i;
       r.st = 'q'; r.tick = false; r.note = '';
-      r.rst = renames.includes(r) && r.sug ? 'q' : null;
-      r.newName = r.rst ? r.sug : '';
+      r.rst = renames.includes(r) && nameOf(r) ? 'q' : null;
+      r.newName = r.rst ? nameOf(r) : '';
       r.ren = false;
     });
     B.pending = null;
@@ -2122,11 +2172,12 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       list.forEach(r => {
         try {
           r.sug = typeof window.scrayCleanNameSuggestionFor === 'function' ? window.scrayCleanNameSuggestionFor(r.v, r.card) : null;
-        } catch (e) { r.sug = null; }
-        r.ren = !!r.sug;
+          r.npAny = typeof window.scrayCleanNameNoParentFor === 'function' ? window.scrayCleanNameNoParentFor(r.v, r.card) : null;
+        } catch (e) { r.sug = null; r.npAny = null; }
+        r.ren = !!nameOf(r);
       });
       B.pending = list;
-      if (!list.some(r => r.sug)) return queueBulk(list, []);
+      if (!list.some(r => nameOf(r) || r.npAny)) return queueBulk(list, []);
       B.ask = 'pre';
       B.rows.forEach(r => paintBulkRow(r));
       paintBulk();
@@ -2167,10 +2218,13 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     if (bulk === B) {
       B.rows.forEach(r => {
         if (r.st === 'done' && !r.rst && r.sug === undefined) {
-          try { r.sug = window.scrayCleanNameSuggestion ? window.scrayCleanNameSuggestion(r.v) : null; } catch (e) { r.sug = null; }
+          try {
+            r.sug = window.scrayCleanNameSuggestion ? window.scrayCleanNameSuggestion(r.v) : null;
+            r.npAny = window.scrayCleanNameNoParent ? window.scrayCleanNameNoParent(r.v) : null;
+          } catch (e) { r.sug = null; r.npAny = null; }
         }
       });
-      if (B.rows.some(r => r.st === 'done' && r.sug && !r.rst)) B.ask = 'ask';
+      if (B.rows.some(r => r.st === 'done' && (r.sug || r.npAny) && !r.rst)) B.ask = 'ask';
       B.rows.forEach(r => paintBulkRow(r));
     }
     paintBulk();
@@ -2194,7 +2248,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       paintBulkRow(r);
       const oldKey = r.key;
       try {
-        const res = await window.showRenameModal(r.v, { auto: 'suggested' });
+        const res = await window.showRenameModal(r.v, { auto: 'suggested', noParent: pmode() === 'without' });
         if (res && res.ok) {
           r.rst = 'renamed';
           r.newName = res.name || r.v.filename;
@@ -2471,6 +2525,16 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (b && b.dataset.b) {
         e.stopPropagation();
         if (b.dataset.b === 'again') { bulkAgain(); return; }
+        // With / Without parent on a rename question (native 15.161): the names
+        // in the rows and the question change with it; a Choose list starts over.
+        if (b.dataset.b === 'pmwith' || b.dataset.b === 'pmwithout') {
+          if (B.renaming || B.submitting) return;
+          if (typeof window.scraySetRenameParentMode === 'function') window.scraySetRenameParentMode(b.dataset.b === 'pmwithout' ? 'without' : 'with');
+          B.rows.forEach(r => { if (!r.rst) r.ren = !!nameOf(r); });
+          B.rows.forEach(r => paintBulkRow(r));
+          paintBulk();
+          return;
+        }
         if (b.dataset.b === 'eye') {
           S.bulkReveal = !S.bulkReveal;
           if (!S.bulkReveal) B.rows.forEach(r => { r.reveal = false; });
@@ -2511,31 +2575,31 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         if (b.dataset.b === 'stop') { B.stop = true; B.running = false; paintBulk(); }
         if (b.dataset.b === 'close') closeBulk();
         if (b.dataset.b === 'match') submitBulk();
-        const can = () => B.rows.filter(r => r.st === 'done' && r.sug && !r.rst);
+        const can = () => B.rows.filter(r => r.st === 'done' && nameOf(r) && !r.rst);
         if (b.dataset.b === 'rall') renameBulk(can());
         if (b.dataset.b === 'rpick') { B.ask = 'pick'; B.rows.forEach(r => paintBulkRow(r)); }
         if (b.dataset.b === 'rgo') renameBulk(can().filter(r => r.ren));
         if (b.dataset.b === 'rnone') { B.ask = null; B.rows.forEach(r => { r.ren = false; paintBulkRow(r); }); }
         // Before handing over (picker 15.76 / native 15.96).
         const pend = () => (B.pending || []);
-        if (b.dataset.b === 'qall') queueBulk(pend(), pend().filter(r => r.sug));
+        if (b.dataset.b === 'qall') queueBulk(pend(), pend().filter(r => nameOf(r)));
         if (b.dataset.b === 'qnone') queueBulk(pend(), []);
         if (b.dataset.b === 'qpick') { B.ask = 'prepick'; B.rows.forEach(r => paintBulkRow(r)); }
-        if (b.dataset.b === 'qgo') queueBulk(pend(), pend().filter(r => r.sug && r.ren));
+        if (b.dataset.b === 'qgo') queueBulk(pend(), pend().filter(r => nameOf(r) && r.ren));
         if (b.dataset.b === 'qback') { B.ask = null; B.pending = null; B.rows.forEach(r => { r.ren = false; paintBulkRow(r); }); }
         return;
       }
       const row = e.target.closest('.shb-row');
       if (!row || B.submitting || B.renaming) return;
       const r = B.rows[+row.dataset.r];
-      if (r && B.ask === 'prepick' && inPending(B, r) && r.sug) {
+      if (r && B.ask === 'prepick' && inPending(B, r) && nameOf(r)) {
         r.ren = !r.ren;
         paintBulkRow(r);
         paintBulk();
         return;
       }
       if (preAsk(B)) return;
-      if (r && B.ask === 'pick' && r.st === 'done' && r.sug && !r.rst) {
+      if (r && B.ask === 'pick' && r.st === 'done' && nameOf(r) && !r.rst) {
         r.ren = !r.ren;
         paintBulkRow(r);
         return;

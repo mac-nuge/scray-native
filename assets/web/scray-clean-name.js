@@ -221,6 +221,42 @@
   }
 
   /**
+   * The parent-less name as it will be once `scene` is matched (native 15.161).
+   * Null when the full name has no parent in it. Unlike cleanNameSuggestionFor
+   * this is not tested against the file's current name - the caller does that,
+   * so "already named without its parent" can be told from "has no parent".
+   */
+  function cleanNameNoParentFor(video, scene) {
+    const full = cleanNameParts(video, { scene });
+    if (!full || !full.parent) return null;
+    const parts = cleanNameParts(video, { scene, noParent: true });
+    return parts ? parts.name : null;
+  }
+
+  // The parent choice every "rename to the suggested name" question shares
+  // (native 15.161): with the parent (the full name) or without it. One
+  // setting, remembered on this device, so the bulk check, the hunt, the Stash
+  // modal's Rename too? and the convert dialog all start from what you picked.
+  const PARENT_KEY = 'scray_rename_parent_v1';
+  function parentMode() {
+    try { return localStorage.getItem(PARENT_KEY) === 'without' ? 'without' : 'with'; } catch (e) { return 'with'; }
+  }
+  function setParentMode(m) {
+    try { localStorage.setItem(PARENT_KEY, m === 'without' ? 'without' : 'with'); } catch (e) { /* not kept */ }
+  }
+  /**
+   * The name to offer for a mode: `full` and `noParent` are the two raw names
+   * (noParent null when there is no parent). In 'without' mode a file that
+   * has a parent gets the parent-less name - or nothing, when it already has
+   * that name, rather than quietly putting the parent back. Without a parent
+   * to leave out, both modes are the full name.
+   */
+  function nameForMode(mode, full, noParent, filename) {
+    if (mode === 'without' && noParent) return differs(noParent, filename);
+    return differs(full, filename);
+  }
+
+  /**
    * The suggestion, but only when it would actually change something. This is
    * the "eligible for a clean rename" test the bulk list and the modal both
    * use: a re-mapped studio changes the suggestion, so the file comes back
@@ -259,4 +295,8 @@
   window.scrayCleanNameSuggestion = cleanNameSuggestion;
   window.scrayCleanNameSuggestionFor = cleanNameSuggestionFor;
   window.scrayCleanNameDiffers    = differs;
+  window.scrayCleanNameNoParentFor = cleanNameNoParentFor;
+  window.scrayRenameParentMode    = parentMode;
+  window.scraySetRenameParentMode = setParentMode;
+  window.scrayCleanNameForMode    = nameForMode;
 })();

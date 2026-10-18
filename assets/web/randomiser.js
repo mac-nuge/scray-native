@@ -960,6 +960,10 @@ window.scrayClearAllFilters = function (ev) {
    if (hetzBtn) hetzBtn.dataset.state = "any";
    window.syncHetznerOnlyToggleLabel?.();
 
+   const varBtn = document.getElementById("variantOnlyToggleBtn");
+   if (varBtn) varBtn.dataset.active = "0";
+   window.syncVariantOnlyToggleLabel?.();
+
    window.skipSearchScroll = true;
    scrayRefreshFilters();
 };
@@ -3633,6 +3637,12 @@ if (hetznerState !== "any" && typeof window.scrayIsHetznerVideo === "function") 
  videos = videos.filter(v => !!window.scrayIsHetznerVideo(v) === wantHz);
 }
 
+// Var filter (picker 15.126 / native 15.166): only files that have linked
+// variants - the server stamps every copy in a group with variant_group.
+if (document.getElementById("variantOnlyToggleBtn")?.dataset.active === "1") {
+ videos = videos.filter(v => !!v.variant_group);
+}
+
 
 // Score filter (filters by user_score already in IndexedDB)
 if (selectedScoreFilters.size > 0) {
@@ -3947,6 +3957,11 @@ if (typeof window.syncOfflineOnlyToggleLabel === "function") window.syncOfflineO
 const hetznerOnlyBtn = document.getElementById("hetznerOnlyToggleBtn");
 if (hetznerOnlyBtn) hetznerOnlyBtn.dataset.state = "any";
 if (typeof window.syncHetznerOnlyToggleLabel === "function") window.syncHetznerOnlyToggleLabel();
+
+// Reset the Var filter (picker 15.126 / native 15.166)
+const variantOnlyBtn = document.getElementById("variantOnlyToggleBtn");
+if (variantOnlyBtn) variantOnlyBtn.dataset.active = "0";
+if (typeof window.syncVariantOnlyToggleLabel === "function") window.syncVariantOnlyToggleLabel();
 
 
 // Reset score filter
@@ -4827,6 +4842,27 @@ searchBox.addEventListener("keydown", (e) => {
               : entry.value === "none" ? "Showing only files NOT on the Hetzner Storage Box"
               : "Hetzner filter: off (tap to cycle)";
   };
+
+  // Var (picker 15.126 / native 15.166): files with linked variants only.
+  // Grey off, teal on; the text never changes.
+  window.syncVariantOnlyToggleLabel = function () {
+      const b = document.getElementById("variantOnlyToggleBtn");
+      if (!b) return;
+      b.textContent = "Var";
+      b.style.background = b.dataset.active === "1" ? "#17a2b8" : "#555";
+      b.style.color = "#fff";
+  };
+
+  const variantOnlyToggleBtn = document.getElementById("variantOnlyToggleBtn");
+  if (variantOnlyToggleBtn) {
+      variantOnlyToggleBtn.addEventListener("click", () => {
+          variantOnlyToggleBtn.dataset.active = variantOnlyToggleBtn.dataset.active === "1" ? "0" : "1";
+          window.syncVariantOnlyToggleLabel();
+          window.skipSearchScroll = true;
+          filterDisplayedByFilename();
+      });
+      window.syncVariantOnlyToggleLabel();
+  }
 
   const hetznerOnlyToggleBtn = document.getElementById("hetznerOnlyToggleBtn");
   if (hetznerOnlyToggleBtn) {

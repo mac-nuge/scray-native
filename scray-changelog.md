@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.126 / native 15.166 — test: Var filter and variants show after a match
+<!-- 2026-10-18T13:26Z -->
+- **Asked:** after a stash match detects a variant, show it in the list straight away instead of needing a catalogue re-fetch (without auto-triggering a full refresh); and a toggle called Var in the filter row that shows only files with variants, changing colour when on and keeping its text.
+- **Cause of the delay:** the server links variants inside the match call (`stash_scene` runs the variant sweep) and stamps `variant_group` on the rows, but the app only learnt that on its next sync / background pull.
+- **Change - post-match pull (picker excel-sheets.js, native local-scores-cache.js):** `scrayNoteStashMatch` on a NEW match schedules one delta pull 4 seconds after the matching goes quiet (once for a bulk run). It is the same incremental pull as the background pull / Sync - only rows the server changed since the last pull, no dialog, nothing pushed - and the lists repaint only if rows arrived. Not a catalogue re-fetch.
+- **Change - Var toggle (randomiser.js, index.php / index.html):** new Var button after Hetz in the filter row. Grey off, teal on, the text stays Var. On, the list keeps only files with a `variant_group`. Clear all filters and the filter reset turn it off.
+- **Not changed:** browse, and matches made outside the apps (they arrive on the next background pull / sync as before).
+- Checked: `node --check` on the changed files. Not run in the apps.
+
 ### native 15.165 — test: modal guard stops clearing real modals
 <!-- 2026-10-18T13:03Z -->
 - **Reported:** the stuck-overlay guard (15.156) closed a legitimate modal - the Stash modal kept closing while matching a video from the bulk Stash (diagnostics report 20261018-130223).

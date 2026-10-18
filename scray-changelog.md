@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.165 — test: modal guard stops clearing real modals
+<!-- 2026-10-18T13:03Z -->
+- **Reported:** the stuck-overlay guard (15.156) closed a legitimate modal - the Stash modal kept closing while matching a video from the bulk Stash (diagnostics report 20261018-130223).
+- **Cause:** the report's console shows three `four taps` clears, no automatic ones: the lock screen (while its code was being entered) and the Stash modal twice. The four-tap escape counted any four quick taps anywhere, then climbed from the tapped control up to the first full-screen modal-style layer around it and cleared that - whether or not the layer had a box showing. Ticking, tapping through scenes or typing in a modal is exactly four quick taps.
+- **Fix (scray-modal-guard.js - JS only, no IPA build):** four taps now have to land on about the same spot (within 45 px), and they only clear a layer that has **nothing visible in it** - no text, picture or control on screen, counting a box that is faded out, hidden or off-screen as nothing, which is the real stuck state. A modal with its box showing is never cleared by taps. The app lock screen and the disguise layer are never touched by either path.
+- **Kept:** the automatic scan (a dim full-screen layer that is the only thing at nine points across the screen and holds nothing, three scans in a row) is unchanged; every clear is still logged with which layer it was.
+- Checked in headless Chromium at phone width: four taps on a real modal's button, on its dim area, on spread-out spots, and on a lock-style screen all leave it alone; four taps on an empty full-screen scrim and on a scrim whose box is invisible still clear it. Not run in the app.
+
 ### picker 15.125 / native 15.164 — test: folder studio search adds the full name
 <!-- 2026-10-18T10:10Z -->
 - **Reported:** the search for a file in the `aa` folder came up as `ellie murphy 720 aa`, not with Amateur Allure (screenshot).

@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.159 — test: bulk rename
+<!-- 2026-10-18T08:42Z -->
+- **Asked:** add rename to the bulk bar in Native, with Use suggested for all, with or without the parent, and the option to override individual names, like the data explorer.
+- **Change (new assets/web/scray-bulk-rename.js, bulk-select button, style.css, index.html - JS only, no IPA build):** a green pencil button in the bulk bar opens a Rename window listing the ticked files. Each row shows the current name, an editable new name (the extension stays outside the box) and two chips, Suggested and minus parent, filling the row from the same name rule as the single rename. Use suggested for all and Use without parent for all fill every row that has that suggestion; Reset and the per-row arrow put the current name back. A name you type over is kept.
+- **Checks and run:** names are checked as you type (empty, banned characters, leading or trailing dot, 250 bytes); Rename is off while any changed name is invalid. Files run one after another through the normal rename, each row showing a tick or the error. If any are phone files that are also in the catalogue, the Everywhere or This phone only question is asked once for the whole batch; Cancel renames nothing. Stash names follow each rename and the lists refresh at the end.
+- Rows with no suggestion (no Stash data) simply have no chips; only changed names are renamed.
+- Checked: `node --check`. Not run in the app.
+
 ### native 15.158 — test: stash check after upload
 <!-- 2026-10-18T08:50Z -->
 - **Asked:** after a file is uploaded from Native, do an immediate Stash check before it is reloaded into the list.

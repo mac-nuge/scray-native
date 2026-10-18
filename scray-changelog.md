@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.167 — test: phone copy delete leaves its Hetzner copy as H
+<!-- 2026-10-18T14:02Z -->
+- **Reported:** deleting a variant's phone copy dropped it from the variants; only a Hetzner re-fetch brought it back, as H instead of P.
+- **Cause:** a box copy filed under the very same key as a phone file is deliberately never added to the library while the phone copy exists (scray-hetzner.js header note). Deleting the phone copy removed the only row for that key, and nothing put the box row back until the next re-fetch.
+- **Fix (scray-hetzner.js `scrayHetznerRestoreAfterPhoneDelete`, file-operations.js `deleteFile`):** after a phone-only delete, it asks the box for just that key (`hetzner_list` with `keys`), adds its row, and pulls that key's catalogue data (scores, bookmarks, tags, variant group) with the scoped pull (now exported as `scrayPullScoped` in scray-sync-ui.js). The lists repaint, so the chip turns from P to H straight away. No re-fetch.
+- **Not changed:** Delete everywhere (the box copy goes too, so nothing is restored); nothing happens when Hetzner isn't on this phone or the file isn't on the box. Picker has no phone copies, so no change there.
+- Checked: `node --check` on the changed files. Not run in the app.
+
 ### picker 15.126 / native 15.166 — test: Var filter and variants show after a match
 <!-- 2026-10-18T13:26Z -->
 - **Asked:** after a stash match detects a variant, show it in the list straight away instead of needing a catalogue re-fetch (without auto-triggering a full refresh); and a toggle called Var in the filter row that shows only files with variants, changing colour when on and keeping its text.

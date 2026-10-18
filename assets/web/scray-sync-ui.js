@@ -337,6 +337,8 @@ async function pullScoped(keys, since, received = null, onRow = null) {
   return total;
 }
 
+window.scrayPullScoped = pullScoped;
+
 /**
  * Anything on this device with no server row is usable but flagged.
  */

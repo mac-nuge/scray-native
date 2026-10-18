@@ -1265,7 +1265,13 @@ async function renameFile(video, newName, opts = {}) {
 async function deleteFile(video) {
    // ✅ Local files bypass Graph entirely
    if (isLocalVideo(video)) {
-       return deleteLocalFile(video);
+       const gone = await deleteLocalFile(video);
+       // native 15.167: the file's box copy under the same key was hidden while
+       // the phone copy existed - bring it back as an H chip right now.
+       if (typeof window.scrayHetznerRestoreAfterPhoneDelete === "function") {
+           try { await window.scrayHetznerRestoreAfterPhoneDelete(video); } catch (e) { console.warn("[hetzner] restore after phone delete:", e); }
+       }
+       return gone;
    }
    // A row that streams from Hetzner (native 15.11): the server deletes it
    // from the box - no Graph account on the phone to find.

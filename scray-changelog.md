@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.155 — test: bulk select upload option
+<!-- 2026-10-18T08:05Z -->
+- **Asked:** add Upload as an option in bulk select for Native.
+- **Change (assets/web/scray-bulk-select.js, scray-upload.js, style.css - JS and CSS only, no IPA build):** the bulk bar has a blue **⬆** button after MP4. It takes the selected files that exist only on this phone, or are catalogued with no OneDrive or box copy (the same test as the menu's Upload and the blue ⬆ badge), and opens the Upload sheet with all of them ticked; from there it is the usual choose-an-account-and-folder, then the queue. Selected files that are already in the library are left out, with a note saying how many; if none qualify it says so and opens nothing. The selection is left as it was. The Upload sheet's opener now takes a list as well as one file.
+- **Also:** the bulk bar wraps onto a second line if the extra button doesn't fit the screen width.
+- **Native only:** Picker has no upload sheet, so scray-bulk-select.js differs between the two by this button.
+- Checked: `node --check` on both scripts. Not run in the app.
+
 ### native 15.154 — test: trim address from saved stream name
 <!-- 2026-10-18T07:58Z -->
 - **Asked:** trim the start of a saved stream's file name, which came out as https---site-ma.fakehub.com-scene-4084621- followed by the rest.

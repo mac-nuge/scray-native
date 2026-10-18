@@ -505,8 +505,9 @@
     S = { step: "files", ticked: new Set(), files: [], filter: "", q: "", targets: null, account: null, path: null,
           folders: null, loading: false, error: null, needsBuild: false, quota: {}, mk: null, note: null, fq: "", wait: null };
     const mine = S;
-    const start = video ? localId(video) : null;
-    if (start) S.ticked.add(start);
+    // One file (the menu), several (bulk select, native 15.155) or none.
+    const picks = (Array.isArray(video) ? video : video ? [video] : []).filter(v => v && localId(v));
+    picks.forEach(v => S.ticked.add(localId(v)));
 
     const modal = document.createElement("div");
     modal.className = "basket-json-modal";
@@ -525,7 +526,7 @@
     try {
       all = await window.getAllVideos();
       S.files = all.filter(isPhoneOnly).sort(byFilename);
-      if (start && !S.files.some(v => localId(v) === start) && isPhoneOnly(video)) S.files.unshift(video);
+      picks.forEach(p => { if (!S.files.some(v => localId(v) === localId(p)) && isPhoneOnly(p)) S.files.unshift(p); });
     } catch (err) {
       S.error = `Couldn't read the phone's files: ${err.message}`;
     }

@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.160 — test: bulk search and rename fit
+<!-- 2026-10-18T08:48Z -->
+- **Asked:** (1) in Native's bulk Stash, add a bulk search like the data explorer's - first result for each file, the same sort options, and a way to open one file's own search (adapted from the explorer and the hunt's bulk check); (2) the bulk Rename window's Rename / Cancel buttons sat under the corner-button dock (screenshot).
+- **Search (scray-stash-hunt.js, scray-bulk-select.js - JS only, no IPA build):** the bulk bar's S now offers a third choice, Search by name. It opens the hunt's existing bulk check over the ticked files instead of a folder or tag: each file is fingerprint-checked, then StashDB is searched on its name and the best scene comes back with its confidence and file vs scene length. All the hunt's controls come with it - show Best match, StashDB first or Closest length; sort by files, confidence or duration difference; extra words for every search and Search all again; the studio / performer / cast filter; Tick 90+ with an adjustable threshold; Match ticked (with the rename offer afterwards); covers with the unblur eye; and 🔎 on a row for that file's full Stash search, with Back to bulk. Up to 60 files at once, + Next 60 for the rest.
+- **Differences from the hunt's own bulk check:** it runs on a throwaway session, so closing it ends everything - no hunt starts afterwards and there is no 🎯 Hunt it on a row. Files only on this phone (no catalogue row), pictures and files already matched are left out, with a message saying how many. It will not open while a hunt is running (stop the hunt first).
+- **Rename window (scray-bulk-rename.js):** it now keeps clear of the dock the way the other sheets do - bottom padding stops above the dock, measured again on resize - and its card fits the space left, so Rename and Cancel are always visible and tappable.
+- Checked: `node --check` on the three scripts. Not run in the app - the search needs StashDB and the phone.
+
 ### native 15.159 — test: bulk rename
 <!-- 2026-10-18T08:42Z -->
 - **Asked:** add rename to the bulk bar in Native, with Use suggested for all, with or without the parent, and the option to override individual names, like the data explorer.

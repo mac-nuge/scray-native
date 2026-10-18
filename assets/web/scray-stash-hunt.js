@@ -2313,18 +2313,21 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     }
     if (S) S.peek = null;
     if (!S) return;
+    // A check opened from the bulk bar (native 15.160) has no hunt behind it:
+    // closing it ends the session, and nothing starts hunting.
+    if (S.standalone) { S = null; return; }
     paintBar();
     // Carry on with the file on screen if it's still one to hunt; else the next.
     const c = S.cur;
     if (!c || !S.modal || !S.modal.isConnected || c.matched || matchedNow(c.video) || !inScope(c.video, S.scope)) advance();
   }
 
-  function openBulk() {
+  function openBulk(list) {
     if (!S) return;
-    if (!bulkable()) { toast('Pick a folder or a tag first - bulk check works on one of those'); return; }
+    if (!list && !bulkable()) { toast('Pick a folder or a tag first - bulk check works on one of those'); return; }
     ensureCss();
     endPreview();
-    const all = inScopeLeft();
+    const all = list || inScopeLeft();
     if (!all.length) { toast('Nothing unmatched left in this scope'); return; }
     if (bulk) bulk.stop = true;
     document.getElementById('stashHuntBulk')?.remove();
@@ -2338,9 +2341,9 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     sheet.id = 'stashHuntBulk';
     sheet.innerHTML =
       '<div class="shb">' +
-        '<h3>⚡ Bulk check · ' + esc(scopeLabel(S.scope)) + '</h3>' +
+        '<h3>⚡ Bulk check · ' + esc(S.standalone ? plural(all.length, 'selected file') : scopeLabel(S.scope)) + '</h3>' +
         '<div class="shb-note">' + (all.length > BULK_MAX ? 'The first ' + BULK_MAX + ' of ' + all.length.toLocaleString() + ' - + Next ' + BULK_MAX + ' adds more. ' : '') +
-          'Tick the ones that are right, then Match ticked. The rest stay in the hunt.</div>' +
+          'Tick the ones that are right, then Match ticked. ' + (S.standalone ? 'The rest stay as they are.' : 'The rest stay in the hunt.') + '</div>' +
         '<div class="shb-terms">' +
           '<div class="shb-trow"><input class="shb-add" type="search" enterkeyhint="search" spellcheck="false" autocomplete="off" ' +
             'autocorrect="off" autocapitalize="off" placeholder="Add words to every search…">' +
@@ -2650,7 +2653,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         bar.className = 'sh-bar sh-insp sh-peek';
         bar.innerHTML =
           '<div class="sh-top"><span class="sh-insp-l">⚡ From the bulk check · ' + (i + 1) + ' of ' + B.rows.length + '</span>' +
-            '<button type="button" data-h="hunt" title="Leave the bulk check and hunt this file">🎯 Hunt it</button>' +
+            (S.standalone ? '' : '<button type="button" data-h="hunt" title="Leave the bulk check and hunt this file">🎯 Hunt it</button>') +
             '<button type="button" class="sh-back" data-h="back">✕ Back to bulk</button></div>' +
           '<div class="sh-file" data-hlk="' + esc(keyOf(r.v)) + '">' + fileLineHtml(r.v, null) + '</div>';
         bar.addEventListener('click', (e) => {
@@ -2703,6 +2706,51 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     S.peek = { video: r.v, key: r.key, handle: h };
     // Opened after the sheet, at the same z-index, so it lands on top of it.
     window.showStashModal(r.v, { search: huntWords(r.v), hunt: h });
+  }
+
+  /**
+   * The bulk check on the files ticked in the bulk bar (native 15.160): the
+   * same sheet the hunt's ⚡ Bulk opens - first scene per file by best match,
+   * StashDB's #1 or closest length, the sorts, the filters, Tick 90+, Match
+   * ticked, 🔎 for a file's full search - but over these files instead of a
+   * folder or tag. Files with no catalogue row, pictures and files already
+   * matched are left out. Nothing is hunted afterwards.
+   */
+  async function openBulkFor(videos) {
+    if (S && !S.standalone) { toast('A Stash hunt is running - stop it first'); return null; }
+    if (S && S.standalone) { if (bulk) { if (bulk.submitting || bulk.renaming) return null; bulk.stop = true; bulk = null; } S = null; }
+    S = newSession();
+    S.standalone = true;
+    if (typeof window.scrayLoadStashState === 'function') {
+      try { await window.scrayLoadStashState(false); } catch (e) { /* the cached set will do */ }
+    }
+    const seen = new Set();
+    const list = [];
+    let noRow = 0, done = 0;
+    (videos || []).forEach(v => {
+      if (!v || !v.filename) return;
+      if (typeof window.scrayIsImageFile === 'function' && window.scrayIsImageFile(v)) return;
+      if (v.inCatalogue === false) { noRow++; return; }
+      const k = keyOf(v);
+      if (!k || seen.has(k)) return;
+      seen.add(k);
+      if (matchedNow(v)) { done++; return; }
+      v.__huntFolder = folderOf(v);
+      v.__huntTags = tagsOf(v);
+      list.push(v);
+    });
+    S.pool = list.slice();
+    const left = [];
+    if (done) left.push(done + ' already matched');
+    if (noRow) left.push(noRow + ' only on this phone');
+    if (!list.length) {
+      S = null;
+      toast('Nothing to search' + (left.length ? ' - ' + left.join(', ') : ''), '#c0392b');
+      return null;
+    }
+    if (left.length) toast('Left out: ' + left.join(', '));
+    openBulk(list);
+    return list.length;
   }
 
   function stop() {
@@ -3000,7 +3048,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     searched,
     /** Pin / unpin a name for the rest of the hunt's files (picker 15.74 / native 15.89). */
     pin, isPinned,
-    openMatches, openBulk,
+    openMatches, openBulk, openBulkFor,
     isActive: () => !!S,
     _test: { inScope, scopeLabel, folderOf, tagsOf, keyOf, getSession: () => S, newSession, setSession: (s) => { S = s; }, buildPool, inScopeLeft,
              getMatches: () => matches.slice(), getBulk: () => bulk, bestOf, getLastPerformers: () => lastPerfs.slice(), SW, huntWords }

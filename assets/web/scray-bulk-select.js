@@ -410,6 +410,13 @@
       const pick = await askStashMode(videos.length);
       if (pick === 'quick') await bulkOhashCheck(videos);
       else if (pick === 'manual') await openBulkStash(videos);
+      // Native 15.160: the hunt's bulk check over the ticked files - StashDB's
+      // search on each name, the best scene for each, the sorts and filters,
+      // Tick 90+, Match ticked, and 🔎 for one file's full search.
+      else if (pick === 'search') {
+        if (!window.scrayStashHunt || typeof window.scrayStashHunt.openBulkFor !== 'function') { alert('Search is not available here.'); return; }
+        await window.scrayStashHunt.openBulkFor(videos);
+      }
       return;
     }
 
@@ -477,6 +484,8 @@
           '<div style="display:flex;flex-direction:column;gap:8px;">' +
             '<button type="button" class="modal-btn modal-btn-primary" data-pick="quick" ' +
               'style="flex:0 0 auto;margin:0;">&#128270; Quick check <small style="font-weight:normal;">(ohash in Stash)</small></button>' +
+            '<button type="button" class="modal-btn modal-btn-primary" data-pick="search" ' +
+              'style="flex:0 0 auto;margin:0;">&#9889; Search by name <small style="font-weight:normal;">(first result for each)</small></button>' +
             '<button type="button" class="modal-btn modal-btn-secondary" data-pick="manual" ' +
               'style="flex:0 0 auto;margin:0;">&#9998; Manual edit</button>' +
             '<button type="button" class="modal-btn modal-btn-secondary" data-pick="" ' +

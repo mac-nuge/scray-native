@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.154 — test: trim address from saved stream name
+<!-- 2026-10-18T07:58Z -->
+- **Asked:** trim the start of a saved stream's file name, which came out as https---site-ma.fakehub.com-scene-4084621- followed by the rest.
+- **Cause:** the name box starts as the page's title, and a page with no title of its own reports its address, which is then tidied (slashes and colons to dashes) into the file name.
+- **Change (ScrayBrowser.swift - needs an IPA build):** a new `trimStreamURLPrefix` drops a leading address from the name: scheme, host and, when it is there, the scene/<number> part, keeping whatever follows. It runs on the default name in both stream prompts (Download Stream and Save Stream to Library, phone or server) and again on whatever is typed, in case an address is pasted back in. A name that does not start with an address is left alone; an address with nothing after it falls back to stream.
+- **Watch for:** only the leading address goes. If the rest of the page title is also junk, say what it looks like and I will trim that too.
+- Checked: the two patterns on sample names in Python (the prefix goes, a plain title is untouched). Swift not compiled or run.
+
 ### native 15.153 — test: upload sheet ticks saved stream, folder search
 <!-- 2026-10-18T07:52Z -->
 - **Asked:** after a stream is saved to the phone and the Upload sheet opens by itself, the file is not pre-selected. Also, at folder selection, offer the previously used folder as a quick option and add a folder search bar.

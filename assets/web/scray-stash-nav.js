@@ -2410,12 +2410,12 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       }
     }
 
-    const start = opts.start || { type: 'search', term: words(video.filename || '') };
+    const start = opts.start || { type: 'search', term: startWords(video) };
     push(start.type === 'home' ? { type: 'home' } : start.type === 'performer'
       ? { type: 'performer', id: start.id || '', name: start.name || '', sceneId: start.sceneId || '', fromKey: start.fromKey || '' }
       : start.type === 'studio'
         ? { type: 'studio', id: start.id || '', name: start.name || '', sceneId: start.sceneId || '', fromKey: start.fromKey || '' }
-        : { type: 'search', term: String(start.term || '').trim() || words(video.filename || '') });
+        : { type: 'search', term: String(start.term || '').trim() || startWords(video) });
 
     return {
       close: () => finish(null),
@@ -2901,6 +2901,48 @@ body.fullscreen-active #ssnPvBar { display: none; }
   }
 
   /**
+   * The full studio name for each folder tag that is a studio's name or its
+   * mapped spelling in manage-data (picker 15.124 / native 15.163). A folder
+   * called aa, with aa mapped to Amateur Allure, gives Amateur Allure; a folder
+   * called amateur-allure gives it too. Searches add these on their own, so a
+   * file in a studio's folder is searched with the studio and the right scene
+   * comes first. A folder that isn't a studio gives nothing, and the search
+   * is as it was. Hyphens count as spaces, as they do for the pills.
+   */
+  function folderStudios(video) {
+    const nm = window.scrayNameMap;
+    const studios = (nm && nm.dump && nm.dump().studio) || {};
+    const keys = Object.keys(studios);
+    if (!keys.length || !video) return [];
+    const fold = nm && nm.key ? nm.key : (x => String(x ?? '').normalize('NFC').trim().toLowerCase());
+    const norm = (x) => fold(x).replace(/[-_]+/g, ' ').replace(/\s+/g, ' ');
+    const tags = [].concat(video.tags || [], video.bracketTags || [])
+      .map(t => String(t ?? '').trim()).filter(t => t && t.toLowerCase() !== 'yet-to-upload');
+    const out = [], seen = new Set();
+    tags.forEach(t => {
+      const k = norm(t);
+      if (!k) return;
+      keys.forEach(rk => {
+        const mapped = String(studios[rk] || '').trim();
+        if (!mapped) return;
+        if (norm(rk) !== k && norm(mapped) !== k) return;
+        const mk = norm(mapped);
+        if (seen.has(mk)) return;
+        seen.add(mk);
+        out.push(mapped);
+      });
+    });
+    return out.slice(0, 2);
+  }
+  /** The words a search of this file starts from: its own, plus its folder's studio. */
+  function startWords(video) {
+    const base = words(video && video.filename || '');
+    const have = ' ' + base.toLowerCase() + ' ';
+    const extra = folderStudios(video).filter(n => !have.includes(' ' + n.toLowerCase() + ' '));
+    return (base + ' ' + extra.join(' ')).trim();
+  }
+
+  /**
    * The file's top-level folder as a tag (picker 15.74 / native 15.89), lower-case with hyphens the
    * way folder tags are made - the catalogue path's first folder and the
    * path's own, so Native's catalogue and phone paths are both covered. Never
@@ -2918,7 +2960,7 @@ body.fullscreen-active #ssnPvBar { display: none; }
     return out;
   }
 
-  window.scrayStashNav = { open, words, clean, preview, endPreview, openProfile, openHome, studioSuggestions, topFolderTags,
+  window.scrayStashNav = { open, words, clean, folderStudios, startWords, preview, endPreview, openProfile, openHome, studioSuggestions, topFolderTags,
     // picker 15.84 / native 15.102 - shared with scray-stash-hunt.js.
     hl: { html: hlHtml, terms: hlTerms, fileTerms: hlFileTerms, sceneTerms: hlSceneTerms, kinds: hlKinds, studioAltHit: hlStudioAltHit },
     // picker 15.91 / native 15.108 - a tap on a word selects it; the hunt's bulk box too.

@@ -1774,7 +1774,19 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     if (v) v.textContent = String(3 - st.n);
   }
 
+  // A matched file leaves the list (native 15.162, as browse's bulk check does since 15.227):
+  // matched by the server, by fingerprint, one at a time or in the Stash modal. It stays while its
+  // rename is still to come or being asked about, and when the rename failed, so that is seen.
+  // The head keeps the tally. Rows are hidden, never spliced out, so their numbers stay put.
+  function bulkGone(r) {
+    if (!r || !(r.st === 'done' || r.st === 'fpmatch')) return false;
+    if (r.rst === 'rfail' || r.rst === 'renaming' || r.rst === 'q') return false;
+    if (bulk && bulk.ask && !r.rst && (r.sug || r.npAny)) return false;
+    return true;
+  }
+
   function bulkRowHtml(r, i) {
+    if (bulkGone(r)) return '';
     const v = r.v;
     const dir = v.__huntFolder || folderOf(v);
     // Matching words marked on both sides (picker 15.84 / native 15.102).
@@ -1874,9 +1886,17 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     const found = B.rows.filter(r => r.card).length;
     const fp = B.rows.filter(r => r.st === 'fpmatch').length;
     const ticked = B.rows.filter(r => r.tick && (r.st === 'found' || r.st === 'fail')).length;
+    const cleared = B.rows.filter(bulkGone).length;
+    const gonePh = sheet.querySelector('.shb-allgone');
+    if (cleared && cleared === B.rows.length) {
+      if (!gonePh) sheet.querySelector('.shb-list').insertAdjacentHTML('beforeend',
+        '<div class="shb-allgone" style="padding:14px;text-align:center;color:#1e7e34;font-weight:600;">✅ All matched - cleared from this list.' +
+        (bulkRest(B).length ? ' + Next adds more.' : '') + '</div>');
+    } else if (gonePh) gonePh.remove();
     sheet.querySelector('.shb-head').innerHTML =
       '<span>' + (B.running ? 'Checked ' + done + ' of ' + B.rows.length : 'Checked ' + done + ' of ' + B.rows.length) +
         ' · ' + found + ' with a likely scene' + (fp ? ' · ' + fp + ' matched by fingerprint' : '') +
+        (cleared ? ' · <b style="color:#1e7e34">' + cleared + ' matched</b> - cleared from the list' : '') +
         (B.extra ? ' · searched with + <b>' + esc(B.extra) + '</b>' : '') + '</span>' +
       '<span class="shb-hb">' +
       (B.running ? '<button type="button" data-b="stop">Stop</button>' : '') +
@@ -1975,6 +1995,11 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     const i = B ? B.rows.indexOf(r) : -1;
     const el = i >= 0 && document.querySelector('#stashHuntBulk .shb-row[data-r="' + i + '"]');
     if (el) el.outerHTML = bulkRowHtml(r, i);
+    else if (i >= 0 && !bulkGone(r)) {
+      // A row that had left the list is back (unmatched in the Stash modal, say): draw the list again.
+      const list = document.querySelector('#stashHuntBulk .shb-list');
+      if (list) list.innerHTML = B.rows.map(bulkRowHtml).join('');
+    }
     paintBulk();
   }
 

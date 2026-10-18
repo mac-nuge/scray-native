@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.123 / native 15.162 — test: matched files leave the bulk check list
+<!-- 2026-10-18T09:02Z -->
+- **Asked:** in the bulk check (screenshot: four files all showing Matched / Renamed), take each file out of the list as it is matched on the server - everywhere that does this.
+- **Change (scray-stash-hunt.js, picker and native):** a file leaves the bulk check's list the moment it is matched - by the server job, by fingerprint, one at a time when the server can't take the job, or in the 🔎 Stash modal. The head keeps the tally (N matched - cleared from the list) and, when every file is done, the list says All matched - cleared from this list. A file stays while its rename is still queued or running, while the rename question is waiting for a choice, and when its rename failed, so a failure is seen. Rows are hidden rather than removed, so their numbers and the sorts are unaffected; a file unmatched again in the modal comes back.
+- **Browse:** the data explorer's bulk check already clears matched files (browse 15.227), so no change there.
+- Checked: `node --check`. Not run in the apps.
+
 ### picker 15.122 / native 15.161 / browse 15.258 — test: parent choice on renames
 <!-- 2026-10-18T08:55Z -->
 - **Asked:** on the Match N files - and rename them to their suggested names? question (and everywhere else a rename is offered as the suggested name), let me choose with or without the parent, and show previews.

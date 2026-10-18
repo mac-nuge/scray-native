@@ -2902,8 +2902,9 @@ body.fullscreen-active #ssnPvBar { display: none; }
 
   /**
    * The full studio name for each folder tag that is a studio's name or its
-   * mapped spelling in manage-data (picker 15.124 / native 15.163). A folder
-   * called aa, with aa mapped to Amateur Allure, gives Amateur Allure; a folder
+   * mapped spelling in manage-data (picker 15.124 / native 15.163; the longer
+   * spelling, picker 15.125 / native 15.164). A folder called aa, which the map
+   * pairs with Amateur Allure either way round, gives Amateur Allure; a folder
    * called amateur-allure gives it too. Searches add these on their own, so a
    * file in a studio's folder is searched with the studio and the right scene
    * comes first. A folder that isn't a studio gives nothing, and the search
@@ -2916,6 +2917,7 @@ body.fullscreen-active #ssnPvBar { display: none; }
     if (!keys.length || !video) return [];
     const fold = nm && nm.key ? nm.key : (x => String(x ?? '').normalize('NFC').trim().toLowerCase());
     const norm = (x) => fold(x).replace(/[-_]+/g, ' ').replace(/\s+/g, ' ');
+    const titled = (x) => String(x).replace(/(^|[\s\-])(\S)/g, (m, a, c) => a + c.toUpperCase());
     const tags = [].concat(video.tags || [], video.bracketTags || [])
       .map(t => String(t ?? '').trim()).filter(t => t && t.toLowerCase() !== 'yet-to-upload');
     const out = [], seen = new Set();
@@ -2926,10 +2928,15 @@ body.fullscreen-active #ssnPvBar { display: none; }
         const mapped = String(studios[rk] || '').trim();
         if (!mapped) return;
         if (norm(rk) !== k && norm(mapped) !== k) return;
-        const mk = norm(mapped);
-        if (seen.has(mk)) return;
-        seen.add(mk);
-        out.push(mapped);
+        // The studio has two spellings - the raw one and the mapped one, and a library may keep
+        // either as the short form (the map here runs "amateur allure" -> "aa"). The search wants
+        // the full one: the longer of the two, the mapped spelling as written when it is, the raw
+        // one with capitals when it isn't. The folder's own short name is not added again.
+        const full = norm(mapped).length >= norm(rk).length ? mapped : titled(rk);
+        const fk = norm(full);
+        if (seen.has(fk)) return;
+        seen.add(fk);
+        out.push(full);
       });
     });
     return out.slice(0, 2);

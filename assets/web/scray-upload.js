@@ -234,9 +234,44 @@
     it.videoKey = res.video_key;
     // The box's paths come back without the leading slash OneDrive's have.
     it.folder = res.path ? "/" + String(res.path).replace(/^\/+/, "") : it.folder;
+    // Native 15.158: the Stash check runs now, before the phone's row is
+    // adopted and the list redrawn, so the list comes back with the match (the
+    // purple S, the studio and performer names) already in it.
+    const stash = await stashCheck(it, res.video_key);
     await adoptLocally(it.rel, res.video_key, v);
+    if (stash) {
+      try {
+        window.scrayNoteStashMatch?.({ ...(v || {}), videoKey: res.video_key, filename: it.filename }, true,
+                                     Array.isArray(stash.markers) && stash.markers.length > 0);
+      } catch { /* the colour catches up on the next refresh */ }
+      if (typeof window.showSyncConfirmation === "function") window.showSyncConfirmation(`✅ ${it.filename}: matched on Stash`);
+    }
     try { await bridge().uploadForget(it.uid); } catch { /* old list entry, harmless */ }
     it.state = "done";
+  }
+
+  /**
+   * The quick Stash check the bulk S does (stash_scene: fingerprint the file,
+   * ask StashDB, store the match if exactly one scene claims it), for the file
+   * that has just gone up. Never fails the upload: a miss, an error or sixty
+   * seconds without an answer just means no match yet - the S in the list can
+   * still do it later. Resolves with the server's answer on a match, else null.
+   */
+  async function stashCheck(it, key) {
+    it.note = "Checking Stash…"; renderPanel();
+    try {
+      const r = await Promise.race([
+        api("stash_scene", { video_key: key, force: false }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("no answer in 60 s")), 60000))
+      ]);
+      it.stash = r && r.stash_id ? "matched on Stash" : "not on Stash";
+      return r && r.stash_id ? r : null;
+    } catch (err) {
+      console.warn("[upload] stash check failed:", err.message);
+      return null;
+    } finally {
+      it.note = null;
+    }
   }
 
   async function localVideo(rel) {
@@ -461,7 +496,7 @@
       const act = i.state === "waiting" ? `<button class="up-link" data-act="cancel" data-uid="${esc(i.uid)}">Remove</button>`
         : (i.state === "failed" || i.state === "cancelled") ? `<button class="up-link" data-act="retry" data-uid="${esc(i.uid)}">Retry</button>` : "";
       const sub = i.state === "failed" ? `<div class="up-err">${esc(i.error)}</div>`
-        : i.state === "done" ? `<div class="up-sub">${esc(shortAcct(i.account))} › ${esc(i.folder)}</div>` : "";
+        : i.state === "done" ? `<div class="up-sub">${esc(shortAcct(i.account))} › ${esc(i.folder)}${i.stash ? ` · ${esc(i.stash)}` : ""}</div>` : "";
       return `<li class="st-${i.state}"><span class="up-ico">${icon}</span>
         <div class="up-li"><div class="up-li-name">${esc(i.filename)} <span class="up-size">${fmtBytes(i.size)}</span></div>${sub}</div>${act}</li>`;
     }).join("");

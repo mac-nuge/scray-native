@@ -921,6 +921,48 @@
   }
   window.scrayHetznerLinkedCopies = linkedCopies;
 
+  /**
+   * A phone file deleted from the phone only (native 15.167). While it existed,
+   * the box copy filed under the very same key was never added (see the note at
+   * the top), so with the phone copy gone the file vanished from its variants
+   * until a Hetzner re-fetch. This asks the box for just that key, adds its row
+   * and pulls that key's catalogue data - one small request pair, no re-fetch -
+   * so the P chip turns into an H chip at once. Does nothing when Hetzner isn't
+   * on here, the key isn't on the box, or a copy is already in the library.
+   */
+  async function restoreAfterPhoneDelete(video) {
+    if (!enabled() || !video || typeof window.scrayApiCall !== "function") return false;
+    const key = video.videoKey || (window.scrayVideoKey ? window.scrayVideoKey(video.filename) : "");
+    if (!key) return false;
+    const res = await api("hetzner_list", { keys: [key] });
+    const listed = ((res && res.videos) || []).find(x => x && x.video_key === key);
+    if (!listed) return false;
+    const db = await openDB();
+    const tx = db.transaction([STORE_NAME, META_STORE_NAME], "readwrite");
+    const src = tx.objectStore(STORE_NAME);
+    const meta = tx.objectStore(META_STORE_NAME);
+    const rows = await readAll(src);
+    if (phoneKeysOf(rows).has(key) || rows.some(v => v.oneDriveId === ID_PREFIX + key)) {
+      await done(tx);
+      return false;
+    }
+    const row = toRow(listed);
+    if (video.variant_group) row.variant_group = video.variant_group;
+    src.put(row);
+    meta.put({
+      oneDriveId: row.oneDriveId, user_score: null, notes: null, bookmarks: [],
+      view_count: 0, time_viewed: 0, last_played: null, first_seen: new Date().toISOString(),
+      f_tally: 0, updatedAt: new Date().toISOString(), updatedBy: "scan",
+    });
+    await done(tx);
+    // Its scores, bookmarks, tags and variant group, for this one key.
+    try { if (typeof window.scrayPullScoped === "function") await window.scrayPullScoped([key], 0); }
+    catch (e) { console.warn("[hetzner] catalogue data for the restored copy:", e); }
+    if (typeof refreshAllLists === "function") refreshAllLists();
+    return true;
+  }
+  window.scrayHetznerRestoreAfterPhoneDelete = restoreAfterPhoneDelete;
+
 
   window.scrayHetznerFetch  = fetchHetzner;
   window.scrayHetznerRemove = removeHetzner;

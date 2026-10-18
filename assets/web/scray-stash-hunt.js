@@ -1268,8 +1268,13 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
   /** The file's own words, and whatever its folder carries. */
   const huntWords = (v) => {
     const base = baseWords(v);
-    const extra = carryOf(v).filter(n => !hasWord(base, n));
-    return (base + ' ' + extra.join(' ')).trim();
+    // The studio the file's folder stands for (picker 15.124 / native 15.163): a folder that is a
+    // studio's name or mapped spelling adds the full studio name; any other folder adds nothing.
+    const studio = (window.scrayStashNav && typeof window.scrayStashNav.folderStudios === 'function'
+      ? window.scrayStashNav.folderStudios(v) : []).filter(n => !hasWord(base, n));
+    const withStudio = (base + ' ' + studio.join(' ')).trim();
+    const extra = carryOf(v).filter(n => !hasWord(withStudio, n));
+    return (withStudio + ' ' + extra.join(' ')).trim();
   };
 
   /** Back to the hunt's own file, as it was. */

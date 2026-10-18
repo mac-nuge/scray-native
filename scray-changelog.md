@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.124 / native 15.163 — test: studio of the folder added to searches
+<!-- 2026-10-18T09:08Z -->
+- **Asked:** always put the full studio name into each file's own search when its folder matches a studio name or its mapped name (a folder `aa` for Amateur Allure), so the right scene comes up without refining the search by hand. A folder that isn't a studio: leave the search as it is.
+- **Change (scray-stash-nav.js, scray-stash-hunt.js):** new `scrayStashNav.folderStudios(video)`: for each of the file's folder and [bracket] tags it looks for a studio in manage-data's studio mapping whose raw name or mapped name is that tag (hyphens read as spaces), and gives back the **mapped (full) name** - `aa` and `amateur-allure` both give Amateur Allure. At most two names; none when no folder is a studio. The hunt's words for a file (`huntWords`) now carry those names after the file's own words - so the bulk check's searches, the hunt's one-by-one search and its 🔎 look all start with the studio - and so does the navigator's default search when it opens with no words of its own. A name already in the words is not added twice. Names pinned for the hunt still follow.
+- **Left alone:** the score is still measured against the file's own words only, so the studio doesn't skew confidence; the single Stash modal's tag-picking box and its Filename button are as they were (type or tap a pill to add the studio there); the studio pills stay and show the name as already in the box.
+- **Browse:** not changed - its searches deliberately offer the studio as a pill instead; say if you want it added there too.
+- Checked: `node --check`; the folder match run in Node with a stubbed name map (aa, amateur-allure, fake-taxi match; a plain folder gives nothing; a name already in the filename is not doubled). Not run in the apps.
+
 ### picker 15.123 / native 15.162 — test: matched files leave the bulk check list
 <!-- 2026-10-18T09:02Z -->
 - **Asked:** in the bulk check (screenshot: four files all showing Matched / Renamed), take each file out of the list as it is matched on the server - everywhere that does this.

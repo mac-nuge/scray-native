@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.153 — test: upload sheet ticks saved stream, folder search
+<!-- 2026-10-18T07:52Z -->
+- **Asked:** after a stream is saved to the phone and the Upload sheet opens by itself, the file is not pre-selected. Also, at folder selection, offer the previously used folder as a quick option and add a folder search bar.
+- **Cause (pre-selection):** the sheet waited ten seconds for the saved file and ticked it only if it was offered as a phone file by then. It is offered only after the browser's closing rescan has read the whole folder and the catalogue check has judged the new file (until then its in-catalogue flag is unset), which on a large library takes longer, so the wait ran out with nothing ticked. It also did not redraw while waiting, and the match was exact on the file name.
+- **Change (assets/web/scray-upload.js - JS only, no IPA build):** with a file name from the browser the sheet now waits up to two minutes, says so (Looking for the file on this phone...), redraws as the list fills in, and ticks the file the moment it is offered. It asks for a folder rescan itself in case none was queued, and stops early if the file is already in the library (it says so) or if you have moved on to the next step. Name matching ignores case and accent-composition differences. The uploader check no longer sits behind the wait, so the sheet is usable straight away.
+- **Change (folder step):** a **Last used** button (the account step already had one) now also shows at the top of the folder step, whenever the last destination differs from where you are. A **Search folders** box sits above the list: every word must match; folders at this level come first, then any other folder the account holds files in, and tapping one opens it like any other. Typing in it no longer touches the file filter.
+- **Not changed:** the Swift side already sends the saved file name and flags the rescan; Picker has no upload sheet.
+- Checked: `node --check scray-upload.js`. Not run in the app.
+
 ### native 15.152 — test: save stream to library via phone
 <!-- 2026-10-16T06:45Z -->
 - **Asked:** Download Stream works on the phone but Save Stream to Library fails on the server (ffprobe: Invalid data found when processing input, because the server cannot sign in to the site). Use the same on-phone download and just send the file to the server.

@@ -503,7 +503,7 @@
   async function openSheet(video, nameHint) {
     closeSheet();
     S = { step: "files", ticked: new Set(), files: [], filter: "", q: "", targets: null, account: null, path: null,
-          folders: null, loading: false, error: null, needsBuild: false, quota: {}, mk: null, note: null };
+          folders: null, loading: false, error: null, needsBuild: false, quota: {}, mk: null, note: null, fq: "", wait: null };
     const mine = S;
     const start = video ? localId(video) : null;
     if (start) S.ticked.add(start);
@@ -521,21 +521,11 @@
     S.modal = modal;
     renderSheet();
 
+    let all = [];
     try {
-      const all = await window.getAllVideos();
-      S.files = all.filter(isPhoneOnly).sort((a, b) => String(a.filename).localeCompare(String(b.filename)));
+      all = await window.getAllVideos();
+      S.files = all.filter(isPhoneOnly).sort(byFilename);
       if (start && !S.files.some(v => localId(v) === start) && isPhoneOnly(video)) S.files.unshift(video);
-      if (nameHint) {
-        const want = String(nameHint).toLowerCase();
-        const find = () => S.files.find(v => String(v.filename).toLowerCase() === want);
-        for (let n = 0; n < 10 && !find() && S === mine; n++) {
-          await new Promise(r => setTimeout(r, 1000));
-          const again = await window.getAllVideos();
-          S.files = again.filter(isPhoneOnly).sort((a, b) => String(a.filename).localeCompare(String(b.filename)));
-        }
-        const hit = S === mine ? find() : null;
-        if (hit) S.ticked.add(localId(hit));
-      }
     } catch (err) {
       S.error = `Couldn't read the phone's files: ${err.message}`;
     }
@@ -543,6 +533,62 @@
     try { await bridge().uploadStatus([]); } catch (err) { if (/Unknown action|not a function|undefined/i.test(String(err.message))) S.needsBuild = true; }
     if (typeof bridge().uploadStatus !== "function") S.needsBuild = true;
     renderSheet();
+
+    // Native 15.153: the saved file is offered only once the folder rescan has
+    // read it AND the catalogue check has judged it (inCatalogue is unset until
+    // then), which on a big library takes well over the ten seconds this used to
+    // allow - so it was never ticked. Now it waits up to two minutes, shows that
+    // it is waiting, keeps the list current, and ticks the file the moment it is
+    // offered. It stops early if the file turns out to be in the library already
+    // or the person has moved on from the file list.
+    if (nameHint && !S.error) {
+      const norm = n => String(n || "").normalize("NFC").toLowerCase();
+      const want = norm(nameHint);
+      const isLocal = v => typeof window.isLocalVideo !== "function" || window.isLocalVideo(v);
+      const row = rows => rows.find(v => !!localId(v) && isLocal(v) && norm(v.filename) === want);
+      const tick = rows => {
+        const hit = rows.find(v => isPhoneOnly(v) && norm(v.filename) === want);
+        if (hit) S.ticked.add(localId(hit));
+        return !!hit;
+      };
+      // Redraw without dropping a half-typed filter.
+      const redraw = () => {
+        if (S.step === "files" && S.modal.querySelector(".up-find") === document.activeElement) S.refocus = true;
+        renderSheet();
+      };
+      try {
+        if (tick(all)) { redraw(); }
+        else {
+          if (typeof window.scrayRefreshLocalFolder === "function") window.scrayRefreshLocalFolder();
+          S.wait = `Looking for ${nameHint} on this phone…`;
+          redraw();
+          const until = Date.now() + 120000;
+          let found = false;
+          while (S === mine && S.step === "files" && Date.now() < until) {
+            await new Promise(r => setTimeout(r, 2000));
+            if (S !== mine) break;
+            const again = await window.getAllVideos();
+            const files = again.filter(isPhoneOnly).sort(byFilename);
+            const changed = files.length !== S.files.length;
+            S.files = files;
+            if (tick(again)) { found = true; S.wait = null; redraw(); break; }
+            const r = row(again);
+            if (r && r.inCatalogue === true && r.inOneDrive === true) {
+              S.wait = `${nameHint} is already in the library, so there is nothing to upload.`; redraw(); found = true; break;
+            }
+            if (changed) redraw();
+          }
+          if (S === mine && !found && S.wait) {
+            S.wait = S.step === "files"
+              ? `${nameHint} hasn't turned up yet. Tick it below if it is listed, or close this and open Upload again in a moment.`
+              : null;
+            redraw();
+          }
+        }
+      } catch (err) {
+        if (S === mine) { S.wait = null; redraw(); }
+      }
+    }
   }
 
   function closeSheet() {
@@ -551,6 +597,19 @@
   }
 
   const tickedFiles = () => S.files.filter(v => S.ticked.has(localId(v)));
+
+  const byFilename = (a, b) => String(a.filename).localeCompare(String(b.filename));
+
+  // The destination used last time, when this account still lists it and it is
+  // still inside one of that account's folders (native 15.153: offered on the
+  // folder step too, not only the account step).
+  function lastDest() {
+    const last = load(LAST_KEY, null);
+    if (!last || !S || !S.targets) return null;
+    const ok = S.targets.some(a => a.account_id === last.account &&
+      a.stacks.some(st => last.path === st.path || String(last.path).startsWith(st.path + "/")));
+    return ok ? last : null;
+  }
 
   // Free space per account (13.54): "324 GB free of 1 TB", red when the ticked
   // files won't fit. Asked for once per sheet, all accounts at once, after the
@@ -635,6 +694,7 @@
       const shown = S.files.filter(v => !f || String(v.filename).toLowerCase().includes(f));
       body += `
         <p class="up-lead">Files on this phone that aren't in the catalogue. Every ticked file goes to the same folder.</p>
+        ${S.wait ? `<div class="up-note">${esc(S.wait)}</div>` : ""}
         <div class="up-tools">
           <input type="search" class="up-find" placeholder="Filter ${S.files.length} files…" value="${esc(S.filter)}">
           <button class="up-link" data-act="all">All</button><button class="up-link" data-act="none">None</button>
@@ -651,7 +711,7 @@
     }
 
     if (S.step === "account") {
-      const last = load(LAST_KEY, null);
+      const last = lastDest();
       body += `<p class="up-lead">${picked.length} file${picked.length === 1 ? "" : "s"} · ${fmtBytes(size)}. Choose where they go.</p>`;
       if (!S.targets) {
         body += `<div class="up-loading">Loading accounts…</div>`;
@@ -672,7 +732,7 @@
             <span class="up-hitacct"><span class="up-count">${esc(shortAcct(h.account))}</span>${spaceShortHtml(h.account, size)}</span><span class="up-go">›</span></button></li>`).join("")
             || `<li class="up-empty">No folder matches that.</li>`}</ul>`;
         } else {
-        if (last && S.targets.some(a => a.account_id === last.account && a.stacks.some(s => last.path === s.path || last.path.startsWith(s.path + "/")))) {
+        if (last) {
           body += `<button class="up-last" data-act="use-last">Last used: <b>${esc(shortAcct(last.account))}</b> › ${esc(last.path)}</button>`;
         }
         body += `<ul class="up-accounts">${S.targets.map(a => `
@@ -696,6 +756,10 @@
         ? acct.stacks.map(s => ({ name: s.name, path: s.path, extra: `${s.files} file${s.files === 1 ? "" : "s"}` }))
         : (S.folders || []).map(f => ({ name: f.name, path: f.path, extra: "" }));
       body += `<div class="up-trail">${trail}</div>`;
+      const lastD = lastDest();
+      if (lastD && !(lastD.account === S.account && lastD.path === S.path)) {
+        body += `<button class="up-last" data-act="use-last">Last used: <b>${esc(shortAcct(lastD.account))}</b> › ${esc(lastD.path)}</button>`;
+      }
       // + New folder (15.18). Inside any folder; at the top only on the Storage
       // Box - a OneDrive upload has to land inside a folder the account is
       // catalogued from (upload_session's rule), so a new top folder there
@@ -712,7 +776,25 @@
           : `<div class="up-newrow"><button class="up-link up-newbtn" data-act="mk-open" ${S.loading ? "disabled" : ""}>+ New folder</button></div>`;
       }
       if (S.note) body += `<div class="up-note">${esc(S.note)}</div>`;
+      // Folder search (native 15.153): every word must match. Folders at this
+      // level first, then any other folder the account holds files in; the
+      // rows open like any other folder.
+      const fterms = S.fq.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      body += `<div class="up-tools"><input type="search" class="up-find" placeholder="Search folders in ${esc(S.path === null ? shortAcct(S.account) : segs[segs.length - 1])}…" value="${esc(S.fq)}"></div>`;
       if (S.path !== null && S.loading) body += `<div class="up-loading">Loading folders…</div>`;
+      else if (fterms.length) {
+        const have = new Set();
+        const hits = list.map(f => f.path).concat((acct && acct.folders) || [])
+          .filter(p => { if (have.has(p)) return false; have.add(p); return fterms.every(t => String(p).toLowerCase().includes(t)); })
+          .sort((a, b) => {
+            const own = p => fterms.every(t => String(p).split("/").pop().toLowerCase().includes(t)) ? 0 : 1;
+            return own(a) - own(b) || String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+          })
+          .slice(0, 200);
+        body += `<ul class="up-folders">${hits.map(p => `
+          <li><button data-act="open" data-path="${esc(p)}"><span class="up-folder">📁 ${esc(p)}</span><span class="up-go">›</span></button></li>`).join("")
+          || `<li class="up-empty">No folder matches that.</li>`}</ul>`;
+      }
       else body += `<ul class="up-folders">${list.map(f => `
           <li><button data-act="open" data-path="${esc(f.path)}"><span class="up-folder">📁 ${esc(f.name)}</span>
           <span class="up-count">${esc(f.extra)}</span><span class="up-go">›</span></button></li>`).join("")
@@ -786,7 +868,7 @@
   }
 
   async function openFolder(path) {
-    S.path = path; S.folders = null; S.error = null; S.q = ""; S.mk = null; S.note = null;
+    S.path = path; S.folders = null; S.error = null; S.q = ""; S.fq = ""; S.mk = null; S.note = null;
     if (path === null) { renderSheet(); return; }
     S.loading = true; renderSheet();
     const want = path;
@@ -855,7 +937,7 @@
     // The new folder's name is kept, not redrawn on every letter (15.18).
     if (S && S.mk && e.target.classList.contains("up-newname")) { S.mk.name = e.target.value; return; }
     if (!S || !e.target.classList.contains("up-find")) return;
-    if (S.step === "account") S.q = e.target.value; else S.filter = e.target.value;
+    if (S.step === "account") S.q = e.target.value; else if (S.step === "folder") S.fq = e.target.value; else S.filter = e.target.value;
     S.refocus = true;
     renderSheet();
   }

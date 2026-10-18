@@ -4,6 +4,18 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.156 — test: clear stuck dim overlay
+<!-- 2026-10-18T08:25Z -->
+- **Asked:** the app sometimes freezes with the screen dimmed as if a modal were open, no modal showing, nothing tappable (the page behind can still be scrolled); a way out, or better, stop it happening.
+- **Cause (not pinned down):** a modal-style layer (the dimmed full-screen backdrop) is left behind without its box, and it catches every touch. Nothing in the logs says which modal, and the app has a dozen places that make one, so I could not find the one that leaves it. The fullscreen-panel backdrop (player.js) is one candidate; it is only the dimming behind a panel and it is removed from its own state, so it looks sound.
+- **Change (new assets/web/scray-modal-guard.js, loaded last in index.html - JS only, no IPA build):**
+  - **Automatic:** every second it looks for a full-screen, dimming, fixed layer (ids or classes with modal, overlay, backdrop, popup, sheet or dialog; never anything holding a video, canvas or iframe, or named for the player) that is the topmost thing at nine points across the screen and holds nothing, with no other modal layer above it. After three scans in a row (about three seconds) it clears it. A modal with a box showing is never touched.
+  - **By hand:** tap the dimmed area four times quickly and the layer under your finger is cleared whether or not it looks empty. A tap on the dim outside a real modal's box closes that modal anyway, so nothing is lost.
+  - **How it clears:** the fullscreen-panel backdrop by dropping its body class; a layer that was in the page's own markup is hidden (inline display none), not deleted; a layer made by script is removed.
+  - **Finding the cause:** every clear is written to the console log (tag, id, classes and the start of the markup) and shows a short Cleared a stuck overlay message, so the next send report says which modal was left behind.
+- **Watch for:** a layer from the page's own markup that is reopened by a class change alone, not by setting its display, would stay hidden after a clear (none known). If a legitimate overlay is ever cleared, the log line names it and it gets an exception.
+- Checked: in headless Chromium at 390 px - a modal with content survives six seconds; an empty one, and one whose only child is hidden, are removed within about four seconds with the message; a static one is hidden, not removed; four taps clear a layer with a junk child; log lines name each one. Not run in the app.
+
 ### native 15.155 — test: bulk select upload option
 <!-- 2026-10-18T08:05Z -->
 - **Asked:** add Upload as an option in bulk select for Native.

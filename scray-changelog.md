@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.157 — test: resolution in stream name
+<!-- 2026-10-18T08:40Z -->
+- **Asked:** add the resolution to the suggested file name when downloading a stream.
+- **Change (ScrayBrowser.swift - needs an IPA build):** in the Download Stream and Save Stream to Library prompts the suggested name now ends with the picture size, for example `Some title 1080p`. The size is read from the stream's own master playlist, from the variant the downloader will pick (the highest BANDWIDTH, the first if several tie), and given as its shorter side, so a tall 1080x1920 clip says 1080p like a wide one. The prompt appears straight away and the box fills in a moment later (one quick request, 8 seconds at most, with the same cookies and headers the download uses); it is only changed if you haven't typed in it by then.
+- **Left alone:** a name that already says a size (1080p, 720p, 4k and so on); a stream that is a plain media playlist rather than a master, which doesn't say its size; a failed or slow request; an empty suggestion. In all of those the name is as before.
+- **Watch for:** the suffix is a plain space and `1080p`, not in brackets, because a bracketed tag at the end of a name is read as a path tag in the catalogue. If you want a different form (an underscore, `[1080p]`, `4k` for 2160), say so; it is one line.
+- Checked: the playlist reading and size test on sample playlists in Python (tie, average-only bandwidth, tall video, media playlist, names with and without a size); Swift parses clean (tree-sitter), same as before. Not compiled or run - the IPA build is the real test.
+
 ### native 15.156 — test: clear stuck dim overlay
 <!-- 2026-10-18T08:25Z -->
 - **Asked:** the app sometimes freezes with the screen dimmed as if a modal were open, no modal showing, nothing tappable (the page behind can still be scrolled); a way out, or better, stop it happening.

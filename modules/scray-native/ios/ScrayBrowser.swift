@@ -1972,7 +1972,7 @@ final class ScrayBrowserViewController: UIViewController,
     /// The name starts as the page's title; the server tidies it and adds
     /// " (2)" if the library already has one of that name.
     private func askStreamName(_ s: ScrayDetectedStream) {
-        let title = (currentWebView?.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = Self.trimStreamURLPrefix(currentWebView?.title ?? "")
         let alert = UIAlertController(title: "Save Stream to Library",
                                       message: "The server copies it into an MP4 in the Streams folder of your library.",
                                       preferredStyle: .alert)
@@ -2013,7 +2013,7 @@ final class ScrayBrowserViewController: UIViewController,
     // delivery to the download folder all come from the blob route above.
 
     private func askDeviceStreamName(_ s: ScrayDetectedStream, toLibrary: Bool = false) {
-        let title = (currentWebView?.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = Self.trimStreamURLPrefix(currentWebView?.title ?? "")
         let alert = UIAlertController(title: toLibrary ? "Save Stream to Library" : "Download Stream",
                                       message: toLibrary
                                           ? "The phone downloads it as an MP4, then sends it to your library."
@@ -2034,7 +2034,7 @@ final class ScrayBrowserViewController: UIViewController,
 
     private func startDeviceStream(_ s: ScrayDetectedStream, name raw: String, toLibrary: Bool = false) {
         guard let wv = currentWebView else { return }
-        var name = raw
+        var name = Self.trimStreamURLPrefix(raw)
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: "\\", with: "-")
             .replacingOccurrences(of: ":", with: "-")
@@ -3473,6 +3473,24 @@ final class ScrayBrowserViewController: UIViewController,
             .replacingOccurrences(of: "\\", with: "-")
             .replacingOccurrences(of: ":", with: "-")
         return Self.withExtension(cleaned.isEmpty ? "download" : cleaned)
+    }
+
+    /// native 15.154: a page with no title of its own reports its address, so a
+    /// saved stream was named after it ("https---site-ma.fakehub.com-scene-4084621-...").
+    /// Drops a leading address - scheme, host and, when it is there, the
+    /// scene/<number> part - and keeps whatever follows. Works on the raw title
+    /// and on the already-tidied form (slashes and colons turned to dashes).
+    /// A name that doesn't start with an address is returned as it was.
+    static func trimStreamURLPrefix(_ raw: String) -> String {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var s = t
+        s = s.replacingOccurrences(of: #"(?i)^https?(?:://|---)[^/\s]+?[/-]scene[/-]\d+[/-]?"#,
+                                   with: "", options: .regularExpression)
+        if s == t {
+            s = s.replacingOccurrences(of: #"(?i)^https?://[^/\s]+/?"#, with: "", options: .regularExpression)
+        }
+        if s == t { return t }
+        return s.trimmingCharacters(in: CharacterSet(charactersIn: " -/"))
     }
 
     /// native 15.22: a download whose name has no extension is saved as .mp4 -

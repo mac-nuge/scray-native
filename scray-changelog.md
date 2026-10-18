@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.125 / native 15.164 — test: folder studio search adds the full name
+<!-- 2026-10-18T10:10Z -->
+- **Reported:** the search for a file in the `aa` folder came up as `ellie murphy 720 aa`, not with Amateur Allure (screenshot).
+- **Cause:** 15.124 / 15.163 added the studio's *mapped* name. In this library's studio map the direction is the other way round - Amateur Allure is the raw name and `aa` is what it is mapped to - so the mapped name of the `aa` folder is `aa` itself.
+- **Fix (scray-stash-nav.js `folderStudios`):** a studio has two spellings, the raw one and the mapped one, and either can be the short form. The search now adds the **longer** of the two - the mapped spelling as written when that is longer, else the raw one with capitals - so `aa` gives Amateur Allure whichever way the map runs, and a folder called `amateur-allure` gives Amateur Allure too. The short folder name is not added.
+- Checked: `node --check`; Node run with the map both ways (`amateur allure -> aa` and `aa -> Amateur Allure`), a folder called amateur-allure, and a folder that isn't a studio (nothing added). Not run in the apps.
+
 ### picker 15.124 / native 15.163 — test: studio of the folder added to searches
 <!-- 2026-10-18T09:08Z -->
 - **Asked:** always put the full studio name into each file's own search when its folder matches a studio name or its mapped name (a folder `aa` for Amateur Allure), so the right scene comes up without refining the search by hand. A folder that isn't a studio: leave the search as it is.

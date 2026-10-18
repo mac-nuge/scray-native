@@ -8431,6 +8431,8 @@ body.scray-bulk-mode #taggedVideosContainer li.lc-row {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;            /* native 15.155: the Upload button made it too wide for a phone */
+  justify-content: center;
   max-width: calc(100vw - 20px);
   padding: 6px 8px;
   border-radius: 10px;
@@ -8467,6 +8469,7 @@ body.scray-bulk-mode #taggedVideosContainer li.lc-row {
 #bulkActionBar .bulk-delete  { background: #f44336; }
 #bulkActionBar .bulk-stash   { background: #6c5ce7; }
 #bulkActionBar .bulk-convert { background: #fd7e14; }   /* picker 15.88 / native 15.105 */
+#bulkActionBar .bulk-upload  { background: #0078d4; }   /* native 15.155, the ⬆ badge blue */
 #bulkActionBar .bulk-clear   { background: #333; }
 #bulkActionBar .bulk-all     { background: #f5c518; color: #000; }
 #bulkActionBar .bulk-delete  { display: inline-flex; align-items: center; justify-content: center; }

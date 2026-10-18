@@ -116,6 +116,7 @@
       <button type="button" class="bulk-btn bulk-refresh" data-bulk="refresh" title="Refresh data">Ref</button>
       <button type="button" class="bulk-btn bulk-stash" data-bulk="stash" title="Stash: quick ohash check, or edit the details by hand">S</button>
       <button type="button" class="bulk-btn bulk-convert" data-bulk="convert" title="Convert to MP4 (files on the Hetzner box)">MP4</button>
+      <button type="button" class="bulk-btn bulk-upload" data-bulk="upload" title="Upload the files that are only on this phone to the library">⬆︎</button>
       <button type="button" class="bulk-btn bulk-delete" data-bulk="delete" title="Delete" aria-label="Delete">${BIN_SVG}</button>
       <button type="button" class="bulk-btn bulk-clear" data-bulk="close" title="Turn bulk select off">✕</button>`;
     bar.addEventListener('click', (e) => {
@@ -160,7 +161,7 @@
       const everything = n > 0 && n >= listVideos().length;
       all.textContent = everything ? 'Select none' : 'Select all';
     }
-    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-stash, .bulk-delete')
+    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-stash, .bulk-upload, .bulk-delete')
       .forEach(b => { b.disabled = n === 0 || (b.classList.contains('bulk-stash') && ohashBusy); });
     placeBar();
   }
@@ -422,6 +423,22 @@
       if (left) say(`${left} not on the Hetzner box left out`);
       if (box.length === 1) conv.forApp(box[0]);
       else bulk.forApp(box, { onQueued: () => clearSelection() });
+      return;
+    }
+
+    // Upload (native 15.155, scray-upload.js - Native only): the files among
+    // the selection that exist only on this phone (or are catalogued with no
+    // copy in OneDrive or on the box), ticked in the Upload sheet, which then
+    // asks for the destination as usual. The rest are left out.
+    if (what === 'upload') {
+      if (typeof window.scrayShowUploadSheet !== 'function' || typeof window.scrayIsPhoneOnly !== 'function') {
+        alert('Upload is not available here.'); return;
+      }
+      const phone = videos.filter(v => window.scrayIsPhoneOnly(v));
+      if (!phone.length) { say('⚠️ None of the selected files are only on this phone', '#c0392b'); return; }
+      const left = videos.length - phone.length;
+      if (left) say(`${left} already in the library left out`);
+      window.scrayShowUploadSheet(phone);
       return;
     }
 

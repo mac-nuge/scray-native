@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.158 — test: stash check after upload
+<!-- 2026-10-18T08:50Z -->
+- **Asked:** after a file is uploaded from Native, do an immediate Stash check before it is reloaded into the list.
+- **Change (assets/web/scray-upload.js - JS only, no IPA build):** when a file finishes uploading and the server has catalogued it, the app now runs the same quick check the bulk S does (`stash_scene`: fingerprint the file, ask StashDB, store the match if exactly one scene claims it) **before** the phone's row is adopted and the list updated. On a match the S turns purple and the studio and performer names are brought in with the row, and a Matched on Stash message shows; the Upload panel says Checking Stash... while it runs and, for a finished file, shows matched on Stash or not on Stash beside its folder.
+- **Never fails the upload:** a miss, an error, or no answer within sixty seconds leaves the file uploaded and catalogued as before; the S in the list can still be used later. The check takes one of the three upload slots only while it runs, so a slow answer can delay the next waiting file by at most that long.
+- **Not changed:** the check is not forced, so a file StashDB has already turned down is not asked again; the bulk S is as it was.
+- Checked: `node --check scray-upload.js`. Not run in the app - the upload path needs the phone and the server, which I can't drive from here.
+
 ### native 15.157 — test: resolution in stream name
 <!-- 2026-10-18T08:40Z -->
 - **Asked:** add the resolution to the suggested file name when downloading a stream.

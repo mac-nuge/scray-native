@@ -117,6 +117,7 @@
       <button type="button" class="bulk-btn bulk-stash" data-bulk="stash" title="Stash: quick ohash check, or edit the details by hand">S</button>
       <button type="button" class="bulk-btn bulk-convert" data-bulk="convert" title="Convert to MP4 (files on the Hetzner box)">MP4</button>
       <button type="button" class="bulk-btn bulk-upload" data-bulk="upload" title="Upload the files that are only on this phone to the library">⬆︎</button>
+      <button type="button" class="bulk-btn bulk-rename" data-bulk="rename" title="Rename: use the suggested names, with or without the parent, or type your own">\u270E</button>
       <button type="button" class="bulk-btn bulk-delete" data-bulk="delete" title="Delete" aria-label="Delete">${BIN_SVG}</button>
       <button type="button" class="bulk-btn bulk-clear" data-bulk="close" title="Turn bulk select off">✕</button>`;
     bar.addEventListener('click', (e) => {
@@ -161,7 +162,7 @@
       const everything = n > 0 && n >= listVideos().length;
       all.textContent = everything ? 'Select none' : 'Select all';
     }
-    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-stash, .bulk-upload, .bulk-delete')
+    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-stash, .bulk-upload, .bulk-rename, .bulk-delete')
       .forEach(b => { b.disabled = n === 0 || (b.classList.contains('bulk-stash') && ohashBusy); });
     placeBar();
   }
@@ -439,6 +440,14 @@
       const left = videos.length - phone.length;
       if (left) say(`${left} already in the library left out`);
       window.scrayShowUploadSheet(phone);
+      return;
+    }
+
+    // Rename (native 15.159, scray-bulk-rename.js): a row per file with the
+    // suggested name, with or without the parent, each still editable.
+    if (what === 'rename') {
+      if (typeof window.scrayShowBulkRename !== 'function') { alert('Rename is not available here.'); return; }
+      window.scrayShowBulkRename(videos);
       return;
     }
 

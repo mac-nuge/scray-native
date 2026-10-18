@@ -71,6 +71,22 @@
     modal.style.zIndex = "2147483002";
     document.body.appendChild(modal);
 
+    // Clear of the corner-button dock (disguise.js), which always draws on top:
+    // the modal's bottom padding stops above it, re-measured on resize, so the
+    // Rename / Cancel row is never underneath the buttons (native 15.160).
+    const clearOfDock = () => {
+      if (!modal.isConnected) { window.removeEventListener("resize", clearOfDock); return; }
+      let gap = 0;
+      try {
+        const dock = document.getElementById("scrayDisguiseDock");
+        const r = dock && dock.offsetParent !== null ? dock.getBoundingClientRect() : null;
+        if (r && r.height && r.top > window.innerHeight / 2) gap = Math.round(window.innerHeight - r.top + 8);
+      } catch (e) { /* no dock */ }
+      modal.style.paddingBottom = gap ? "max(" + gap + "px, 20px)" : "";
+    };
+    clearOfDock();
+    window.addEventListener("resize", clearOfDock);
+
     const changed = (r) => nfc(r.value.trim()) !== nfc(r.orig);
     const todo = () => rows.filter((r) => changed(r) && !check(r) && r.status !== "ok");
 
@@ -80,7 +96,7 @@
       const bad = rows.filter((r) => changed(r) && check(r)).length;
       const go = todo().length;
       modal.innerHTML = `
-        <div class="basket-json-modal-content" style="max-width:640px;width:94vw;max-height:88vh;display:flex;flex-direction:column;">
+        <div class="basket-json-modal-content" style="max-width:640px;width:94vw;max-height:100%;display:flex;flex-direction:column;">
           <h3 style="margin:0 0 6px;">Rename ${rows.length} file${rows.length === 1 ? "" : "s"}</h3>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
             <button class="modal-btn modal-btn-secondary" data-br="all-full" ${running || !nFull ? "disabled" : ""}>Use suggested for all (${nFull})</button>

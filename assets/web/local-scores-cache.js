@@ -335,9 +335,26 @@ function scrayNoteStashMatch(video, matched = true, hasMarkers = false) {
     // repaints the lists itself when something changed). Wherever the match
     // came from - the modal opening, the hunt, a bulk check - and once for a
     // run of them, not once each.
-    if (matched && !wasMatched) scrayScheduleStashNamesRefresh();
+    if (matched && !wasMatched) { scrayScheduleStashNamesRefresh(); scrayScheduleVariantPull(); }
 }
 window.scrayNoteStashMatch = scrayNoteStashMatch;
+
+// native 15.166: a new match can link the file to its other sizes on the
+// server (the variant sweep runs inside stash_scene), but the list only learnt
+// that on the next sync. Once the matching goes quiet, delta-pull - only rows
+// the server changed since the last pull, no dialog, nothing pushed - and
+// repaint if any arrived. Not a catalogue re-fetch.
+let scrayVariantPullTimer = 0;
+function scrayScheduleVariantPull() {
+    clearTimeout(scrayVariantPullTimer);
+    scrayVariantPullTimer = setTimeout(async () => {
+        try {
+            if (typeof window.scrayPullDeltas !== 'function' || typeof window.scrayApplyPulledRow !== 'function') return;
+            const r = await window.scrayPullDeltas(window.scrayApplyPulledRow);
+            if (r && r.pulled && typeof window.refreshAllLists === 'function') window.refreshAllLists();
+        } catch (e) { /* the next sync brings them */ }
+    }, 4000);
+}
 
 let scrayStashNamesTimer = 0;
 function scrayScheduleStashNamesRefresh() {

@@ -25,6 +25,7 @@
 //   scrayConvertBulk.open({ items: [{ videoKey, instanceId?, filename, row? }], theme: 'console' | 'app',
 //                           call(action, body) -> Promise<json>,
 //                           suggest(item) -> Promise<name|null>,
+//                           suggestNoParent?(item) -> Promise<name|null>   (the same without the parent, for a file that has one),
 //                           by, monitorUrl, onQueued(results) })
 //   scrayConvertBulk.forApp(videos, { onQueued })    Picker / Native: all of the above from video rows
 (function () {
@@ -219,7 +220,13 @@
       const floor = dur ? Math.round(FLOOR_BPS * dur / 1000 / 8) : 0;
       return Math.min(size, Math.max(Math.round(size * st.q / 100), floor));
     }
-    const nameOf = (it) => st.nameMode === 'sug' && it.sug ? it.sug : it.prep.default_name;
+    // 'sugnp' (native 15.161): the suggested name without the parent. A file with no
+    // parent gets its ordinary suggestion; one already named that way keeps its name.
+    const sugMode = () => st.nameMode === 'sug' || st.nameMode === 'sugnp';
+    const nameOf = (it) => {
+      if (st.nameMode === 'sugnp' && it.np) return it.np;
+      return sugMode() && it.sug ? it.sug : it.prep.default_name;
+    };
     const sameDir = (it) => (it.copy && it.copy.same_folder && it.copy.same_folder.dir) || '';
     const destDir = () => String(st.dir || '').trim().replace(/^\/+|\/+$/g, '');
 
@@ -278,6 +285,15 @@
           const n = s ? stripExt(s).trim() : '';
           it.sug = n && (n + '.mp4').toLowerCase() !== String(it.prep.default_name).toLowerCase() ? n + '.mp4' : null;
         } catch (e) { it.sug = null; }
+        it.np = null;
+        if (opts.suggestNoParent) {
+          try {
+            const q = await opts.suggestNoParent(it.src);
+            const m = q ? stripExt(q).trim() : '';
+            // Already named that way: its own name, so the parent is not put back.
+            if (m) it.np = (m + '.mp4').toLowerCase() === String(it.prep.default_name).toLowerCase() ? it.prep.default_name : m + '.mp4';
+          } catch (e) { it.np = null; }
+        }
       }));
       sugDone = true;
       st.finding = false;
@@ -303,7 +319,7 @@
         `<td><div class="nm">${esc(it.filename)}</div>` +
           (to ? `<div class="to">→ <b>${esc(to)}</b> · /${esc(dir)}${esc(more)}</div>` : '') +
           (skip ? `<div class="why">${esc(skip)}</div>` : '') +
-          (!skip && st.nameMode === 'sug' && sugDone && !it.sug ? `<div class="note">no suggested name - keeps its own</div>` : '') +
+          (!skip && sugMode() && sugDone && !(st.nameMode === 'sugnp' ? (it.np || it.sug) : it.sug) ? `<div class="note">no suggested name - keeps its own</div>` : '') +
         `</td>` +
         `<td class="sz">${it.copy ? esc(bytes(sizeOf(it))) + '<br>→ ' + esc(bytes(estOf(it))) : ''}</td></tr>`;
     }
@@ -361,7 +377,8 @@
 
         `<div class="scv-sec"><span class="scv-lab">Names</span>` +
           `<label class="scv-opt"><input type="radio" name="scvbName" value="same"${st.nameMode === 'same' ? ' checked' : ''}><span><b>The same names</b>, as .mp4</span></label>` +
-          `<label class="scv-opt"><input type="radio" name="scvbName" value="sug"${st.nameMode === 'sug' ? ' checked' : ''}${opts.suggest ? '' : ' disabled'}><span><b>Suggested names</b> where there is one<small>From each file’s Stash match. A file with no suggestion keeps its own name.</small></span></label></div>` +
+          `<label class="scv-opt"><input type="radio" name="scvbName" value="sug"${st.nameMode === 'sug' ? ' checked' : ''}${opts.suggest ? '' : ' disabled'}><span><b>Suggested names</b> where there is one<small>From each file’s Stash match. A file with no suggestion keeps its own name.</small></span></label>` +
+          (opts.suggestNoParent ? `<label class="scv-opt"><input type="radio" name="scvbName" value="sugnp"${st.nameMode === 'sugnp' ? ' checked' : ''}><span><b>Suggested names, without the parent</b><small>The same, leaving the parent studio out of each name. Each file lists its new name above.</small></span></label>` : '') + `</div>` +
 
         `<div class="scv-sec"><span class="scv-lab">Save to</span>` +
           `<label class="scv-opt"><input type="radio" name="scvbDest" value="same"${st.destMode === 'same' ? ' checked' : ''}><span><b>Each file’s own folder</b></span></label>` +
@@ -394,7 +411,7 @@
       card.querySelectorAll('input[name=scvbName]').forEach(r => {
         r.onchange = () => {
           st.nameMode = r.value;
-          if (st.nameMode === 'sug') findSuggestions(); else checkNames();
+          if (sugMode()) findSuggestions(); else checkNames();
         };
       });
       card.querySelectorAll('input[name=scvbDest]').forEach(r => {
@@ -514,6 +531,9 @@
       call: (action, body) => window.scrayApiCall(action, { method: 'POST', body: { b64: b64(JSON.stringify(body || {})) } }),
       suggest: typeof window.scrayCleanNameSuggestion === 'function'
         ? async (it) => { try { return window.scrayCleanNameSuggestion(it.row); } catch (e) { return null; } }
+        : null,
+      suggestNoParent: typeof window.scrayCleanNameNoParent === 'function'
+        ? async (it) => { try { return window.scrayCleanNameNoParent(it.row); } catch (e) { return null; } }
         : null,
       monitorUrl: appMonitorUrl(),
       onQueued: extra && extra.onQueued

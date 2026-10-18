@@ -848,15 +848,23 @@ if (e.key === 'Enter') {
 // rule it applies still does, but it is never shown. Resolves with whether
 // the rename happened.
 if (opts && opts.auto === 'suggested') {
-    if (!cleanSuggestionBase || cleanSuggestionBase + extension === currentName) {
+    // opts.noParent (native 15.161): the name without the parent. A file that
+    // has a parent gets the parent-less name, or nothing when it already has
+    // it - never the full name put back; one with no parent is unaffected.
+    let autoBase = cleanSuggestionBase;
+    if (opts.noParent && typeof window.scrayCleanNameNoParent === 'function') {
+        const np = window.scrayCleanNameNoParent(video);
+        if (np) autoBase = (extension && np.endsWith(extension)) ? np.slice(0, -extension.length) : np;
+    }
+    if (!autoBase || autoBase + extension === currentName) {
         modal.remove();
         return { ok: false, why: 'no suggested name' };
     }
-    input.value = cleanSuggestionBase;
+    input.value = autoBase;
     await scrayDoRename();
     const ok = !document.body.contains(modal);
     modal.remove();
-    return { ok, name: cleanSuggestionBase + extension };
+    return { ok, name: autoBase + extension };
 }
 }
 
@@ -4723,6 +4731,53 @@ async function showStashModal(video, openOpts) {
                         try { hunt.renamed(video, keyBefore); } catch (e) { /* the list keeps the old name */ }
                     }
                 }, 400);
+            });
+        }
+        // Without the parent (native 15.161): its own button and its own two taps,
+        // the name it would give shown before the second.
+        const huntNp = (() => {
+            if (!hunt || !window.scrayCleanNameNoParent || !window.scrayCleanNameDiffers) return null;
+            return window.scrayCleanNameDiffers(window.scrayCleanNameNoParent(video), video.filename);
+        })();
+        if (huntNp) {
+            const nb = document.createElement('button');
+            nb.type = 'button';
+            nb.id = 'stashRenameNowNp';
+            nb.className = 'modal-btn modal-btn-secondary';
+            nb.style.cssText = 'flex:0 0 auto;width:auto;margin:0;padding:4px 12px;font-size:.8rem;';
+            const npIdle = () => { nb.innerHTML = '&#9998; \u2212 parent'; nb.style.background = ''; nb.style.color = ''; };
+            npIdle();
+            (offer.querySelector('#stashRenameEdit') || offer.querySelector('#stashRenameNow')).after(nb);
+            let npArm = null;
+            nb.addEventListener('click', async () => {
+                if (typeof window.showRenameModal !== 'function' || nb.disabled) return;
+                if (!npArm) {
+                    nb.textContent = 'Tap again to rename: ' + huntNp;
+                    nb.style.whiteSpace = 'normal';
+                    nb.style.background = '#6f42c1';
+                    nb.style.color = '#fff';
+                    npArm = setTimeout(() => { npArm = null; npIdle(); }, 3000);
+                    return;
+                }
+                clearTimeout(npArm);
+                npArm = null;
+                nb.disabled = true;
+                nb.textContent = 'Renaming\u2026';
+                const keyBefore = video.videoKey || window.scrayVideoKey(video.filename);
+                try {
+                    const res = await window.showRenameModal(video, { auto: 'suggested', noParent: true });
+                    if (res && res.ok) {
+                        offer.remove();
+                        if (typeof hunt.renamed === 'function') {
+                            try { hunt.renamed(video, keyBefore); } catch (e) { /* the list keeps the old name */ }
+                        }
+                        return;
+                    }
+                } catch (e) {
+                    console.error('[stash] rename without the parent failed:', e);
+                }
+                nb.disabled = false;
+                npIdle();
             });
         }
         let renArm = null;

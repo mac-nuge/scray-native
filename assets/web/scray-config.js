@@ -1138,6 +1138,93 @@ window.scrayStashNames = (function () {
   return { parts, partsFromScene, text, has, keyFor, refresh, rekey, asFor, releaseDate, dump: () => rows };
 })();
 
+/* =========================================
+   PINNED QUICK NOTES (native 15.169)
+   =========================================
+   The keywords you have pinned to the top of the bookmark modal's quick-note
+   rail, which overrides their popularity. Kept on the server (browse
+   quick_note_pins_get / quick_note_pin_set, app_state 'quick_note_pins') so
+   every device and both apps share one list, in the order they were pinned.
+   A copy is kept in localStorage so the rail is right the moment the modal
+   opens, even offline; the server's list replaces it whenever it answers.
+   ========================================= */
+window.scrayQuickPins = (function () {
+  const CACHE_KEY = "scray_quick_pins_v1";
+  let pins = [];
+  let inFlight = null;
+
+  const norm = (n) => String(n || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const clean = (arr) => {
+    const out = [];
+    (Array.isArray(arr) ? arr : []).forEach(x => {
+      const n = norm(x);
+      if (n && !out.includes(n)) out.push(n);
+    });
+    return out;
+  };
+  const store = () => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(pins)); } catch { /* over quota - memory still works */ } };
+
+  try { pins = clean(JSON.parse(localStorage.getItem(CACHE_KEY) || "[]")); } catch { /* corrupt cache is the same as none */ }
+
+  /** The pinned keywords, in the order they were pinned. */
+  function list() { return pins.slice(); }
+  function has(note) { return pins.includes(norm(note)); }
+
+  /** Ask the server for the list. Resolves true when it differs from what was held. */
+  function refresh() {
+    if (typeof window.scrayApiCall !== "function") return Promise.resolve(false);
+    if (inFlight) return inFlight;
+    inFlight = (async () => {
+      try {
+        const r = await window.scrayApiCall("quick_note_pins_get");
+        if (!r || !Array.isArray(r.pins)) return false;
+        const next = clean(r.pins);
+        const changed = JSON.stringify(next) !== JSON.stringify(pins);
+        pins = next;
+        store();
+        return changed;
+      } catch (err) {
+        // Keep the cached list: a stale order is better than none.
+        console.warn("[quick-pins] refresh failed, keeping cached list:", err && err.message);
+        return false;
+      } finally {
+        inFlight = null;
+      }
+    })();
+    return inFlight;
+  }
+
+  /**
+   * Pin or unpin one keyword. The local list changes at once (before the first
+   * await, so a caller can redraw straight after calling) and the server is
+   * told one keyword at a time - it does the add or remove under a lock, so two
+   * devices pinning together can't drop each other's pin. Resolves true when the
+   * server took it; on failure the local list goes back as it was.
+   */
+  async function set(note, pinned) {
+    const n = norm(note);
+    if (!n) return false;
+    const before = pins.slice();
+    if (pinned) { if (!pins.includes(n)) pins.push(n); }
+    else pins = pins.filter(x => x !== n);
+    store();
+    try {
+      if (typeof window.scrayApiCall !== "function") throw new Error("no connection to the server");
+      const r = await window.scrayApiCall("quick_note_pin_set", { method: "POST", body: { note: n, pinned: !!pinned } });
+      if (r && r.ok === false) throw new Error(r.error || "the server refused it");
+      if (r && Array.isArray(r.pins)) { pins = clean(r.pins); store(); }
+      return true;
+    } catch (err) {
+      console.warn("[quick-pins] could not save the pin:", err && err.message);
+      pins = before;
+      store();
+      return false;
+    }
+  }
+
+  return { list, has, refresh, set };
+})();
+
 /**
  * WHICH NAME a video gets, decided once for every renderer.
  *

@@ -3370,8 +3370,17 @@ async function showBookmarksModal(video, autoAddTimestamp = false, openOpts = {}
         }));
     }
     const popOf = (pn) => kwPop.get(pn) || 0;
-    const keywordsByPop = [...kwPop.keys()]
-        .sort((a, b) => (popOf(b) - popOf(a)) || a.localeCompare(b));
+    // Pinned keywords first, in the order they were pinned, whatever their
+    // popularity (native 15.169); everything else by popularity as before. A pin on a
+    // keyword that no longer exists is kept on the server but not offered.
+    const quickPins = window.scrayQuickPins || null;
+    const orderKeywords = () => {
+        const pinned = quickPins ? quickPins.list().filter(pn => kwPop.has(pn)) : [];
+        const pinnedSet = new Set(pinned);
+        return pinned.concat([...kwPop.keys()].filter(pn => !pinnedSet.has(pn))
+            .sort((a, b) => (popOf(b) - popOf(a)) || a.localeCompare(b)));
+    };
+    let keywordsByPop = orderKeywords();
     // ⚙️ How many keywords the rail offers before anything is typed.
     const TOP_KEYWORDS = 100;
 
@@ -3817,17 +3826,20 @@ async function showBookmarksModal(video, autoAddTimestamp = false, openOpts = {}
             }
             resultItems = items;
 
-            const PILL = 'flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.69rem; margin: 0; ';
+            // No text selection or iOS callout: a hold on a pill pins it (native 15.169).
+            const PILL = 'flex: 0 0 auto; width: auto; padding: 6px 10px; font-size: 0.69rem; margin: 0; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; ';
             railEl.innerHTML = items.length
                 ? items.map((it, i) => {
                     const look = it.on ? 'background: #007bff; color: #fff; border: 1px solid #007bff;'
                         : it.fresh ? 'background: #fff; color: #1e7e34; border: 1px dashed #28a745;'
                         : '';
                     const parentNote = !it.fresh && isParentNote(it.word);
-                    const title = it.on ? 'Picked - tap to remove' : it.fresh ? 'New keyword - tap to add it'
-                        : parentNote ? 'Parent note - tap to add' : 'Tap to add';
+                    const pinnedNow = !it.fresh && !!quickPins && quickPins.has(it.word);
+                    const title = (it.on ? 'Picked - tap to remove' : it.fresh ? 'New keyword - tap to add it'
+                        : parentNote ? 'Parent note - tap to add' : 'Tap to add')
+                        + (it.fresh || !quickPins ? '' : pinnedNow ? ' - hold to unpin' : ' - hold to pin to the top');
                     // Parent notes in bold (browse 13.64).
-                    return `<button type="button" class="quick-note-btn modal-btn${it.on || it.fresh ? '' : ' modal-btn-secondary'}" data-ri="${i}" title="${title}" style="${PILL}${look}${parentNote ? ' font-weight: 700;' : ''}">${it.fresh ? '+ ' : ''}${esc(it.word)}</button>`;
+                    return `<button type="button" class="quick-note-btn modal-btn${it.on || it.fresh ? '' : ' modal-btn-secondary'}" data-ri="${i}" title="${title}" style="${PILL}${look}${parentNote ? ' font-weight: 700;' : ''}">${it.fresh ? '+ ' : ''}${pinnedNow ? '\u{1F4CC} ' : ''}${esc(it.word)}</button>`;
                 }).join('')
                 : '<span style="font-size: 0.72rem; color: #999;">No notes yet - type one to add it.</span>';
 
@@ -3846,6 +3858,15 @@ async function showBookmarksModal(video, autoAddTimestamp = false, openOpts = {}
             modal.querySelector('#qnScroll')?.dispatchEvent(new Event('scroll'));
         };
         renderResults();
+        // The first draw uses the pins held on this device; ask the server in the
+        // background and redraw only if another device has changed them.
+        if (quickPins) {
+            quickPins.refresh().then(changed => {
+                if (!changed || !modal.isConnected) return;
+                keywordsByPop = orderKeywords();
+                renderResults();
+            });
+        }
 
         // ---- the pager (13.152 / 13.150) -------------------------------
         // Follows the finger, rubber-bands past either end, and settles on
@@ -4126,6 +4147,68 @@ async function showBookmarksModal(video, autoAddTimestamp = false, openOpts = {}
 
         // Picking and unpicking. Delegated: renderResults replaces the pills.
         if (railEl) {
+            // HOLD a note to pin it to the top of the rail, hold it again to
+            // unpin (native 15.169). The list is kept on the server, so every
+            // device and both apps agree. A hold that fires is not also a tap:
+            // the click that follows its release is swallowed, so it never saves
+            // or picks. Moving more than HOLD_SLOP px first is a scroll or a swipe
+            // of the pages, not a hold. Fresh "+ word" pills are not keywords yet,
+            // so they can't be pinned.
+            const HOLD_MS = 550;       // ⚙️ how long a press counts as a hold
+            const HOLD_SLOP = 10;      // ⚙️ px of travel that cancels it
+            let hold = null;
+            let holdSuppressClick = false;
+            const holdEnd = () => {
+                if (hold) { clearTimeout(hold.timer); hold = null; }
+                document.removeEventListener('pointermove', holdMove, true);
+                document.removeEventListener('pointerup', holdEnd, true);
+                document.removeEventListener('pointercancel', holdEnd, true);
+            };
+            // On the document, in the capture phase: the pager takes pointer
+            // capture once a swipe turns horizontal, and after that the rail
+            // stops hearing the moves.
+            function holdMove(e) {
+                if (!hold || e.pointerId !== hold.id) return;
+                if (Math.abs(e.clientX - hold.x) > HOLD_SLOP || Math.abs(e.clientY - hold.y) > HOLD_SLOP) holdEnd();
+            }
+            railEl.addEventListener('pointerdown', (e) => {
+                holdSuppressClick = false;
+                holdEnd();
+                if (!quickPins) return;
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                const btn = e.target.closest('.quick-note-btn');
+                if (!btn) return;
+                const it = resultItems[parseInt(btn.dataset.ri, 10)];
+                if (!it || it.fresh) return;
+                const word = it.word;
+                hold = { id: e.pointerId, x: e.clientX, y: e.clientY, timer: setTimeout(() => {
+                    holdEnd();
+                    holdSuppressClick = true;
+                    try { if (navigator.vibrate) navigator.vibrate(15); } catch (_) {}
+                    const pin = !quickPins.has(word);
+                    // set() changes the list before it first waits, so the rail
+                    // can be redrawn in the new order straight away.
+                    const saved = quickPins.set(word, pin);
+                    keywordsByPop = orderKeywords();
+                    renderResults();
+                    saved.then(ok => {
+                        if (ok) return;
+                        // The server didn't take it: set() has put the list back.
+                        if (typeof window.showScoreConfirmation === 'function') {
+                            window.showScoreConfirmation('\u274C Could not save the pin', '#f44336');
+                        }
+                        keywordsByPop = orderKeywords();
+                        if (modal.isConnected) renderResults();
+                    });
+                }, HOLD_MS) };
+                document.addEventListener('pointermove', holdMove, true);
+                document.addEventListener('pointerup', holdEnd, true);
+                document.addEventListener('pointercancel', holdEnd, true);
+            });
+            // No text-selection callout or context menu on a held pill.
+            railEl.addEventListener('contextmenu', (e) => {
+                if (e.target.closest('.quick-note-btn')) e.preventDefault();
+            });
             let pressedWhileTyping = false;
             const railPress = (e) => {
                 if (!e.target.closest('.quick-note-btn')) return;
@@ -4138,6 +4221,8 @@ async function showBookmarksModal(video, autoAddTimestamp = false, openOpts = {}
                 const btn = e.target.closest('.quick-note-btn');
                 if (!btn) return;
                 e.stopPropagation();
+                // The release of a hold that pinned or unpinned is not a tap.
+                if (holdSuppressClick) { holdSuppressClick = false; e.preventDefault(); return; }
                 const it = resultItems[parseInt(btn.dataset.ri, 10)];
                 if (!it) return;
                 const typing = pressedWhileTyping || (noteFieldActive && document.activeElement === newNoteEl);

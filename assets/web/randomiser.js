@@ -139,6 +139,11 @@ const SCRAY_LIST_SORT_KEYS = {
   // When migrate last copied it OneDrive -> Hetzner (native 15.10 / picker
   // 15.14, browse 15.53's videos.migrated_at). Never-migrated files go last.
   migrated:   { type: 'date', first: 'desc', value: v => v.migrated_at },
+  // StashDB's release date for the matched scene (native 15.168; the server
+  // sends it as stash_names row [7], with your own correction applied).
+  // Unmatched files and scenes with no date go last whichever way it runs, then
+  // alphabetically (see scraySortVideos) unless another sort says otherwise.
+  released:   { type: 'date', first: 'desc', value: v => window.scrayStashNames && window.scrayStashNames.releaseDate ? window.scrayStashNames.releaseDate(v) : '' },
   // Bookmarks page: a bookmark entry carries its note and time (bookmarks-page.js).
   // Nothing on the main list has either, so these never move a video there.
   note:       { type: 'text', first: 'asc',  value: v => v.__bmNote },
@@ -191,6 +196,12 @@ function scraySortVideos(videos, baseOrder) {
   if (!Array.isArray(videos)) return videos;
   const spec = scrayListSort.filter(s => SCRAY_LIST_SORT_KEYS[s.key]);
   if (!spec.length && !baseOrder) return videos;
+  // Files with no release date sit after the dated ones in filename order,
+  // unless the stack already has a filename key or another key that splits
+  // them first: this tie-break only decides what every other key left tied.
+  if (spec.some(s => s.key === 'released') && !spec.some(s => s.key === 'filename')) {
+    spec.push({ key: 'filename', dir: 'asc' });
+  }
 
   const base = baseOrder ? new Map(baseOrder.map((v, i) => [v, i])) : null;
   const rows = videos.map((v, i) => ({
@@ -306,7 +317,116 @@ function syncListSortButtons() {
     btn.textContent = `${base} ${s.dir === 'asc' ? '↑' : '↓'}${scrayListSort.length > 1 ? at + 1 : ''}`;
     btn.dataset.sortState = s.dir;
   });
+
+  // The one Date button: reads "Date" until a date type is in the sort, then
+  // names it - "Released ↓", "Created ↑2" - and goes blue like the others.
+  document.querySelectorAll('.sort-btn[data-date-sort]').forEach(btn => {
+    const at = scrayListSort.findIndex(s => SCRAY_DATE_SORT_TYPES.some(t => t.key === s.key));
+    if (at === -1) {
+      btn.textContent = 'Date';
+      btn.dataset.sortState = 'none';
+      return;
+    }
+    const s = scrayListSort[at];
+    const type = SCRAY_DATE_SORT_TYPES.find(t => t.key === s.key);
+    btn.textContent = `${type.label} ${s.dir === 'asc' ? '↑' : '↓'}${scrayListSort.length > 1 ? at + 1 : ''}`;
+    btn.dataset.sortState = s.dir;
+  });
 }
+
+/* =========================================
+DATE SORT - one button, a choice of which date (native 15.168)
+=========================================
+
+Created, Played, Migrated and Released used to be a button each. Now one Date
+button opens a small menu of them. Picking a date type that isn't in the sort
+swaps it in for whichever date type was there (one date at a time, kept in the
+same place in the stack); picking the one already in the sort cycles it, the
+same as a heading: newest first, oldest first, off. Every one feeds the same
+scrayListSort as the headings and the other buttons.
+========================================= */
+const SCRAY_DATE_SORT_TYPES = [
+  { key: 'created',  label: 'Created' },
+  { key: 'played',   label: 'Played' },
+  { key: 'migrated', label: 'Migrated' },
+  { key: 'released', label: 'Released' }
+];
+
+function scrayDateSortPick(key) {
+  const keys = SCRAY_DATE_SORT_TYPES.map(t => t.key);
+  if (!keys.includes(key) || !SCRAY_LIST_SORT_KEYS[key]) return;
+  if (scrayListSort.some(s => s.key === key)) { scrayListSortTap(key); return; }
+
+  scrayListSortIsDefault = false;
+  const entry = { key, dir: SCRAY_LIST_SORT_KEYS[key].first };
+  const next = [];
+  let placed = false;
+  scrayListSort.forEach(s => {
+    if (!keys.includes(s.key)) { next.push(s); return; }
+    if (!placed) { next.push(entry); placed = true; }   // the old date's place
+  });
+  if (!placed) next.push(entry);
+  scrayListSort = next;
+  scrayApplyListSort();
+}
+window.scrayDateSortPick = scrayDateSortPick;
+
+function scrayCloseDateMenu() {
+  const m = document.getElementById('scrayDateMenu');
+  if (m) m.remove();
+}
+
+function scrayOpenDateMenu(btn) {
+  if (document.getElementById('scrayDateMenu')) { scrayCloseDateMenu(); return; }
+  const menu = document.createElement('div');
+  menu.id = 'scrayDateMenu';
+  menu.className = 'scray-date-menu';
+  menu.setAttribute('role', 'menu');
+
+  SCRAY_DATE_SORT_TYPES.forEach(t => {
+    const at = scrayListSort.findIndex(s => s.key === t.key);
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'scray-date-menu-item';
+    item.setAttribute('role', 'menuitem');
+    if (at !== -1) {
+      const s = scrayListSort[at];
+      item.dataset.sortState = s.dir;
+      item.textContent = `${t.label} ${s.dir === 'asc' ? '↑' : '↓'}${scrayListSort.length > 1 ? at + 1 : ''}`;
+    } else {
+      item.textContent = t.label;
+    }
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      scrayCloseDateMenu();
+      scrayDateSortPick(t.key);
+    });
+    menu.appendChild(item);
+  });
+
+  // Fixed and clamped to the screen, under the button or above it if there
+  // is no room. Just below the dock's layer, so it never covers the dock.
+  menu.style.visibility = 'hidden';
+  document.body.appendChild(menu);
+  const r = btn.getBoundingClientRect();
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - mw - 8));
+  const below = r.bottom + 4 + mh <= window.innerHeight - 8;
+  menu.style.left = left + 'px';
+  menu.style.top = Math.max(8, below ? r.bottom + 4 : r.top - mh - 4) + 'px';
+  menu.style.visibility = '';
+}
+window.scrayOpenDateMenu = scrayOpenDateMenu;
+
+// Any tap outside the menu (or on the Date button, which toggles it), a
+// scroll, or Escape closes it.
+document.addEventListener('click', (e) => {
+  if (!document.getElementById('scrayDateMenu')) return;
+  if (e.target.closest && (e.target.closest('#scrayDateMenu') || e.target.closest('.sort-btn[data-date-sort]'))) return;
+  scrayCloseDateMenu();
+}, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') scrayCloseDateMenu(); });
+window.addEventListener('scroll', scrayCloseDateMenu, true);
 
 window.sortVideosBySize = sortVideosBySize;
 
@@ -4454,13 +4574,16 @@ if (refreshScoresBtn) {
   });
 }
 
-// Clear / Views / Watched / Played / Created. The column headings are wired
+// Clear / Views / Watched / Date (which opens its own menu). The column headings are wired
 // in render.js, each time the header is drawn.
 document.querySelectorAll('.sort-btn[data-list-sort]').forEach(btn => {
     btn.addEventListener('click', () => {
         if (btn.dataset.listSort === 'clear') scrayListSortClear();
         else scrayListSortTap(btn.dataset.listSort);
     });
+});
+document.querySelectorAll('.sort-btn[data-date-sort]').forEach(btn => {
+    btn.addEventListener('click', () => scrayOpenDateMenu(btn));
 });
 syncListSortButtons();
 

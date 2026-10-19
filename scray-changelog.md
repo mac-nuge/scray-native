@@ -4,6 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.168 / browse 15.268 — test: one Date sort button with release date
+<!-- 2026-10-19T07:01Z -->
+- **Asked (native):** a sort button for release date; fold all the date buttons into one button where you choose the date type (created, migrated, released and so on); files with no release date go alphabetically after the dated ones unless another sort is applied.
+- **Why browse too:** the apps never had the release date - the `stash_names` rows they cache carried studio, cast, title, length, markers, other cast and tags, but not the date. A release sort needs it on the phone, so it travels with the names.
+- **Browse (api.php `stash_names` / `scrayStashNameRows`):** each row gets a new last entry `[7]`, the scene's release date as StashDB writes it (YYYY-MM-DD, sometimes only a year or year-month), with your own correction from `stash_overrides` applied the way the other fields are. Appended, not inserted, so a client still holding a shorter cached row reads nothing for it instead of a shifted field. The signature carries a new `|rd1` marker, so every client re-downloads the table once and then caches it as before.
+- **Native (scray-config.js `scrayStashNames.releaseDate`, randomiser.js, index.html, bookmarks.html, style.css):** the Created and Migrated buttons (and Played on the Bookmarks page) are now one **Date** button. Tap it for a small menu: Created, Played, Migrated, Released. Choosing a date type that is not in the sort swaps it in for whichever date was there, keeping its place in the stack; choosing the one already in the sort cycles it like a heading (newest first, oldest first, off). The button reads `Date` until one is on, then names it - `Released ↓`, `Created ↑2` - and goes blue. The menu sits one layer under the corner-button dock.
+- **Release sort:** newest first on the first tap. Files with no release date (unmatched, or a scene StashDB gave no date) go last whichever way it runs, then alphabetically by filename. That filename tie-break is only added when nothing else in the sort already splits them, so stacking another sort after Released orders the undated files by that instead. A year-only or year-month date sorts as the start of that period.
+- **Not changed:** the column headings, the landscape panel's own sort buttons, Picker (it has no Released sort or Date button yet - say if you want it ported).
+- **Deploy:** browse `api.php`, then the native web layer (Reload now). No IPA build. The date shows up after the first names refresh following the browse deploy; until then Released leaves every file undated.
+- Checked: `php -l api.php`, `node --check` on the changed JS; Node run of the real sort and Date-pick code - dated files in order, undated ones alphabetical after them both ways, a date swap from the boot default and from the middle of a stack. Not run in the app.
+
 ### native 15.167 — test: phone copy delete leaves its Hetzner copy as H
 <!-- 2026-10-18T14:02Z -->
 - **Reported:** deleting a variant's phone copy dropped it from the variants; only a Hetzner re-fetch brought it back, as H instead of P.

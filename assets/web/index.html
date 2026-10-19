@@ -674,8 +674,9 @@
 <button class="sort-btn sort-btn-clear" data-list-sort="clear" title="Clear the sort - headings and buttons">Clear</button>
 <button class="sort-btn" data-list-sort="views" title="Sort by view count">Views</button>
 <button class="sort-btn" data-list-sort="watched" title="Sort by time watched">Watched</button>
-<button class="sort-btn" data-list-sort="created" title="Sort by date created">Created</button>
-<button class="sort-btn" data-list-sort="migrated" title="Sort by when it was last migrated from OneDrive to Hetzner (files never migrated go last)">Migrated</button>
+<!-- One Date button (native 15.168): opens a menu of Created / Played / Migrated /
+     Released. No data-list-sort - randomiser.js wires it by data-date-sort. -->
+<button type="button" class="sort-btn" data-date-sort title="Sort by a date - tap to choose which: created, played, migrated or released (files with none go last)">Date</button>
 <!-- Bookmarks view only: bookmark time. In the DOM on both views but hidden in
      Videos (scray-views.js), because the sort row is wired by data-list-sort
      once at boot and a button that came and went would lose its handler. -->

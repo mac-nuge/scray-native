@@ -975,7 +975,8 @@ window.scrayStashNames = (function () {
     const rest = cast.filter(p => p && p.gender_short !== "F" && nm(p)).map(p => (p.gender_short || "?") + ":" + nm(p));
     const tags = Array.isArray(c.tags) ? c.tags.map(t => typeof t === "string" ? t : (t && t.name) || "") : [];
     return partsOfRow([c.studio || "", fem.join(", "), c.title || "",
-                       Number(c.stash_duration_sec) || null, 0, rest.join(", "), tags.filter(Boolean).join(", ")]);
+                       Number(c.stash_duration_sec) || null, 0, rest.join(", "), tags.filter(Boolean).join(", "),
+                       String(c.release_date || "").trim()]);
   }
 
   function partsOfRow(r) {
@@ -1115,13 +1116,26 @@ window.scrayStashNames = (function () {
     return true;
   }
 
+  /**
+   * The scene's release date as StashDB writes it - YYYY-MM-DD, sometimes only
+   * a year or year-month - or "" (native 15.168, for the Date sort). Read from
+   * the row directly rather than through parts(): a row with a date but no
+   * studio, cast or title is not worth a name, but its date still sorts.
+   * The server applies your own correction (stash_overrides) before sending.
+   */
+  function releaseDate(video) {
+    const k = keyFor(video);
+    const r = k ? rows[k] : null;
+    return (r && typeof r[7] === "string") ? r[7].trim() : "";
+  }
+
   /** The names a performer was credited as (picker 15.57 / native 15.68). */
   function asFor(name) {
     const a = asMap[String(name || "").trim().toLowerCase()];
     return Array.isArray(a) ? a : [];
   }
 
-  return { parts, partsFromScene, text, has, keyFor, refresh, rekey, asFor, dump: () => rows };
+  return { parts, partsFromScene, text, has, keyFor, refresh, rekey, asFor, releaseDate, dump: () => rows };
 })();
 
 /**

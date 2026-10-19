@@ -573,8 +573,9 @@
 <button class="sort-btn sort-btn-clear" data-list-sort="clear" title="Clear the sort - headings and buttons">Clear</button>
 <button class="sort-btn" data-list-sort="views" title="Sort by view count">Views</button>
 <button class="sort-btn" data-list-sort="watched" title="Sort by time watched">Watched</button>
-<button class="sort-btn" data-list-sort="played" title="Sort by last played">Played</button>
-<button class="sort-btn" data-list-sort="created" title="Sort by date created">Created</button>
+<!-- One Date button (native 15.168): opens a menu of Created / Played / Migrated /
+     Released. No data-list-sort - randomiser.js wires it by data-date-sort. -->
+<button type="button" class="sort-btn" data-date-sort title="Sort by a date - tap to choose which: created, played, migrated or released (files with none go last)">Date</button>
 <button class="sort-btn" data-list-sort="bmtime" title="Sort by bookmark time">Time</button>
 </div>
 

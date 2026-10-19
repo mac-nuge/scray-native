@@ -7708,6 +7708,34 @@ specificity (the extra .lc-row class). */
 /* Clear has nothing to clear. */
 .sort-btn.sort-btn-idle { opacity: 0.55; }
 
+/* The Date button's menu (native 15.168). Fixed, placed by randomiser.js, and one
+   layer under the corner-button dock (disguise.js uses the very top). */
+.scray-date-menu {
+  position: fixed;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+  padding: 4px;
+  background: #333;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.scray-date-menu-item {
+  background: #555;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+.scray-date-menu-item:hover { background: #444; }
+.scray-date-menu-item[data-sort-state="asc"],
+.scray-date-menu-item[data-sort-state="desc"] { background: #007bff; }
+
 /* =========================================
 FLS PEEK + PANELS OVER FULLSCREEN
 =========================================

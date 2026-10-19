@@ -230,6 +230,30 @@ window.scraySortVideos = scraySortVideos;
 /** A copy, for render.js to draw the heading arrows from. */
 window.scrayListSortState = () => scrayListSort.map(s => ({ ...s }));
 
+/**
+ * Put a saved sort back (history states, native 15.170). Only keys the main list
+ * knows - never the Bookmarks page's note / bmtime - each once, with a valid
+ * direction; anything else in the saved stack is dropped. The buttons and
+ * headings are re-synced; the list is NOT redrawn here, because the caller's
+ * filter pass redraws it (so there is no second sort). An empty stack means
+ * unsorted. Returns the stack that was set.
+ */
+window.scrayListSortSet = function (stack) {
+  const seen = new Set();
+  const next = [];
+  (Array.isArray(stack) ? stack : []).forEach(s => {
+    const key = s && s.key;
+    if (!key || seen.has(key) || key === 'note' || key === 'bmtime' || !SCRAY_LIST_SORT_KEYS[key]) return;
+    seen.add(key);
+    next.push({ key, dir: s.dir === 'asc' ? 'asc' : 'desc' });
+  });
+  scrayListSort = next;
+  scrayListSortIsDefault = false;
+  syncListSortButtons();
+  if (typeof window.scrayRefreshMainListHeader === 'function') window.scrayRefreshMainListHeader();
+  return next.map(s => ({ ...s }));
+};
+
 function scrayListSortTap(key) {
   const def = SCRAY_LIST_SORT_KEYS[key];
   if (!def) return;

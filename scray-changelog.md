@@ -4,6 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.128 / native 15.170 — test: sort kept with history states
+<!-- 2026-10-19T07:28Z -->
+- **Asked (native and picker):** add the sort selections to the states in history, the ones that hold the tag filters.
+- **Change (history.js `captureHistoryState` / `applyHistoryState` / `historyStateSig`, randomiser.js `scrayListSortSet`):** a state now also remembers the list's sort - every key in order with its direction (`created ↓`, then `score ↑`...). Tapping a state puts the filters, the search **and** the sort back: the sort is set first (buttons and column headings re-sync), then the filter pass redraws the list in that order, so there is no second sort. The Bookmarks page's `note` / `bmtime` keys are left out of a state both ways, and any key the list doesn't know is dropped on restore.
+- **Identity:** the sort is part of what makes a state the same one - the same filters played under a different sort are two states, and the green "armed now" edge needs the sort to match too (it refreshes when the panel opens, so it follows a sort changed with the panel shut). A sort alone still doesn't make a state; filters or a search are needed, as before. The 20-state cap is unchanged, so more sorts means older states fall off sooner.
+- **States saved before this:** they hold no sort. Their signature is unchanged (the sort part is only added for a state that has one), they still show and apply, and applying one leaves the sort as it is. They won't turn green or merge with a new state, even with the same filters, since the new ones carry a sort.
+- **Display:** each state row gets a grey `⇅ Created ↓ · Score ↑` pill after the filters (`⇅ none` when the list was unsorted); the tap hint reads "Put these filters and sort back".
+- **Not changed:** browse (states are kept on this device only, as before) and the server's play history.
+- Checked: `node --check`; Node run of the real signature and capture code (an old state's signature unchanged, a different sort gives a different state, same sort the same, bookmark keys dropped, no list on the page gives no sort) and of the real `scrayListSortSet` (invalid, duplicate, bookmark-only and bad-direction entries cleaned; flag, buttons and heading re-synced). Not run in the apps.
+- **Deploy:** the native web layer (Reload now) and picker, as usual. No IPA build.
+
 ### picker 15.127 / native 15.169 / browse 15.269 — test: hold a quick note to pin it to the top
 <!-- 2026-10-19T07:21Z -->
 - **Asked (native, then picker too):** in the bookmarks modal, pin quick notes to the top of the list so they override their popularity; hold a note to pin it, hold it again to unpin; keep the preference on the server.

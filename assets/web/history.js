@@ -345,6 +345,12 @@ window.removeFromHistoryByVideoId = removeFromHistoryByVideoId;
    Stash / BM toggles are left as they are. × forgets one (everywhere it shows).
    The one matching what's armed now has a green edge.
 
+   The sort comes with it (native 15.170): a state also remembers the list's sort - every
+   key in order, with its direction - and tapping the state puts that back too.
+   It is part of what makes a state the same one: the same filters played
+   under a different sort are two states. A state saved before this holds no
+   sort, so tapping it leaves the sort as it is.
+
    Kept on this device only (localStorage) - the shared play list on the
    server has no room for them, so a play made on another player has no state.
    ========================================= */
@@ -431,15 +437,34 @@ return Object.values(st.inc || {}).reduce((n, a) => n + a.length, 0) + (st.paren
 
 /** Same filters = same state. A switch only counts where it changes anything. */
 function historyStateSig(st) {
-return JSON.stringify([
+const parts = [
     historyStateClasses().map(k => (st.inc[k] || []).join("\u0001")),
     (st.parents || []).join("\u0001"),
     (st.kw || []).join("\u0001"),
     (st.kw || []).length > 1 && !!st.kwAll,
     historyStateTerms(st) > 1 && !!st.intersect,
     String(st.q || "").toLowerCase(),
-]);
+];
+// The sort is part of the identity only for a state that has one, so a state
+// saved before sorts were kept recomputes to the signature it was saved under.
+if (Array.isArray(st.sort)) parts.push(st.sort.map(s => s.key + ":" + s.dir).join(","));
+return JSON.stringify(parts);
 }
+
+/** The list's sort as a state keeps it: main-list keys in order. null where there is no sort (a page without the list). */
+function historyCurrentSort() {
+if (typeof window.scrayListSortState !== "function") return null;
+return window.scrayListSortState()
+    .filter(s => s && s.key && s.key !== "note" && s.key !== "bmtime")
+    .map(s => ({ key: s.key, dir: s.dir === "asc" ? "asc" : "desc" }));
+}
+
+/** The names the state's sort pill prints. */
+const HISTORY_SORT_LABELS = {
+    studio: "Studio", performers: "Performers", filename: "File", score: "Score", size: "Size",
+    views: "Views", watched: "Watched", played: "Played", created: "Created",
+    migrated: "Migrated", released: "Released",
+};
 
 /** What's armed right now, or null when there's nothing to remember. */
 function captureHistoryState() {
@@ -457,7 +482,10 @@ const st = {
     intersect: !!window.scrayTagIntersect,
     q: box ? String(box.value || "").trim() : "",
 };
+// Filters or a search make a state; a sort alone does not.
 if (!historyStateTerms(st) && !st.kw.length && !st.q) return null;
+const sort = historyCurrentSort();
+if (sort) st.sort = sort;
 st.sig = historyStateSig(st);
 return st;
 }
@@ -501,6 +529,10 @@ if (window.scrayNoteKeywordFilter) {
 }
 window.scrayNoteKeywordIntersect = !!st.kwAll;
 window.scrayTagIntersect = !!st.intersect;
+
+// The sort comes back with it (native 15.170). Set before the filter pass below,
+// which redraws the list in this order; a state with no sort leaves it alone.
+if (Array.isArray(st.sort) && typeof window.scrayListSortSet === "function") window.scrayListSortSet(st.sort);
 
 // The search, the way the row menus' 🔍 sets it: both boxes, both ✕.
 const q = String(st.q || "");
@@ -571,7 +603,7 @@ row.dataset.sig = st.sig;
 const go = document.createElement("button");
 go.type = "button";
 go.className = "history-state-go";
-go.title = "Put these filters back";
+go.title = "Put these filters and sort back";
 const pill = (kind, text) => {
     const p = document.createElement("span");
     p.className = `history-state-pill hsp-${kind}`;
@@ -583,6 +615,11 @@ historyStateClasses().forEach(k => (st.inc[k] || []).forEach(v => pill(k, v)));
 (st.kw || []).forEach(v => pill("notekeyword", v));
 if (historyStateTerms(st) > 1) pill(st.intersect ? "and" : "or", st.intersect ? "ALL" : "ANY");
 if (st.q) pill("search", `🔍 ${st.q}`);
+if (Array.isArray(st.sort)) {
+    pill("sort", "⇅ " + (st.sort.length
+        ? st.sort.map(s => `${HISTORY_SORT_LABELS[s.key] || s.key} ${s.dir === "asc" ? "↑" : "↓"}`).join(" · ")
+        : "none"));
+}
 if (!woven) {
     const meta = document.createElement("span");
     meta.className = "history-state-meta";
@@ -732,6 +769,7 @@ css.textContent = `
 #historyList .hsp-notekeyword { background: #3d1f7a; }
 #historyList .hsp-and { background: #222; }
 #historyList .hsp-or { background: #bbb; color: #222; }
+#historyList .hsp-sort { background: #555; }
 #historyList .hsp-search { background: #fff; color: #222; border: 1px solid #999; }
 #historyList .history-state-meta { margin-left: auto; padding-left: 6px; font-size: 0.7rem; color: #888; white-space: nowrap; }
 #historyList .history-state-x { margin: 0; width: 34px; flex: 0 0 34px; padding: 0; border: 0; border-left: 1px solid #eee; background: #fafafa; color: #999; font-size: 1.05rem; cursor: pointer; }

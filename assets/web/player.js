@@ -445,6 +445,8 @@ function scrayStripBelongsInTitle() {
     // Returning false here sends both back, which scrayReturnNowPlayingStrip and
     // scrayReturnTagPills below already know how to do.
     if (b.contains('fls-peek')) return false;
+    // TikTok mode has the pills bar on top of its own player (scray-reels.js) - leave it there.
+    if (document.documentElement.classList.contains('scray-reels-open')) return false;
     return b.contains('manual-rotate-landscape') || b.contains('portrait-fullscreen');
 }
 

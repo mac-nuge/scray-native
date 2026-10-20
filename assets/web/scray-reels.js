@@ -203,7 +203,11 @@
 .sr-track{position:absolute;left:0;right:0;bottom:6px;height:8px;background:rgba(255,255,255,.22)}
 .sr-buf{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(255,255,255,.38)}
 .sr-fill{position:absolute;left:0;top:0;bottom:0;width:0;background:#fff}
-body.scray-reels-open #cornerButtons,body.scray-reels-open #floatingTagPillsBar{display:none!important}
+/* Everything that floats over the page goes behind, as in MPFS: the old corner shell, the pills, and the fused
+   dock (X R H ... 🔍 BM 🌐 COL). The dock lives in #scrayDisguise under <html>, outside <body>, at the top z-index,
+   hence the class on <html>. The disguise screen itself is left alone and still covers this when it is up. */
+html.scray-reels-open #cornerButtons,html.scray-reels-open #floatingTagPillsBar,
+html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStrip{display:none!important}
 .sr-pause{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;
   background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;font-size:34px;pointer-events:none}
 .sr-pause.on{display:flex}
@@ -747,7 +751,7 @@ body.scray-reels-open #cornerButtons,body.scray-reels-open #floatingTagPillsBar{
     R.curPlaying = false; R.waiters.length = 0; R.autoMuted = false;
     try { window.plyrPlayer && window.plyrPlayer.pause && window.plyrPlayer.pause(); } catch (e) { /* nothing playing */ }
     R.root.classList.add('on');
-    document.body.classList.add('scray-reels-open');      // hides the corner buttons and pills
+    document.documentElement.classList.add('scray-reels-open');   // corner buttons, pills and dock go behind
     document.documentElement.style.overflow = 'hidden';
     window.addEventListener('keydown', onKey, true);
     setMuted(R.muted);
@@ -769,7 +773,7 @@ body.scray-reels-open #cornerButtons,body.scray-reels-open #floatingTagPillsBar{
     if (typeof window.scrayWatchFlush === 'function') window.scrayWatchFlush();
     R.slots.forEach(s => { s.tok++; resetSlot(s); s.idx = -1; });
     R.root.classList.remove('on');
-    document.body.classList.remove('scray-reels-open');
+    document.documentElement.classList.remove('scray-reels-open');
     document.documentElement.style.overflow = '';
     window.removeEventListener('keydown', onKey, true);
     const cb = R.onClose; R.onClose = null;

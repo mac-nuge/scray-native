@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.132 / native 15.176 — test: TikTok mode hides the dock
+<!-- 2026-10-20T12:10Z -->
+- **Asked (testing 15.131 / 15.175):** the corner buttons still covered TikTok mode - put them behind it, as the other fullscreen modes do.
+- **Why 15.131 missed it:** it hid `#cornerButtons`, but since 13.121 that is only an empty shell - its row was moved into the fused dock (`#scrayDisguiseDock` / `#scrayDisguiseStrip`, disguise.js). The dock sits in `#scrayDisguise`, under `<html>` rather than `<body>`, at the maximum z-index, so a body class couldn't reach it and the overlay couldn't cover it.
+- **Fix (scray-reels.js):** the open class moves to `<html>` (`html.scray-reels-open`) and also hides `#scrayDisguiseDock` and `#scrayDisguiseStrip`, as MPFS does with no dock. All of it comes back on Stop or MPFS. The disguise screen itself is untouched and still covers TikTok mode when it is up.
+- **Tested** (Chromium stand-in with a dock under `<html>` at the top z-index): dock and corner shell hidden while open, back after Stop and after MPFS; no page errors. Not on a phone.
+- **Files:** scray-reels.js.
+
 ### picker 15.131 / native 15.175 — test: TikTok mode bottom controls, progress bar, MPFS button
 <!-- 2026-10-20T10:20Z -->
 - **Asked (testing 15.130 on an iPhone):** add MPFS's progress bar, hide the corner buttons, move Stop and Mute to the bottom by the title, make the buttons smaller, and add a button next to them that switches from TikTok mode to the normal portrait player (MPFS).

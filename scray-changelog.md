@@ -4,6 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.133 / native 15.177 — test: TikTok mode clickable title, lighter controls, raised bar
+<!-- 2026-10-20T12:35Z -->
+- **Asked (testing 15.132 / 15.176):** raise the progress bar, since the iPhone's rounded corners cut off its ends; make the title and text a little smaller and semi-transparent; make the names and paths clickable to add to search or filter, like the other titles; make the three buttons semi-transparent; raise the video a little, as there is space at the top.
+- **Raised (scray-reels.js):** one setting, `--sr-lift: 18px` on `.sr-root`, lifts the bar, its time, the title and the buttons above the safe area. The track also stops 10px short of each side, with rounded ends, and is 6px tall.
+- **Smaller and see-through:** the title is 11.5px (was 13) and the time 10px (was 11), both at about 72-80% opacity. Mute, Stop and MPFS are 72% opaque on lighter backgrounds.
+- **Video higher:** `object-position: 50% 30%`. A video shorter than the screen now has 30% of the spare height above it and 70% below, rather than half and half. A video that already fills the screen doesn't move.
+- **Clickable title:** the title is now built by `createClickablePath`, the same as a list row, so folders, bracket tags and Stash studio and performer chips open the same filter / search / exclude modal. Colours are restated for the black background: links light blue, text white, device folder grey. Tapping a link doesn't pause or start a swipe. The tag modal is raised above the overlay while TikTok mode is open, and the overlay's notes are too.
+- **The stream follows the filter:** in the main and random lists, when the list changes (a tag from the title, or any filter or search) the videos after the current one are reshuffled from the new list's portrait videos, with a note saying how many match. If nothing else matches, it carries on as it was. player.js passes `listKey` / `listItems` to `scrayReels.open` (both apps).
+- **Tested** (Chromium at 390x844, stand-in page): a tap on a title link fires its click without pausing; the list narrowing to two makes the next swipes alternate between those two; layout screenshot checked; no page errors. Not tried on a phone.
+- **Files:** scray-reels.js, player.js.
+
 ### picker 15.132 / native 15.176 — test: TikTok mode hides the dock
 <!-- 2026-10-20T12:10Z -->
 - **Asked (testing 15.131 / 15.175):** the corner buttons still covered TikTok mode - put them behind it, as the other fullscreen modes do.

@@ -11032,8 +11032,8 @@ window.scrayPlayImage = scrayPlayImage;
 /**
  * TikTok mode (scray-reels.js): while it is armed every play goes to the
  * overlay instead of the Plyr player. The list is the one the video was played
- * from, cut down to portrait videos the web player can decode; swiping walks
- * it. Like scrayPlayImage, each video shown becomes the playing file (green
+ * from, cut down to portrait videos the web player can decode, played in random
+ * order (this one first); swiping walks it. Like scrayPlayImage, each video shown becomes the playing file (green
  * row, history, and where < and > carry on from), and is watched the same way
  * (view count and time) through scrayWatchBegin / scrayWatchStep.
  */
@@ -11066,6 +11066,7 @@ function scrayPlayReels(video, listContext = null, index = null, opts = {}) {
     const opened = R.open({
         items,
         index: at,
+        shuffle: true,      // random order: this one first, then the rest shuffled, reshuffled when it runs out
         onShow: (it) => {
             const v = it.video;
             window.currentPlayingVideo = v;

@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.180 — test: Hetzner new-files check on load
+<!-- 2026-10-20T13:45Z -->
+- **Asked:** Picker checks the Hetzner box for new files on load (the yellow pill with "(+15)"), but Native doesn't - make it run there too.
+- **Why it never ran:** Picker's check is `scrayCheckAllNewVideos` in auth.js, which reaches the box through Picker's Graph look-alike in scray-hetzner.js. Native has no auth.js and its own scray-hetzner.js, which only listed the box when the pill was tapped. Nothing in Native ever checked on its own.
+- **The check (scray-hetzner.js, `checkNewVideos`, also `window.scrayHetznerCheckNew`):** 4 s after start-up (it waits for the start-up run to settle, as Picker's does), whenever the app comes back to the front, and every 15 minutes while it's open, no more than once every 5 minutes. Only once the box is part of this library. It kicks the server's box rescan (skipped if one finished in the last ten minutes, as a re-fetch does) and re-checks when that finds changes. It asks for the manifest (keys and fingerprints, one small request) and compares it with the library: keys not here and not on the phone are new, Hetzner rows whose key has left the box are gone. Nothing is added or removed by the check itself.
+- **The pill:** new or gone turns it yellow (`#ffd84a`) with `(+15)` and `−2` after the count, as Picker's account pills do. The tooltip lists up to ten names each way and how many changed. While it's yellow, one tap fetches just the changes (the incremental re-fetch from 15.95), without the Re-fetch? step. Any fetch, and Remove, clear it. The console logs `[new-videos] Hetzner: {...}` in Picker's shape.
+- **Tested** (jsdom with fake IndexedDB and a stubbed api): a library with one changed row, one row gone from the box and one key on the phone, against a manifest with one new key - the check reported +1 / −1 / 1 changed, the pill went yellow with `(+1) −1`, a second check inside 5 minutes was skipped, one tap fetched the two changed keys only and cleared the yellow, and a re-check found nothing new. `node --check`. Not tried on a phone.
+- **Files:** assets/web/scray-hetzner.js.
+
 ### picker 15.135 / native 15.179 — test: redeploy after Hostinger outage
 <!-- 2026-10-20T13:29Z -->
 - **Asked:** a minor change to push, so the deploy can be re-run now Hostinger is back - the earlier pushes landed while its dashboard and API were down.

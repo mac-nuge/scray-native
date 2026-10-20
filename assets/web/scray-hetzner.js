@@ -56,6 +56,12 @@
   function boxTotal() { try { return +localStorage.getItem(BOX_TOTAL) || 0; } catch { return 0; } }
   function setBoxTotal(n) { try { n ? localStorage.setItem(BOX_TOTAL, String(n)) : localStorage.removeItem(BOX_TOTAL); } catch {} }
 
+  // native 15.180: what the last new-videos check found - { added, names, gone,
+  // goneNames, changed } - or null when there's nothing to show. The pill goes
+  // yellow while it's set; any fetch clears it. See checkNewVideos below.
+  let NEWVID = null;
+  let newVidAt = 0;
+
   function splitList(s) { return typeof s === "string" && s ? s.split(";").filter(Boolean) : []; }
 
   /** One hetzner_list row as a videoSource row. */
@@ -309,6 +315,7 @@
     }
     await done(tx);
     setEnabled(true);
+    NEWVID = null; newVidAt = Date.now();   // native 15.180: the library is up to date with the box now
     const total = inc ? inc.total : listed.length;
     const inLibrary = total - skipped;
     setBoxTotal(total);
@@ -373,7 +380,9 @@
    */
   let rescanWatching = false;
   const RESCAN_MIN_AGE_S = 600;
-  function kickBoxRescan() {
+  // native 15.180: followUp "check" (the new-videos check) re-checks when the
+  // rescan finds changes, so the pill goes yellow; "fetch" re-lists as before.
+  function kickBoxRescan({ followUp = "fetch" } = {}) {
     if (rescanWatching) return;
     rescanWatching = true;
     const t0 = Date.now();
@@ -396,6 +405,10 @@
         console.log(`[hetzner] box rescanned: ${x.moved || 0} moved, ${x.added || 0} new, ${x.gone || 0} gone, details read for ${x.probed || 0}`);
         // Details read (duration, size) are worth a re-list too: they're what the rows show.
         if ((x.moved || 0) + (x.added || 0) + (x.gone || 0) + (x.probed || 0) > 0) {
+          if (followUp === "check") {
+            try { await checkNewVideos({ force: true, rescan: false }); } catch {}
+            return;
+          }
           // native 15.74: not on top of a fetch the pill is showing - after it.
           for (let w = 0; PROG && w < 600; w++) await new Promise(r => setTimeout(r, 1000));
           try { await fetchHetzner({ rescan: false }); }
@@ -433,6 +446,7 @@
     await done(tx);
     setEnabled(false);
     setBoxTotal(0);
+    NEWVID = null;
     console.log(`[hetzner] removed ${n} video(s) from this device's library`);
     if (typeof refreshAllLists === "function") refreshAllLists();
     if (typeof window.renderFolderPills === "function") await window.renderFolderPills();
@@ -1113,13 +1127,21 @@
     // fetch has recorded the total, just the rows.
     const total = boxTotal();
     const onPhone = total > count ? total - count : 0;
-    const label = total && onPhone
+    const base = total && onPhone
       ? `☁ ${NAME} ${total.toLocaleString()} (${onPhone.toLocaleString()} on phone)`
       : `☁ ${NAME} (${count.toLocaleString()})`;
+    // native 15.180: new videos on the box (or rows gone from it) - yellow,
+    // with "(+15)" / "−2", as Picker's account pills do.
+    const nv = NEWVID;
+    const suffix = nv ? [nv.added ? `(+${nv.added.toLocaleString()})` : "", nv.gone ? `\u2212${nv.gone.toLocaleString()}` : ""]
+      .filter(Boolean).join(" ") : "";
+    const label = suffix ? `${base} ${suffix}` : base;
+    const baseBg = nv ? "#ffd84a" : "";
     const btn = document.createElement("button");
     btn.className = "account-load-btn";
     btn.textContent = label;
-    btn.title = "Tap to re-fetch from the Hetzner Storage Box";
+    btn.style.background = baseBg;
+    btn.title = nv ? newVidTitle(nv) : "Tap to re-fetch from the Hetzner Storage Box";
     const cross = document.createElement("span");
     cross.className = "account-remove-cross";
     cross.innerHTML = "&times;";
@@ -1128,7 +1150,7 @@
     let armed = null, timer = null;
     const disarm = () => {
       armed = null; clearTimeout(timer);
-      btn.textContent = label; btn.style.background = ""; cross.style.display = "";
+      btn.textContent = label; btn.style.background = baseBg; cross.style.display = "";
     };
     const arm = (mode, text, colour) => {
       armed = mode; btn.textContent = text; btn.style.background = colour;
@@ -1143,7 +1165,8 @@
         try { await removeHetzner(); } catch (err) { alert(`Remove failed: ${err.message}`); await renderPill(); }
         return;
       }
-      if (armed !== "fetch") { arm("fetch", "Re-fetch?", "#007bff"); return; }
+      // Yellow (native 15.180): one tap fetches just the changes, as in Picker.
+      if (armed !== "fetch" && !NEWVID) { arm("fetch", "Re-fetch?", "#007bff"); return; }
       disarm();
       const r = await fetchWithPill();
       if (r && (r.added || r.removed)) console.log(`[hetzner] +${r.added} −${r.removed}`);
@@ -1234,6 +1257,115 @@
   }
   window.scrayBoxRescan = boxRescan;
 
+  // ---------------------------------------------------------------
+  // NEW-VIDEOS CHECK (native 15.180) - Picker's start-up check for the box.
+  // Picker has looked for new files on load since 13.194 (auth.js
+  // scrayCheckAllNewVideos, which reaches the box through scray-hetzner.js);
+  // Native never had one, so a file put on the box only showed up after a
+  // tap on the pill. Now, 4 s after start-up (once the start-up run has
+  // settled), whenever the app comes back to the front, and every 15 minutes
+  // while it's open, it:
+  //  - asks the server to rescan the box (unless one finished in the last ten
+  //    minutes - the same kick a re-fetch makes), and re-checks when that
+  //    finds anything;
+  //  - asks for the manifest (keys and fingerprints only, one small request)
+  //    and compares it with this library: keys not here and not on the phone
+  //    are new, Hetzner rows whose key has left the box are gone.
+  // Nothing is added or removed by the check. New or gone turns the pill
+  // yellow with "(+15)" / "−2"; one tap then fetches just the changes.
+  // Only runs once the box is part of this library (fetched at least once).
+  // ---------------------------------------------------------------
+  // ⚙️ Checks no closer together than this (bar the rescan's follow-up), and the background interval.
+  const NEWVID_TTL_MS  = 5 * 60 * 1000;
+  const NEWVID_POLL_MS = 15 * 60 * 1000;
+  let newVidInFlight = null;
+  const showKey = k => String(k).replace(/#hetzner$/i, "");
+
+  function newVidTitle(nv) {
+    const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? "" : "s"}`;
+    const lines = [];
+    if (nv.added) {
+      lines.push(`${plural(nv.added, "video")} on the box not fetched yet`);
+      nv.names.slice(0, 10).forEach(n => lines.push(`• ${n}`));
+      if (nv.added > 10) lines.push(`…and ${(nv.added - 10).toLocaleString()} more`);
+    }
+    if (nv.gone) {
+      lines.push(`${plural(nv.gone, "video")} in this library no longer on the box`);
+      nv.goneNames.slice(0, 10).forEach(n => lines.push(`• ${n}`));
+      if (nv.gone > 10) lines.push(`…and ${(nv.gone - 10).toLocaleString()} more`);
+    }
+    if (nv.changed) lines.push(`${plural(nv.changed, "video")} changed (moved, renamed or new details)`);
+    lines.push("Tap to fetch just these changes");
+    return lines.join("\n");
+  }
+
+  async function checkNewVideos({ force = false, rescan = true } = {}) {
+    if (!enabled() && !boxTotal()) return null;           // the box isn't part of this library
+    if (typeof window.scrayApiCall !== "function") return null;
+    if (navigator.onLine === false) return null;
+    if (newVidInFlight) return newVidInFlight;
+    if (!force && newVidAt && Date.now() - newVidAt < NEWVID_TTL_MS) return null;
+    newVidInFlight = (async () => {
+      try {
+        // Not inside a watched run (start-up, a folder refresh): a request
+        // landing in one would push its READY back.
+        for (let i = 0; i < 120 && window.scrayBoot?.stats?.().running; i++) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        if (PROG) return null;                            // a fetch is running - it brings the changes itself
+        if (rescan) kickBoxRescan({ followUp: "check" });
+        const snap = await snapshot();
+        const res = await api("hetzner_list", { manifest: 1 });
+        if (!res || !Array.isArray(res.manifest)) return null;   // an api.php without the manifest
+        const live = new Set(), added = [];
+        let changed = 0;
+        for (const [key, sig] of res.manifest) {
+          if (!key) continue;
+          live.add(key);
+          if (snap.phoneKeys.has(key)) continue;          // the phone copy wins
+          const prior = snap.existing.get(ID_PREFIX + key);
+          if (!prior) added.push(key);
+          else if (sig && prior.hzSig && prior.hzSig !== sig) changed++;
+        }
+        const goneRows = [...snap.existing.values()].filter(v => {
+          const id = String(v.oneDriveId || "");
+          const key = id.startsWith(ID_PREFIX) ? id.slice(ID_PREFIX.length) : "";
+          return !key || !live.has(key);
+        });
+        if (PROG) return null;                            // a fetch started meanwhile: its answer wins
+        const state = {
+          added: added.length,
+          names: added.map(showKey).sort((a, b) => a.localeCompare(b)),
+          gone: goneRows.length,
+          goneNames: goneRows.map(v => v.filename || showKey(v.videoKey || v.oneDriveId)).sort((a, b) => String(a).localeCompare(String(b))),
+          changed,
+        };
+        if (state.added || state.gone) console.log(`[new-videos] ${NAME}:`, state);
+        else console.log(`[new-videos] ${NAME}: ${live.size.toLocaleString()} on the box, nothing new` +
+                         (changed ? ` (${changed.toLocaleString()} changed)` : ""));
+        NEWVID = (state.added || state.gone) ? state : null;
+        await renderPill();
+        return state;
+      } catch (err) {
+        // Leave the pill as it is - a failed check isn't news.
+        console.warn(`[new-videos] ${NAME} check failed:`, friendly(err));
+        return null;
+      } finally {
+        newVidAt = Date.now();
+        newVidInFlight = null;
+      }
+    })();
+    return newVidInFlight;
+  }
+  window.scrayHetznerCheckNew = checkNewVideos;
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkNewVideos();
+  });
+  setInterval(() => {
+    if (document.visibilityState === "visible") checkNewVideos();
+  }, NEWVID_POLL_MS);
+
   document.addEventListener("DOMContentLoaded", () => {
     wrapPills();
     const btn = document.getElementById("hetznerFetchBtn");
@@ -1244,5 +1376,7 @@
       fetchWithPill();
     });
     renderPill().catch(() => {});
+    // native 15.180: the first new-videos check, once start-up has settled (it waits on scrayBoot).
+    setTimeout(() => { checkNewVideos(); }, 4000);
   });
 })();

@@ -11085,6 +11085,20 @@ function scrayPlayReels(video, listContext = null, index = null, opts = {}) {
 }
 window.scrayPlayReels = scrayPlayReels;
 
+// TikTok mode's MPFS button: TikTok mode has already been switched off, so this plays the video in the normal
+// player from where it was, then goes portrait fullscreen (MPFS) like a double-tap would.
+window.scrayPlayFromReels = async function (video, t) {
+    if (!video) return;
+    const at = (t && t > 1) ? Math.floor(t) : null;
+    await playVideoInline(video, currentListContext || 'main', currentVideoIndex, at);
+    setTimeout(() => {
+        try {
+            const fs = window.plyrPlayer && window.plyrPlayer.fullscreen;
+            if (fs && !fs.active) fs.enter();
+        } catch (e) { /* needs a tap on some browsers; the normal player is already playing */ }
+    }, 200);
+};
+
 async function playVideoInline(video, listContext = null, index = null, startAt = null, opts = {}) {
 // 🖼 A picture opens in the image viewer instead (native 15.133) - see scrayPlayImage.
 // The token bump makes a video still waiting out its preview delay give way.

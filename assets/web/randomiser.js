@@ -4804,16 +4804,24 @@ searchBox.addEventListener("keydown", (e) => {
       { value: "L",   label: "Landscape",   icon: ORIENT_ICON(ORIENT_SVG(14, 8), 16) },
       { value: "P",   label: "Portrait",    icon: ORIENT_ICON(ORIENT_SVG(8, 14), 16) }
   ];
+  // TikTok mode (scray-reels.js) is the step after Portrait: a portrait frame with a play
+  // triangle, in pink. It isn't a value of the filter's <select> - it is Portrait plus the
+  // mode - so it is picked out by window.scrayReels.armed() rather than by sel.value.
+  const REELS_ENTRY = { value: "reels", label: "TikTok",
+      icon: ORIENT_ICON(ORIENT_SVG(8, 14) + `<path d="M6.5 5.2 L10.3 8 L6.5 10.8 Z" fill="currentColor"></path>`, 16) };
 
   window.syncOrientationToggleLabel = function () {
       const sel = document.getElementById("orientationFilter");
       const btn = document.getElementById("orientationToggleBtn");
       if (!sel || !btn) return;
-      const entry = ORIENTATION_CYCLE.find(o => o.value === sel.value) || ORIENTATION_CYCLE[0];
+      const reels = !!(window.scrayReels && window.scrayReels.armed());
+      const entry = reels ? REELS_ENTRY : (ORIENTATION_CYCLE.find(o => o.value === sel.value) || ORIENTATION_CYCLE[0]);
       btn.innerHTML = entry.icon;
-      btn.title = entry.value === "any" ? "Orientation filter: all (tap to cycle)" : `Orientation filter: ${entry.label}`;
+      btn.title = entry.value === "any" ? "Orientation filter: all (tap to cycle)"
+                : reels ? "TikTok mode: portrait videos at random, swipe up for the next (tap to stop)"
+                : `Orientation filter: ${entry.label}`;
       btn.setAttribute("aria-label", entry.value === "any" ? "Orientation: all" : entry.label);
-      btn.style.background = entry.value === "any" ? "#555" : "#007bff";
+      btn.style.background = entry.value === "any" ? "#555" : reels ? "#e91e63" : "#007bff";
   };
 
   // ✅ StashDB-match cycle and bookmark cycle. Both keep their state on the
@@ -5028,6 +5036,16 @@ searchBox.addEventListener("keydown", (e) => {
       orientationToggleBtn.addEventListener("click", () => {
           const sel = document.getElementById("orientationFilter");
           if (!sel) return;
+          const reels = window.scrayReels;
+          // All -> Landscape -> Portrait -> TikTok -> All.
+          if (reels && reels.armed()) {
+              reels.disarm();                     // out of TikTok: back to All
+              sel.value = "any";
+              sel.dispatchEvent(new Event("change", { bubbles: true }));
+              window.syncOrientationToggleLabel();
+              return;
+          }
+          if (reels && sel.value === "P") { reels.toggle(); return; }   // Portrait -> TikTok (starts playing)
           const idx = ORIENTATION_CYCLE.findIndex(o => o.value === sel.value);
           const next = ORIENTATION_CYCLE[(idx + 1) % ORIENTATION_CYCLE.length];
           sel.value = next.value;

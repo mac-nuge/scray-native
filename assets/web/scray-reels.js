@@ -15,11 +15,18 @@
  * not caught up yet shows a spinner and plays when it can.
  *
  * The mode ("armed") is separate from the overlay:
- *   - the portrait-with-play button (#reelsToggleBtn) arms it, which sets the
- *     orientation filter to portrait and takes the "soft" tag out of the
- *     excluded tags (they go back when the mode ends), then starts playing;
+ *   - the orientation button's cycle (All > Landscape > Portrait > TikTok)
+ *     arms it, which sets the orientation filter to portrait and takes the
+ *     "soft" tag out of the excluded tags (they go back when the mode ends),
+ *     then starts playing a random portrait video;
  *   - while armed, playVideoInline hands every video to the overlay
  *     (player.js scrayPlayReels), and only portrait ones play;
+ *   - the videos come at random: the list is shuffled, starting with the one
+ *     played, and reshuffled when it runs out, so it never ends;
+ *   - gestures are MPFS's seek gestures: a horizontal drag scrubs (x3 in the
+ *     bottom fifth), a horizontal drag on a paused video jogs frame by frame
+ *     (128x / 64x / 32x by thirds, bottom to top), a double tap in the left
+ *     or right half of the middle band seeks 3 / 10 / 30s back or on;
  *   - Stop closes the overlay AND ends the mode.
  *
  * It builds itself the first time it opens. Nothing happens at load beyond
@@ -81,14 +88,6 @@
   }
 
   // ---------------------------------------------------------------- the mode
-  function syncBtn() {
-    const b = $('reelsToggleBtn');
-    if (!b) return;
-    b.style.background = armed ? '#e91e63' : '#555';
-    b.setAttribute('aria-pressed', armed ? 'true' : 'false');
-    b.title = armed ? 'TikTok mode is on - tap to stop' : 'TikTok mode: portrait videos, swipe up for the next';
-  }
-
   function arm() {
     if (armed) return;
     armed = true;
@@ -112,7 +111,6 @@
       }
     }
     if (typeof window.syncOrientationToggleLabel === 'function') window.syncOrientationToggleLabel();
-    syncBtn();
   }
 
   function disarm() {
@@ -135,7 +133,6 @@
       }
     }
     if (typeof window.syncOrientationToggleLabel === 'function') window.syncOrientationToggleLabel();
-    syncBtn();
   }
 
   /** Start playing from the list on screen: a random portrait video, then onwards in list order. */
@@ -153,6 +150,26 @@
     // The filter change redraws the list; give it a moment before reading it.
     await new Promise(r => setTimeout(r, 150));
     try { await start(); } catch (err) { console.warn('[reels] could not start:', err); }
+  }
+
+  // ---------------------------------------------------------------- random order
+  function shuffled(list) {
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+  /** Keep a few videos queued ahead: when the shuffled run is nearly out, add another shuffle of the lot. */
+  function ensureAhead() {
+    if (!R || !R.pool || R.pool.length < 2) return;
+    while (R.items.length - R.index < 4) {
+      const last = R.items[R.items.length - 1];
+      const batch = shuffled(R.pool);
+      if (batch[0] === last) { const t = batch[0]; batch[0] = batch[1]; batch[1] = t; }   // no repeat back to back
+      R.items.push(...batch);
+    }
   }
 
   // ---------------------------------------------------------------- the overlay
@@ -182,6 +199,9 @@
 .sr-pause{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;
   background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;font-size:34px;pointer-events:none}
 .sr-pause.on{display:flex}
+.sr-fb{position:absolute;top:calc(env(safe-area-inset-top,0px) + 56px);background:rgba(0,0,0,.65);padding:6px 12px;border-radius:14px;
+  font-size:14px;font-variant-numeric:tabular-nums;opacity:0;transition:opacity .2s;pointer-events:none}
+.sr-fb.on{opacity:1}
 .sr-hint{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 70px);transform:translateX(-50%);
   background:rgba(0,0,0,.6);padding:7px 14px;border-radius:16px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
 .sr-hint.on{opacity:1}
@@ -239,12 +259,12 @@
       '<div class="sr-top"><span class="sr-count"></span>' +
       '<button type="button" class="sr-btn mute" aria-label="Sound"></button>' +
       '<button type="button" class="sr-btn stop">Stop</button></div>' +
-      '<div class="sr-bar"><i></i></div><div class="sr-hint">Swipe up for the next video</div>');
+      '<div class="sr-bar"><i></i></div><div class="sr-fb"></div><div class="sr-hint">Swipe up for the next video</div>');
     document.body.appendChild(root);
     const st = {
       root, slots, items: [], index: 0, busy: false, muted: lsGet(MUTE_KEY) === '1',
       onShow: null, onClose: null,
-      bar: root.querySelector('.sr-bar i'), count: root.querySelector('.sr-count'),
+      bar: root.querySelector('.sr-bar i'), fb: root.querySelector('.sr-fb'), count: root.querySelector('.sr-count'),
       pauseIcon: root.querySelector('.sr-pause'), hint: root.querySelector('.sr-hint'),
       muteBtn: root.querySelector('.mute'), wheelLock: false, errTimer: 0
     };
@@ -335,7 +355,7 @@
 
   function shown() {
     const it = R.items[R.index];
-    R.count.textContent = `${R.index + 1} / ${R.items.length}`;
+    R.count.textContent = R.pool ? `${R.index + 1}` : `${R.index + 1} / ${R.items.length}`;
     R.bar.style.width = '0%';
     showPaused(false);
     if (R.onShow && it) { try { R.onShow(it, R.index); } catch (err) { console.warn('[reels] onShow:', err); } }
@@ -350,6 +370,7 @@
   function go(dir) {
     if (!R || R.busy) return;
     const ni = R.index + dir;
+    if (dir > 0) ensureAhead();
     if (ni < 0 || ni >= R.items.length) { bounce(); return; }
     clearTimeout(R.errTimer);
     R.busy = true;
@@ -362,6 +383,7 @@
       if (dir > 0) {
         R.slots.push(R.slots.shift());          // the old "before" becomes the new "after"
         R.index = ni;
+        ensureAhead();
         fill(R.slots[2], ni + 1, 'auto');
       } else {
         R.slots.unshift(R.slots.pop());         // the old "after" becomes the new "before"
@@ -389,36 +411,171 @@
     else { v.pause(); showPaused(true); }
   }
 
-  // ---- finger, mouse, wheel, keys
+  // ---- seek gestures (the MPFS ones, player.js startScrub / scrubMove / handleDoubleTap)
+  const DEAD_PX = 10;            // a drag decides its direction after this much
+  const JOG_PX_PER_STEP = 8;     // paused: pixels per frame step
+  const JOG_MULT = [128, 64, 32];// paused: bottom, middle, top third
+  const FRAME_S = 1 / 30;
+  const DOUBLE_MS = 300;
+  const BAND_TOP_FRAC = 1 / 3;   // double taps work from a third of the way down...
+  const BAND_BOTTOM_PX = 152;    // ...to this far above the bottom
+
+  const fmt = t => {
+    t = Math.max(0, Math.floor(t || 0));
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+    return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(sec).padStart(2, '0');
+  };
+
+  let fbT = 0;
+  function feedback(text, side) {
+    if (!R) return;
+    const f = R.fb;
+    f.textContent = text;
+    f.style.left = side === 'right' ? 'auto' : '14px';
+    f.style.right = side === 'right' ? '14px' : 'auto';
+    f.classList.add('on');
+    clearTimeout(fbT);
+    fbT = setTimeout(() => { if (R) R.fb.classList.remove('on'); }, 900);
+  }
+
+  function seekTo(t) {
+    const v = R.slots[1].v;
+    const d = v.duration;
+    if (!(d > 0)) return;
+    t = Math.max(0, Math.min(d, t));
+    try { v.currentTime = t; } catch (e) { /* not seekable yet */ }
+    if (R.bar) R.bar.style.width = (100 * t / d) + '%';
+  }
+
+  function seekBy(delta) {
+    const v = R.slots[1].v;
+    if (!(v.duration > 0)) return;
+    seekTo(v.currentTime + delta);
+    const sign = delta > 0 ? '+' : '−';
+    feedback(`${sign}${Math.abs(delta)}s (${fmt(v.currentTime)})`, delta > 0 ? 'right' : 'left');
+  }
+
+  /** A double tap's zone: left half minus, right half plus; 3 / 10 / 30s from the bottom to the top of the band. */
+  function tapZone(x, y) {
+    const W = window.innerWidth, H = window.innerHeight;
+    const top = H * BAND_TOP_FRAC;
+    const bottom = Math.max(top + 1, H - BAND_BOTTOM_PX);
+    if (y < top || y > bottom) return null;
+    if (x >= W / 4 && x <= W * 3 / 4) return null;           // the middle is play / pause
+    const into = y - top, h = bottom - top;
+    const amount = into > h * 2 / 3 ? 3 : into > h / 3 ? 10 : 30;
+    return { sign: x > W / 2 ? 1 : -1, amount };
+  }
+
   function wireGestures(st) {
     const root = st.root;
-    let down = false, moved = false, y0 = 0, dy = 0, hist = [];
+    let down = false, mode = 'none', x0 = 0, y0 = 0, dy = 0, hist = [];
+    // seek drag
+    let t0 = 0, wasPlaying = false, jog = false, jogMult = 32, mult = 1, raf = 0, pending = null;
+    // taps
+    let lastTapAt = 0, tapTimer = 0, lastSeekAt = 0, lastSeekSign = 0;
+
+    const flush = () => { raf = 0; if (pending != null) { seekTo(pending); pending = null; } };
+
     root.addEventListener('pointerdown', e => {
       if (!R || R.busy || e.target.closest('.sr-btn')) return;
-      down = true; moved = false; y0 = e.clientY; dy = 0; hist = [[e.clientY, performance.now()]];
+      down = true; mode = 'none'; x0 = e.clientX; y0 = e.clientY; dy = 0;
+      hist = [[e.clientY, performance.now()]];
       try { root.setPointerCapture(e.pointerId); } catch (err) { /* synthetic */ }
     });
+
     root.addEventListener('pointermove', e => {
       if (!down || !R) return;
+      const dx = e.clientX - x0;
       dy = e.clientY - y0;
-      if (Math.abs(dy) > 6) moved = true;
-      if (!moved) return;
-      hist.push([e.clientY, performance.now()]);
-      if (hist.length > 6) hist.shift();
-      const atEdge = (dy < 0 && R.index + 1 >= R.items.length) || (dy > 0 && R.index === 0);
-      layout(atEdge ? dy * 0.3 : dy, false);
+      if (mode === 'none') {
+        if (Math.abs(dx) <= DEAD_PX && Math.abs(dy) <= DEAD_PX) return;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          // Sideways: seek. Where the finger is decides the speed, once, for the whole drag.
+          const v = R.slots[1].v;
+          if (!(v.duration > 0)) { mode = 'x'; return; }
+          mode = 'h';
+          jog = v.paused;
+          t0 = v.currentTime;
+          wasPlaying = !v.paused;
+          if (wasPlaying) v.pause();                      // a still frame to seek against
+          const H = window.innerHeight;
+          const fromBottom = 1 - (y0 / H);                // 0 at the bottom, 1 at the top
+          mult = fromBottom < 0.2 ? 3 : 1;                // playing: bottom fifth is x3
+          jogMult = JOG_MULT[fromBottom < 1 / 3 ? 0 : fromBottom < 2 / 3 ? 1 : 2];
+          clearTimeout(tapTimer);
+        } else {
+          mode = 'v';
+          clearTimeout(tapTimer);
+        }
+      }
+      if (mode === 'h') {
+        const v = R.slots[1].v, d = v.duration;
+        let t;
+        if (jog) {
+          const steps = dx / JOG_PX_PER_STEP;
+          t = t0 + steps * FRAME_S * jogMult;
+        } else {
+          const beyond = Math.sign(dx) * Math.max(0, Math.abs(dx) - DEAD_PX);
+          t = t0 + (beyond / window.innerWidth) * d * mult;
+        }
+        t = Math.max(0, Math.min(d, t));
+        pending = t;
+        if (!raf) raf = requestAnimationFrame(flush);
+        const off = t - t0;
+        feedback(jog
+          ? `${off >= 0 ? '+' : '−'}${Math.abs(off).toFixed(2)}s (${jogMult}x)  ${fmt(t)}`
+          : `${off >= 0 ? '+' : '−'}${Math.abs(Math.round(off))}s  ${fmt(t)}`, 'left');
+        return;
+      }
+      if (mode === 'v') {
+        hist.push([e.clientY, performance.now()]);
+        if (hist.length > 6) hist.shift();
+        const atEdge = (dy < 0 && R.index + 1 >= R.items.length) || (dy > 0 && R.index === 0);
+        layout(atEdge ? dy * 0.3 : dy, false);
+      }
     });
+
     const end = e => {
       if (!down) return;
       down = false;
       if (!R) return;
-      if (!moved) { if (e.type === 'pointerup') togglePause(); return; }
-      const a = hist[0], b = hist[hist.length - 1];
-      const v = b && a && b[1] > a[1] ? (b[0] - a[0]) / (b[1] - a[1]) : 0;   // px per ms, up is negative
-      if (e.type === 'pointercancel') { layout(0, true); return; }
-      if (dy < -FLICK_PX || v < -FLICK_V) go(1);
-      else if (dy > FLICK_PX || v > FLICK_V) go(-1);
-      else layout(0, true);
+      if (mode === 'h') {
+        if (raf) { cancelAnimationFrame(raf); raf = 0; }
+        if (pending != null) { seekTo(pending); pending = null; }
+        if (wasPlaying) playCur();
+        mode = 'none';
+        return;
+      }
+      if (mode === 'v') {
+        mode = 'none';
+        const a = hist[0], b = hist[hist.length - 1];
+        const v = b && a && b[1] > a[1] ? (b[0] - a[0]) / (b[1] - a[1]) : 0;   // px per ms, up is negative
+        if (e.type === 'pointercancel') { layout(0, true); return; }
+        if (dy < -FLICK_PX || v < -FLICK_V) go(1);
+        else if (dy > FLICK_PX || v > FLICK_V) go(-1);
+        else layout(0, true);
+        return;
+      }
+      mode = 'none';
+      if (e.type !== 'pointerup') return;
+      // A tap. Two close together in the seek zones seek; otherwise it is play / pause (after a beat,
+      // so a double tap doesn't pause on its first tap).
+      const now = performance.now();
+      const zone = tapZone(e.clientX, e.clientY);
+      // Already seeking with double taps: further single taps in the same half keep seeking.
+      if (zone && now - lastSeekAt < 450 && zone.sign === lastSeekSign) {
+        lastSeekAt = now; seekBy(zone.sign * zone.amount); return;
+      }
+      if (zone && now - lastTapAt < DOUBLE_MS) {
+        clearTimeout(tapTimer);
+        lastTapAt = 0; lastSeekAt = now; lastSeekSign = zone.sign;
+        seekBy(zone.sign * zone.amount);
+        return;
+      }
+      lastTapAt = now;
+      clearTimeout(tapTimer);
+      tapTimer = setTimeout(() => { lastTapAt = 0; togglePause(); }, DOUBLE_MS);
     };
     root.addEventListener('pointerup', end);
     root.addEventListener('pointercancel', end);
@@ -457,8 +614,18 @@
     if (!items.length) return false;
     if (!R) R = build(); else if (!R.root.isConnected) document.body.appendChild(R.root);
     clearTimeout(R.errTimer);
-    R.items = items;
-    R.index = Math.max(0, Math.min(items.length - 1, (opts.index | 0)));
+    const at = Math.max(0, Math.min(items.length - 1, (opts.index | 0)));
+    if (opts.shuffle) {
+      // The one played first, then the rest in random order; reshuffled when it runs out.
+      R.pool = items.slice();
+      R.items = [items[at]].concat(shuffled(items.filter((_, i) => i !== at)));
+      R.index = 0;
+      ensureAhead();
+    } else {
+      R.pool = null;
+      R.items = items;
+      R.index = at;
+    }
     R.onShow = opts.onShow || null;
     R.onClose = opts.onClose || null;
     R.busy = false;
@@ -472,6 +639,7 @@
     fill(R.slots[2], R.index + 1, 'auto');
     fill(R.slots[0], R.index - 1, 'metadata');
     shown();
+    R.hint.textContent = R.pool ? 'Swipe up for the next - random' : 'Swipe up for the next video';
     R.hint.classList.add('on');
     setTimeout(() => { if (R) R.hint.classList.remove('on'); }, 2600);
     return true;
@@ -499,14 +667,4 @@
     canPlay, toast
   };
 
-  function wire() {
-    const b = $('reelsToggleBtn');
-    if (b && !b.dataset.reelsWired) {
-      b.dataset.reelsWired = '1';
-      b.addEventListener('click', () => { toggle(); });
-      syncBtn();
-    }
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
-  else wire();
 })();

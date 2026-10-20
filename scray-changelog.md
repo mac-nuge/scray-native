@@ -4,6 +4,18 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.130 / native 15.174 — test: TikTok mode in the orientation cycle, random order, seek gestures
+<!-- 2026-10-20T09:48Z -->
+- **Asked (testing 15.129 / 15.173):** (1) make sure the videos play at random; (2) no new button - put TikTok mode in the orientation button's cycle, keeping the symbol and colour; (3) bring back MPFS's seek gestures.
+- **Random:** 15.129 only started at a random video and then walked the list in order. The overlay now takes the list shuffled - the video played first, then the rest at random - and when the run is nearly out it adds another shuffle of the whole list (never the same video twice running), so it doesn't end. Swiping back goes to what was just played. The counter is the number played, since there is no end to count to. `scrayPlayReels` passes `shuffle: true`.
+- **Orientation cycle (randomiser.js, both apps):** All → Landscape → Portrait → **TikTok** → All. The TikTok step shows a portrait frame with a play triangle, in the pink the new button had, and starts playing at once; tapping again returns to All and ends the mode (Stop in the overlay ends it too, leaving Portrait). The separate `#reelsToggleBtn` is gone from index.html / index.php. TikTok isn't a value of the filter's select - it is Portrait plus the mode - so the label is chosen by `scrayReels.armed()`.
+- **Seek gestures (scray-reels.js), as in MPFS (player.js startScrub / scrubMove / handleDoubleTap):**
+  - **Drag sideways, playing:** the video pauses and follows the finger, the whole width being the whole video; the bottom fifth of the screen is x3 (decided where the drag starts, as there). A 10px dead zone first, which also settles sideways from up/down. It resumes on release. The time shows top left.
+  - **Drag sideways, paused:** jog - 8px a frame step, at 128x / 64x / 32x by the bottom, middle and top thirds where the drag started. It stays paused.
+  - **Double tap** in the left or right quarter-to-half (not the middle) of the band from a third of the way down to 152px from the bottom: back / on 3s (lower third), 10s (middle), 30s (top), and further taps in the same half keep seeking. A single tap still pauses / plays, now after a 300ms beat so a double tap doesn't pause first. Left out: MPFS's left-quarter mode zone (there is no other surface here).
+- **Tested** (Chromium at phone size, stand-in page): four runs of ten swipes - random order, a full shuffle each pass, no back-to-back repeat, past the end of the list; swipe back; sideways drag +10s / −10s over half the width and x3 in the bottom fifth; jog 32x and 128x; double taps right and left in the band seeking with their feedback; the pause delayed by the double-tap window. No page errors. The orientation cycle itself was read, not run (randomiser.js needs the whole app), and none of it is tried on a phone.
+- **Files:** scray-reels.js, player.js, randomiser.js, index.html (native) / index.php (picker).
+
 ### picker 15.129 / native 15.173 — test: TikTok mode
 <!-- 2026-10-20T09:32Z -->
 - **Asked (native and picker):** a TikTok-style mode, switched on from the landscape/portrait button's row with a portrait-with-play button. Only portrait videos play, the soft filter is off while it runs, swiping up plays the next with the full swipe motion (next one preloaded, a little buffering is fine rather than a lot of preloading), and Stop closes the mode.

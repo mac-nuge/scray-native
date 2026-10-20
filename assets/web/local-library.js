@@ -529,9 +529,18 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // ✅ "Refresh" - re-scans the linked folder and updates the pill counts
+  // ✅ "Refresh" - re-scans the linked folder and updates the pill counts.
+  // native 15.171: it asks first - this phone's folders (as before), or one of data explorer's
+  // ↻ Rescan box modes, run on the server (scrayBoxRescan in scray-hetzner.js).
   document.getElementById("rescanLibraryBtn")?.addEventListener("click", async () => {
     const btn = document.getElementById("rescanLibraryBtn");
+    const pick = await scrayRefreshChoice();
+    if (!pick) return;
+    if (pick !== "folders") {
+      if (typeof window.scrayBoxRescan === "function") await window.scrayBoxRescan(pick, btn);
+      else alert("The box rescan isn't loaded - reload the app");
+      return;
+    }
     const originalText = btn ? btn.textContent : null;
     if (btn) { btn.textContent = "Refreshing..."; btn.disabled = true; }
     try {
@@ -544,6 +553,51 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
+
+/**
+ * native 15.171: what Refresh does - a sheet in the top half of the screen (clear of the dock, which sits low).
+ * Resolves "folders" | "listing" | "quick" | "full", or null when cancelled. The three box modes are data
+ * explorer's ↻ Rescan box ones, with its wording.
+ */
+function scrayRefreshChoice() {
+  return new Promise(resolve => {
+    document.getElementById("scrayRefreshSheet")?.remove();
+    const opts = [
+      ["folders", "This phone's folders", "Re-scan the folders linked on this phone and update their counts (what Refresh always did)."],
+      ["listing", "Box: just the file list", "Quickest: only the box's file list is read on the server - moved, new and gone files put right, no video details. Gone files then show in REMOVED."],
+      ["quick", "Box: new files only", "The box re-read, with details (duration, resolution) only for videos that have none yet. Quick."],
+      ["full", "Box: everything", "Then every mp4 / m4v / mov on the box has its duration, resolution and orientation read again and the catalogue corrected where it differs. Slower."]
+    ];
+    const wrap = document.createElement("div");
+    wrap.id = "scrayRefreshSheet";
+    wrap.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;justify-content:center;align-items:flex-start;padding:max(env(safe-area-inset-top),12px) 12px 0";
+    const box = document.createElement("div");
+    box.style.cssText = "margin-top:6vh;width:min(440px,100%);max-height:62vh;overflow:auto;background:#151f29;color:#dbe5ee;border:1px solid #26364a;border-radius:12px;padding:14px;box-shadow:0 10px 34px rgba(0,0,0,.6);font:14px/1.4 system-ui,sans-serif";
+    box.innerHTML = `<div style="font-weight:700;font-size:15px;margin:0 0 4px">Refresh</div>
+      <div style="color:#8ea3b8;font-size:12.5px;margin:0 0 10px">The box rescans run on the server - the app can be closed meanwhile; this button shows how far it has got while it's open.</div>`;
+    const done = v => { wrap.remove(); document.removeEventListener("keydown", onKey, true); resolve(v); };
+    const onKey = e => { if (e.key === "Escape") { e.preventDefault(); done(null); } };
+    opts.forEach(([v, label, sub]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.style.cssText = "display:block;width:100%;text-align:left;margin:0 0 8px;padding:10px 12px;border-radius:9px;border:1px solid #26364a;background:#1b2733;color:#fff;font:inherit;cursor:pointer";
+      b.innerHTML = `<b style="font-weight:600">${label}</b><span style="display:block;color:#8ea3b8;font-size:12px;margin-top:3px">${sub}</span>`;
+      b.addEventListener("click", e => { e.stopPropagation(); done(v); });
+      box.appendChild(b);
+    });
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    cancel.style.cssText = "display:block;width:100%;padding:9px;border-radius:9px;border:1px solid #26364a;background:none;color:#8ea3b8;font:inherit;cursor:pointer";
+    cancel.addEventListener("click", e => { e.stopPropagation(); done(null); });
+    box.appendChild(cancel);
+    box.addEventListener("click", e => e.stopPropagation());
+    wrap.addEventListener("click", () => done(null));
+    wrap.appendChild(box);
+    document.body.appendChild(wrap);
+    document.addEventListener("keydown", onKey, true);
+  });
+}
 
 /**
 * Scray Picker Excel DB import

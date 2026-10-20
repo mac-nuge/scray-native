@@ -1175,6 +1175,65 @@
   }
   wrapPills();
 
+  // ---------------------------------------------------------------
+  // native 15.171: Refresh's box rescans - data explorer's ↻ Rescan box (browse 15.74 / 15.81), from the phone.
+  // The same server job (hetzner_rescan, which the device key may start and watch): the box walked and the
+  // catalogue put right - moved, new and gone files - then, by mode, video details read. Its progress is on
+  // the Refresh button; when it finishes with changes, the box is re-listed here so the phone's library shows them.
+  //   listing: just the file list · quick: details only for videos with none · full: every mp4 / m4v / mov re-read
+  // ---------------------------------------------------------------
+  const RESCAN_BUSY = ["walking", "reconciling", "probing"];
+  let boxRescanOn = false;
+  async function boxRescan(mode, btn) {
+    if (boxRescanOn) return;
+    boxRescanOn = true;
+    const label = btn ? btn.textContent : "";
+    const n = v => Number(v || 0).toLocaleString();
+    const paint = z => {
+      if (!btn) return;
+      const st = z.state || "";
+      btn.textContent = st === "walking" ? `Box ${n(z.dirs_done)}/${n((z.dirs_done || 0) + (z.dirs_left || 0))}`
+        : st === "reconciling" ? "Box: updating…"
+        : st === "probing" ? `Details ${n(z.probe_done)}/${n(z.probe_total)}`
+        : "Box…";
+    };
+    if (btn) { btn.disabled = true; btn.textContent = "Box…"; }
+    let z = {};
+    try {
+      z = (await api("hetzner_rescan", { do: "start", device: device(), full: mode === "full", listing: mode === "listing" })).scan || {};
+      if (!RESCAN_BUSY.includes(z.state || "")) {
+        // Not started and not running: say why (a rescan only just finished, or the server refused).
+        throw new Error(z.error || (z.state ? `the rescan is ${z.state}` : "the server didn't start it"));
+      }
+      const t0 = Date.now();
+      while (RESCAN_BUSY.includes(z.state || "") && Date.now() - t0 < 60 * 60 * 1000) {
+        paint(z);
+        await new Promise(r => setTimeout(r, 3000));
+        try { z = (await api("hetzner_rescan", { do: "status" })).scan || z; } catch { /* a dropped poll: try again */ }
+      }
+      const x = z.result || {};
+      if (z.state !== "done") throw new Error(z.error || `the rescan ended ${z.state || "without an answer"}`);
+      const msg = `✓ box rescanned: ${n(x.moved)} moved · ${n(x.added)} new · ${n(x.gone)} gone` +
+                  (x.probed ? ` · details read for ${n(x.probed)}` : "") + (x.fixed ? ` · ${n(x.fixed)} corrected` : "");
+      console.log("[hetzner] " + msg);
+      if (btn) btn.textContent = `✓ +${n(x.added)} −${n(x.gone)}`;
+      // Changes the phone should see: re-list the box (the pill shows it), as the background rescan does.
+      if ((x.moved || 0) + (x.added || 0) + (x.gone || 0) + (x.probed || 0) + (x.fixed || 0) > 0 && (enabled() || boxTotal())) {
+        await fetchWithPill();
+      }
+      return { ok: true, result: x, message: msg };
+    } catch (err) {
+      console.warn("[hetzner] box rescan:", err);
+      if (btn) btn.textContent = "Rescan failed";
+      alert(`Box rescan: ${err.message}`);
+      return { ok: false, error: err.message };
+    } finally {
+      boxRescanOn = false;
+      if (btn) setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 4000);
+    }
+  }
+  window.scrayBoxRescan = boxRescan;
+
   document.addEventListener("DOMContentLoaded", () => {
     wrapPills();
     const btn = document.getElementById("hetznerFetchBtn");

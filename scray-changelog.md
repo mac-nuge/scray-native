@@ -4,6 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.131 / native 15.175 — test: TikTok mode bottom controls, progress bar, MPFS button
+<!-- 2026-10-20T10:20Z -->
+- **Asked (testing 15.130 on an iPhone):** add MPFS's progress bar, hide the corner buttons, move Stop and Mute to the bottom by the title, make the buttons smaller, and add a button next to them that switches from TikTok mode to the normal portrait player (MPFS).
+- **Progress bar (scray-reels.js):** replaces the thin line. A full-width track along the bottom like MPFS's permanent bar - played in white, what is loaded a lighter white - with the time as played / left above it. **Tap** it to jump to that spot, **drag** along it to scrub (8px before a tap counts as a drag; the video follows, exact on release). The strip is taller than the track so a thumb can find it, and touching it never starts a swipe.
+- **Corner buttons hidden:** while the overlay is open the body has `scray-reels-open`, which hides `#cornerButtons` and `#floatingTagPillsBar`; they come back when it closes. The overlay's z-index is raised above them.
+- **Bottom row:** the title on the left (three lines at most, smaller), then Mute (icon only), Stop and **MPFS** at the right, all smaller. Only the counter stays at the top, small.
+- **MPFS button:** ends TikTok mode (filters put back, as Stop does), then `scrayPlayFromReels(video, t)` (new, player.js, both apps) plays that video in the normal player from where it was and enters portrait fullscreen. If the browser wants a tap for fullscreen, the normal player is still playing.
+- **Black video seen in the screenshot - cause not known.** Two precautions: the videos either side now only start loading once the one on screen is playing (or after 3s), so loads go one after another instead of three at once; and if the browser made it start muted, the first touch turns sound back on (this does not change the saved Mute setting).
+- **Tested** (Chromium at phone size, stand-in page): corner buttons hidden and restored; bar tap to 50%, drag to 20%, time and loaded part update; the MPFS button closes the overlay, restores the filters and calls the hand-off with the right video and time; four runs of ten swipes still random. The real MPFS entry, iOS sound and the black video are untested on a phone.
+- **Files:** scray-reels.js, player.js.
+
 ### picker 15.130 / native 15.174 — test: TikTok mode in the orientation cycle, random order, seek gestures
 <!-- 2026-10-20T09:48Z -->
 - **Asked (testing 15.129 / 15.173):** (1) make sure the videos play at random; (2) no new button - put TikTok mode in the orientation button's cycle, keeping the symbol and colour; (3) bring back MPFS's seek gestures.

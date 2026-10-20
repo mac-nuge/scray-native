@@ -174,35 +174,43 @@
 
   // ---------------------------------------------------------------- the overlay
   const CSS = `
-.sr-root{position:fixed;inset:0;z-index:100000;background:#000;color:#fff;overflow:hidden;touch-action:none;
+.sr-root{position:fixed;inset:0;z-index:2147483000;background:#000;color:#fff;overflow:hidden;touch-action:none;
   user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;display:none;font-family:system-ui,sans-serif}
 .sr-root.on{display:block}
 .sr-slot{position:absolute;inset:0;background:#000;will-change:transform}
 .sr-slot video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;pointer-events:none}
-.sr-cap{position:absolute;left:14px;right:70px;bottom:calc(env(safe-area-inset-bottom,0px) + 22px);font-size:14px;
-  line-height:1.3;text-shadow:0 1px 3px #000,0 0 8px #000;pointer-events:none;word-break:break-word}
+.sr-cap{position:absolute;left:12px;right:150px;bottom:calc(env(safe-area-inset-bottom,0px) + 42px);font-size:13px;
+  line-height:1.3;text-shadow:0 1px 3px #000,0 0 8px #000;pointer-events:none;word-break:break-word;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .sr-spin{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border:3px solid rgba(255,255,255,.25);
   border-top-color:#fff;border-radius:50%;animation:srspin .8s linear infinite;display:none;pointer-events:none}
 .sr-spin.on{display:block}
 @keyframes srspin{to{transform:rotate(360deg)}}
 .sr-err{position:absolute;left:10%;right:10%;top:45%;text-align:center;font-size:14px;color:#ff8a80;display:none;pointer-events:none}
 .sr-err.on{display:block}
-.sr-top{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;gap:8px;
+.sr-top{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;
   padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 0 12px;pointer-events:none}
-.sr-top>*{pointer-events:auto}
-.sr-count{margin-right:auto;font-size:12px;opacity:.85;background:rgba(0,0,0,.45);padding:5px 10px;border-radius:14px;pointer-events:none}
-.sr-btn{background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:16px;padding:6px 14px;
-  font-size:13px;cursor:pointer}
+.sr-count{font-size:11px;opacity:.85;background:rgba(0,0,0,.45);padding:3px 8px;border-radius:12px}
+.sr-ctl{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 40px);display:flex;gap:5px;align-items:center}
+.sr-btn{background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:12px;padding:3px 9px;
+  font-size:11px;line-height:1.4;cursor:pointer}
 .sr-btn.stop{background:rgba(200,30,60,.85);border-color:transparent;font-weight:600}
-.sr-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.25);pointer-events:none}
-.sr-bar i{display:block;height:100%;width:0;background:#fff}
+.sr-btn.mpfs{letter-spacing:.02em}
+/* The seek bar, as MPFS's: a thin full-width track, played in white, loaded a little lighter, the time
+   as played / left above it. The strip is taller than the track so a thumb can find it. */
+.sr-seek{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 0px);height:34px;touch-action:none}
+.sr-ts{position:absolute;left:12px;bottom:17px;font-size:11px;font-variant-numeric:tabular-nums;text-shadow:1px 1px 2px rgba(0,0,0,.9);pointer-events:none}
+.sr-track{position:absolute;left:0;right:0;bottom:6px;height:8px;background:rgba(255,255,255,.22)}
+.sr-buf{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(255,255,255,.38)}
+.sr-fill{position:absolute;left:0;top:0;bottom:0;width:0;background:#fff}
+body.scray-reels-open #cornerButtons,body.scray-reels-open #floatingTagPillsBar{display:none!important}
 .sr-pause{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;
   background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;font-size:34px;pointer-events:none}
 .sr-pause.on{display:flex}
 .sr-fb{position:absolute;top:calc(env(safe-area-inset-top,0px) + 56px);background:rgba(0,0,0,.65);padding:6px 12px;border-radius:14px;
   font-size:14px;font-variant-numeric:tabular-nums;opacity:0;transition:opacity .2s;pointer-events:none}
 .sr-fb.on{opacity:1}
-.sr-hint{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 70px);transform:translateX(-50%);
+.sr-hint{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 100px);transform:translateX(-50%);
   background:rgba(0,0,0,.6);padding:7px 14px;border-radius:16px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
 .sr-hint.on{opacity:1}
 `;
@@ -230,13 +238,14 @@
     v.loop = true;
     v.addEventListener('waiting', () => { if (cur() && !v.paused) slot.spin.classList.add('on'); });
     v.addEventListener('loadstart', () => { if (cur()) slot.spin.classList.add('on'); });
-    v.addEventListener('playing', () => { slot.spin.classList.remove('on'); if (cur()) showPaused(false); });
+    v.addEventListener('playing', () => { slot.spin.classList.remove('on'); if (cur()) { showPaused(false); flushWaiters(); } });
     v.addEventListener('canplay', () => { if (cur() && !v.paused) slot.spin.classList.remove('on'); });
     v.addEventListener('timeupdate', () => {
       if (!cur()) return;
-      if (v.duration > 0) R.bar.style.width = (100 * v.currentTime / v.duration) + '%';
+      paint();
       if (typeof window.scrayWatchStep === 'function') window.scrayWatchStep(v.currentTime);
     });
+    ['loadedmetadata', 'durationchange', 'progress'].forEach(n => v.addEventListener(n, () => { if (cur()) paint(); }));
     v.addEventListener('pause', () => { if (cur() && typeof window.scrayWatchFlush === 'function') window.scrayWatchFlush(); });
     v.addEventListener('error', () => {
       if (!slot.v.getAttribute('src')) return;     // a source we removed ourselves
@@ -256,30 +265,36 @@
     slots.forEach(s => root.appendChild(s.el));
     root.insertAdjacentHTML('beforeend',
       '<div class="sr-pause">&#9654;</div>' +
-      '<div class="sr-top"><span class="sr-count"></span>' +
-      '<button type="button" class="sr-btn mute" aria-label="Sound"></button>' +
-      '<button type="button" class="sr-btn stop">Stop</button></div>' +
-      '<div class="sr-bar"><i></i></div><div class="sr-fb"></div><div class="sr-hint">Swipe up for the next video</div>');
+      '<div class="sr-top"><span class="sr-count"></span></div>' +
+      '<div class="sr-ctl"><button type="button" class="sr-btn mute" aria-label="Sound"></button>' +
+      '<button type="button" class="sr-btn stop">Stop</button>' +
+      '<button type="button" class="sr-btn mpfs" title="Leave TikTok mode and carry on in the normal portrait player (MPFS)">MPFS</button></div>' +
+      '<div class="sr-seek"><div class="sr-ts">0:00 / 0:00</div><div class="sr-track"><div class="sr-buf"></div><div class="sr-fill"></div></div></div>' +
+      '<div class="sr-fb"></div><div class="sr-hint">Swipe up for the next video</div>');
     document.body.appendChild(root);
     const st = {
       root, slots, items: [], index: 0, busy: false, muted: lsGet(MUTE_KEY) === '1',
       onShow: null, onClose: null,
-      bar: root.querySelector('.sr-bar i'), fb: root.querySelector('.sr-fb'), count: root.querySelector('.sr-count'),
+      bar: root.querySelector('.sr-fill'), buf: root.querySelector('.sr-buf'), ts: root.querySelector('.sr-ts'),
+      seek: root.querySelector('.sr-seek'), track: root.querySelector('.sr-track'),
+      curPlaying: false, waiters: [], waitT: 0, autoMuted: false, fb: root.querySelector('.sr-fb'), count: root.querySelector('.sr-count'),
       pauseIcon: root.querySelector('.sr-pause'), hint: root.querySelector('.sr-hint'),
       muteBtn: root.querySelector('.mute'), wheelLock: false, errTimer: 0
     };
     root.querySelector('.stop').addEventListener('click', e => { e.stopPropagation(); disarm(); closeOverlay(); });
+    root.querySelector('.mpfs').addEventListener('click', e => { e.stopPropagation(); toMpfs(); });
     st.muteBtn.addEventListener('click', e => { e.stopPropagation(); setMuted(!R.muted); });
     wireGestures(st);
+    wireSeekBar(st);
     return st;
   }
 
-  function setMuted(m) {
+  function setMuted(m, persist = true) {
     if (!R) return;
     R.muted = !!m;
-    lsSet(MUTE_KEY, R.muted ? '1' : '0');
+    if (persist) { R.autoMuted = false; lsSet(MUTE_KEY, R.muted ? '1' : '0'); }
     R.slots.forEach(s => { s.v.muted = R.muted; });
-    R.muteBtn.textContent = R.muted ? '🔇 Muted' : '🔊';
+    R.muteBtn.textContent = R.muted ? '🔇' : '🔊';
   }
 
   function showPaused(on) { if (R) R.pauseIcon.classList.toggle('on', !!on); }
@@ -328,10 +343,29 @@
     catch (err) { if (slot.tok === my && R) fail(slot, err); return; }
     if (slot.tok !== my || !R) return;
     if (!url) { fail(slot, new Error('no link for this one')); return; }
-    slot.v.muted = R.muted;
-    slot.v.preload = preload;
-    slot.v.src = url;
-    if (R.slots[1] === slot) playCur();
+    const apply = () => {
+      if (slot.tok !== my || !R) return;
+      slot.v.muted = R.muted;
+      slot.v.preload = preload;
+      slot.v.src = url;
+    };
+    if (R.slots[1] === slot) { apply(); playCur(); }
+    else whenCurPlaying(apply);     // neighbours start loading once this one is on screen, not alongside it
+  }
+
+  /** Run fn once the video on screen is playing (or after 3s regardless), so loads go one after another. */
+  function whenCurPlaying(fn) {
+    if (!R) return;
+    if (R.curPlaying) { fn(); return; }
+    R.waiters.push(fn);
+    clearTimeout(R.waitT);
+    R.waitT = setTimeout(flushWaiters, 3000);
+  }
+  function flushWaiters() {
+    if (!R) return;
+    clearTimeout(R.waitT);
+    R.curPlaying = true;
+    R.waiters.splice(0).forEach(f => f());
   }
 
   function playCur() {
@@ -344,7 +378,9 @@
       p.catch(err => {
         if (err && err.name === 'NotAllowedError' && !v.muted) {
           // Sound needs a tap on some browsers; carry on muted rather than sit still.
-          setMuted(true);
+          // The browser wouldn't start sound without a tap: play muted, and the next touch turns it back on.
+          setMuted(true, false);
+          R.autoMuted = true;
           v.play().catch(() => showPaused(true));
         } else if (!err || err.name !== 'AbortError') {
           showPaused(true);
@@ -353,10 +389,27 @@
     }
   }
 
+  /** The seek bar and its time, from the playing video (or from t while seeking). */
+  function paint(t) {
+    if (!R) return;
+    const v = R.slots[1].v, d = v.duration;
+    if (!(d > 0) || !isFinite(d)) { R.bar.style.width = '0%'; R.buf.style.width = '0%'; R.ts.textContent = '0:00 / 0:00'; return; }
+    const c = t == null ? v.currentTime : t;
+    R.bar.style.width = (100 * c / d) + '%';
+    R.ts.textContent = `${fmt(c)} / ${fmt(Math.max(0, d - c))}`;
+    try {
+      let e = 0;
+      for (let i = 0; i < v.buffered.length; i++) {
+        if (v.buffered.start(i) <= c + 0.5 && v.buffered.end(i) > e) e = v.buffered.end(i);
+      }
+      R.buf.style.width = (100 * Math.min(e, d) / d) + '%';
+    } catch (err) { /* no ranges yet */ }
+  }
+
   function shown() {
     const it = R.items[R.index];
     R.count.textContent = R.pool ? `${R.index + 1}` : `${R.index + 1} / ${R.items.length}`;
-    R.bar.style.width = '0%';
+    paint();
     showPaused(false);
     if (R.onShow && it) { try { R.onShow(it, R.index); } catch (err) { console.warn('[reels] onShow:', err); } }
   }
@@ -391,6 +444,7 @@
         fill(R.slots[0], ni - 1, 'metadata');
       }
       layout(0, false);
+      R.curPlaying = false;
       const s = R.slots[1];
       if (s.v.getAttribute('src')) {
         try { s.v.currentTime = 0; } catch (e) { /* not seekable yet */ }
@@ -444,7 +498,7 @@
     if (!(d > 0)) return;
     t = Math.max(0, Math.min(d, t));
     try { v.currentTime = t; } catch (e) { /* not seekable yet */ }
-    if (R.bar) R.bar.style.width = (100 * t / d) + '%';
+    paint(t);
   }
 
   function seekBy(delta) {
@@ -479,6 +533,7 @@
 
     root.addEventListener('pointerdown', e => {
       if (!R || R.busy || e.target.closest('.sr-btn')) return;
+      if (R.autoMuted) { R.autoMuted = false; setMuted(false, false); }
       down = true; mode = 'none'; x0 = e.clientX; y0 = e.clientY; dy = 0;
       hist = [[e.clientY, performance.now()]];
       try { root.setPointerCapture(e.pointerId); } catch (err) { /* synthetic */ }
@@ -589,6 +644,66 @@
     root.addEventListener('contextmenu', e => e.preventDefault());
   }
 
+  /** Tap the bar to jump, drag along it to scrub (MPFS's permanent progress bar). */
+  function wireSeekBar(st) {
+    const bar = st.seek;
+    let on = false, dragging = false, x0 = 0, pending = null, raf = 0;
+    const fracAt = e => {
+      const r = st.track.getBoundingClientRect();
+      return Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)));
+    };
+    const apply = precise => {
+      const v = R.slots[1].v;
+      if (pending == null) return;
+      const t = pending; pending = null;
+      if (!precise && typeof v.fastSeek === 'function') { try { v.fastSeek(t); } catch (e) { v.currentTime = t; } }
+      else { try { v.currentTime = t; } catch (e) { /* not seekable yet */ } }
+    };
+    const to = (e, precise) => {
+      const v = R.slots[1].v;
+      if (!(v.duration > 0)) return;
+      const t = fracAt(e) * v.duration;
+      pending = t;
+      paint(t);
+      feedback(fmt(t), 'left');
+      if (precise) { if (raf) { cancelAnimationFrame(raf); raf = 0; } apply(true); }
+      else if (!raf) raf = requestAnimationFrame(() => { raf = 0; apply(false); });
+    };
+    bar.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      if (!R || !(R.slots[1].v.duration > 0)) return;
+      on = true; dragging = false; x0 = e.clientX;
+      try { bar.setPointerCapture(e.pointerId); } catch (err) { /* synthetic */ }
+      to(e, true);                                  // a tap lands on the spot, exactly
+    });
+    bar.addEventListener('pointermove', e => {
+      if (!on || !R) return;
+      e.stopPropagation();
+      if (!dragging && Math.abs(e.clientX - x0) < 8) return;   // a tap's jitter is not a drag
+      dragging = true;
+      to(e, false);
+    });
+    const up = e => {
+      e.stopPropagation();
+      if (!on) return;
+      on = false;
+      if (dragging && R) to(e, true);
+      dragging = false;
+    };
+    bar.addEventListener('pointerup', up);
+    bar.addEventListener('pointercancel', up);
+  }
+
+  /** The MPFS button: leave TikTok mode and carry on with this video in the normal portrait player. */
+  function toMpfs() {
+    if (!R) return;
+    const it = R.items[R.index];
+    const t = R.slots[1].v.currentTime || 0;
+    disarm();                                       // ends the mode, filters back as they were
+    closeOverlay();
+    if (it && typeof window.scrayPlayFromReels === 'function') window.scrayPlayFromReels(it.video, t);
+  }
+
   function onKey(e) {
     if (!R) return;
     const k = e.key;
@@ -629,8 +744,10 @@
     R.onShow = opts.onShow || null;
     R.onClose = opts.onClose || null;
     R.busy = false;
+    R.curPlaying = false; R.waiters.length = 0; R.autoMuted = false;
     try { window.plyrPlayer && window.plyrPlayer.pause && window.plyrPlayer.pause(); } catch (e) { /* nothing playing */ }
     R.root.classList.add('on');
+    document.body.classList.add('scray-reels-open');      // hides the corner buttons and pills
     document.documentElement.style.overflow = 'hidden';
     window.addEventListener('keydown', onKey, true);
     setMuted(R.muted);
@@ -652,6 +769,7 @@
     if (typeof window.scrayWatchFlush === 'function') window.scrayWatchFlush();
     R.slots.forEach(s => { s.tok++; resetSlot(s); s.idx = -1; });
     R.root.classList.remove('on');
+    document.body.classList.remove('scray-reels-open');
     document.documentElement.style.overflow = '';
     window.removeEventListener('keydown', onKey, true);
     const cb = R.onClose; R.onClose = null;

@@ -4,6 +4,19 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.171 — test: Refresh offers data explorer's box rescans
+<!-- 2026-10-20T04:36Z -->
+- **Asked:** on Native's Refresh button, add ↻ Rescan box and all its options from data explorer, so it can be run from the phone.
+- **What Refresh does now:** it asks first, in a sheet in the top half of the screen (clear of the dock):
+  - **This phone's folders**: what Refresh always did (scanLocalLibrary).
+  - **Box: just the file list**, **Box: new files only**, **Box: everything**: data explorer's three modes, with its wording (browse 15.74 / 15.81).
+  - **Cancel**: a tap outside or Esc also closes it.
+  - Data explorer's fourth, *Ticked only*, is left out: there are no ticked rows on the phone.
+- **The box rescan** (`scrayBoxRescan`, scray-hetzner.js): the same server job, `hetzner_rescan` (`do: start`, with `listing` / `full`), which the device key may start and watch. Progress is on the Refresh button (Box n/m while walking, updating, Details n/m), polled every 3 s. At the end the button shows ✓ +new −gone for a few seconds. If anything changed, the box is re-listed (the Hetzner pill shows it), as the quiet background rescan already does. A rescan that won't start or fails says why in an alert. It runs on the server, so the app can be closed meanwhile.
+- **Picker:** not changed. It has no folder Refresh, and data explorer has the button already. Say if Picker should get it too.
+- **Tested:** the real scray-hetzner.js and local-library.js in Chromium at phone size, against a stand-in server whose rescan walks, probes and finishes. The sheet showed the four choices and Cancel. Folders ran the old scan. Just the file list sent `do: start, listing: true` with the phone's device id, and the button went Box 1/10 → Box 6/10 → Details 3/8 → ✓ +2 −0 → Refresh. Esc closed the sheet without calling anything. No page errors.
+- **Files:** assets/web/local-library.js, assets/web/scray-hetzner.js. Web layer only: Settings > Reload now, no IPA build.
+
 ### picker 15.128 / native 15.170 — test: sort kept with history states
 <!-- 2026-10-19T07:28Z -->
 - **Asked (native and picker):** add the sort selections to the states in history, the ones that hold the tag filters.

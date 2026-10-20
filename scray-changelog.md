@@ -4,6 +4,20 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.129 / native 15.173 — test: TikTok mode
+<!-- 2026-10-20T09:32Z -->
+- **Asked (native and picker):** a TikTok-style mode, switched on from the landscape/portrait button's row with a portrait-with-play button. Only portrait videos play, the soft filter is off while it runs, swiping up plays the next with the full swipe motion (next one preloaded, a little buffering is fine rather than a lot of preloading), and Stop closes the mode.
+- **The button (index.html / index.php):** `#reelsToggleBtn`, right after the orientation button - a portrait rectangle with a play triangle. Grey off, pink on. Tapping it again also ends the mode.
+- **New `scray-reels.js` (the same file in both apps, like the image viewer):** a full-screen overlay with its own `<video>` elements; the normal Plyr player is paused while it is open. Three slots - before, playing, after - follow the finger and then rotate, so the next video is already in place:
+  - **Swipe up** for the next, **down** for the one before (a drag of 60px or a flick moves on, less snaps back; past either end it bounces and says so). **Tap** pauses, a bar along the bottom shows progress, a Mute button (remembered), and **Stop**. Desktop: wheel or ↓ / ↑, Space, M, Esc.
+  - **Preloading is shallow on purpose:** only the next video gets `preload=auto`, the one before gets metadata only, and a recycled slot drops its source, so at most two are buffering. Swiping onto one that hasn't caught up shows a spinner and plays when it can.
+  - A video that won't load says so and moves on by itself after 1.6s. Videos loop, as on TikTok. If the browser won't start sound without a tap, it carries on muted.
+- **The mode:** turning it on sets the orientation filter to portrait (what it was is put back at the end), takes the **soft** tag out of the excluded tags (put back too), then starts at a random portrait video from the list on screen and walks the list in order. While it is on, every play (a row, X, >, history, basket, bookmarks) goes to the overlay; a landscape one is refused with a note, and a wholesale-mode preview is left alone. Portrait here is the filter's own P - portrait or square - and containers the web player can't decode (mkv, wmv, avi...) are left out.
+- **player.js (identical patch in both):** `scrayPlayReels` beside `scrayPlayImage`, and a hook at the top of `playVideoInline`. Each video shown becomes the playing file (green row, history, where < and > carry on from) and is watched like any other: the watch tracker's timeupdate body is now `scrayWatchStep(now)`, which the overlay feeds too, so views and time viewed still count.
+- **Assumption to check:** I took the soft filter to be a tag named `soft` in the default excluded tags - I found nothing called soft in the code, only a `soft` tag in an old changelog line. If it is something else, it is the `SOFT_TAGS` list at the top of scray-reels.js.
+- **Tested** (Chromium at phone size, a stand-in page with portrait and landscape webm clips; not the real apps): button arms the mode, filter goes to P, soft leaves the excludes, plays from a random portrait one; swipe up and down move on with the slots rotating (next preload auto, before metadata); the last one bounces; short slow drag snaps back; tap pauses and resumes; Stop closes, the orientation filter and soft come back, button greys. No page errors. Not tried on a phone: the swipe feel and sound on iOS are the things to test.
+- **Files:** scray-reels.js (new), player.js, index.html (native) / index.php (picker).
+
 ### native 15.172 — test: Move in the bulk bar
 <!-- 2026-10-20T05:33Z -->
 - **Asked:** add Move file to the bulk options.

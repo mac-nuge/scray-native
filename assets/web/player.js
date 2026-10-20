@@ -10757,38 +10757,46 @@ function scrayWatchCountView(s) {
         .catch(err => console.warn("Failed to track video view:", err));
 }
 
+/**
+ * One timeupdate tick of the loaded video's session. Plyr's 'timeupdate' feeds
+ * it, and so does the TikTok-style overlay (scray-reels.js), which plays in
+ * its own <video> elements but is watched the same way.
+ */
+function scrayWatchStep(now) {
+    const s = scrayWatchSession;
+    if (!s) return;
+    if (!Number.isFinite(now)) return;
+
+    // First tick of a load only establishes where we are. Accumulating
+    // from it would bank the whole start offset as watched time, which is
+    // exactly what a bookmark jump or a resume would do.
+    if (s.lastTime === null) { s.lastTime = now; return; }
+
+    const step = now - s.lastTime;
+    s.lastTime = now;
+    if (step <= 0 || step > SCRAY_WATCH_MAX_STEP_S) return;   // seek, or a repeat tick
+
+    s.watched += step;
+
+    if (!s.viewCounted && s.watched >= SCRAY_VIEW_THRESHOLD_S) {
+        s.viewCounted = true;
+        scrayWatchCountView(s);
+    }
+    // Flush the moment the gate opens, then at intervals. Without that
+    // first one, a watch that ends abruptly anywhere between 10s and 70s
+    // - app killed, phone locked, tab closed - reports nothing at all,
+    // and there is no way to see anything working until a full minute in.
+    if (!s.flushed || s.watched - s.flushed >= SCRAY_WATCH_FLUSH_EVERY_S) scrayWatchFlushTime(s);
+}
+window.scrayWatchStep = scrayWatchStep;
+window.scrayWatchFlush = () => scrayWatchFlushTime(scrayWatchSession);
+
 /** Attach the listeners to the one Plyr instance. Idempotent. */
 function scrayWatchAttach() {
     if (scrayWatchBound || !window.plyrPlayer) return;
     scrayWatchBound = true;
 
-    window.plyrPlayer.on('timeupdate', () => {
-        const s = scrayWatchSession;
-        if (!s) return;
-        const now = window.plyrPlayer.currentTime;
-        if (!Number.isFinite(now)) return;
-
-        // First tick of a load only establishes where we are. Accumulating
-        // from it would bank the whole start offset as watched time, which is
-        // exactly what a bookmark jump or a resume would do.
-        if (s.lastTime === null) { s.lastTime = now; return; }
-
-        const step = now - s.lastTime;
-        s.lastTime = now;
-        if (step <= 0 || step > SCRAY_WATCH_MAX_STEP_S) return;   // seek, or a repeat tick
-
-        s.watched += step;
-
-        if (!s.viewCounted && s.watched >= SCRAY_VIEW_THRESHOLD_S) {
-            s.viewCounted = true;
-            scrayWatchCountView(s);
-        }
-        // Flush the moment the gate opens, then at intervals. Without that
-        // first one, a watch that ends abruptly anywhere between 10s and 70s
-        // - app killed, phone locked, tab closed - reports nothing at all,
-        // and there is no way to see anything working until a full minute in.
-        if (!s.flushed || s.watched - s.flushed >= SCRAY_WATCH_FLUSH_EVERY_S) scrayWatchFlushTime(s);
-    });
+    window.plyrPlayer.on('timeupdate', () => scrayWatchStep(window.plyrPlayer.currentTime));
 
     // Natural stopping points. Flushing here means a normal watch reports its
     // seconds immediately rather than waiting out the next flush interval.
@@ -11021,12 +11029,73 @@ function scrayPlayImage(video, listContext = null, index = null, opts = {}) {
 }
 window.scrayPlayImage = scrayPlayImage;
 
+/**
+ * TikTok mode (scray-reels.js): while it is armed every play goes to the
+ * overlay instead of the Plyr player. The list is the one the video was played
+ * from, cut down to portrait videos the web player can decode; swiping walks
+ * it. Like scrayPlayImage, each video shown becomes the playing file (green
+ * row, history, and where < and > carry on from), and is watched the same way
+ * (view count and time) through scrayWatchBegin / scrayWatchStep.
+ */
+function scrayPlayReels(video, listContext = null, index = null, opts = {}) {
+    if (listContext === 'history') {
+        const placed = scrayPlaceHistoryPlay(video, index);
+        currentListContext = placed.context;
+        currentVideoIndex = placed.index;
+    } else {
+        currentListContext = listContext;
+        currentVideoIndex = index;
+    }
+    const R = window.scrayReels;
+    if (!R.canPlay(video)) {
+        R.toast('TikTok mode plays portrait videos only');
+        return false;
+    }
+    const fullList = (currentListContext !== null && Array.isArray(getVideoListByContext())) ? getVideoListByContext() : [];
+    const idOf = v => (v ? (v.oneDriveId ?? v.idFromAPI ?? v.filename ?? null) : null);
+    let vids = fullList.filter(v => R.canPlay(v));
+    let at = vids.indexOf(video);
+    if (at < 0 && idOf(video) != null) at = vids.findIndex(v => idOf(v) === idOf(video));
+    if (at < 0) { vids = [video]; at = 0; }
+    const items = vids.map(v => ({
+        video: v,
+        name: (window.scrayStashDisplayName && window.scrayStashDisplayName(v)) || v.filename || v.name || '',
+        load: async () => { await refreshVideoBeforeUse(v); return v.downloadUrl; }
+    }));
+    let first = true;
+    const opened = R.open({
+        items,
+        index: at,
+        onShow: (it) => {
+            const v = it.video;
+            window.currentPlayingVideo = v;
+            if (!first) {
+                const li = fullList.indexOf(v);
+                if (li >= 0) currentVideoIndex = li;
+            }
+            window.scrayMarkPlayingRows?.();
+            if (typeof window.addToHistory === 'function') window.addToHistory(v, first ? listContext : currentListContext);
+            window.scrayWatchBegin(v, { count: true });
+            first = false;
+        }
+    });
+    console.log(`[player] ${video.filename || video.name} opened in TikTok mode (${at + 1}/${vids.length})`);
+    return opened;
+}
+window.scrayPlayReels = scrayPlayReels;
+
 async function playVideoInline(video, listContext = null, index = null, startAt = null, opts = {}) {
 // 🖼 A picture opens in the image viewer instead (native 15.133) - see scrayPlayImage.
 // The token bump makes a video still waiting out its preview delay give way.
 if (video && window.scrayImageViewer && typeof window.scrayIsImageFile === 'function' && window.scrayIsImageFile(video)) {
     window.scrayPlayRequestToken = (window.scrayPlayRequestToken || 0) + 1;
     return scrayPlayImage(video, listContext, index, opts);
+}
+// TikTok mode (scray-reels.js): while it is on, every play goes to its overlay - except a
+// wholesale-mode preview, which is a look and stays in the normal player.
+if (video && window.scrayReels && window.scrayReels.armed() && !(opts && opts.preview)) {
+    window.scrayPlayRequestToken = (window.scrayPlayRequestToken || 0) + 1;
+    return scrayPlayReels(video, listContext, index, opts);
 }
 // MPB: note where the played row is before any play-path scrolling (13.177).
 scrayKeepPlayedRowAbovePlayer(video);

@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.134 / native 15.178 — test: TikTok mode filter pills on top
+<!-- 2026-10-20T13:05Z -->
+- **Asked (testing 15.133 / 15.177):** after a search term is added, keep the video the same size (it shrinks) and show the pill on top of the player, like FLS / MPFS.
+- **Pills on top (scray-reels.js):** while TikTok mode is open the page's `#floatingTagPillsBar` is moved into a strip at the top of the overlay, beside the counter, and put back when it closes (a comment marker holds its place; `syncNowPlayingStripPlacement` runs after, so a fullscreen mode can take it again). Styled as in the FLS / MPFS title (13.62 rules restated): compact, centred, 85% opaque, and only the pink search pill takes taps. Tapping it opens it for typing; typing filters the list and the next videos follow it (15.133). Keys typed there are no longer eaten by TikTok mode's own shortcuts (space, m, j, k, Esc).
+- **player.js (both):** `scrayStripBelongsInTitle` returns false while TikTok mode is open, so the fullscreen title doesn't pull the bar back.
+- **The shrink - not reproduced.** In Chromium the overlay and video keep their size through a search from the title. What did happen underneath was the page scrolling, from the search's scroll to the search box and the list redrawing. iOS is the suspect. `scrollToSearchBox` (ui.js, both) now does nothing while TikTok mode is open, which removes one of those scrolls; the list's own scroll still happens.
+- **Tested** (the real native web layer in Chromium at 390x844 with stand-in videos and stubbed CDN/API): title link → modal → Search: overlay 390x844 before and after, the bar in the overlay showing the term, typing into it reaches the main search box without pausing, Stop puts the bar back and visible. No page errors. Not on a phone.
+- **Files:** scray-reels.js, player.js, ui.js.
+
 ### picker 15.133 / native 15.177 — test: TikTok mode clickable title, lighter controls, raised bar
 <!-- 2026-10-20T12:35Z -->
 - **Asked (testing 15.132 / 15.176):** raise the progress bar, since the iPhone's rounded corners cut off its ends; make the title and text a little smaller and semi-transparent; make the names and paths clickable to add to search or filter, like the other titles; make the three buttons semi-transparent; raise the video a little, as there is space at the top.

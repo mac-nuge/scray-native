@@ -214,6 +214,25 @@
 .sr-top{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;
   padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 0 12px;pointer-events:none}
 .sr-count{font-size:11px;opacity:.85;background:rgba(0,0,0,.45);padding:3px 8px;border-radius:12px}
+/* The filter pills, on top of the picture as in FLS / MPFS (their 13.62 title rules, restated here): the page's own
+   #floatingTagPillsBar is moved in while the overlay is open and put back after. Compact, centred, and - as there -
+   only the pink search pill takes taps; a stray tap beside it does nothing. */
+.sr-pills{position:absolute;left:44px;right:44px;top:calc(env(safe-area-inset-top,0px) + 8px);display:flex;justify-content:center;pointer-events:none}
+#scrayReels .sr-pills > #floatingTagPillsBar{display:flex!important;visibility:visible!important;opacity:.85!important;position:static!important;
+  top:auto!important;right:auto!important;bottom:auto!important;left:auto!important;transform:none!important;z-index:auto!important;
+  flex-wrap:wrap;justify-content:center;gap:3px;width:auto!important;max-width:100%!important;margin:0!important;padding:0!important;
+  background:transparent!important;pointer-events:none!important}
+#scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-pill{font-size:.6rem;line-height:1.2;padding:2px 6px}
+#scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap,
+#scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search,
+#scrayReels .sr-pills > #floatingTagPillsBar .search-pill-input{pointer-events:auto!important}
+#scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused{position:static!important;top:auto!important;left:auto!important;
+  right:auto!important;z-index:auto!important;width:100%!important;flex:0 0 100%!important}
+#scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .floating-tag-search{width:auto!important;max-width:100%!important;
+  gap:4px!important;padding:2px 6px!important;border-radius:10px!important;box-shadow:none!important}
+#scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-input{font-size:.7rem!important;flex:1 1 0!important;min-width:0!important;width:auto!important}
+#scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-glass{font-size:.7rem!important}
+#scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-x{font-size:.8rem!important;margin:0!important;padding:0 4px!important;border-radius:8px!important}
 .sr-ctl{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 38px);display:flex;gap:5px;align-items:center;opacity:.72}
 /* The title is the same clickable path as a list row (createClickablePath): folders, bracket tags and Stash chips
    open the filter / search modal. Its inline colours are for a white page, so they are restated for black. */
@@ -237,7 +256,7 @@ html.scray-reels-open .basket-json-modal{z-index:2147483647!important}
 /* Everything that floats over the page goes behind, as in MPFS: the old corner shell, the pills, and the fused
    dock (X R H ... 🔍 BM 🌐 COL). The dock lives in #scrayDisguise under <html>, outside <body>, at the top z-index,
    hence the class on <html>. The disguise screen itself is left alone and still covers this when it is up. */
-html.scray-reels-open #cornerButtons,html.scray-reels-open #floatingTagPillsBar,
+html.scray-reels-open #cornerButtons,html.scray-reels-open #floatingTagPillsBar:not(.sr-in),
 html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStrip{display:none!important}
 .sr-pause{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;
   background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;font-size:34px;pointer-events:none}
@@ -300,7 +319,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     slots.forEach(s => root.appendChild(s.el));
     root.insertAdjacentHTML('beforeend',
       '<div class="sr-pause">&#9654;</div>' +
-      '<div class="sr-top"><span class="sr-count"></span></div>' +
+      '<div class="sr-top"><span class="sr-count"></span></div><div class="sr-pills"></div>' +
       '<div class="sr-ctl"><button type="button" class="sr-btn mute" aria-label="Sound"></button>' +
       '<button type="button" class="sr-btn stop">Stop</button>' +
       '<button type="button" class="sr-btn mpfs" title="Leave TikTok mode and carry on in the normal portrait player (MPFS)">MPFS</button></div>' +
@@ -578,7 +597,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
 
     root.addEventListener('pointerdown', e => {
       if (!R || R.busy || e.target.closest('.sr-btn')) return;
-      if (e.target.closest('.sr-cap span[style*="underline"]')) return;   // a tag in the title: its own click
+      if (e.target.closest('.sr-cap span[style*="underline"], .sr-pills .floating-tag-search-wrap')) return;   // a tag in the title, the search pill: their own taps
       if (R.autoMuted) { R.autoMuted = false; setMuted(false, false); }
       down = true; mode = 'none'; x0 = e.clientX; y0 = e.clientY; dy = 0;
       hist = [[e.clientY, performance.now()]];
@@ -752,6 +771,8 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
 
   function onKey(e) {
     if (!R) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;   // typing in the search pill
     const k = e.key;
     const used = ['ArrowDown', 'ArrowUp', ' ', 'Escape', 'm', 'M', 'k', 'j'];
     if (!used.includes(k)) { e.stopPropagation(); return; }   // keep the page's own shortcuts out of it
@@ -799,6 +820,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     R.curPlaying = false; R.waiters.length = 0; R.autoMuted = false;
     try { window.plyrPlayer && window.plyrPlayer.pause && window.plyrPlayer.pause(); } catch (e) { /* nothing playing */ }
     R.root.classList.add('on');
+    borrowPills();
     document.documentElement.classList.add('scray-reels-open');   // corner buttons, pills and dock go behind
     document.documentElement.style.overflow = 'hidden';
     window.addEventListener('keydown', onKey, true);
@@ -815,6 +837,29 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
   }
 
   /** The playing video's own row changed (the same overlay, a new list). */
+  /** Borrow the page's pill bar for the top of the overlay; a marker remembers where it lives. */
+  let pillsHome = null;
+  function borrowPills() {
+    const bar = document.getElementById('floatingTagPillsBar');
+    const slot = R && R.root.querySelector('.sr-pills');
+    if (!bar || !slot || bar.parentElement === slot) return;
+    if (!pillsHome) pillsHome = document.createComment(' floatingTagPillsBar (TikTok mode) ');
+    if (bar.parentNode) bar.parentNode.insertBefore(pillsHome, bar);
+    bar.classList.add('sr-in');
+    slot.appendChild(bar);
+  }
+  function returnPills() {
+    const bar = document.getElementById('floatingTagPillsBar');
+    if (!bar || !bar.classList.contains('sr-in')) return;
+    const a = document.activeElement;
+    if (a && bar.contains(a)) { try { a.blur(); } catch (e) { /* fine */ } }
+    bar.classList.remove('sr-in');
+    if (pillsHome && pillsHome.parentNode) { pillsHome.parentNode.insertBefore(bar, pillsHome); pillsHome.remove(); }
+    else document.body.appendChild(bar);
+    // Let the fullscreen modes take it again if one of them is what is showing now.
+    if (typeof window.syncNowPlayingStripPlacement === 'function') { try { window.syncNowPlayingStripPlacement(); } catch (e) { /* fine */ } }
+  }
+
   function closeOverlay() {
     if (!R || !R.root.classList.contains('on')) return;
     clearTimeout(R.errTimer);
@@ -822,6 +867,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     if (typeof window.scrayWatchFlush === 'function') window.scrayWatchFlush();
     R.slots.forEach(s => { s.tok++; resetSlot(s); s.idx = -1; });
     R.root.classList.remove('on');
+    returnPills();
     document.documentElement.classList.remove('scray-reels-open');
     document.documentElement.style.overflow = '';
     window.removeEventListener('keydown', onKey, true);

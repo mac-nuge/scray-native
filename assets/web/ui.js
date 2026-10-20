@@ -147,6 +147,9 @@ window.showButtonFeedback = showButtonFeedback;
 */
 function scrollToSearchBox(searchBox) {
 if (!searchBox) return;
+// TikTok mode covers the page: scrolling it underneath does nothing you can see, and iOS can
+// shift the full-screen overlay while the page moves (picker 15.134 / native 15.178).
+if (document.documentElement.classList.contains('scray-reels-open')) return;
 
 // Check if on desktop
 const isDesktop = window.innerWidth >= 769;

@@ -11057,21 +11057,33 @@ function scrayPlayReels(video, listContext = null, index = null, opts = {}) {
     let at = vids.indexOf(video);
     if (at < 0 && idOf(video) != null) at = vids.findIndex(v => idOf(v) === idOf(video));
     if (at < 0) { vids = [video]; at = 0; }
-    const items = vids.map(v => ({
+    const toItem = v => ({
         video: v,
         name: (window.scrayStashDisplayName && window.scrayStashDisplayName(v)) || v.filename || v.name || '',
         load: async () => { await refreshVideoBeforeUse(v); return v.downloadUrl; }
-    }));
+    });
+    const items = vids.map(toItem);
+    // The main and random lists follow filters: tapping a tag in the title (or any filter / search change)
+    // makes what comes next come from the new list. A new array, or a new length, is a new list.
+    const live = currentListContext === 'main' || currentListContext === 'random';
+    const listNow = () => (Array.isArray(getVideoListByContext()) ? getVideoListByContext() : []);
+    let keyList = null, keyN = 0;
     let first = true;
     const opened = R.open({
         items,
         index: at,
         shuffle: true,      // random order: this one first, then the rest shuffled, reshuffled when it runs out
+        listKey: live ? () => {
+            const l = listNow();
+            if (l !== keyList || l.length !== keyN) { keyList = l; keyN = l.length; return {}; }   // a fresh token on change
+            return null;
+        } : null,
+        listItems: live ? () => listNow().filter(v => R.canPlay(v)).map(toItem) : null,
         onShow: (it) => {
             const v = it.video;
             window.currentPlayingVideo = v;
             if (!first) {
-                const li = fullList.indexOf(v);
+                const li = listNow().indexOf(v);
                 if (li >= 0) currentVideoIndex = li;
             }
             window.scrayMarkPlayingRows?.();

@@ -76,7 +76,7 @@
     if (!toastEl) {
       toastEl = document.createElement('div');
       toastEl.style.cssText = 'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 90px);' +
-        'transform:translateX(-50%);z-index:100001;background:rgba(0,0,0,.85);color:#fff;padding:8px 14px;' +
+        'transform:translateX(-50%);z-index:2147483646;background:rgba(0,0,0,.85);color:#fff;padding:8px 14px;' +
         'border-radius:18px;font:13px/1.3 system-ui,sans-serif;max-width:86%;text-align:center;' +
         'pointer-events:none;opacity:0;transition:opacity .2s';
       document.body.appendChild(toastEl);
@@ -162,6 +162,27 @@
     return a;
   }
   /** Keep a few videos queued ahead: when the shuffled run is nearly out, add another shuffle of the lot. */
+  /** If the list behind the mode changed (a filter or search from the title, say), what comes next follows it. */
+  function syncList() {
+    if (!R || !R.pool || !R.listKey) return;
+    let key;
+    try { key = R.listKey(); } catch (e) { return; }
+    if (!key || key === R.lastKey) return;
+    R.lastKey = key;
+    let items;
+    try { items = R.listItems(); } catch (e) { return; }
+    const cur = R.items[R.index];
+    const curId = cur && idOf(cur.video);
+    const fresh = (items || []).filter(it => idOf(it.video) !== curId);
+    if (!fresh.length) { toast('Nothing else matches - keeping the current run'); return; }
+    R.pool = items;                     // the whole match, this one included, for the reshuffles after
+    R.items = R.items.slice(0, R.index + 1).concat(shuffled(fresh));
+    ensureAhead();
+    fill(R.slots[2], R.index + 1, 'auto');
+    if (Date.now() - R.openedAt > 2500) toast(`Next videos from the ${fresh.length + (curId != null ? 1 : 0)} that match`);   // not for the list settling at the start
+  }
+  const idOf = v => (v ? (v.oneDriveId ?? v.idFromAPI ?? v.filename ?? v) : null);
+
   function ensureAhead() {
     if (!R || !R.pool || R.pool.length < 2) return;
     while (R.items.length - R.index < 4) {
@@ -174,13 +195,15 @@
 
   // ---------------------------------------------------------------- the overlay
   const CSS = `
-.sr-root{position:fixed;inset:0;z-index:2147483000;background:#000;color:#fff;overflow:hidden;touch-action:none;
+.sr-root{--sr-lift:18px;position:fixed;inset:0;z-index:2147483000;background:#000;color:#fff;overflow:hidden;touch-action:none;
   user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;display:none;font-family:system-ui,sans-serif}
 .sr-root.on{display:block}
 .sr-slot{position:absolute;inset:0;background:#000;will-change:transform}
-.sr-slot video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;pointer-events:none}
-.sr-cap{position:absolute;left:12px;right:150px;bottom:calc(env(safe-area-inset-bottom,0px) + 42px);font-size:13px;
-  line-height:1.3;text-shadow:0 1px 3px #000,0 0 8px #000;pointer-events:none;word-break:break-word;
+/* ⚙️ object-position 50% 30%: a video shorter than the screen sits higher than centred - 30% of the spare
+   height above it, 70% below - so it uses the space at the top and keeps clear of the title and bar. */
+.sr-slot video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:50% 30%;background:#000;pointer-events:none}
+.sr-cap{position:absolute;left:12px;right:140px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 40px);font-size:11.5px;
+  line-height:1.3;text-shadow:0 1px 3px #000,0 0 8px #000;pointer-events:none;word-break:break-word;opacity:.72;
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .sr-spin{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border:3px solid rgba(255,255,255,.25);
   border-top-color:#fff;border-radius:50%;animation:srspin .8s linear infinite;display:none;pointer-events:none}
@@ -191,16 +214,24 @@
 .sr-top{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;
   padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 0 12px;pointer-events:none}
 .sr-count{font-size:11px;opacity:.85;background:rgba(0,0,0,.45);padding:3px 8px;border-radius:12px}
-.sr-ctl{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 40px);display:flex;gap:5px;align-items:center}
-.sr-btn{background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:12px;padding:3px 9px;
-  font-size:11px;line-height:1.4;cursor:pointer}
-.sr-btn.stop{background:rgba(200,30,60,.85);border-color:transparent;font-weight:600}
+.sr-ctl{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 38px);display:flex;gap:5px;align-items:center;opacity:.72}
+/* The title is the same clickable path as a list row (createClickablePath): folders, bracket tags and Stash chips
+   open the filter / search modal. Its inline colours are for a white page, so they are restated for black. */
+.sr-cap span{color:#fff!important}
+.sr-cap span[style*="underline"]{color:#8cc8ff!important;pointer-events:auto;cursor:pointer}
+.sr-cap span[style*="italic"]{color:#bbb!important}
+html.scray-reels-open .basket-json-modal{z-index:2147483647!important}
+.sr-btn{background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:12px;padding:3px 8px;
+  font-size:10.5px;line-height:1.4;cursor:pointer}
+.sr-btn.stop{background:rgba(200,30,60,.55);border-color:transparent;font-weight:600}
 .sr-btn.mpfs{letter-spacing:.02em}
 /* The seek bar, as MPFS's: a thin full-width track, played in white, loaded a little lighter, the time
    as played / left above it. The strip is taller than the track so a thumb can find it. */
-.sr-seek{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 0px);height:34px;touch-action:none}
-.sr-ts{position:absolute;left:12px;bottom:17px;font-size:11px;font-variant-numeric:tabular-nums;text-shadow:1px 1px 2px rgba(0,0,0,.9);pointer-events:none}
-.sr-track{position:absolute;left:0;right:0;bottom:6px;height:8px;background:rgba(255,255,255,.22)}
+/* ⚙️ --sr-lift (18px, on .sr-root) raises the bar, its time, the title and the buttons clear of the screen's
+   rounded bottom corners; the track also stops 10px short of each side, with round ends. */
+.sr-seek{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift));height:34px;touch-action:none}
+.sr-ts{position:absolute;left:12px;bottom:17px;font-size:10px;opacity:.8;font-variant-numeric:tabular-nums;text-shadow:1px 1px 2px rgba(0,0,0,.9);pointer-events:none}
+.sr-track{position:absolute;left:10px;right:10px;bottom:6px;height:6px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.22)}
 .sr-buf{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(255,255,255,.38)}
 .sr-fill{position:absolute;left:0;top:0;bottom:0;width:0;background:#fff}
 /* Everything that floats over the page goes behind, as in MPFS: the old corner shell, the pills, and the fused
@@ -214,7 +245,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
 .sr-fb{position:absolute;top:calc(env(safe-area-inset-top,0px) + 56px);background:rgba(0,0,0,.65);padding:6px 12px;border-radius:14px;
   font-size:14px;font-variant-numeric:tabular-nums;opacity:0;transition:opacity .2s;pointer-events:none}
 .sr-fb.on{opacity:1}
-.sr-hint{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 100px);transform:translateX(-50%);
+.sr-hint{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 100px);transform:translateX(-50%);
   background:rgba(0,0,0,.6);padding:7px 14px;border-radius:16px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
 .sr-hint.on{opacity:1}
 `;
@@ -312,6 +343,16 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     R.slots.forEach((s, i) => place(s, i - 1, dy, anim));
   }
 
+  /** The title: the list row's clickable path when ui.js is there, else the plain name. */
+  function setCaption(slot, it) {
+    slot.cap.textContent = '';
+    if (it.video && typeof window.createClickablePath === 'function') {
+      try { slot.cap.appendChild(window.createClickablePath(it.video, true, true)); return; }
+      catch (err) { slot.cap.textContent = ''; }
+    }
+    slot.cap.textContent = it.name || '';
+  }
+
   function resetSlot(slot) {
     slot.v.pause();
     slot.v.removeAttribute('src');
@@ -340,7 +381,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     resetSlot(slot);
     const it = R.items[idx];
     if (!it) return;
-    slot.cap.textContent = it.name || '';
+    setCaption(slot, it);
     if (R.slots[1] === slot) slot.spin.classList.add('on');
     let url;
     try { url = await it.load(); }
@@ -537,6 +578,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
 
     root.addEventListener('pointerdown', e => {
       if (!R || R.busy || e.target.closest('.sr-btn')) return;
+      if (e.target.closest('.sr-cap span[style*="underline"]')) return;   // a tag in the title: its own click
       if (R.autoMuted) { R.autoMuted = false; setMuted(false, false); }
       down = true; mode = 'none'; x0 = e.clientX; y0 = e.clientY; dy = 0;
       hist = [[e.clientY, performance.now()]];
@@ -747,6 +789,12 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     }
     R.onShow = opts.onShow || null;
     R.onClose = opts.onClose || null;
+    R.openedAt = Date.now();
+    R.listKey = opts.listKey || null;
+    R.listItems = opts.listItems || null;
+    try { R.lastKey = R.listKey ? R.listKey() : null; } catch (e) { R.lastKey = null; }
+    clearInterval(R.syncT);
+    if (R.listKey && R.pool) R.syncT = setInterval(syncList, 700);
     R.busy = false;
     R.curPlaying = false; R.waiters.length = 0; R.autoMuted = false;
     try { window.plyrPlayer && window.plyrPlayer.pause && window.plyrPlayer.pause(); } catch (e) { /* nothing playing */ }
@@ -770,6 +818,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
   function closeOverlay() {
     if (!R || !R.root.classList.contains('on')) return;
     clearTimeout(R.errTimer);
+    clearInterval(R.syncT);
     if (typeof window.scrayWatchFlush === 'function') window.scrayWatchFlush();
     R.slots.forEach(s => { s.tok++; resetSlot(s); s.idx = -1; });
     R.root.classList.remove('on');

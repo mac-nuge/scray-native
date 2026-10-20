@@ -1660,7 +1660,20 @@ if (window.currentPlayingVideo && typeof window.rebuildVideoInfoDisplay === 'fun
 /**
 * Show move file modal with path selection
 */
-async function showMoveFileModal(video) {
+async function showMoveFileModal(videoOrList, opts = {}) {
+// native 15.172: several files at once (the bulk bar's Move) - one destination for all, moved one
+// after another. A single file works exactly as before.
+const moveList = (Array.isArray(videoOrList) ? videoOrList : [videoOrList]).filter(Boolean);
+if (!moveList.length) return;
+const video = moveList[0];
+const many = moveList.length > 1;
+// Where they all are now, when that's one place (else nothing is marked current).
+const sameHere = moveList.every(v => v.path === video.path && v.accountKey === video.accountKey);
+const isCurrent = p => sameHere && p.path === video.path && p.accountKey === video.accountKey;
+const fromText = sameHere
+    ? (video.path ? (video.path.startsWith('*') ? video.path.substring(1) : video.path) : 'root')
+    : `${new Set(moveList.map(v => (v.accountKey || '') + '|' + (v.path || ''))).size} different folders`;
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // Get all unique paths from database - NOW INCLUDES ALL ACCOUNTS
 const allVideos = await getAllVideos();
 const pathMap = new Map(); // Map: path -> { path, accountName, accountKey }
@@ -1688,8 +1701,8 @@ if (!pathMap.has(currentPath)) {
 // Convert to array and sort - current location at top
 const allPaths = Array.from(pathMap.values()).sort((a, b) => {
 // ✅ Current location always at top
-const aIsCurrent = a.path === video.path && a.accountKey === video.accountKey;
-const bIsCurrent = b.path === video.path && b.accountKey === video.accountKey;
+const aIsCurrent = isCurrent(a);
+const bIsCurrent = isCurrent(b);
 
 if (aIsCurrent) return -1; // a is current, move to top
 if (bIsCurrent) return 1;  // b is current, move to top
@@ -1710,10 +1723,10 @@ const modal = document.createElement('div');
 modal.className = 'basket-json-modal';
 modal.innerHTML = `
 <div class="basket-json-modal-content basket-json-modal-wide">
-<h3>Move File</h3>
+<h3>${many ? `Move ${moveList.length} files` : 'Move File'}</h3>
 <p style="font-size: 0.85rem; color: #666; margin-bottom: 12px; word-break: break-word;">
-    <strong>${video.filename}</strong><br>
-    Current location: ${video.path ? (video.path.startsWith('*') ? video.path.substring(1) : video.path) : 'root'}
+    <strong>${many ? `${esc(video.filename)} and ${moveList.length - 1} more` : video.filename}</strong><br>
+    ${many ? 'Now in' : 'Current location'}: ${esc(fromText)}
 </p>
 
 <!-- ✅ Progress bar (hidden by default) -->
@@ -1784,7 +1797,7 @@ pathItem.dataset.accountKey = pathInfo.accountKey;
 pathItem.dataset.accountName = pathInfo.accountName;
 
 // Highlight if this is the current path AND account
-if (pathInfo.path === video.path && pathInfo.accountKey === video.accountKey) {
+if (isCurrent(pathInfo)) {
     pathItem.style.background = '#e8f5e9';
     pathItem.style.color = '#2e7d32';
     const currentLabel = document.createElement('span');
@@ -1811,9 +1824,10 @@ if (pathInfo.path === video.path && pathInfo.accountKey === video.accountKey) {
         // console-only). Picker's Move dialog can delete an empty one.
         const hzFolder = typeof window.scrayIsHetznerVideo === 'function'
             && window.scrayIsHetznerVideo({ accountKey: pathInfo && pathInfo.accountKey });
-        goToFolderBtn.style.display = hzFolder ? 'none' : 'block';
+        // Not for a bulk move (native 15.172): the dialog is about the files, one choice for all.
+        goToFolderBtn.style.display = (hzFolder || many) ? 'none' : 'block';
         goToFolderBtn.disabled = false;
-        deleteFolderBtn.style.display = hzFolder ? 'none' : 'block';
+        deleteFolderBtn.style.display = (hzFolder || many) ? 'none' : 'block';
         deleteFolderBtn.disabled = false;
     });
     
@@ -1945,6 +1959,12 @@ return;
 // ✅ Check if new folder name provided
 const newFolderName = newFolderInput.value.trim();
 
+// native 15.172: several files - each moved in turn, the rest carry on past one that fails.
+if (many) {
+    await runBulkMove(newFolderName);
+    return;
+}
+
 // ✅ Check if same location AND account
 if (selectedPath.path === video.path && 
 selectedPath.accountKey === video.accountKey && 
@@ -2009,6 +2029,75 @@ confirmBtn.textContent = 'Move';
 modal.addEventListener('click', (e) => {
 if (e.target === modal) modal.remove();
 });
+
+/**
+ * native 15.172: the bulk move. One file after another to the chosen folder, with the same rules as a single
+ * move (a box file only to another box folder, a phone file not onto the box, between OneDrive accounts by
+ * copy). A new folder is made by the first file that goes; the rest go straight into it. Files already
+ * there are skipped; one that fails is reported and the rest carry on.
+ */
+async function runBulkMove(newFolderName) {
+    const isHz = v => typeof window.scrayIsHetznerVideo === 'function' && window.scrayIsHetznerVideo(v);
+    const progressContainer = document.getElementById('moveProgressContainer');
+    const progressBar = document.getElementById('moveProgressBar');
+    const progressText = document.getElementById('moveProgressText');
+    const progressDetails = document.getElementById('moveProgressDetails');
+    confirmBtn.disabled = true;
+    searchInput.disabled = true;
+    newFolderInput.disabled = true;
+    pathListContainer.style.pointerEvents = 'none';
+    // Cancel becomes Stop: a fresh copy of the button, so its old close-the-dialog listener is gone.
+    const oldCancel = document.getElementById('cancelMoveBtn');
+    const cancelBtn = oldCancel ? oldCancel.cloneNode(true) : null;
+    if (oldCancel && cancelBtn) oldCancel.replaceWith(cancelBtn);
+    let stop = false;
+    if (cancelBtn) { cancelBtn.textContent = 'Stop after this file'; cancelBtn.onclick = () => { stop = true; cancelBtn.textContent = 'Stopping…'; cancelBtn.disabled = true; }; }
+    if (progressContainer) progressContainer.style.display = 'block';
+    let dest = { ...selectedPath }, folder = newFolderName || null;
+    let moved = 0, skipped = 0;
+    const fails = [];
+    for (let i = 0; i < moveList.length && !stop; i++) {
+        const v = moveList[i];
+        confirmBtn.textContent = `Moving ${i + 1} of ${moveList.length}…`;
+        if (progressBar) progressBar.style.width = `${Math.round(i / moveList.length * 100)}%`;
+        if (progressText) progressText.textContent = `Moving ${i + 1} of ${moveList.length}`;
+        if (progressDetails) progressDetails.textContent = v.filename || '';
+        if (dest.path === v.path && dest.accountKey === v.accountKey && !folder) { skipped++; continue; }
+        if (v.path === 'yet-to-upload' || (Array.isArray(v.tags) && v.tags.includes('yet-to-upload'))) {
+            fails.push(`${v.filename}: not uploaded yet`); continue;
+        }
+        const hzSrc = isHz(v), hzDest = isHz({ accountKey: dest.accountKey });
+        if ((hzSrc || hzDest) && hzSrc !== hzDest) {
+            fails.push(`${v.filename}: ${hzSrc ? 'a Hetzner file can only move to another Hetzner folder' : 'a phone / OneDrive file can\'t be moved onto Hetzner from here'}`);
+            continue;
+        }
+        try {
+            if (dest.accountKey !== v.accountKey) await moveFileBetweenAccounts(v, { ...dest }, folder);
+            else await moveFile(v, dest.path, folder);
+            moved++;
+            // The new folder exists now: the rest go straight into it.
+            if (folder) { dest = { ...dest, path: dest.path ? `${dest.path}/${folder}` : folder }; folder = null; }
+        } catch (err) {
+            console.error('[bulk move]', v.filename, err);
+            fails.push(`${v.filename}: ${err.message}`);
+        }
+    }
+    if (progressBar) progressBar.style.width = '100%';
+    const left = moveList.length - moved - skipped - fails.length;
+    const summary = `Moved ${moved}` + (skipped ? ` · ${skipped} already there` : '') + (fails.length ? ` · ${fails.length} failed` : '') + (left > 0 ? ` · ${left} not tried (stopped)` : '');
+    if (progressText) progressText.textContent = summary;
+    if (progressDetails) progressDetails.textContent = '';
+    confirmBtn.textContent = fails.length ? `⚠️ ${summary}` : `✅ ${summary}`;
+    confirmBtn.style.background = fails.length ? '#c0392b' : '#28a745';
+    if (typeof refreshAllLists === 'function') refreshAllLists();
+    if (typeof opts.onDone === 'function') { try { opts.onDone({ moved, skipped, failed: fails.length }); } catch (e) {} }
+    if (fails.length) {
+        alert(`${summary}\n\n` + fails.slice(0, 12).join('\n') + (fails.length > 12 ? `\n…and ${fails.length - 12} more` : ''));
+        if (cancelBtn) { cancelBtn.textContent = 'Close'; cancelBtn.disabled = false; cancelBtn.onclick = () => modal.remove(); }
+    } else {
+        setTimeout(() => modal.remove(), 1500);
+    }
+}
 }
 
 /**

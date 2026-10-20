@@ -8499,6 +8499,7 @@ body.scray-bulk-mode #taggedVideosContainer li.lc-row {
 #bulkActionBar .bulk-convert { background: #fd7e14; }   /* picker 15.88 / native 15.105 */
 #bulkActionBar .bulk-upload  { background: #0078d4; }   /* native 15.155, the ⬆ badge blue */
 #bulkActionBar .bulk-rename  { background: #2ea44f; }   /* native 15.159 */
+#bulkActionBar .bulk-move    { background: #9c27b0; }   /* native 15.172, the single Move button's purple */
 #bulkActionBar .bulk-clear   { background: #333; }
 #bulkActionBar .bulk-all     { background: #f5c518; color: #000; }
 #bulkActionBar .bulk-delete  { display: inline-flex; align-items: center; justify-content: center; }

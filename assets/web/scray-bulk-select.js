@@ -118,6 +118,7 @@
       <button type="button" class="bulk-btn bulk-convert" data-bulk="convert" title="Convert to MP4 (files on the Hetzner box)">MP4</button>
       <button type="button" class="bulk-btn bulk-upload" data-bulk="upload" title="Upload the files that are only on this phone to the library">⬆︎</button>
       <button type="button" class="bulk-btn bulk-rename" data-bulk="rename" title="Rename: use the suggested names, with or without the parent, or type your own">\u270E</button>
+      <button type="button" class="bulk-btn bulk-move" data-bulk="move" title="Move the selected files to one folder">Move</button>
       <button type="button" class="bulk-btn bulk-delete" data-bulk="delete" title="Delete" aria-label="Delete">${BIN_SVG}</button>
       <button type="button" class="bulk-btn bulk-clear" data-bulk="close" title="Turn bulk select off">✕</button>`;
     bar.addEventListener('click', (e) => {
@@ -162,7 +163,7 @@
       const everything = n > 0 && n >= listVideos().length;
       all.textContent = everything ? 'Select none' : 'Select all';
     }
-    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-stash, .bulk-upload, .bulk-rename, .bulk-delete')
+    bar.querySelectorAll('.bulk-basket, .bulk-refresh, .bulk-stash, .bulk-upload, .bulk-rename, .bulk-move, .bulk-delete')
       .forEach(b => { b.disabled = n === 0 || (b.classList.contains('bulk-stash') && ohashBusy); });
     placeBar();
   }
@@ -455,6 +456,14 @@
     if (what === 'rename') {
       if (typeof window.scrayShowBulkRename !== 'function') { alert('Rename is not available here.'); return; }
       window.scrayShowBulkRename(videos);
+      return;
+    }
+
+    // Move (native 15.172): the single-file Move dialog (file-operations.js) with every selected file - one
+    // folder for all, moved in turn; the selection clears once they're done.
+    if (what === 'move') {
+      if (typeof window.showMoveFileModal !== 'function') { alert('Move is not available here.'); return; }
+      await window.showMoveFileModal(videos, { onDone: (r) => { if (r && r.moved) clearSelection(); } });
       return;
     }
 

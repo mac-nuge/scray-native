@@ -4,6 +4,30 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.172 — test: Move in the bulk bar
+<!-- 2026-10-20T05:33Z -->
+- **Asked:** add Move file to the bulk options.
+- **The button:** **Move**, purple like the single Move, after ✎ in the bulk bar (scray-bulk-select.js). It's disabled with nothing selected. It opens the single-file Move dialog (`showMoveFileModal`, file-operations.js) with every selected file, and the selection clears once anything has moved.
+- **The dialog, for several files:** *Move n files*, *first file and n more*, and where they are now (the folder, or *n different folders*). "(current)" is marked only when they all share one folder. Go to Folder / Delete Folder are hidden: the dialog is about the files. Search and the optional new folder work as for one file.
+- **The move (`runBulkMove`):** one file after another, with a single move's rules for each:
+  - A box file only goes to another box folder, and nothing goes onto the box from here.
+  - Between OneDrive accounts it moves by copy, each with its own copy of the destination, because `moveFileBetweenAccounts` appends the new folder to the object it's given.
+  - Files not uploaded yet are refused.
+  - The new folder is made by the first file that moves, and the rest go straight into it, since a cross-account move fails on a folder that already exists.
+  - A file already in the destination is skipped.
+  - One that fails is noted and the rest carry on.
+  - Progress shows in the dialog's bar, and Cancel becomes *Stop after this file*.
+  - At the end the button says *Moved n · n already there · n failed · n not tried*. Failures are listed in an alert and the dialog stays open with Close; otherwise it closes itself.
+- **One file:** unchanged.
+- **Picker:** not changed. It has its own bulk bar; say if it should get Move too.
+- **Tested** (the dialog's real code in Chromium, moves stubbed):
+  - Five files from five folders into Dst with a new folder New: OneDrive moves went to Dst+New, then Dst/New, Dst/New, and one cross-account to Dst/New. The Hetzner file was refused with its reason. Result: 4 moved, 1 failed.
+  - A file already in Dst was skipped.
+  - Stop after the first left the dialog open, with 2 not tried.
+  - A single file was as before ("(current)" marked, Go to Folder / Delete Folder shown).
+  - No page errors.
+- **Files:** assets/web/file-operations.js, assets/web/scray-bulk-select.js, assets/web/style.css. Web layer only: Settings > Reload now.
+
 ### native 15.171 — test: Refresh offers data explorer's box rescans
 <!-- 2026-10-20T04:36Z -->
 - **Asked:** on Native's Refresh button, add ↻ Rescan box and all its options from data explorer, so it can be run from the phone.

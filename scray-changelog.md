@@ -4,6 +4,11 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.135 / native 15.179 — test: redeploy after Hostinger outage
+<!-- 2026-10-20T13:29Z -->
+- **Asked:** a minor change to push, so the deploy can be re-run now Hostinger is back - the earlier pushes landed while its dashboard and API were down.
+- **Change:** this version bump and entry only; no code changed. Picker carries 15.129-15.134 (TikTok mode); native carries 15.173-15.178.
+
 ### picker 15.134 / native 15.178 — test: TikTok mode filter pills on top
 <!-- 2026-10-20T13:05Z -->
 - **Asked (testing 15.133 / 15.177):** after a search term is added, keep the video the same size (it shrinks) and show the pill on top of the player, like FLS / MPFS.

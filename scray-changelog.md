@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.181 — test: browser N back and X closes tab
+<!-- 2026-10-21T06:45Z -->
+- **Asked:** in the in-app browser, make the ‹N / ‹P button always go back to Native, the same as ✕ did, and change ✕ to close the tab instead of the browser.
+- **‹N (ScrayBrowser.swift):** always reads ‹N in Native's green and always closes the browser, putting you back where you were in Native; the tabs stay open behind it. The ‹P trip back to a Picker page (the tab's back history or the Picker tab that opened it, native 14.20) is removed, along with `pickerReturn` / `isPickerURL`. In the ⋯ menu it reads Back to Native.
+- **✕:** closes the tab on screen (`closeTabTapped`), with the tab list's rules: a pinned tab stays (a note says to unpin it first), and closing the last tab leaves a fresh home tab. In the ⋯ menu and Browser Controls it reads Close Tab.
+- **Browser Controls (ScrayBrowserControls.swift):** the can't-be-hidden rule moves from ✕ to ‹N, since ‹N is now the way out. A saved layout with ‹N hidden puts it back on the bottom bar; ✕ can now be hidden.
+- **Tested:** no Swift toolchain here, so not compiled; the diff was checked by hand (every symbol used exists in the same class). Needs an IPA build.
+- **Files:** modules/scray-native/ios/ScrayBrowser.swift, modules/scray-native/ios/ScrayBrowserControls.swift.
+
 ### native 15.180 — test: Hetzner new-files check on load
 <!-- 2026-10-20T13:45Z -->
 - **Asked:** Picker checks the Hetzner box for new files on load (the yellow pill with "(+15)"), but Native doesn't - make it run there too.

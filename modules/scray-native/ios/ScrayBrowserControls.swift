@@ -18,7 +18,8 @@ import UIKit
 //
 // Two rules keep the browser usable whatever is saved:
 //   ⋯  is always a button (top or bottom) - it's the way back to this screen.
-//   ✕  can go in the menu but never be hidden - it's the way out.
+//   ‹N can go in the menu but never be hidden - it's the way out (native
+//      15.181; ✕ only closes the tab now, so it's ‹N that has to stay).
 // ============================================================================
 
 enum ScrayBrowserControl: String, CaseIterable {
@@ -27,7 +28,7 @@ enum ScrayBrowserControl: String, CaseIterable {
     /// The line in the editor, and the ⋯ menu's title when it's placed there.
     var title: String {
         switch self {
-        case .picker:    return "‹P / ‹N  Back to Picker or Native"
+        case .picker:    return "‹N  Back to Native"
         case .back:      return "Back"
         case .forward:   return "Forward"
         case .lastTab:   return "Last Tab"
@@ -36,7 +37,7 @@ enum ScrayBrowserControl: String, CaseIterable {
         case .tabs:      return "Tabs"
         case .downloads: return "Downloads"
         case .more:      return "⋯ Menu"
-        case .close:     return "Close Browser"
+        case .close:     return "Close Tab"
         case .home:      return "Home"
         }
     }
@@ -62,7 +63,7 @@ enum ScrayBrowserControl: String, CaseIterable {
     func allowed(in place: ScrayBrowserPlace) -> Bool {
         switch (self, place) {
         case (.more, .menu), (.more, .hidden): return false
-        case (.close, .hidden):                return false
+        case (.picker, .hidden):               return false
         default:                               return true
         }
     }

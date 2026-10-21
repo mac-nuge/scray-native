@@ -47,9 +47,8 @@ final class ScrayBrowser: NSObject {
     /// `home` is what the house button goes to.
     ///
     /// `fromNative` marks a trip that started in the app's own view rather
-    /// than on a page inside the browser (native 14.49). For that session the
-    /// ‹P button becomes ‹N and closes the browser, putting you back where you
-    /// were in Native - the same thing ‹P does for Picker.
+    /// than on a page inside the browser (native 14.49). ‹N closes the browser
+    /// either way since native 15.181, putting you back where you were.
     func present(url: String?, home: String, fromNative: Bool = false) {
         DispatchQueue.main.async {
             let homeURL = URL(string: home) ?? URL(string: "about:blank")!
@@ -274,17 +273,15 @@ final class ScrayBrowserViewController: UIViewController,
     /// control has been moved off it.
     private var toolbarShownHeight: CGFloat { controlsLayout.controls(in: .bottom).isEmpty ? 0 : 44 }
     private let tabsButton = UIButton(type: .system)
-    /// ‹P (native 14.20) - back to Picker from an external page Picker sent
-    /// you to. See pickerReturn(). Reads ‹N instead when the trip started in
-    /// Native's own view (native 14.49).
+    /// ‹N - back to Native by closing the browser (native 15.181; was ‹P/‹N,
+    /// back to Picker or Native, from 14.20 / 14.49).
     private let pickerButton = UIButton(type: .system)
 
     /// This browser session was opened from Native's own view, so there is
     /// somewhere in Native to go back to. Cleared when the browser closes.
     var cameFromNative = false
     private let newTabButton = UIButton(type: .system)
-    private static let pickerPurple = UIColor(red: 0.424, green: 0.361, blue: 0.906, alpha: 1)  // #6c5ce7
-    /// ‹N wears Native's green, so the two are never mistaken for each other.
+    /// ‹N wears Native's green.
     private static let nativeGreen = UIColor(red: 0.157, green: 0.655, blue: 0.271, alpha: 1)   // #28a745
     private let trayButton = ScrayTrayButton(frame: .zero)
     private let toastView = ScrayToastView(frame: .zero)
@@ -600,12 +597,12 @@ final class ScrayBrowserViewController: UIViewController,
 
         webContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        // ✕ closes the browser. Last in the strip (native 14.50), so the
-        // whole row sits under the right thumb; it was alone at the far left
-        // before. Its own tint, so the one button that ends the session does
-        // not read as just another arrow.
+        // ✕ closes the tab on screen (native 15.181; it closed the browser
+        // before - ‹N does that now). Last in the strip (native 14.50), so the
+        // whole row sits under the right thumb. Its own tint, so it does not
+        // read as just another arrow.
         closeButton.setImage(UIImage(systemName: "xmark", withConfiguration: Self.toolbarSymbol), for: .normal)
-        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+        closeButton.addTarget(self, action: #selector(closeTabTapped), for: .touchUpInside)
         closeButton.tintColor = .secondaryLabel
         backButton.setImage(UIImage(systemName: "chevron.left", withConfiguration: Self.toolbarSymbol), for: .normal)
         backButton.addTarget(self, action: #selector(backTapped), for: .touchUpInside)
@@ -628,12 +625,12 @@ final class ScrayBrowserViewController: UIViewController,
         tabsButton.addTarget(self, action: #selector(tabsTapped), for: .touchUpInside)
         // trayButton is its own class because it carries a badge.
         trayButton.addTarget(self, action: #selector(downloadsTapped), for: .touchUpInside)
-        pickerButton.setTitle("\u{2039}P", for: .normal)
+        // Always ‹N, always back to Native (native 15.181) - it closes the
+        // browser, as ✕ used to. The ‹P trip back to a Picker page is gone.
+        pickerButton.setTitle("\u{2039}N", for: .normal)
         pickerButton.titleLabel?.font = .systemFont(ofSize: Self.TOOLBAR_TITLE_POINTS, weight: .bold)
         pickerButton.addTarget(self, action: #selector(pickerTapped), for: .touchUpInside)
-        // ‹P is always live (native 14.26): back to the Picker page you came
-        // from if there is one, otherwise straight to Picker home.
-        pickerButton.tintColor = Self.pickerPurple
+        pickerButton.tintColor = Self.nativeGreen
         // + opens a new tab (same as "New Tab" in the ⋯ menu).
         newTabButton.setImage(UIImage(systemName: "plus", withConfiguration: Self.toolbarSymbol), for: .normal)
         newTabButton.addTarget(self, action: #selector(newTabTapped), for: .touchUpInside)
@@ -855,7 +852,7 @@ final class ScrayBrowserViewController: UIViewController,
         case .tabs:      tabsTapped()
         case .downloads: downloadsTapped()
         case .more:      moreTapped()
-        case .close:     closeTapped()
+        case .close:     closeTabTapped()
         case .home:      homeTapped()
         }
     }
@@ -866,7 +863,7 @@ final class ScrayBrowserViewController: UIViewController,
         var enabled = true
         switch c {
         case .picker:
-            title = (pickerReturn() == nil && cameFromNative) ? "Back to Native" : "Back to Picker"
+            title = "Back to Native"
         case .back:      enabled = currentWebView?.canGoBack ?? false
         case .forward:   enabled = currentWebView?.canGoForward ?? false
         case .lastTab:   enabled = lastTabIndex != nil
@@ -1456,7 +1453,17 @@ final class ScrayBrowserViewController: UIViewController,
 
     // MARK: - Actions
 
+    /// Closes the browser - what ‹N does (native 15.181). The tabs stay open
+    /// behind it for next time.
     @objc private func closeTapped()   { dismiss(animated: true) }
+
+    /// ✕ closes the tab on screen (native 15.181), no longer the browser.
+    /// Same rules as closing it from the tab list: a pinned tab stays until
+    /// it's unpinned, and closing the last tab leaves a fresh home tab.
+    @objc private func closeTabTapped() {
+        if currentTab?.pinned == true { flash("Pinned tab - unpin it to close"); return }
+        closeTab(currentIndex)
+    }
 
     // MARK: - Upload pill (native 14.37)
 
@@ -1519,60 +1526,16 @@ final class ScrayBrowserViewController: UIViewController,
         ScrayNativeView.current?.refreshLocalFolder()
     }
     @objc private func homeTapped()    { openOrFocus(homeURL) }
-    // MARK: - ‹P, back to Picker (native 14.20)
-    //
-    // Lit only on an external page that Picker sent you to. Two ways that
-    // happens, and ‹P undoes whichever it was:
-    //   - the page opened in THIS tab from Picker (a plain link): Picker is in
-    //     the tab's back history, so ‹P jumps back to the latest Picker page
-    //     in it - however many external pages you've clicked through since;
-    //   - Picker opened it in a NEW tab (target=_blank, or scraynative://newtab
-    //     for its Stash / TinEye searches): the tab's opener is Picker's tab,
-    //     so ‹P switches to that tab and leaves this one open behind it.
-    private func isPickerURL(_ url: URL?) -> Bool {
-        guard let host = url?.host?.lowercased(), !host.isEmpty else { return false }
-        return host == (homeURL.host ?? "").lowercased()
-    }
+    // MARK: - ‹N, back to Native
 
-    private enum PickerReturn { case history(WKBackForwardListItem), tab(Int) }
+    /// ‹N, always (native 15.181): back to Native by closing the browser,
+    /// whatever page or tab you're on and however you got here. The tabs stay
+    /// open behind it.
+    @objc private func pickerTapped() { closeTapped() }
 
-    private func pickerReturn() -> PickerReturn? {
-        guard let tab = currentTab else { return nil }
-        let here = tab.displayURL
-        let scheme = (here?.scheme ?? "").lowercased()
-        guard scheme == "http" || scheme == "https", !isPickerURL(here) else { return nil }
-        if let item = tab.webView.backForwardList.backList.last(where: { isPickerURL($0.url) }) {
-            return .history(item)
-        }
-        if let opener = tab.opener,
-           let idx = tabs.firstIndex(where: { $0.webView === opener }),
-           isPickerURL(tabs[idx].displayURL) {
-            return .tab(idx)
-        }
-        return nil
-    }
-
-    @objc private func pickerTapped() {
-        switch pickerReturn() {
-        case .history(let item)?: currentWebView?.go(to: item)
-        case .tab(let idx)?:      selectTab(idx)
-        case nil:
-            // ‹N: back to Native, where this trip started. Closing the browser
-            // IS that - the app's view is still on the page that sent you -
-            // and the tabs stay open behind it, as they do for ✕.
-            if cameFromNative { closeTapped() }
-            else { openOrFocus(homeURL) }   // no trail either way - act as Picker home
-        }
-    }
-
-    /// ‹P, or ‹N when this session came from Native and this page has no
-    /// Picker trail of its own (native 14.49). Called from refreshChrome, so
-    /// it follows the tab you are on.
-    private func refreshPickerItem() {
-        let native = (pickerReturn() == nil) && cameFromNative
-        pickerButton.setTitle(native ? "\u{2039}N" : "\u{2039}P", for: .normal)
-        pickerButton.tintColor = native ? Self.nativeGreen : Self.pickerPurple
-    }
+    /// Nothing left to follow now ‹N never changes; kept so the callers in
+    /// refreshChrome and the tab observers stay as they are.
+    private func refreshPickerItem() {}
 
     @objc private func backTapped()    { if currentWebView?.canGoBack == true { currentWebView?.goBack() } }
     @objc private func forwardTapped() { if currentWebView?.canGoForward == true { currentWebView?.goForward() } }

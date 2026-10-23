@@ -73,7 +73,26 @@ console.log("scray-twoway.js loaded");
   const PREPARE_LIMIT = 12000;  // ms for prepare() as a whole, then the plain way
   const PASS_AGAIN_MS = 2000;   // a piece given up on is tried again after this
   const STALL_MS      = 8000;   // playing, not moving, this long = stuck
+  const START_NUDGE_MAX = 1.0;  // s: a first picture later than this is not a start gap, and is left alone (15.139 / 15.183)
   const STATS_EVERY   = 500;    // ms between overlay repaints
+
+  /**
+   * The start gap (picker 15.139 / native 15.183). The chunker lays the picture down `lead` later than the sound
+   * starts, to keep the two as far apart as the file's edit lists say (the sound's priming is trimmed there). With
+   * ordinary AAC that is ~21 ms; with HE-AAC - what Instagram and TikTok downloads have - it is ~115 ms. Safari starts
+   * from a playhead that has a picture under it, and will not from one that has none: the video sat frozen at 0:00
+   * with everything "buffered", and only the stall watchdog's 8 s fallback to the plain path got it going.
+   * Returns the time to move the playhead to - just onto the first picture - or null when it should be left alone:
+   * not at the very start, seeking, no gap, or the picture not in the player yet.
+   * firstPic: seconds; t: currentTime; ranges: [[start, end], ...] of what the element holds.
+   */
+  function startNudge(firstPic, t, ranges, seeking) {
+    if (!(firstPic > 0.001) || firstPic > START_NUDGE_MAX || seeking) return null;
+    if (t >= firstPic - 0.001 || t > START_NUDGE_MAX) return null;
+    const to = firstPic + 0.002;
+    for (const [s, e] of ranges) if (s <= to && e > to) return to;
+    return null;
+  }
 
   const MSClass = window.ManagedMediaSource || window.MediaSource || null;
   const MANAGED = !!window.ManagedMediaSource;
@@ -280,6 +299,13 @@ console.log("scray-twoway.js loaded");
       this.h = {
         seeking: () => this.onSeeking(),
         timeupdate: () => { if (performance.now() - this.lastSchedule > 1000) this.schedule(); },
+        // Frozen at the very start with a picture only a little way in (see startNudge).
+        loadedmetadata: () => this.nudgeStart(),
+        loadeddata: () => this.nudgeStart(),
+        canplay: () => this.nudgeStart(),
+        waiting: () => this.nudgeStart(),
+        stalled: () => this.nudgeStart(),
+        progress: () => this.nudgeStart(),
         // A fragment the decoder rejects: carry on from the plain URL.
         error: () => {
           if (this.useObj ? media.srcObject !== this.mms : media.currentSrc !== this.url) return;
@@ -336,6 +362,21 @@ console.log("scray-twoway.js loaded");
       this.ops.push({ append: this.initBuf, seg: null });
       this.pump();
       this.schedule();
+    }
+
+    /** Move the playhead onto the first picture when it starts a little after 0 (see startNudge). */
+    nudgeStart() {
+      const m = this.media, first = this.pl && this.pl.firstPic;
+      if (this.dead || !m || !(first > 0)) return;
+      const now = performance.now();
+      if (now - (this.lastNudge || 0) < 400) return;
+      const ranges = [];
+      try { const b = m.buffered; for (let k = 0; k < b.length; k++) ranges.push([b.start(k), b.end(k)]); } catch { return; }
+      const to = startNudge(first, m.currentTime, ranges, m.seeking);
+      if (to == null) return;
+      this.lastNudge = now;
+      log(`start gap: the first picture is at ${Math.round(first * 1000)} ms - moving the playhead onto it`);
+      try { m.currentTime = to; } catch {}
     }
 
     // --- buffer bookkeeping
@@ -459,7 +500,7 @@ console.log("scray-twoway.js loaded");
         } else { this.misses = 0; this.held.add(op.seg); }
       }
       this.pump();
-      if (op && op.seg != null) this.schedule();
+      if (op && op.seg != null) { this.schedule(); this.nudgeStart(); }
     }
     maybeEnd() {
       if (this.mms.readyState !== "open" || this.inflight.size || this.queued.size) return;
@@ -795,7 +836,8 @@ console.log("scray-twoway.js loaded");
     return {
       kind: "chunked",
       ix,
-      pl: { segs: ix.segs, total: ix.total },
+      // firstPic: where the first picture lands in the pieces (buildSegment: dts + cts - shift + lead), in seconds.
+      pl: { segs: ix.segs, total: ix.total, firstPic: (ix.v.dts[0] + ix.v.cts[0] - ix.v.shift + ix.v.lead) / ix.v.timescale },
       initBuf: C.initSegment(ix),
       load: async (i, read) => {
         const rs = C.rangesFor(ix, i);
@@ -1148,6 +1190,6 @@ console.log("scray-twoway.js loaded");
     get originalUrl() { return session ? session.base : null; },
     get active() { return !!session; },
     get note() { return lastNote; },
-    _test: { codecsFromInit },
+    _test: { codecsFromInit, startNudge },
   };
 })();

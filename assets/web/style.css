@@ -7685,6 +7685,35 @@ specificity (the extra .lc-row class). */
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-group-actions .lc-group-basket.lc-group-basket-remove {
   background: #6c757d;
 }
+/* Select folder (bulk mode only) and Download all (picker 15.138 / native 15.182), the same size as the basket button. */
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-group-actions :is(.lc-group-select, .lc-group-download) {
+  flex: 0 0 auto;
+  width: auto !important;
+  margin: 0 !important;
+  padding: 5px 10px !important;
+  min-height: 28px;
+  font-size: 0.72rem !important;
+  line-height: 1.1;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-group-actions .lc-group-download {
+  background: #1f6feb;
+}
+/* Yellow like the Bulk button; a ticked folder goes solid. */
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-group-actions .lc-group-select {
+  background: #f1c40f;
+  color: #222;
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-group-actions .lc-group-select.lc-group-select-on {
+  background: #b7950b;
+  color: #fff;
+}
+:is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-group-actions .lc-group-select[hidden] {
+  display: none !important;
+}
 :is(#taggedVideosContainer, #playlist, #historyList, #basketList) .lc-group-summary {
   min-width: 0;
   font-size: 0.68rem;

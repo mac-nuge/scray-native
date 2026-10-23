@@ -43,7 +43,10 @@ console.log("scray-twoway.js loaded");
 (function () {
   const CFG_KEY = "scray.twoway";
   // On by default (15.25). From 15.27 that means every Hetzner mp4/m4v/mov.
-  const DEFAULTS = { enabled: true, behind: 30, ahead: 60 };
+  // minMB: a Hetzner file smaller than this plays the usual way, not through the
+  // loader (15.138 / native 15.182) - 0 turns that off. 100 matches the "misc
+  // <100mb" folder lines. A file whose size isn't known still goes two-way.
+  const DEFAULTS = { enabled: true, behind: 30, ahead: 60, minMB: 100 };
   // The stats box is "buffer i" in the player's ... menu (native 15.26), off
   // until tapped. Its own key, so an older saved "stats" setting doesn't count.
   const INFO_KEY = "scray.bufferInfo";
@@ -228,6 +231,7 @@ console.log("scray-twoway.js loaded");
   let session = null;       // the one loader, while a video plays two-way
   let budgetCap = BUDGET_START;   // learned down this page load (see BUDGET_START)
   let prepSeq = 0;          // a newer prepare() makes an older one give up
+  let prepAbort = null;     // cancels the index reads of a prepare() that has been overtaken
   let lastNote = "";        // why the last play did or didn't go two-way
 
   class Session {
@@ -537,7 +541,7 @@ console.log("scray-twoway.js loaded");
         return { r, buf: await r.arrayBuffer() };
       });
       if (r.status === 403 || r.status === 410) {
-        await this.refreshUrl();
+        await this.refreshUrl(`HTTP ${r.status}, link expired`);
         const e = new Error(`HTTP ${r.status}`); e.retryNow = true; throw e;
       }
       if (r.status !== 206 && r.status !== 200) throw new Error(`HTTP ${r.status}`);
@@ -549,10 +553,10 @@ console.log("scray-twoway.js loaded");
       return { buf, total: null };
     }
 
-    async refreshUrl() {
+    async refreshUrl(why) {
       if (!this.refreshing) {
         this.refreshing = (async () => {
-          log("signed URL expired - asking for a new one");
+          log(`asking for a new link (${why || "needed"})`);
           this.n.refreshes++;
           if (typeof window.scrayHetznerRefresh !== "function") throw new Error("no refresh available");
           const v = await window.scrayHetznerRefresh(this.video);
@@ -591,7 +595,7 @@ console.log("scray-twoway.js loaded");
             // fresh one first (picker 15.108 / native 15.129).
             const go = () => { if (!this.have(i)) this.fetchSeg(i, attempt + 1); };
             if (attempt >= 1 && !(e && e.retryNow)) {
-              this.refreshUrl().catch(err => log("fresh link failed:", err && err.message)).finally(() => { if (!this.dead) go(); });
+              this.refreshUrl("second failure").catch(err => log("fresh link failed:", err && err.message)).finally(() => { if (!this.dead) go(); });
             } else {
               this.later(go, e && e.retryNow ? 0 : 400 * (attempt + 1));
             }
@@ -609,7 +613,7 @@ console.log("scray-twoway.js loaded");
       if (this.dead) return;
       for (const [, ac] of this.inflight) { try { ac.abort(); } catch {} this.n.aborted++; }
       this.inflight.clear();
-      this.refreshUrl()
+      this.refreshUrl("stalled")
         .catch(err => log("fresh link failed:", err && err.message))
         .finally(() => { if (!this.dead) this.schedule(); });
     }
@@ -688,9 +692,23 @@ console.log("scray-twoway.js loaded");
     lastNote = "";
     const my = ++prepSeq;
     const stale = () => my !== prepSeq;
+    // Skipping through videos left each one's index reads running (they had no
+    // way to be cancelled) and they queued the next video's requests behind
+    // them. A newer prepare() now cancels the older one's reads.
+    if (prepAbort) { try { prepAbort.abort(); } catch {} }
+    prepAbort = new AbortController();
+    const prepSignal = prepAbort.signal;
     const c = cfg();
     try {
       if (!c.enabled && !opts.force) { lastNote = "off in Settings"; return null; }
+      // Small files: the plain player fetches a few MB in a moment, where the
+      // loader costs an extra link, two index reads and a MediaSource first -
+      // and was the thing stuck at 0.0 s on them. (opts.force is the rescue
+      // for a file the plain player refused - that still chunks.)
+      if (!opts.force && c.minMB > 0) {
+        const size = Number(video && video.sizeBytes) || 0;
+        if (size > 0 && size < c.minMB * MB) { lastNote = `small file (under ${c.minMB} MB) - played the usual way`; return null; }
+      }
       if (!MSClass) { lastNote = "no MediaSource in this WebView"; log(lastNote); return null; }
       const base = video && video.downloadUrl;
       if (!base || !/^https?:/.test(base)) { lastNote = "not a streamed file"; return null; }
@@ -706,11 +724,14 @@ console.log("scray-twoway.js loaded");
         let limitT = null;
         const limit = new Promise((_, rej) => { limitT = setTimeout(() => {
           const e = new Error(`index not read in ${PREPARE_LIMIT / 1000} s`); e.timeout = true; rej(e); }, PREPARE_LIMIT); });
-        try { src = await Promise.race([openChunked(video, base), limit]); }
+        try { src = await Promise.race([openChunked(video, base, prepSignal), limit]); }
         finally { clearTimeout(limitT); }
         describeOnce(video, src.ix);
       }
-      catch (e) { lastNote = "can't chunk: " + (e && e.message); log(lastNote, "-", video.filename); return null; }
+      catch (e) {
+        if (stale() || (e && e.name === "AbortError")) return null;     // overtaken - nothing to report
+        lastNote = "can't chunk: " + (e && e.message); log(lastNote, "-", video.filename); return null;
+      }
       const mime = pickMime(src.initBuf);
       if (!mime) { lastNote = "codec not supported here"; return null; }
       const useObj = await srcObjectWorks();
@@ -738,7 +759,7 @@ console.log("scray-twoway.js loaded");
   const INDEX_KEEP = 3;
   const indexCache = new Map();
 
-  async function openChunked(video, base) {
+  async function openChunked(video, base, signal) {
     const C = window.scrayMp4Chunks;
     const key = video.videoKey || video.filename || base;
     let ix = indexCache.get(key);
@@ -747,7 +768,7 @@ console.log("scray-twoway.js loaded");
       // Each read has a limit, and is tried once more - with a fresh link if
       // the old one had run out (picker 15.108 / native 15.129).
       let url = base;
-      const readOnce = (off, len) => withTimeout(INDEX_TIMEOUT, null, async (sig) => {
+      const readOnce = (off, len) => withTimeout(INDEX_TIMEOUT, signal || null, async (sig) => {
         const r = await fetch(url, { headers: { Range: `bytes=${off}-${off + len - 1}` }, signal: sig });
         if (r.status === 403 || r.status === 410) { const e = new Error(`HTTP ${r.status} reading the index`); e.expired = true; throw e; }
         if (r.status !== 206) throw new Error(`HTTP ${r.status} reading the index`);
@@ -758,6 +779,7 @@ console.log("scray-twoway.js loaded");
       const read = async (off, len) => {
         try { return await readOnce(off, len); }
         catch (e) {
+          if (signal && signal.aborted) throw e;          // overtaken: don't retry
           log(`index read failed (${e && e.message}) - once more${e && e.expired ? " with a fresh link" : ""}`);
           if (e && e.expired && typeof window.scrayHetznerRefresh === "function") {
             const v = await window.scrayHetznerRefresh(video);
@@ -1080,13 +1102,24 @@ console.log("scray-twoway.js loaded");
           l.append(i, document.createTextNode(text)); wrap.appendChild(l); return i;
         };
         const en = check("Use it for Hetzner videos", c.enabled);
+        const mn = (() => {
+          const l = document.createElement("label"); l.style.cssText = rowCss;
+          const i = document.createElement("input"); i.type = "number"; i.min = "0"; i.max = "5000"; i.step = "10";
+          i.inputMode = "numeric"; i.value = String(c.minMB); i.style.cssText = inputCss;
+          l.append(i, document.createTextNode("MB: files smaller than this play the usual way (0 = all go two-way)"));
+          wrap.appendChild(l); return i;
+        })();
         const be = num("seconds kept behind the playhead", c.behind);
         const ah = num("seconds loaded ahead", c.ahead);
         const clamp = (v, d) => { const n = Math.round(Number(v)); return isFinite(n) && n >= 5 ? Math.min(600, n) : d; };
         return {
           el: wrap,
-          value: () => ({ enabled: en.checked, behind: clamp(be.value, DEFAULTS.behind),
-                          ahead: clamp(ah.value, DEFAULTS.ahead) }),
+          value: () => {
+            const m = Math.round(Number(mn.value));
+            return { enabled: en.checked, behind: clamp(be.value, DEFAULTS.behind),
+                     ahead: clamp(ah.value, DEFAULTS.ahead),
+                     minMB: isFinite(m) && m >= 0 ? Math.min(5000, m) : DEFAULTS.minMB };
+          },
           focus: () => {},
         };
       },

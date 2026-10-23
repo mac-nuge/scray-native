@@ -26,6 +26,12 @@
 // Stash knows. The files it matched are unticked, the rest stay selected.
 // picker 15.119 / native 15.141: no button of its own - S asks which: Quick
 // check (that ohash check) or Manual edit (the Stash details form).
+//
+// picker 15.138 / native 15.182: a "misc <100mb" folder line has a Select
+// folder button (render.js) while the mode is on - it ticks every file in the
+// folder through scrayBulkSelection.setVideos, so the bar's actions then apply
+// to the folder. Every change to the mode or the ticks fires 'scray-bulk-change'
+// on document, which the folder lines listen to for their button's wording.
 
 (function scrayBulkSelect() {
   if (window.__scrayBulkSelectBound) return;
@@ -155,6 +161,8 @@
     const n = selected.size;
     ensureBar();
     bar.hidden = !bulkOn;
+    // The folder lines' Select folder buttons follow the mode and the ticks.
+    try { document.dispatchEvent(new CustomEvent('scray-bulk-change')); } catch (e) { /* cosmetic */ }
     if (!bulkOn) return;
     const count = bar.querySelector('#bulkCount');
     if (count) count.textContent = String(n);
@@ -700,6 +708,19 @@
     videos: () => [...selected.values()],
     clear: clearSelection,
     setMode: setBulkMode,
+    // A folder line's Select folder (render.js): tick or untick a set of files.
+    setVideos: (videos, on) => {
+      (videos || []).forEach(v => {
+        const id = idOf(v);
+        if (!id) return;
+        if (on) selected.set(id, v); else selected.delete(id);
+      });
+      paintAll();
+    },
+    hasAll: (videos) => {
+      const list = (videos || []).filter(v => idOf(v));
+      return list.length > 0 && list.every(v => selected.has(idOf(v)));
+    },
     // A column set to "Bulk select this line" (render.js, Tap a column):
     // turns the mode on and takes that line.
     selectRow: (li) => {

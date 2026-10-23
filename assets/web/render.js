@@ -1611,7 +1611,43 @@ function scrayBuildGroupRow(group, number, cfg) {
       window.scrayAddVideosToBasket(group.members);
     }
   });
-  actions.append(basketBtn, summary);
+
+  // Select folder (picker 15.138 / native 15.182): only while bulk select is on,
+  // and only in the main list, which is the one the mode works on. It ticks
+  // every file in the folder, so the bulk bar's actions then apply to them.
+  const selectBtn = document.createElement('button');
+  selectBtn.type = 'button';
+  selectBtn.className = 'lc-group-select';
+  const syncSelectBtn = () => {
+    const bulk = window.scrayBulkSelection;
+    const show = list === 'main' && !!bulk && typeof bulk.isOn === 'function' && bulk.isOn();
+    selectBtn.hidden = !show;
+    if (!show) return;
+    const all = bulk.hasAll(group.members);
+    selectBtn.textContent = all ? 'Deselect folder' : 'Select folder';
+    selectBtn.classList.toggle('lc-group-select-on', all);
+  };
+  li._scraySyncGroupBulk = syncSelectBtn;
+  syncSelectBtn();
+  selectBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const bulk = window.scrayBulkSelection;
+    if (!bulk || typeof bulk.setVideos !== 'function') return;
+    bulk.setVideos(group.members, !bulk.hasAll(group.members));
+  });
+
+  // Download all: every file in the folder, in turn (window.scrayDownloadMany).
+  const downloadBtn = document.createElement('button');
+  downloadBtn.type = 'button';
+  downloadBtn.className = 'lc-group-download';
+  downloadBtn.textContent = 'Download all';
+  downloadBtn.title = `Download the ${group.members.length} files in this folder`;
+  downloadBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    window.scrayDownloadMany(group.members);
+  });
+
+  actions.append(basketBtn, selectBtn, downloadBtn, summary);
 
   const members = document.createElement('ul');
   members.className = 'lc-group-list';
@@ -1641,6 +1677,52 @@ function scrayBuildGroupRow(group, number, cfg) {
 }
 window.scrayBuildGroupRow = scrayBuildGroupRow;
 
+/**
+ * Download a set of files one after another (picker 15.138 / native 15.182) -
+ * the folder line's Download all. Each gets a fresh link first, as the single
+ * D button does, and files still to upload are skipped. A Hetzner file goes to
+ * the app's download list (scrayHetznerDownload) exactly as D does.
+ */
+const SCRAY_DOWNLOAD_GAP_MS = 200;   // ⚙️ between one file's download starting and the next
+window.scrayDownloadMany = async function (videos) {
+  const say = (msg, colour) => {
+    if (typeof window.showSyncConfirmation === 'function') window.showSyncConfirmation(msg, colour);
+    else console.log('[download-all]', msg);
+  };
+  const list = (videos || []).filter(v => v && !scrayListIsYetToUpload(v));
+  if (!list.length) { say('⚠️ Nothing here to download', '#c0392b'); return; }
+  const bytes = list.reduce((n, v) => n + (Number(v.sizeBytes) || 0), 0);
+  if (!confirm(`Download ${list.length} file${list.length === 1 ? '' : 's'}${bytes ? ` (${formatFileSize(bytes)})` : ''}?`)) return;
+  let started = 0, failed = 0;
+  for (const video of list) {
+    try {
+      const vid = await refreshVideoBeforeUse(video);
+      if (!vid || !vid.downloadUrl) { failed++; continue; }
+      if (typeof window.scrayHetznerDownload === 'function' && window.scrayHetznerDownload(vid)) {
+        started++;            // native 15.10: into the app's download list
+      } else {
+        // Anything else: a link click, so this page stays where it is
+        // (window.location.href would navigate Native away).
+        const a = document.createElement('a');
+        a.href = vid.downloadUrl;
+        a.download = vid.filename || '';
+        a.rel = 'noopener';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        started++;
+      }
+    } catch (err) {
+      console.warn('[download-all] failed for', video && video.filename, err);
+      failed++;
+    }
+    await new Promise(r => setTimeout(r, SCRAY_DOWNLOAD_GAP_MS));
+  }
+  say(failed ? `⚠️ Started ${started} download${started === 1 ? '' : 's'}, ${failed} failed` : `✅ Started ${started} download${started === 1 ? '' : 's'}`,
+      failed ? '#c0392b' : undefined);
+};
+
 /** Group lines follow the basket too: pink when the whole folder is in, and the button's wording. */
 function scrayRefreshGroupBasketState() {
   document.querySelectorAll('#taggedVideosContainer li.lc-group').forEach(g => {
@@ -1649,6 +1731,13 @@ function scrayRefreshGroupBasketState() {
     if (typeof g._scraySyncGroupBasket === 'function') g._scraySyncGroupBasket();
   });
 }
+
+/** Select folder follows bulk select: shown while the mode is on, worded by whether every file is ticked. */
+document.addEventListener('scray-bulk-change', () => {
+  document.querySelectorAll('#taggedVideosContainer li.lc-group').forEach(g => {
+    if (typeof g._scraySyncGroupBulk === 'function') g._scraySyncGroupBulk();
+  });
+});
 
 /**
 * Render a list of videos into a given container.

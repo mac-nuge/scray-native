@@ -4,6 +4,19 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.138 / native 15.182 — test: folder bulk actions, small files play the usual way
+<!-- 2026-10-23T06:30Z -->
+- **Asked:** on a "misc <100mb" folder line, put bulk actions where Add folder to basket is - a Download that applies to every file in the folder, and bulk select when bulk is on. Also: some small files won't stream or take a long time to start (a report was filed while trying to play them; TikTok mode plays them fine).
+- **Folder line (render.js, scray-bulk-select.js, style.css):**
+  - **Download all** (blue) is beside Add folder to basket. It asks first (*Download n files (size)?*), then goes through the files in turn, each with a fresh link as the D button does; files still to upload are skipped. Native: a Hetzner file goes into the app's download list exactly as D does (`scrayHetznerDownload`); anything else is a link click. The new `window.scrayDownloadMany` does the work.
+  - **Select folder** (yellow) shows only while bulk select is on, in the main list. It ticks every file in the folder (*Deselect folder* when all are ticked), so the bulk bar's actions - B, Ref, S, MP4, rename, move, delete - then apply to the folder. `scrayBulkSelection` gained `setVideos` / `hasAll`, and fires `scray-bulk-change` on document so the button follows the mode and the ticks.
+- **Small files (scray-twoway.js):** the report shows every one of these files being stuck at 0.0 s for 8 s on the two-way path, then playing normally after the watchdog fell back to the plain path - and TikTok mode, which never uses the loader, was fine. A 3 MB file doesn't need the loader (a fresh link, two index reads and a MediaSource before the first frame), so a Hetzner file under **100 MB** now plays the usual way. Settings > Two-way buffer has a new box for the size (0 = everything goes two-way). A file with no known size still goes two-way, and the rescue for a file the plain player refuses still chunks.
+- **Skipping through videos (scray-twoway.js):** the index reads of a video you had already skipped past had no way to be cancelled, and queued the next video's requests behind them. A newer `prepare()` now cancels the older one's reads, quietly.
+- **Log wording (scray-twoway.js):** `signed URL expired - asking for a new one` was also logged for a stall, where nothing had expired. It now says why: `asking for a new link (stalled / HTTP 403, link expired / second failure)`.
+- **Not confirmed:** why the loader stalls at 0.0 s on these files isn't proven from the report alone - it never logged a failed piece. The two changes above remove it for small files and for fast skipping; a big file that stalls will still show in the log with the new wording.
+- **Tested** (the real native files in headless Chromium at 390 px): folder line with three files - Select folder hidden with bulk off, shown with it on, ticked all three (bar count 3), unticked them, hidden again when bulk went off; Download all asked *Download 3 files (8.6 MB)?* and started 3 downloads (all three through scrayHetznerDownload, none as link clicks). Two-way: a 3 MB file returns the usual way with the new note; 500 MB, unknown size, `force`, and minMB 0 all still try to chunk; a prepare overtaken by a newer one cancels its index fetch and logs nothing. No page errors. Not tried against the real box or on a phone.
+- **Files:** assets/web/render.js, assets/web/scray-bulk-select.js, assets/web/scray-twoway.js, assets/web/style.css, assets/web/VERSION, scray-changelog.md.
+
 ### native 15.181 — test: browser N back and X closes tab
 <!-- 2026-10-21T06:45Z -->
 - **Asked:** in the in-app browser, make the ‹N / ‹P button always go back to Native, the same as ✕ did, and change ✕ to close the tab instead of the browser.

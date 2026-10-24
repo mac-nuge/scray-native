@@ -4,8 +4,9 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
-### picker 15.139 / native 15.183 — test: short videos no longer freeze at the start of the two-way player
+### picker 15.139 / native 15.183 — stable: short videos no longer freeze at the start of the two-way player
 <!-- 2026-10-23T23:25Z -->
+- **Stable (2026-10-24):** Mac confirmed short videos play in the normal player and MPB after this change ('works!').
 - **Asked (native, with a console log):** short videos (a few seconds) freeze in the normal player, and in MPB, but play in TikTok mode and in MPFS after switching to it. Buffering was ruled out.
 - **What the log showed:** `Boutine Los Angeles - Shop link in bio.mp4`, 10 s, 1.5 MB, two pieces. The two-way player opened, `startstreaming` and `loadedmetadata` fired, and then nothing moved: 0:00 / 0:00 with 99% buffered. The `Playback failed: AbortError` came later, when something tore the player down, and the `buffered ranges removed` / `dropped 1 piece` lines straight after it are that teardown, not the cause.
 - **Cause (from the file's own layout; not yet seen on a phone):** the chunker lays the picture down later than the sound starts, to keep the two as far apart as the file's edit lists say (`v.lead`, from the audio's priming trim). For this file's audio (HE-AAC, `mp4a.40.5`, a start offset of 5058 samples at 44.1 kHz) that puts the first picture at **115 ms**. Ordinary AAC gives about 23 ms, and the long videos in the same log have no offset at all. Safari starts from a playhead that has a picture under it; with data in from 115 ms and the playhead at 0 it sat there. TikTok mode and the plain player never go through the chunker. (Inference, not checked: MPFS probably moves the playhead as it opens, which would get it going.) It also fits the 15.182 report, where small files stayed at 0.0 s until the 8 s watchdog fell back to the plain path.

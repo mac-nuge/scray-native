@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.188 — test: TT presses X for you
+<!-- 2026-10-25T08:12Z -->
+- **Reported:** TT kept saying the player was not ready (15.187's message).
+- **Cause:** `playVideoInline` is a plain function inside player.js and is not on `window`, so `window.playVideoInline` was never a function when TikTok mode tried to start. 15.187's check just made that visible; before it the start was skipped without a word. This is why TT only ever toggled the mode.
+- **Fix (scray-reels.js):** after the portrait filter is on and the list holds a playable video, TT clicks the X button - the same as toggling TikTok mode and pressing X yourself. X picks a random video from the list as it stands (its usual recent-play rules) and, with the mode on, plays it in the TikTok overlay. The wait for the list (up to 4 s) and the toast when it is empty are kept.
+- **Tested:** `node --check`. **Not tested** on a phone.
+- **Files:** assets/web/scray-reels.js, assets/web/VERSION, scray-changelog.md.
+
 ### native 15.187 — test: TT starts the player, not just the mode
 <!-- 2026-10-25T08:10Z -->
 - **Reported:** TT only toggled TikTok mode on and off; nothing played.

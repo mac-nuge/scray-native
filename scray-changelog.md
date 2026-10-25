@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.187 — test: TT starts the player, not just the mode
+<!-- 2026-10-25T08:10Z -->
+- **Reported:** TT only toggled TikTok mode on and off; nothing played.
+- **Cause (from the code; not seen on a phone):** `start()` read the list once, 150 ms after the portrait filter was switched on. The filter redraws the list asynchronously, so on a slow redraw the list held nothing playable yet, and the only sign was a small toast at the bottom that could be missed.
+- **Fix (scray-reels.js):** `start()` now waits for the list to hold a playable portrait video (checks every 0.2 s, up to 4 s), then plays a random one in TikTok mode. If there is still nothing it says how many videos the list held, and if the player is not ready or the video is refused or throws, it says so in a toast instead of staying silent.
+- **Tested:** `node --check`. **Not tested** on a phone.
+- **If it still only toggles:** the toast now says why - send me its wording.
+- **Files:** assets/web/scray-reels.js, assets/web/VERSION, scray-changelog.md.
+
 ### native 15.186 — test: TT button after H in the corner row
 <!-- 2026-10-25T08:05Z -->
 - **Reported:** TT still did not show after 15.185. The row you see is not index.html's: disguise.js shows only the buttons named in its `ROW_IDLE` list, in that order (X R H X^n Xb X^T B() H()) and hides the rest, so TT was hidden wherever it sat in the markup.

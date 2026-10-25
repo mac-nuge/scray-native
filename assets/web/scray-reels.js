@@ -42,6 +42,7 @@
   const FLICK_PX = 60;          // a drag this long moves on
   const FLICK_V = 0.45;         // ...or a flick this fast (px per ms)
   const MUTE_KEY = 'scray_reels_muted';
+  const ORDER_KEY = 'scray_reels_order';      // 'random' (default) or 'ordered'
   // Containers the web player can't decode (player.js SCRAY_UNPLAYABLE_EXT).
   const NO_PLAY = new Set(['mkv', 'wmv', 'avi', 'flv', 'mpg', 'mpeg', 'rm', 'rmvb', 'asf',
                            'f4v', 'vob', 'divx', 'ogv', 'mts', 'm2v']);
@@ -176,6 +177,7 @@
     const fresh = (items || []).filter(it => idOf(it.video) !== curId);
     if (!fresh.length) { toast('Nothing else matches - keeping the current run'); return; }
     R.pool = items;                     // the whole match, this one included, for the reshuffles after
+    R.source = items;
     R.items = R.items.slice(0, R.index + 1).concat(shuffled(fresh));
     ensureAhead();
     fill(R.slots[2], R.index + 1, 'auto');
@@ -321,6 +323,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
       '<div class="sr-pause">&#9654;</div>' +
       '<div class="sr-top"><span class="sr-count"></span></div><div class="sr-pills"></div>' +
       '<div class="sr-ctl"><button type="button" class="sr-btn mute" aria-label="Sound"></button>' +
+      '<button type="button" class="sr-btn order" aria-label="Order"></button>' +
       '<button type="button" class="sr-btn stop">Stop</button>' +
       '<button type="button" class="sr-btn mpfs" title="Leave TikTok mode and carry on in the normal portrait player (MPFS)">MPFS</button></div>' +
       '<div class="sr-seek"><div class="sr-ts">0:00 / 0:00</div><div class="sr-track"><div class="sr-buf"></div><div class="sr-fill"></div></div></div>' +
@@ -333,11 +336,12 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
       seek: root.querySelector('.sr-seek'), track: root.querySelector('.sr-track'),
       curPlaying: false, waiters: [], waitT: 0, autoMuted: false, fb: root.querySelector('.sr-fb'), count: root.querySelector('.sr-count'),
       pauseIcon: root.querySelector('.sr-pause'), hint: root.querySelector('.sr-hint'),
-      muteBtn: root.querySelector('.mute'), wheelLock: false, errTimer: 0
+      muteBtn: root.querySelector('.mute'), orderBtn: root.querySelector('.order'), source: [], wheelLock: false, errTimer: 0
     };
     root.querySelector('.stop').addEventListener('click', e => { e.stopPropagation(); disarm(); closeOverlay(); });
     root.querySelector('.mpfs').addEventListener('click', e => { e.stopPropagation(); toMpfs(); });
     st.muteBtn.addEventListener('click', e => { e.stopPropagation(); setMuted(!R.muted); });
+    st.orderBtn.addEventListener('click', e => { e.stopPropagation(); toggleOrder(); });
     wireGestures(st);
     wireSeekBar(st);
     return st;
@@ -349,6 +353,40 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     if (persist) { R.autoMuted = false; lsSet(MUTE_KEY, R.muted ? '1' : '0'); }
     R.slots.forEach(s => { s.v.muted = R.muted; });
     R.muteBtn.textContent = R.muted ? '🔇' : '🔊';
+  }
+
+  // ---- random / in order (the button beside mute)
+  const isRandom = () => lsGet(ORDER_KEY) !== 'ordered';
+  function paintOrder() {
+    if (!R) return;
+    const rnd = !!R.pool;
+    R.orderBtn.textContent = rnd ? '🔀' : '➡️';
+    R.orderBtn.title = rnd ? 'Random order - tap for in order' : 'In order - tap for random';
+  }
+  /** Switch what comes next between random and the list's own order, from the video on screen, without a restart. */
+  function toggleOrder() {
+    if (!R) return;
+    const goRandom = !R.pool;
+    lsSet(ORDER_KEY, goRandom ? 'random' : 'ordered');
+    const src = R.source && R.source.length ? R.source : R.items;
+    const cur = R.items[R.index];
+    const curId = cur && idOf(cur.video);
+    const head = R.items.slice(0, R.index + 1);
+    if (goRandom) {
+      R.pool = src.slice();
+      R.items = head.concat(shuffled(src.filter(it => idOf(it.video) !== curId)));
+      ensureAhead();
+      if (R.listKey && R.listItems) { clearInterval(R.syncT); R.syncT = setInterval(syncList, 700); }
+    } else {
+      clearInterval(R.syncT);
+      R.pool = null;
+      const at = src.findIndex(it => idOf(it.video) === curId);
+      R.items = head.concat(at >= 0 ? src.slice(at + 1) : src.filter(it => idOf(it.video) !== curId));
+    }
+    fill(R.slots[2], R.index + 1, 'auto');
+    paintOrder();
+    shown();
+    toast(goRandom ? 'Random order' : 'In order');
   }
 
   function showPaused(on) { if (R) R.pauseIcon.classList.toggle('on', !!on); }
@@ -472,7 +510,13 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
 
   function shown() {
     const it = R.items[R.index];
-    R.count.textContent = R.pool ? `${R.index + 1}` : `${R.index + 1} / ${R.items.length}`;
+    if (R.pool) R.count.textContent = `${R.index + 1}`;
+    else {
+      // In order: the place in the list itself, not in the run since the toggle.
+      const id = it && idOf(it.video);
+      const at = R.source.length ? R.source.findIndex(s => idOf(s.video) === id) : -1;
+      R.count.textContent = at >= 0 ? `${at + 1} / ${R.source.length}` : `${R.index + 1} / ${R.items.length}`;
+    }
     paint();
     showPaused(false);
     if (R.onShow && it) { try { R.onShow(it, R.index); } catch (err) { console.warn('[reels] onShow:', err); } }
@@ -797,7 +841,8 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     if (!R) R = build(); else if (!R.root.isConnected) document.body.appendChild(R.root);
     clearTimeout(R.errTimer);
     const at = Math.max(0, Math.min(items.length - 1, (opts.index | 0)));
-    if (opts.shuffle) {
+    R.source = items.slice();
+    if (opts.shuffle && isRandom()) {
       // The one played first, then the rest in random order; reshuffled when it runs out.
       R.pool = items.slice();
       R.items = [items[at]].concat(shuffled(items.filter((_, i) => i !== at)));
@@ -825,12 +870,13 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     document.documentElement.style.overflow = 'hidden';
     window.addEventListener('keydown', onKey, true);
     setMuted(R.muted);
+    paintOrder();
     layout(0, false);
     fill(R.slots[1], R.index, 'auto');
     fill(R.slots[2], R.index + 1, 'auto');
     fill(R.slots[0], R.index - 1, 'metadata');
     shown();
-    R.hint.textContent = R.pool ? 'Swipe up for the next - random' : 'Swipe up for the next video';
+    R.hint.textContent = R.pool ? 'Swipe up for the next - random' : 'Swipe up for the next - in order';
     R.hint.classList.add('on');
     setTimeout(() => { if (R) R.hint.classList.remove('on'); }, 2600);
     return true;
@@ -883,5 +929,15 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     stop: () => { disarm(); closeOverlay(); },
     canPlay, toast
   };
+
+  // The corner-row TT button (index.html) starts TikTok mode, and a second tap ends it.
+  function wireCornerBtn() {
+    const b = $('reelsCornerBtn');
+    if (!b || b.dataset.wired) return;
+    b.dataset.wired = '1';
+    b.addEventListener('click', e => { e.preventDefault(); toggle(); });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireCornerBtn);
+  else wireCornerBtn();
 
 })();

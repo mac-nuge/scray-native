@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.184 — test: TikTok corner button and order toggle
+<!-- 2026-10-25T08:10Z -->
+- **Asked (native):** a corner button that starts TikTok mode, and in TikTok mode a button next to mute that switches between random and in order.
+- **Corner button (index.html, scray-reels.js):** a pink **TT** at the end of the corner row. It starts TikTok mode (the same as the orientation button's TikTok step: portrait filter, a random portrait video first) and a second tap ends it. It sits in the row, so it goes behind the overlay and returns with the dock like the other buttons.
+- **Order button (scray-reels.js):** beside mute, 🔀 for random and ➡️ for in order. Tapping it switches from the video on screen without restarting: random reshuffles everything after this one; in order carries on down the list from this one, and the counter shows the place in the list (e.g. 12 / 87). It stops at the end of the list in order, and a filter or search change still re-targets what comes next while in random. The choice is remembered (`scray_reels_order`, default random) and applies the next time the mode opens.
+- **Tested:** `node --check`. **Not tested** in a browser or on a phone.
+- **Not done:** Picker has the same `scray-reels.js`; not changed, since this was asked for Native.
+- **Files:** assets/web/scray-reels.js, assets/web/index.html, assets/web/VERSION, scray-changelog.md.
+
 ### picker 15.139 / native 15.183 — stable: short videos no longer freeze at the start of the two-way player
 <!-- 2026-10-23T23:25Z -->
 - **Stable (2026-10-24):** Mac confirmed short videos play in the normal player and MPB after this change ('works!').

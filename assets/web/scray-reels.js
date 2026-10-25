@@ -149,10 +149,11 @@
       await new Promise(r => setTimeout(r, 200));
     }
     if (!ok.length) { toast(`No portrait videos in the list (${list.length} listed)`); return; }
-    const v = ok[Math.floor(Math.random() * ok.length)];
-    if (typeof window.playVideoInline !== 'function') { toast('The player is not ready yet'); return; }
-    const res = await window.playVideoInline(v, 'main', list.indexOf(v));
-    if (res === false) toast('TikTok mode could not start that video - tap TT to try again');
+    // Exactly what pressing X does with TikTok mode on: it picks from the list as it stands and plays it,
+    // which TikTok mode hands to the overlay. (playVideoInline is not on window, so it cannot be called from here.)
+    const x = $('playRandomFilteredBtn');
+    if (!x) { toast('The X button is missing'); return; }
+    x.click();
   }
 
   async function toggle() {

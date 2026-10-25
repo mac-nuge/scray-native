@@ -136,13 +136,23 @@
     if (typeof window.syncOrientationToggleLabel === 'function') window.syncOrientationToggleLabel();
   }
 
-  /** Start playing from the list on screen: a random portrait video, then onwards in list order. */
+  /** Start playing from the list on screen: a random portrait video, then onwards (random or in order, per the order button). */
   async function start() {
-    const list = (window.paginationState && window.paginationState.allVideos) || [];
-    const ok = list.filter(canPlay);
-    if (!ok.length) { toast('No portrait videos in the list'); return; }
+    // The portrait filter was only just switched on, and the list redraws asynchronously - wait for it to
+    // hold something playable (up to 4 s) rather than reading it once and giving up.
+    const t0 = Date.now();
+    let list = [], ok = [];
+    for (;;) {
+      list = (window.paginationState && window.paginationState.allVideos) || [];
+      ok = list.filter(canPlay);
+      if (ok.length || Date.now() - t0 > 4000) break;
+      await new Promise(r => setTimeout(r, 200));
+    }
+    if (!ok.length) { toast(`No portrait videos in the list (${list.length} listed)`); return; }
     const v = ok[Math.floor(Math.random() * ok.length)];
-    if (typeof window.playVideoInline === 'function') await window.playVideoInline(v, 'main', list.indexOf(v));
+    if (typeof window.playVideoInline !== 'function') { toast('The player is not ready yet'); return; }
+    const res = await window.playVideoInline(v, 'main', list.indexOf(v));
+    if (res === false) toast('TikTok mode could not start that video - tap TT to try again');
   }
 
   async function toggle() {
@@ -150,7 +160,7 @@
     arm();
     // The filter change redraws the list; give it a moment before reading it.
     await new Promise(r => setTimeout(r, 150));
-    try { await start(); } catch (err) { console.warn('[reels] could not start:', err); }
+    try { await start(); } catch (err) { console.warn('[reels] could not start:', err); toast('TikTok mode could not start: ' + ((err && err.message) || err)); }
   }
 
   // ---------------------------------------------------------------- random order

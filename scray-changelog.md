@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.185 — test: TT button moved to the front of the corner row
+<!-- 2026-10-25T07:58Z -->
+- **Reported:** the TT button added in 15.184 could not be seen. The corner row scrolls sideways and TT was last, past the end of what shows.
+- **Fix (index.html):** TT now sits second, right after the search button, so it is on screen without scrolling. Nothing else in the row moved except that everything after it is one place further along.
+- **Tested:** the button id is unique and the only reelsCornerBtn in the file. **Not tested** on a phone.
+- **Files:** assets/web/index.html, assets/web/VERSION, scray-changelog.md.
+
 ### native 15.184 — test: TikTok corner button and order toggle
 <!-- 2026-10-25T08:10Z -->
 - **Asked (native):** a corner button that starts TikTok mode, and in TikTok mode a button next to mute that switches between random and in order.

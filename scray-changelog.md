@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.192 — test: TikTok title and buttons no longer clash
+<!-- 2026-10-25T09:20Z -->
+- **Reported (screenshot):** the title ran underneath the button row (sound, order, orientation, Stop, MPFS). The title was held 140 px clear of the right edge, which suited three buttons; the row is five wide now.
+- **Fix (scray-reels.js):** the title moves up to sit directly above the button row, full width (up to three lines, as before), instead of sharing a line with it. The row keeps its place at the bottom right, with the gaps and side padding a touch tighter (4 px, 7 px), and the swipe hint is raised to clear the higher title. Nothing else moves, so the overlay stays as compact as it was: the title is a few lines higher.
+- **Tested:** `node --check` and a render of the overlay at 390 px and at the screenshot's width in headless Chromium, checking the title and the button row do not overlap. **Not tested** on a phone.
+- **Files:** assets/web/scray-reels.js, assets/web/VERSION, scray-changelog.md.
+
 ### native 15.191 — test: TikTok mode no longer portrait-only, landscape-only added
 <!-- 2026-10-25T09:10Z -->
 - **Asked (native):** take the portrait restriction off TikTok mode, set the orientation with the button in the player, and add landscape only.

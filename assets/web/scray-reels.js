@@ -238,7 +238,8 @@
 /* ⚙️ object-position 50% 30%: a video shorter than the screen sits higher than centred - 30% of the spare
    height above it, 70% below - so it uses the space at the top and keeps clear of the title and bar. */
 .sr-slot video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:50% 30%;background:#000;pointer-events:none}
-.sr-cap{position:absolute;left:12px;right:140px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 40px);font-size:11.5px;
+/* ⚙️ The title sits ABOVE the button row (74px up, the row is 40px + about 28 tall), full width: five buttons are too wide to share a line with it. */
+.sr-cap{position:absolute;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 74px);font-size:11.5px;
   line-height:1.3;text-shadow:0 1px 3px #000,0 0 8px #000;pointer-events:none;word-break:break-word;opacity:.72;
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .sr-spin{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border:3px solid rgba(255,255,255,.25);
@@ -269,14 +270,14 @@
 #scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-input{font-size:.7rem!important;flex:1 1 0!important;min-width:0!important;width:auto!important}
 #scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-glass{font-size:.7rem!important}
 #scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-x{font-size:.8rem!important;margin:0!important;padding:0 4px!important;border-radius:8px!important}
-.sr-ctl{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 38px);display:flex;gap:5px;align-items:center;opacity:.72}
+.sr-ctl{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 38px);display:flex;gap:4px;align-items:center;opacity:.72}
 /* The title is the same clickable path as a list row (createClickablePath): folders, bracket tags and Stash chips
    open the filter / search modal. Its inline colours are for a white page, so they are restated for black. */
 .sr-cap span{color:#fff!important}
 .sr-cap span[style*="underline"]{color:#8cc8ff!important;pointer-events:auto;cursor:pointer}
 .sr-cap span[style*="italic"]{color:#bbb!important}
 html.scray-reels-open .basket-json-modal{z-index:2147483647!important}
-.sr-btn{background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:12px;padding:3px 8px;
+.sr-btn{background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:12px;padding:3px 7px;
   font-size:10.5px;line-height:1.4;cursor:pointer}
 .sr-btn.stop{background:rgba(200,30,60,.55);border-color:transparent;font-weight:600}
 .sr-btn.mpfs{letter-spacing:.02em}
@@ -300,7 +301,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
 .sr-fb{position:absolute;top:calc(env(safe-area-inset-top,0px) + 56px);background:rgba(0,0,0,.65);padding:6px 12px;border-radius:14px;
   font-size:14px;font-variant-numeric:tabular-nums;opacity:0;transition:opacity .2s;pointer-events:none}
 .sr-fb.on{opacity:1}
-.sr-hint{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 100px);transform:translateX(-50%);
+.sr-hint{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 140px);transform:translateX(-50%);
   background:rgba(0,0,0,.6);padding:7px 14px;border-radius:16px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
 .sr-hint.on{opacity:1}
 `;

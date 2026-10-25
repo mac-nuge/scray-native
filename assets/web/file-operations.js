@@ -885,7 +885,13 @@ async function showDeleteModal(video, opts) {
    // cancelled. At the top z-index, as the rename modal is, so it opens over
    // the Stash modal (and the FLS player) rather than underneath it.
    const onDone = opts && typeof opts.onDone === 'function' ? opts.onDone : null;
+   // native 15.190: set when Delete is confirmed if this is the video playing - what plays after it goes.
+   let playedSnap = null;
    const finish = (ok, msg) => {
+       if (ok && playedSnap && typeof window.scrayPlayAfterDelete === 'function') {
+           try { window.scrayPlayAfterDelete(playedSnap); } catch (e) { console.error('[delete] play next:', e); }
+           playedSnap = null;
+       }
        if (onDone) { try { onDone(ok, msg); } catch (e) { console.error('[delete] onDone:', e); } }
        else if (ok) alert(msg);
    };
@@ -947,6 +953,9 @@ async function showDeleteModal(video, opts) {
        const confirmBtn = document.getElementById('confirmDeleteBtn');
        confirmBtn.disabled = true;
        confirmBtn.textContent = 'Deleting...';
+       // Before the file goes: while the list still holds it, work out what comes after it.
+       try { playedSnap = typeof window.scrayDeleteSnapshot === 'function' ? window.scrayDeleteSnapshot(video) : null; }
+       catch (e) { playedSnap = null; }
 
        try {
            if (everywhereOn()) {

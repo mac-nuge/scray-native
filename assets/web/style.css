@@ -2434,6 +2434,24 @@ white-space: nowrap;
 overflow: hidden;
 }
 
+/* ⚙️ TT circle (native 15.189): switches the playing video to TikTok mode. MPFS only - FLS and MPB do not show it.
+   Out of the row's flow, sitting just above its right-hand end: the row of nine already fills a phone's
+   width, so a tenth circle in it would run off the left edge. A child of the group, so it fades with the
+   controls and obeys the same pointer-events rules as the other circles. */
+.plyr-frame-step-group > .plyr-frame-reels {
+display: none;
+}
+body.portrait-fullscreen:not(.manual-rotate-landscape) .plyr-frame-step-group > .plyr-frame-reels {
+display: flex;
+position: absolute;
+right: 0;
+bottom: calc(100% + 5px);
+font-size: 11px;
+letter-spacing: -0.3px;
+color: rgba(255, 255, 255, 0.7);
+background: rgba(233, 30, 99, 0.35);
+}
+
 /* ⚙️ FLS CIRCLES 1.2x (native 15.86). Every circle in FLS - the row and the BM
    cluster - is 1.2 times the phone size set by the portrait media query
    above (34px -> 41px), labels scaled with them. FLS only: MPFS runs the row

@@ -4912,6 +4912,19 @@ function attachFrameStepButtons() {
     // 0 - S, the stash modal for the video on screen (picker 13.160 / native
     // 13.158), left of X^n / X^T. The same modal as the S button in the
     // now-playing strip, which is tucked behind "..." in both modes.
+    // TT - switch the video on screen to TikTok mode (MPFS only; style.css). Carries on from where it is.
+    // Arming first sets the orientation filter the mode needs; if this video is refused (a landscape one
+    // with landscape off) the mode is switched straight back off.
+    const reelsBtn = makeCircle('plyr-frame-reels', 'TikTok mode', 'TT');
+    setupTapButton(reelsBtn, () => {
+        const Rr = window.scrayReels, v = window.currentPlayingVideo;
+        if (!Rr || !v || Rr.isOpen() || typeof window.scrayPlayReels !== 'function') return;
+        const t = (window.plyrPlayer && window.plyrPlayer.currentTime) || 0;
+        const wasArmed = Rr.armed();
+        Rr.arm();
+        if (!window.scrayPlayReels(v, currentListContext, currentVideoIndex, { startAt: t }) && !wasArmed) Rr.disarm();
+    });
+
     const stashBtn = makeCircle('plyr-frame-stash', 'Stash', 'S');
     setupTapButton(stashBtn, () => {
         const v = window.currentPlayingVideo;
@@ -4963,6 +4976,7 @@ function attachFrameStepButtons() {
     // The first slot is X^n now rather than F; see makeCircle above.
     // (Leaving them built-but-detached in 13.129 is what made this an
     // appendChild rather than an archaeology exercise.)
+    group.appendChild(reelsBtn);
     group.appendChild(stashBtn);
     group.appendChild(filterBtn);
     group.appendChild(historyBtn);
@@ -11050,7 +11064,7 @@ function scrayPlayReels(video, listContext = null, index = null, opts = {}) {
     }
     const R = window.scrayReels;
     if (!R.canPlay(video)) {
-        R.toast('TikTok mode plays portrait videos only');
+        R.toast('TikTok mode plays portrait videos only - its ▯ button allows landscape');
         return false;
     }
     const fullList = (currentListContext !== null && Array.isArray(getVideoListByContext())) ? getVideoListByContext() : [];
@@ -11074,6 +11088,7 @@ function scrayPlayReels(video, listContext = null, index = null, opts = {}) {
     const opened = R.open({
         items,
         index: at,
+        startAt: opts && opts.startAt,
         shuffle: true,      // random order: this one first, then the rest shuffled, reshuffled when it runs out
         listKey: live ? () => {
             const l = listNow();

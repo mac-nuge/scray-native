@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.189 — test: MPFS TT circle, landscape toggle in TikTok mode
+<!-- 2026-10-25T08:40Z -->
+- **Asked (native):** in MPFS a circle button that switches the current video to TikTok mode; and a toggle in TikTok mode that allows landscape videos.
+- **TT circle (player.js, style.css):** a pink-tinted **TT** circle in MPFS only (not FLS or MPB), sitting just above the right-hand end of the circle row. It is out of the row because nine circles already fill a phone's width, so a tenth in line would run off the left edge. Tapping it turns TikTok mode on and plays the video on screen in it, carrying on from the same second. Like the other circles it fades with the controls. If the video is refused (a landscape one while landscape is off) the mode is switched straight back off, with the toast.
+- **Landscape toggle (scray-reels.js):** a new button in the TikTok overlay beside the order button: **▯** portrait only (as before), **▯▭** portrait and landscape. It is remembered (`scray_reels_landscape`, default off). Turning it on sets the orientation filter to All while the mode runs (Portrait when off), so the list behind the mode - and what comes next - follows it live; when the mode ends the filter goes back to what it was. Landscape videos sit letterboxed in the portrait frame.
+- **Also:** what comes next now follows a filter or search change in in-order mode as well, as it already did in random.
+- **Tested:** `node --check`; the overlay loaded on its own in headless Chromium with five stand-in videos: buttons present, filter All -> Portrait on arming, -> All with landscape on, back to what it was on stop; order toggle 🔀/➡️ and the counter (3 / 5); no page errors. **Not tested** on a phone, and the TT circle's placement above the row has not been seen on screen.
+- **Files:** assets/web/scray-reels.js, assets/web/player.js, assets/web/style.css, assets/web/VERSION, scray-changelog.md.
+
 ### native 15.188 — test: TT presses X for you
 <!-- 2026-10-25T08:12Z -->
 - **Reported:** TT kept saying the player was not ready (15.187's message).

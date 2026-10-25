@@ -4921,6 +4921,7 @@ function attachFrameStepButtons() {
         if (!Rr || !v || Rr.isOpen() || typeof window.scrayPlayReels !== 'function') return;
         const t = (window.plyrPlayer && window.plyrPlayer.currentTime) || 0;
         const wasArmed = Rr.armed();
+        Rr.allow(v);            // this video's orientation may be one the setting would refuse: widen to both
         Rr.arm();
         if (!window.scrayPlayReels(v, currentListContext, currentVideoIndex, { startAt: t }) && !wasArmed) Rr.disarm();
     });
@@ -11064,7 +11065,7 @@ function scrayPlayReels(video, listContext = null, index = null, opts = {}) {
     }
     const R = window.scrayReels;
     if (!R.canPlay(video)) {
-        R.toast('TikTok mode plays portrait videos only - its ▯ button allows landscape');
+        R.toast('TikTok mode cannot play this one - its orientation button (▯ ▯▭ ▭) sets which videos it takes');
         return false;
     }
     const fullList = (currentListContext !== null && Array.isArray(getVideoListByContext())) ? getVideoListByContext() : [];

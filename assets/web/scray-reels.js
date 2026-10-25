@@ -2,7 +2,8 @@
  * scray-reels.js - TikTok-style mode. Same file in Picker and Native, like
  * scray-image-viewer.js.
  *
- * What it is: a full-screen overlay that plays portrait videos one at a time.
+ * What it is: a full-screen overlay that plays videos one at a time - portrait, landscape or both, as the
+ * overlay's orientation button is set (default both).
  * Swipe up for the next, down for the one before, tap to pause, Stop to leave.
  * It has its own <video> elements (the normal Plyr player is paused while it is
  * open) and three slots - the one before, the one playing, the one after - that
@@ -16,11 +17,12 @@
  *
  * The mode ("armed") is separate from the overlay:
  *   - the orientation button's cycle (All > Landscape > Portrait > TikTok)
- *     arms it, which sets the orientation filter to portrait and takes the
+ *     arms it, which sets the orientation filter to what the overlay's orientation
+ *     button is set to (portrait / both / landscape; both by default) and takes the
  *     "soft" tag out of the excluded tags (they go back when the mode ends),
- *     then starts playing a random portrait video;
+ *     then starts playing a random video;
  *   - while armed, playVideoInline hands every video to the overlay
- *     (player.js scrayPlayReels), and only portrait ones play;
+ *     (player.js scrayPlayReels), and only ones of that orientation play;
  *   - the videos come at random: the list is shuffled, starting with the one
  *     played, and reshuffled when it runs out, so it never ends;
  *   - gestures are MPFS's seek gestures: a horizontal drag scrubs (x3 in the
@@ -43,7 +45,7 @@
   const FLICK_V = 0.45;         // ...or a flick this fast (px per ms)
   const MUTE_KEY = 'scray_reels_muted';
   const ORDER_KEY = 'scray_reels_order';      // 'random' (default) or 'ordered'
-  const LAND_KEY = 'scray_reels_landscape';   // '1' = landscape videos play too (default: portrait only)
+  const ORIENT_KEY = 'scray_reels_orient';    // which videos play: 'P' portrait, 'any' both (the default), 'L' landscape
   // Containers the web player can't decode (player.js SCRAY_UNPLAYABLE_EXT).
   const NO_PLAY = new Set(['mkv', 'wmv', 'avi', 'flv', 'mpg', 'mpeg', 'rm', 'rmvb', 'asf',
                            'f4v', 'vob', 'divx', 'ogv', 'mts', 'm2v']);
@@ -71,10 +73,21 @@
     const ext = String(v.filename || '').split('.').pop().toLowerCase();
     return !NO_PLAY.has(ext);
   }
-  let landMem = null;     // the switch's value this session, for when storage is not available
-  const landscapeOK = () => (landMem !== null ? landMem : lsGet(LAND_KEY) === '1');
-  /** A video the mode will play: playable, and portrait (the filter's P - portrait or square) unless landscape is switched on. */
-  function canPlay(v) { return playable(v) && (landscapeOK() || isPortrait(v)); }
+  let orientMem = null;   // the setting this session, for when storage is not available
+  const orientMode = () => {
+    const m = orientMem !== null ? orientMem : lsGet(ORIENT_KEY);
+    return m === 'P' || m === 'L' ? m : 'any';
+  };
+  const isLandscape = v => !!v && (v.orientation ?? (typeof window.deriveOrientation === 'function'
+    ? window.deriveOrientation(v.width, v.height) : null)) === 'L';
+  /** A video the mode will play: playable, and of the orientation the overlay's button is set to (the filter's P / any / L). */
+    function canPlay(v) {
+    if (!playable(v)) return false;
+    const m = orientMode();
+    return m === 'any' || (m === 'P' ? isPortrait(v) : isLandscape(v));
+  }
+  /** Before starting on a particular video (the MPFS TT circle): if the setting would refuse it, widen to both. */
+  function allow(v) { if (playable(v) && !canPlay(v)) setOrient('any'); }
 
   // ---------------------------------------------------------------- toast
   function toast(text) {
@@ -100,7 +113,7 @@
     const sel = $('orientationFilter');
     if (sel) {
       saved.orient = sel.value;
-      ownOrient = landscapeOK() ? 'any' : 'P';
+      ownOrient = orientMode();
       if (sel.value !== ownOrient) {
         sel.value = ownOrient;
         sel.dispatchEvent(new Event('change', { bubbles: true }));
@@ -153,7 +166,7 @@
       if (ok.length || Date.now() - t0 > 4000) break;
       await new Promise(r => setTimeout(r, 200));
     }
-    if (!ok.length) { toast(`No portrait videos in the list (${list.length} listed)`); return; }
+    if (!ok.length) { toast(`No ${ORIENT_TXT[orientMode()].toLowerCase()} videos in the list (${list.length} listed)`); return; }
     // Exactly what pressing X does with TikTok mode on: it picks from the list as it stands and plays it,
     // which TikTok mode hands to the overlay. (playVideoInline is not on window, so it cannot be called from here.)
     const x = $('playRandomFilteredBtn');
@@ -379,25 +392,32 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
   }
 
   // ---- landscape videos (the button beside the order button)
+  const ORIENT_NEXT = { P: 'any', any: 'L', L: 'P' };
+  const ORIENT_TXT = { P: 'Portrait only', any: 'Portrait and landscape', L: 'Landscape only' };
+  const ORIENT_GLYPH = { P: '▯', any: '▯▭', L: '▭' };
   function paintLand() {
     if (!R) return;
-    const on = landscapeOK();
-    R.landBtn.textContent = on ? '▯▭' : '▯';
-    R.landBtn.title = on ? 'Portrait and landscape - tap for portrait only' : 'Portrait only - tap to allow landscape';
+    const m = orientMode();
+    R.landBtn.textContent = ORIENT_GLYPH[m];
+    R.landBtn.title = `${ORIENT_TXT[m]} - tap for ${ORIENT_TXT[ORIENT_NEXT[m]].toLowerCase()}`;
   }
-  /** Allow (or stop allowing) landscape videos. The list behind the mode is the orientation filter's, so it moves too. */
-  function toggleLandscape() {
-    const on = !landscapeOK();
-    landMem = on;
-    lsSet(LAND_KEY, on ? '1' : '0');
+  /** Set which videos play. The list behind the mode is the orientation filter's, so the filter moves too. */
+  function setOrient(m) {
+    orientMem = m;
+    lsSet(ORIENT_KEY, m);
     const sel = $('orientationFilter');
     if (armed && sel && ownOrient != null && sel.value === ownOrient) {
-      ownOrient = on ? 'any' : 'P';
-      sel.value = ownOrient;
+      ownOrient = m;
+      sel.value = m;
       sel.dispatchEvent(new Event('change', { bubbles: true }));   // the list redraws; syncList then feeds what comes next
     }
     paintLand();
-    toast(on ? 'Landscape videos allowed' : 'Portrait only');
+  }
+  /** The button in the overlay: portrait only > portrait and landscape > landscape only > portrait only. */
+  function toggleLandscape() {
+    const m = ORIENT_NEXT[orientMode()];
+    setOrient(m);
+    toast(ORIENT_TXT[m]);
   }
 
   // ---- random / in order (the button beside mute)
@@ -1032,7 +1052,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     arm, disarm, toggle, start, open,
     close: closeOverlay,
     stop: () => { disarm(); closeOverlay(); },
-    canPlay, toast,
+    canPlay, allow, toast,
     /** The video that comes after the one on screen (for play-next-after-delete), or null. */
     peekNext: () => (R && R.root.classList.contains('on') && R.items[R.index + 1] && R.items[R.index + 1].video) || null
   };

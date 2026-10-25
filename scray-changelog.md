@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.191 — test: TikTok mode no longer portrait-only, landscape-only added
+<!-- 2026-10-25T09:10Z -->
+- **Asked (native):** take the portrait restriction off TikTok mode, set the orientation with the button in the player, and add landscape only.
+- **Orientation button (scray-reels.js):** the overlay's orientation button (beside the order button) now cycles three settings: **▯▭** portrait and landscape (the new default), **▭** landscape only, **▯** portrait only, then round again. It is remembered (`scray_reels_orient`; the earlier `scray_reels_landscape` switch from 15.189 is no longer read, so the mode starts on both). It sets the page's orientation filter while the mode runs (All / Landscape / Portrait), so the list behind the mode and what comes next follow it at once, and the filter goes back to what it was when the mode ends.
+- **No portrait gate any more:** starting TikTok mode (the orientation button's TikTok step, the corner TT, the MPFS TT circle) no longer forces the filter to portrait; it takes the button's setting. The MPFS TT circle widens the setting to both if it would refuse the video on screen (a landscape one while set to portrait only). The refusal message and the orientation button's tooltip no longer say portrait.
+- **Tested:** `node --check`; the overlay in headless Chromium with a portrait and a landscape stand-in: starts on both with the filter on All, the button cycles both > landscape only > portrait only > both with the filter on All / L / P and the right videos allowed each time, `allow()` widens a refused video to both, and the filter returns to what it was on stop. **Not tested** on a phone.
+- **Files:** assets/web/scray-reels.js, assets/web/player.js, assets/web/randomiser.js, assets/web/VERSION, scray-changelog.md.
+
 ### native 15.190 — test: play next after deleting the playing video, TikTok scrub engine
 <!-- 2026-10-25T08:45Z -->
 - **Asked (native):** (1) deleting a video while it is playing should play the next one once it is gone; (2) TikTok mode should get the scrubbing and jog improvements the other players have, such as precise real-time frame by frame when scrubbing.

@@ -4,6 +4,13 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.186 — test: TT button after H in the corner row
+<!-- 2026-10-25T08:05Z -->
+- **Reported:** TT still did not show after 15.185. The row you see is not index.html's: disguise.js shows only the buttons named in its `ROW_IDLE` list, in that order (X R H X^n Xb X^T B() H()) and hides the rest, so TT was hidden wherever it sat in the markup.
+- **Fix (disguise.js, index.html):** `reelsCornerBtn` is added to `ROW_IDLE` right after H, so the row reads X R H TT X^n Xb X^T B() H(). In index.html it moves to follow H too, to match.
+- **Tested:** both anchors unique before editing; `node --check disguise.js`. **Not tested** on a phone.
+- **Files:** assets/web/disguise.js, assets/web/index.html, assets/web/VERSION, scray-changelog.md.
+
 ### native 15.185 — test: TT button moved to the front of the corner row
 <!-- 2026-10-25T07:58Z -->
 - **Reported:** the TT button added in 15.184 could not be seen. The corner row scrolls sideways and TT was last, past the end of what shows.

@@ -1776,14 +1776,14 @@
 
     // ---- Which buttons the row shows, by app state (13.132) ---------------
     // Nothing playing: the things that start something, in Mac's order -
-    //   X  R  H  X^n  Xb  X^T  B()  H()
+    //   X  R  H  TT  X^n  Xb  X^T  B()  H()
     // Fullscreen: nothing at all. The row is hidden there and the circles carry
     // its jobs, so a second set of them over the picture is just clutter.
     //
     // hidden, not removed: every one of these is wired by id elsewhere, and the
     // parked-button rule applies just as much to a button that comes back.
     const ROW_IDLE = ['playRandomFilteredBtn', 'quickRandomBtn', 'playHistorySequenceBtn',
-                      'playRandomWeightedBtn', 'scrayXbBtn', 'playRandomTimeBtn',
+                      'reelsCornerBtn', 'playRandomWeightedBtn', 'scrayXbBtn', 'playRandomTimeBtn',
                       'basketToggleBtn', 'historyToggleBtn'];
     // ⚙️ Empty in fullscreen (13.132). The row is hidden outright by CSS there -
     // this is belt and braces, and it is what the state function reads, so the

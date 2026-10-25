@@ -544,7 +544,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     if (!R) return;
     const v = R.slots[1].v, d = v.duration;
     if (!(d > 0) || !isFinite(d)) { R.bar.style.width = '0%'; R.buf.style.width = '0%'; R.ts.textContent = '0:00 / 0:00'; return; }
-    const c = t == null ? v.currentTime : t;
+    const c = t == null ? (R.scrubT != null ? R.scrubT : v.currentTime) : t;   // while scrubbing: from the finger
     R.bar.style.width = (100 * c / d) + '%';
     R.ts.textContent = `${fmt(c)} / ${fmt(Math.max(0, d - c))}`;
     try {
@@ -621,6 +621,66 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     else { v.pause(); showPaused(true); }
   }
 
+  // ---- scrub engine: the main player's window.scrayScrubSeek (player.js), for this overlay's video
+  // fastSeek snaps to keyframes and a seek per animation frame aborts the one before it, so a drag showed few
+  // frames. This issues ACCURATE seeks (the exact frame) one at a time - the next only once the last has
+  // completed ('seeked') - so the picture follows the finger as fast as the source can deliver. A playing
+  // video is paused for the drag (seeking one is far slower on iOS) and resumes on release, which lands on
+  // the exact spot with one last accurate seek. The bar and time are drawn from the finger, not the element.
+  const SCRUB_TIMEOUT_MS = 250;      // 'seeked' never came (a stalled segment): carry on after this
+  const SCRUB_MIN_DELTA_S = 0.015;   // ignore requests closer than this to the last seek issued
+  const Scrub = (function () {
+    let target = null, lastReq = null, lastIssued = null, inFlight = false, wd = 0, el = null, active = false, resume = false;
+    const media = () => (R ? R.slots[1].v : null);
+    const settle = () => { clearTimeout(wd); inFlight = false; pump(); };
+    function bind(v) {
+      if (el === v) return;
+      if (el) { el.removeEventListener('seeked', settle); el.removeEventListener('error', settle); }
+      el = v;
+      el.addEventListener('seeked', settle);
+      el.addEventListener('error', settle);
+    }
+    function pump() {
+      if (inFlight || target === null) return;
+      const v = media();
+      if (!v || v.readyState < 1) return;           // writing currentTime with nothing loaded stalls iOS's media pipeline
+      const next = target; target = null;
+      if (lastIssued !== null && Math.abs(next - lastIssued) < SCRUB_MIN_DELTA_S) return;
+      bind(v);
+      inFlight = true; lastIssued = next;
+      wd = setTimeout(settle, SCRUB_TIMEOUT_MS);
+      try { v.currentTime = next; } catch (e) { settle(); }
+    }
+    const clear = () => { clearTimeout(wd); target = null; lastReq = null; lastIssued = null; inFlight = false; };
+    return {
+      active: () => active,
+      begin() {
+        clear();
+        active = true;
+        const v = media();
+        resume = resume && !!(v && v.paused);       // a resume already owed carries over, only while still paused
+        if (v && !v.paused) { resume = true; v.pause(); }
+      },
+      request(t) {
+        if (!isFinite(t)) return;
+        target = t; lastReq = t;
+        if (R) { R.scrubT = t; paint(t); }
+        pump();
+      },
+      end(finalT) {
+        const landOn = isFinite(finalT) ? finalT : (target !== null ? target : lastReq);
+        clear();
+        const v = media();
+        if (v && v.readyState > 0 && isFinite(landOn)) { try { v.currentTime = landOn; } catch (e) { /* not seekable yet */ } }
+        active = false;
+        if (R) { R.scrubT = null; if (isFinite(landOn)) paint(landOn); }
+        if (resume) { resume = false; playCur(); }
+      },
+      /** Drop the session without resuming (the overlay is closing or moving on). */
+      reset() { clear(); active = false; resume = false; if (R) R.scrubT = null; }
+    };
+  })();
+
   // ---- seek gestures (the MPFS ones, player.js startScrub / scrubMove / handleDoubleTap)
   const DEAD_PX = 10;            // a drag decides its direction after this much
   const JOG_PX_PER_STEP = 8;     // paused: pixels per frame step
@@ -681,11 +741,9 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     const root = st.root;
     let down = false, mode = 'none', x0 = 0, y0 = 0, dy = 0, hist = [];
     // seek drag
-    let t0 = 0, wasPlaying = false, jog = false, jogMult = 32, mult = 1, raf = 0, pending = null;
+    let t0 = 0, jog = false, jogMult = 32, mult = 1, last = null;
     // taps
     let lastTapAt = 0, tapTimer = 0, lastSeekAt = 0, lastSeekSign = 0;
-
-    const flush = () => { raf = 0; if (pending != null) { seekTo(pending); pending = null; } };
 
     root.addEventListener('pointerdown', e => {
       if (!R || R.busy || e.target.closest('.sr-btn')) return;
@@ -707,10 +765,10 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
           const v = R.slots[1].v;
           if (!(v.duration > 0)) { mode = 'x'; return; }
           mode = 'h';
-          jog = v.paused;
+          jog = v.paused;                                 // decided before the drag pauses a playing one
           t0 = v.currentTime;
-          wasPlaying = !v.paused;
-          if (wasPlaying) v.pause();                      // a still frame to seek against
+          last = null;
+          Scrub.begin();                                  // pauses a playing video: a still frame to seek against
           const H = window.innerHeight;
           const fromBottom = 1 - (y0 / H);                // 0 at the bottom, 1 at the top
           mult = fromBottom < 0.2 ? 3 : 1;                // playing: bottom fifth is x3
@@ -732,8 +790,8 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
           t = t0 + (beyond / window.innerWidth) * d * mult;
         }
         t = Math.max(0, Math.min(d, t));
-        pending = t;
-        if (!raf) raf = requestAnimationFrame(flush);
+        last = t;
+        Scrub.request(t);
         const off = t - t0;
         feedback(jog
           ? `${off >= 0 ? '+' : '−'}${Math.abs(off).toFixed(2)}s (${jogMult}x)  ${fmt(t)}`
@@ -753,9 +811,8 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
       down = false;
       if (!R) return;
       if (mode === 'h') {
-        if (raf) { cancelAnimationFrame(raf); raf = 0; }
-        if (pending != null) { seekTo(pending); pending = null; }
-        if (wasPlaying) playCur();
+        Scrub.end(last);                              // lands on the exact frame, then resumes if it was playing
+        last = null;
         mode = 'none';
         return;
       }
@@ -804,34 +861,30 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
   /** Tap the bar to jump, drag along it to scrub (MPFS's permanent progress bar). */
   function wireSeekBar(st) {
     const bar = st.seek;
-    let on = false, dragging = false, x0 = 0, pending = null, raf = 0;
+    let on = false, dragging = false, began = false, x0 = 0;
     const fracAt = e => {
       const r = st.track.getBoundingClientRect();
       return Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)));
     };
-    const apply = precise => {
-      const v = R.slots[1].v;
-      if (pending == null) return;
-      const t = pending; pending = null;
-      if (!precise && typeof v.fastSeek === 'function') { try { v.fastSeek(t); } catch (e) { v.currentTime = t; } }
-      else { try { v.currentTime = t; } catch (e) { /* not seekable yet */ } }
-    };
-    const to = (e, precise) => {
+    // A tap lands on the spot, exactly. A drag goes through the scrub engine (accurate, one seek at a time,
+    // paused while it runs); letting go lands on the last spot and resumes.
+    const to = (e, final) => {
       const v = R.slots[1].v;
       if (!(v.duration > 0)) return;
       const t = fracAt(e) * v.duration;
-      pending = t;
       paint(t);
       feedback(fmt(t), 'left');
-      if (precise) { if (raf) { cancelAnimationFrame(raf); raf = 0; } apply(true); }
-      else if (!raf) raf = requestAnimationFrame(() => { raf = 0; apply(false); });
+      if (!dragging) { try { v.currentTime = t; } catch (err) { /* not seekable yet */ } return; }
+      if (!began) { Scrub.begin(); began = true; }
+      if (final) { Scrub.end(t); began = false; }
+      else Scrub.request(t);
     };
     bar.addEventListener('pointerdown', e => {
       e.stopPropagation();
       if (!R || !(R.slots[1].v.duration > 0)) return;
       on = true; dragging = false; x0 = e.clientX;
       try { bar.setPointerCapture(e.pointerId); } catch (err) { /* synthetic */ }
-      to(e, true);                                  // a tap lands on the spot, exactly
+      to(e, false);                                 // a tap lands on the spot, exactly (not a drag yet)
     });
     bar.addEventListener('pointermove', e => {
       if (!on || !R) return;
@@ -888,6 +941,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     if (!items.length) return false;
     if (!R) R = build(); else if (!R.root.isConnected) document.body.appendChild(R.root);
     clearTimeout(R.errTimer);
+    Scrub.reset();
     const at = Math.max(0, Math.min(items.length - 1, (opts.index | 0)));
     R.source = items.slice();
     if (opts.shuffle && isRandom()) {
@@ -960,6 +1014,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     if (!R || !R.root.classList.contains('on')) return;
     clearTimeout(R.errTimer);
     clearInterval(R.syncT);
+    Scrub.reset();
     if (typeof window.scrayWatchFlush === 'function') window.scrayWatchFlush();
     R.slots.forEach(s => { s.tok++; resetSlot(s); s.idx = -1; });
     R.root.classList.remove('on');
@@ -977,7 +1032,9 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     arm, disarm, toggle, start, open,
     close: closeOverlay,
     stop: () => { disarm(); closeOverlay(); },
-    canPlay, toast
+    canPlay, toast,
+    /** The video that comes after the one on screen (for play-next-after-delete), or null. */
+    peekNext: () => (R && R.root.classList.contains('on') && R.items[R.index + 1] && R.items[R.index + 1].video) || null
   };
 
   // The corner-row TT button (index.html) starts TikTok mode, and a second tap ends it.

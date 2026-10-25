@@ -12458,6 +12458,51 @@ window.scrayPlayInVlc = function (video, startAt, previewOnly, onUnavailable) {
 };
 window.showFileNotFoundError = showFileNotFoundError;
 window.playNextInCurrentList = playNextInCurrentList;
+
+/**
+ * Delete the playing video, then play the one after it (native 15.190).
+ * scrayDeleteSnapshot is taken when Delete is confirmed - BEFORE the file goes, while the list still has it, so
+ * "the one after" is known - and is null when the file being deleted is not the one playing. After the delete
+ * has gone through, scrayPlayAfterDelete plays that next video from the list as it now stands (the list has
+ * shrunk by one, so the next one sits where the deleted one was). In TikTok mode "the next" is the overlay's
+ * own next (random or in order, as it is set); the list walk is the fallback. A list of one has nothing to
+ * move on to, and the player is left alone.
+ */
+window.scrayDeleteSnapshot = function (video) {
+    const cur = window.currentPlayingVideo;
+    const idOf = v => (v ? (v.oneDriveId ?? v.idFromAPI ?? null) : null);
+    if (!video || !cur) return null;
+    const same = (idOf(video) != null && idOf(video) === idOf(cur)) || (idOf(video) == null && video.filename && video.filename === cur.filename);
+    if (!same) return null;
+    const reels = window.scrayReels;
+    let next = reels && reels.isOpen() ? reels.peekNext() : null;
+    const ctx = currentListContext;
+    if (!next && ctx !== null) {
+        const list = getVideoListByContext();
+        if (Array.isArray(list) && list.length > 1) {
+            let at = (ctx === 'main' || ctx === 'bookmarks') ? scrayPlayingIndexIn(list) : currentVideoIndex;
+            if (!(list[at] && idOf(list[at]) === idOf(video))) {
+                const f = list.findIndex(v => idOf(v) === idOf(video));
+                if (f >= 0) at = f;
+            }
+            const cand = list[(at + 1) % list.length];
+            if (cand && idOf(cand) !== idOf(video)) next = cand;
+        }
+    }
+    if (!next || idOf(next) === idOf(video)) return null;
+    return { next, ctx, deletedId: idOf(video) };
+};
+window.scrayPlayAfterDelete = function (snap) {
+    if (!snap || !snap.next || !window.inlineVideoPlayer) return false;
+    const idOf = v => (v ? (v.oneDriveId ?? v.idFromAPI ?? null) : null);
+    const ctx = snap.ctx;
+    const list = ctx !== null && Array.isArray(getVideoListByContext()) ? getVideoListByContext() : [];
+    let at = list.findIndex(v => idOf(v) === idOf(snap.next));
+    if (at < 0) { at = 0; }
+    console.log(`[delete] the playing video is gone - playing the next one: ${snap.next.filename}`);
+    window.inlineVideoPlayer.play(snap.next, ctx, at);
+    return true;
+};
 window.playPreviousInCurrentList = playPreviousInCurrentList;
 
 // Init

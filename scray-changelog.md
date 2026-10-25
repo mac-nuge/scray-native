@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.190 — test: play next after deleting the playing video, TikTok scrub engine
+<!-- 2026-10-25T08:45Z -->
+- **Asked (native):** (1) deleting a video while it is playing should play the next one once it is gone; (2) TikTok mode should get the scrubbing and jog improvements the other players have, such as precise real-time frame by frame when scrubbing.
+- **Delete, then next (player.js, file-operations.js):** when Delete is confirmed on the video that is playing, the one after it is worked out first, while the list still holds it; once the delete has gone through that video plays, from the list as it now stands. In TikTok mode the next is the overlay's own next (random or in order, as set), otherwise the next in the list the video was played from, wrapping at the end. A list of one has nothing to move on to and is left alone. Deleting a video that is not the one playing changes nothing. Covers the Delete modal everywhere it is used (phone, OneDrive, Hetzner, delete everywhere, the Stash hunt's delete). **Not covered:** bulk delete of several selected files.
+- **TikTok scrubbing (scray-reels.js):** the overlay used the old way the other players dropped (a seek on every animation frame, and fastSeek on the bar, which snaps to keyframes and aborts the seek before it). It now has the main player's scrub engine (`scrayScrubSeek`): accurate seeks to the exact frame, one at a time - the next only once the last has completed, with a 250 ms watchdog and a 15 ms minimum step - a playing video is paused for the drag and resumes on release, release lands on the exact frame with one last seek, and the bar and time are drawn from the finger, not from the video. It drives the sideways drag (the x1 / x3 scrub and the paused frame-by-frame jog at 32x / 64x / 128x by thirds) and dragging the progress bar. A tap on the bar still jumps straight to the spot.
+- **Tested:** `node --check` on the three files; the TikTok overlay on a real 6 s clip in headless Chromium - a drag while playing paused the video, issued one accurate seek at a time (22 frames shown, 0.5 s to 3.4 s, evenly spaced), showed the time from the finger, landed and resumed. **Not tested:** the delete-then-next path (no phone or catalogue here), and nothing on a phone.
+- **Not done:** the − / + frame-step circles and the hold-to-speed-up stepping from the main player have no place in TikTok mode yet; say if you want them there. Picker has the same scray-reels.js and is not changed.
+- **Files:** assets/web/scray-reels.js, assets/web/player.js, assets/web/file-operations.js, assets/web/VERSION, scray-changelog.md.
+
 ### native 15.189 — test: MPFS TT circle, landscape toggle in TikTok mode
 <!-- 2026-10-25T08:40Z -->
 - **Asked (native):** in MPFS a circle button that switches the current video to TikTok mode; and a toggle in TikTok mode that allows landscape videos.

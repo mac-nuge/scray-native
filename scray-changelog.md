@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.140 / native 15.193 / browse 15.371 — test: studio and performer dropdowns sort by library
+<!-- 2026-10-26T14:10Z -->
+- **Asked:** in every Stash profile browser (the apps' Stash modal and browse's Stash pages), a sort option for the studio and performer dropdowns that ranks by how many videos each has in the library - on a performer's profile the studio you have most of first, on a studio's profile the performers you have most of first.
+- **Change:** an **In library** button beside the search box in each studio / performer list. On, the list is ordered by your library count (highest first, picked ones still at the top of a flat list) and each row shows `n in library` next to StashDB's own scene count. The choice is kept per kind (studio lists / performer lists) in `scray_dd_libsort` and applies to every such list in that app: a performer's Studio and With lists, a studio's Performer list, a network's sub-studio list, the search view's studio / performer result filters, and browse's profile filters and bulk-check Only filters. Cast shape lists have no library count and are left alone.
+- **Networks:** on a performer's Studio list a network (the ⌂ rows) ranks by the total of the studios under it, and its studios are ranked inside it, so the nesting stays as on stashdb.org. A parent studio's sub-studio list keeps the parent (itself) first.
+- **Server (browse api.php):** new `stash_nav` op `lib_counts` - POST `{studios: [names]}` and/or `{performers: [names]}`, answered as counts in the same order. Counted like op `local`: live, matched files, overrides winning, by name key, each file once per studio / performer. Read-only, so it stays off `SCRAY_PRIVILEGED`. Counts are fetched only for the names in the open list, 300 a request, and cached for the session; if the op is not there yet (browse not deployed) the lists just stay in StashDB's order and the console says why.
+- **Tested:** the ranking logic (grouped networks, flat lists, sub-studios, picked-first, cast shape untouched) and browse's in-place reorder of the profile lists in jsdom; `node --check` on the JS and `php -l` on api.php. Not run against the real API or on a phone.
+- **Files:** picker `scray-stash-nav.js`; native `assets/web/scray-stash-nav.js` (identical); browse `api.php`, `scray-stash-profiles.js`, `scray-stash-search.js`.
+
 ### native 15.192 — test: TikTok title and buttons no longer clash
 <!-- 2026-10-25T09:20Z -->
 - **Reported (screenshot):** the title ran underneath the button row (sound, order, orientation, Stop, MPFS). The title was held 140 px clear of the right edge, which suited three buttons; the row is five wide now.

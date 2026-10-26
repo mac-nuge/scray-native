@@ -1,4 +1,6 @@
 // scray-stash-nav.js — the Stash modal's own StashDB navigator
+// picker 15.140 / native 15.193 (browse 15.371): an "In library" button in every studio / performer dropdown ranks it by how many
+// of your videos each has in the library (browse op lib_counts); the choice is kept per kind.
 // (picker 13.162 / native 13.161, needs browse 13.68's stash_nav action).
 // picker 13.163 / native 13.162: path tags under the words box, a ▶ preview,
 // a Google link on profiles, and scrayPerformerChoice for the list rows.
@@ -492,6 +494,9 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
 #stashModal .ssn-dd-top { display: flex; gap: 6px; align-items: center; margin: 0 0 6px; }
 #stashModal .ssn-dd-top input.ssn-studio-find { flex: 1 1 auto; min-width: 0; margin: 0; }
 #stashModal .ssn .ssn-dd-done { flex: 0 0 auto; background: #6c5ce7; border-color: #6c5ce7; color: #fff; font-weight: 600; }
+#stashModal .ssn .ssn-dd-sort { flex: 0 0 auto; font-weight: 600; }
+#stashModal .ssn .ssn-dd-sort.on { background: #e8e4ff; border-color: #6c5ce7; color: #4a3bc7; }
+#stashModal .ssn .ssn-studio-opt small.lib { opacity: 1; color: #4a3bc7; font-weight: 600; margin-right: 6px; }
 #stashModal .ssn .ssn-dd-done-bottom { display: block; width: 100%; margin-top: 6px; padding: 9px 12px; }
 #stashModal .ssn .ssn-studio-opt.net { font-weight: 600; }
 #stashModal .ssn .ssn-studio-opt.child { padding-left: 24px; }
@@ -1231,14 +1236,21 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         picks.forEach(pk => { if (!opts.some(o => o.k === pk.k)) opts.push({ k: pk.k, name: pk.name, n: 0 }); });
         const isOn = (k) => picks.some(x => x.k === k);
         opts.sort((a, b) => (isOn(b.k) ? 1 : 0) - (isOn(a.k) ? 1 : 0));
+        // In library (see libRank): studios and performers by how many of your videos they have.
+        const libK = open === 'rfs' ? 'studio' : 'performer';
+        const byLib = open !== 'rfc' && !!libSort[libK];
+        if (byLib) {
+          libWant(libK, opts.map(o => o.name));
+          opts.sort((a, b) => (isOn(b.k) ? 1 : 0) - (isOn(a.k) ? 1 : 0) || libN(libK, b.name) - libN(libK, a.name));
+        }
         pop = '<div class="ssn-studio-pop">' +
           '<div class="ssn-studio-how">' + (open === 'rfs' ? 'Pick several to see scenes from any of them'
                                         : open === 'rfc' ? 'Cast shape - pick several to see scenes with any of them'
                                                          : 'Pick several to see scenes they&rsquo;re all in together') + '</div>' +
           '<div class="ssn-dd-top"><input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
             'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + ' in the results&hellip;" value="' + esc(e[DD[open].term] || '') + '">' +
-            doneBtn(open) + '</div>' +
-          '<div class="ssn-studio-list">' +
+            (open !== 'rfc' ? sortBtn(e, open) : '') + doneBtn(open) + '</div>' +
+          '<div class="ssn-studio-list">' + (byLib ? libNote() : '') +
             '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-dd="' + open + '" data-rf-pick="">All ' + many + '</button>' +
             opts.map(o => {
               // Performers: who they were credited as here, and aka (picker 15.57 / native 15.68).
@@ -1248,7 +1260,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
               const find = [o.name].concat(o.as || [], o.aliases || []).join(' | ');
               return '<button type="button" class="ssn-studio-opt' + (isOn(o.k) ? ' on' : '') + '" data-dd="' + open + '" ' +
                 'data-rf-pick="' + esc(o.name) + '" data-studio-name="' + esc(o.name) + '" data-find="' + esc(find) + '">' +
-                '<span>' + (isOn(o.k) ? '&#10003; ' : '') + esc(o.name) + extra + '</span><small>' + o.n + '</small></button>';
+                '<span>' + (isOn(o.k) ? '&#10003; ' : '') + esc(o.name) + extra + '</span>' + (byLib && libN(libK, o.name) ? '<small class="lib">' + libN(libK, o.name) + ' in library</small>' : '') + '<small>' + o.n + '</small></button>';
             }).join('') +
             '<div class="ssn-studio-none" hidden>No ' + one.toLowerCase() + ' matches</div>' +
           '</div>' +
@@ -1573,6 +1585,109 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       rfc:  { picks: 'rfCasts',   open: 'rfcOpen', term: 'rfcTerm', focus: 'rfcFocus' }   // cast shape (picker 15.106 / native 15.127)
     };
 
+    // ---- ranking a dropdown by your library ---------------------------------
+    // The "In library" button in a studio / performer dropdown: its names go to
+    // browse's stash_nav op lib_counts, which says how many live files you have
+    // for each, and the list is ordered by that. The choice is kept per kind
+    // (studio lists / performer lists) and counts are cached for the session.
+    const libCache = new Map();      // 'studio|name' -> files in the library
+    const libAsked = new Set();
+    let libBusy = 0;
+    let libErr = '';
+    const libSort = (() => {
+      const d = { studio: false, performer: false };
+      try { return Object.assign(d, JSON.parse(localStorage.getItem('scray_dd_libsort') || '{}')); } catch (_) { return d; }
+    })();
+    const libSave = () => { try { localStorage.setItem('scray_dd_libsort', JSON.stringify(libSort)); } catch (_) { /* no storage */ } };
+    // The ⌂ of a network and the (itself) of its parent are ours, not the studio's name.
+    const libName = (nm) => String(nm || '').replace(/^⌂ /, '').replace(/ \(itself\)$/, '').trim();
+    const libKind = (e, dd) => dd === 'rfs' || dd === 'sub' ? 'studio'
+      : dd === 'rfp' || dd === 'with' ? 'performer'
+      : (e && e.type === 'studio' ? 'performer' : 'studio');
+    const libN = (kind, nm) => libCache.get(kind + '|' + lk(libName(nm))) || 0;
+    function libRepaint() {
+      const e = top();
+      if (finished || !e) return;
+      if (['main', 'sub', 'with', 'rfs', 'rfp'].some(d => e[DD[d].open])) paint(false, true);
+    }
+    function libWant(kind, names) {
+      const need = [];
+      names.forEach(nm => {
+        const n = libName(nm), k = kind + '|' + lk(n);
+        if (!n || libCache.has(k) || libAsked.has(k)) return;
+        libAsked.add(k);
+        need.push(n);
+      });
+      for (let i = 0; i < need.length; i += 300) {
+        const chunk = need.slice(i, i + 300);
+        libBusy++;
+        api('stash_nav', { method: 'POST', body: Object.assign({ op: 'lib_counts' }, kind === 'studio' ? { studios: chunk } : { performers: chunk }) })
+          .then(r => {
+            const arr = (r && (kind === 'studio' ? r.studios : r.performers)) || [];
+            chunk.forEach((n, j) => libCache.set(kind + '|' + lk(n), Number(arr[j]) || 0));
+            libErr = '';
+          })
+          .catch(err => { libErr = (err && err.message) || String(err); })
+          .finally(() => { libBusy--; if (!libBusy) libRepaint(); });
+      }
+    }
+    function libToggle(dd) {
+      const e = top();
+      if (!e) return;
+      const k = libKind(e, dd);
+      libSort[k] = !libSort[k];
+      libSave();
+      if (libSort[k]) { libAsked.clear(); libErr = ''; }
+      paint(false, true);
+    }
+    const sortBtn = (e, dd) => {
+      const on = !!libSort[libKind(e, dd)];
+      return '<button type="button" class="ssn-dd-sort' + (on ? ' on' : '') + '" data-dd-sort="' + dd +
+        '" title="Rank by how many of your videos each has in the library">In library' + (on ? ' &#8595;' : '') + '</button>';
+    };
+    const libNote = () => libErr ? '<div class="ssn-studio-how">Library counts unavailable: ' + esc(libErr) + '</div>' : '';
+    /**
+     * The options in library order, with each one's count - or null when this
+     * list isn't ranked. A network (and its studios) ranks by the studios it
+     * holds; the parent of a sub-studio list stays first.
+     */
+    function libRank(e, dd, opts, isOn) {
+      const kind = libKind(e, dd);
+      if (dd === 'rfc' || !libSort[kind]) return null;
+      libWant(kind, opts.map(o => o.name));
+      const own = (o) => libN(kind, o.name);
+      const idx = new Map(opts.map((o, i) => [o.id, i]));
+      const byOwn = (a, b) => own(b) - own(a) || idx.get(a.id) - idx.get(b.id);
+      const n = new Map();
+      let list;
+      if (dd === 'sub') {
+        const rest = opts.slice(1).sort(byOwn);
+        list = opts.slice(0, 1).concat(rest);
+        list.forEach(o => n.set(o.id, own(o)));
+      } else if (opts.some(o => o.group)) {
+        const units = [];
+        let cur = null;
+        opts.forEach(o => {
+          if (o.net) { cur = { head: o, kids: [] }; units.push(cur); }
+          else if (o.child && cur && o.group === cur.head.group) cur.kids.push(o);
+          else { cur = null; units.push({ head: o, kids: [] }); }
+        });
+        units.forEach(u => {
+          u.kids.sort(byOwn);
+          u.w = u.head.net ? u.kids.reduce((t, o) => t + own(o), 0) : own(u.head);
+          n.set(u.head.id, u.w);
+          u.kids.forEach(o => n.set(o.id, own(o)));
+        });
+        units.sort((a, b) => b.w - a.w || idx.get(a.head.id) - idx.get(b.head.id));
+        list = [];
+        units.forEach(u => { list.push(u.head); u.kids.forEach(o => list.push(o)); });
+      } else {
+        list = opts.slice().sort((a, b) => (isOn(b.id) ? 1 : 0) - (isOn(a.id) ? 1 : 0) || byOwn(a, b));
+        list.forEach(o => n.set(o.id, own(o)));
+      }
+      return { list, n };
+    }
+
     // Done (picker 15.31 / native 15.40): closes the list it sits in - beside
     // the search box, and again under the list, where the thumb is after
     // scrolling through it.
@@ -1663,12 +1778,13 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       const opts = ddOptions(e, dd);
       const picks = e[K.picks] || [];
       const isOn = (id) => picks.some(x => x.id === id);
-      return '' +
+      const lib = libRank(e, dd, opts, isOn);
+      return libNote() +
             '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-dd="' + dd + '" data-studio-pick="">All ' + many + '</button>' +
             // Picked ones first, so they're easy to find and untick.
             // A nested list keeps its order (a studio stays under its network);
             // a flat one puts the picked ones first.
-            (opts.some(o => o.group) ? opts : opts.slice().sort((a, b) => (isOn(b.id) ? 1 : 0) - (isOn(a.id) ? 1 : 0))).map(o => {
+            (lib ? lib.list : opts.some(o => o.group) ? opts : opts.slice().sort((a, b) => (isOn(b.id) ? 1 : 0) - (isOn(a.id) ? 1 : 0))).map(o => {
               // Credited as / aka (picker 15.56 / native 15.67), searched as well as the name.
               const asTxt = (o.as || []).length ? ' <small class="as">as ' + o.as.map(esc).join(', ') + '</small>' : '';
               const aka = (o.aliases || []).filter(a => !(o.as || []).includes(a));
@@ -1678,7 +1794,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
               return '<button type="button" class="ssn-studio-opt' + (isOn(o.id) ? ' on' : '') + (o.net ? ' net' : '') + (o.child ? ' child' : '') + '" data-dd="' + dd + '" ' +
                 (o.group ? 'data-group="' + esc(o.group) + '" ' : '') +
                 'data-studio-pick="' + esc(o.id) + '" data-studio-name="' + esc(o.name) + '" data-find="' + esc(find) + '">' +
-                '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + gTxt + asTxt + akaTxt + '</span>' + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>';
+                '<span>' + (isOn(o.id) ? '&#10003; ' : '') + esc(o.name) + gTxt + asTxt + akaTxt + '</span>' + (lib && lib.n.get(o.id) ? '<small class="lib">' + lib.n.get(o.id) + ' in library</small>' : '') + (o.count ? '<small>' + o.count + '</small>' : '') + '</button>';
             }).join('') +
             '<div class="ssn-studio-none" hidden>No ' + (dd === 'with' ? 'co-performer' : one.toLowerCase()) + ' matches</div>' +
             (dd === 'with' && e.costarsFrom && e.data && e.data.count > e.costarsFrom
@@ -1719,7 +1835,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
           '<div class="ssn-studio-how">' + how + '</div>' +
           '<div class="ssn-dd-top"><input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
             'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + '&hellip;" value="' + esc(e[K.term] || '') + '">' +
-            doneBtn(dd) + '</div>' +
+            sortBtn(e, dd) + doneBtn(dd) + '</div>' +
           '<div class="ssn-studio-list">' + ddListInner(e, dd) + '</div>' +
           doneBtn(dd, true) +
         '</div>';
@@ -2245,6 +2361,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (btn.dataset.pstudio !== undefined) { pillMenu(btn.dataset.pstudio); return; }
       if (btn.dataset.pperf !== undefined) { pillMenu(btn.dataset.pperf, 'performer'); return; }
       if (btn.dataset.pword !== undefined) { toggleWord(btn.dataset.pword); searchSoon(); return; }
+      if (btn.dataset.ddSort) { libToggle(btn.dataset.ddSort); return; }
       if (btn.dataset.ddDone) { closeDd(btn.dataset.ddDone); return; }
       if (btn.dataset.rfToggle) {
         const e = top();

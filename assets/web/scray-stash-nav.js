@@ -1,4 +1,7 @@
 // scray-stash-nav.js — the Stash modal's own StashDB navigator
+// picker 15.141 / native 15.194 (browse 15.372): the profile's In library button has a third state, Not in library (the scenes
+// none of your files are); result lists sort by In library (studio + cast you have most of); and a
+// Stash get list on the home view, kept on the server, filled from + Stash get on any scene card.
 // picker 15.140 / native 15.193 (browse 15.371): an "In library" button in every studio / performer dropdown ranks it by how many
 // of your videos each has in the library (browse op lib_counts); the choice is kept per kind.
 // (picker 13.162 / native 13.161, needs browse 13.68's stash_nav action).
@@ -380,6 +383,15 @@
 #stashModal .ssn-topbar { justify-content: flex-end; margin: 0 0 8px; }
 #stashModal .ssn .ssn-libf { border-color: #28a745; color: #1e7e34; background: #fff; font-weight: 600; }
 #stashModal .ssn .ssn-libf.on { background: #28a745; color: #fff; }
+#stashModal .ssn .ssn-libf.on.not { background: #dc3545; border-color: #dc3545; }
+#stashModal .ssn .ssn-getb { border-color: #0d6efd; color: #0a58ca; background: #fff; font-weight: 600; }
+#stashModal .ssn .ssn-getb.on { background: #0d6efd; color: #fff; }
+#stashModal .ssn-get-row { display: flex; align-items: center; gap: 10px; margin: 4px 4px 12px; font-size: .8rem; color: #777; }
+#stashModal .ssn .ssn-get-go { background: #0d6efd; border-color: #0d6efd; color: #fff; font-weight: 700; padding: 8px 14px; font-size: .88rem; }
+#stashModal .ssn .ssn-getgot.on { background: #28a745; border-color: #28a745; color: #fff; }
+#stashModal .ssn .ssn-getrm.armed { background: #dc3545; border-color: #dc3545; color: #fff; }
+#stashModal .ssn .ssn-gotlib { color: #1e7e34; font-weight: 600; font-size: .78rem; }
+#stashModal .ssn-getdone > summary { cursor: pointer; font-size: .8rem; opacity: .75; margin: 6px 0 8px; }
 #stashModal .ssn .ssn-google { padding: 1px 7px; margin-left: 6px; font-size: .7rem; font-weight: 400; vertical-align: middle; background: transparent; color: #1a73e8; border-color: rgba(26,115,232,.4); }
 #stashModal .ssn-btns button[data-go] { background: #6c5ce7; border-color: #6c5ce7; color: #fff; }
 #stashModal .ssn-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: .78rem; opacity: .8; margin: 0 0 8px; }
@@ -747,7 +759,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       }
       stack.push(Object.assign({ data: null, busy: false, error: '', scroll: 0 }, entry));
       paint(false);
-      if (entry.type !== 'home') load(top(), false);
+      if (entry.type !== 'home' && entry.type !== 'get') load(top(), false);
     }
 
     // ---- the studio + performer box -----------------------------------------
@@ -972,6 +984,19 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         }
       }
       paint(false, true);
+      notMore(entry);
+    }
+
+    // Not in library hides the scenes you have, so a page can come back nearly
+    // empty: look further on its own (up to 8 pages) until ten show.
+    function notMore(entry) {
+      if (!entry.libNot || entry.busy || !entry.data || entry.error) return;
+      const d = entry.data, n = d.scenes.length;
+      const shown = d.scenes.filter(c => !(c.library || []).length).length;
+      const hasMore = d.count != null && n < d.count && d.lastCount >= (d.per_page || 25);
+      if (shown >= 10 || !hasMore || (entry.notTries || 0) >= 8) return;
+      entry.notTries = (entry.notTries || 0) + 1;
+      setTimeout(() => { if (!finished && top() === entry && entry.libNot && !entry.busy) load(entry, true); }, 0);
     }
 
     // ---- painting --------------------------------------------------------
@@ -996,6 +1021,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
           ? 'Stash'
           : e.type === 'search'
           ? 'Stash search'
+          : e.type === 'get'
+          ? 'Stash get'
           : e.type === 'studio'
             ? (e.data && e.data.studio ? e.data.studio.name : (e.name || 'Studio'))
             : (e.data && e.data.performer ? e.data.performer.name : (e.name || 'Performer'));
@@ -1010,8 +1037,10 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
             (window.scrayStashHunt
               ? '<div class="ssn-hunt-row"><button type="button" class="ssn-hunt-go">&#127919; Stash hunt</button>' +
                 '<span>Random unmatched files, one at a time</span></div>'
-              : '')
-          : e.type === 'search' ? searchHtml(e) : e.type === 'studio' ? studioViewHtml(e) : performerHtml(e)) + '</div>';
+              : '') +
+            // Stash get (picker 15.141 / native 15.194): the list kept on the server.
+            getRowHtml()
+          : e.type === 'search' ? searchHtml(e) : e.type === 'get' ? getViewHtml() : e.type === 'studio' ? studioViewHtml(e) : performerHtml(e)) + '</div>';
       paintFind();
       // Started from the Stash button: the box is all there is, so it has the keyboard.
       const fb = host.querySelector('input.ssn-find-box');
@@ -1043,8 +1072,13 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     }
 
     function sortedScenes(e) {
-      const list = (e.data && e.data.scenes || []).map((s, i) => ({ s, i }));
-      if (e.sort === 'match') {
+      // Not in library: the scenes none of your files are.
+      const list = (e.data && e.data.scenes || []).map((s, i) => ({ s, i }))
+        .filter(x => !(e.libNot && (x.s.library || []).length));
+      if (e.sort === 'lib') {
+        libWantScenes(list.map(x => x.s));
+        list.sort((a, b) => libScene(b.s) - libScene(a.s) || (a.s.order ?? a.i) - (b.s.order ?? b.i));
+      } else if (e.sort === 'match') {
         list.sort((a, b) => (Number(b.s.confidence) || 0) - (Number(a.s.confidence) || 0)
                             || (a.s.order ?? a.i) - (b.s.order ?? b.i));
       } else if (e.sort === 'dur') {
@@ -1067,11 +1101,11 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       // Duration diff (picker 15.64 / native 15.76) needs the file's length
       // and at least one scene's.
       const hasDur = e.data.scenes.some(c => durGap(c) !== Infinity);
-      if (!e.data.scored && !hasDur) return '';
       return '<span class="ssn-sort">' +
           (e.data.scored ? '<button type="button" data-sort="match" class="' + (e.sort === 'match' ? 'on' : '') + '">Best match</button>' : '') +
           '<button type="button" data-sort="order" class="' + (e.sort === 'order' ? 'on' : '') + '">' + orderLabel + '</button>' +
           (hasDur ? '<button type="button" data-sort="dur" class="' + (e.sort === 'dur' ? 'on' : '') + '" title="Closest length to this file first">Duration diff</button>' : '') +
+          '<button type="button" data-sort="lib" class="' + (e.sort === 'lib' ? 'on' : '') + '" title="Scenes from the studios and with the performers you have most of in your library first">In library</button>' +
         '</span>';
     }
     const errHtml = (msg) => msg ? '<div class="ssn-state"><span class="ssn-err">' + esc(msg) + '</span></div>' : '';
@@ -1431,13 +1465,12 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       }
 
       const n = d ? d.scenes.length : 0;
-      const label = d ? ((e.libOnly ? 'In your library' : 'Scenes') + (d.count != null ? ' &middot; ' + d.count : '') +
-                         (e.sort === 'order' ? ' &middot; newest first' : '')) : '';
+      const label = d ? scenesLabel(e, d) : '';
       const list = d && !n && !e.busy
         ? (d.note ? '' : '<div class="ssn-empty">' + (e.libOnly ? 'None of your files are scenes of this performer' +
             (e.picks && e.picks.length ? ' at that studio' : '') : 'No scenes listed for this performer') +
             (e.withPicks && e.withPicks.length ? ' with ' + esc(e.withPicks.map(x => x.name).join(' + ')) : '') + '.</div>')
-        : sortedScenes(e).map(x => cardHtml(x.s, x.i, p ? p.id : null)).join('');
+        : (sortedScenes(e).map(x => cardHtml(x.s, x.i, p ? p.id : null)).join('') || notEmpty(e, n));
       const more = d && d.count != null && n < d.count && d.lastCount >= (d.per_page || 25)
         ? '<button type="button" class="ssn-loadmore" data-more' + (e.busy ? ' disabled' : '') + '>' +
             (e.busy ? 'Loading&hellip;' : 'Load more (' + n + ' of ' + d.count + ')') + '</button>'
@@ -1447,6 +1480,18 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         errHtml(e.error) + errHtml(d && d.note) +
         list + more;
     }
+
+    /** The heading over a profile's scenes. */
+    function scenesLabel(e, d) {
+      const sortBit = e.sort === 'order' ? ' &middot; newest first' : e.sort === 'lib' ? ' &middot; most in library first' : '';
+      if (e.libNot) {
+        const shown = d.scenes.filter(c => !(c.library || []).length).length;
+        return 'Not in your library &middot; ' + shown + ' of ' + d.scenes.length + ' loaded' + sortBit;
+      }
+      return (e.libOnly ? 'In your library' : 'Scenes') + (d.count != null ? ' &middot; ' + d.count : '') + sortBit;
+    }
+    const notEmpty = (e, n) => e.libNot && !e.busy && n
+      ? '<div class="ssn-empty">Every scene loaded so far is already in your library. Load more to look further.</div>' : '';
 
     // ---- studio view (picker 14.6 / native 14.10) --------------------------
     // The performer view's twin: the studio's logo, name, aliases and links,
@@ -1500,12 +1545,11 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       }
 
       const n = d ? d.scenes.length : 0;
-      const label = d ? ((e.libOnly ? 'In your library' : 'Scenes') + (d.count != null ? ' &middot; ' + d.count : '') +
-                         (e.sort === 'order' ? ' &middot; newest first' : '')) : '';
+      const label = d ? scenesLabel(e, d) : '';
       const list = d && !n && !e.busy
         ? (d.note ? '' : '<div class="ssn-empty">' + (e.libOnly ? 'None of your files are' : 'No') + ' scenes listed for this studio' +
             (e.picks && e.picks.length ? ' with ' + esc(e.picks.map(x => x.name).join(' + ')) + ' together' : '') + '.</div>')
-        : sortedScenes(e).map(x => cardHtml(x.s, x.i, (e.picks || []).map(x => x.id), s ? s.id : null)).join('');
+        : (sortedScenes(e).map(x => cardHtml(x.s, x.i, (e.picks || []).map(x => x.id), s ? s.id : null)).join('') || notEmpty(e, n));
       const more = d && d.count != null && n < d.count && d.lastCount >= (d.per_page || 25)
         ? '<button type="button" class="ssn-loadmore" data-more' + (e.busy ? ' disabled' : '') + '>' +
             (e.busy ? 'Loading&hellip;' : 'Load more (' + n + ' of ' + d.count + ')') + '</button>'
@@ -1608,7 +1652,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     function libRepaint() {
       const e = top();
       if (finished || !e) return;
-      if (['main', 'sub', 'with', 'rfs', 'rfp'].some(d => e[DD[d].open])) paint(false, true);
+      if (['main', 'sub', 'with', 'rfs', 'rfp'].some(d => e[DD[d].open]) || e.sort === 'lib') paint(false, true);
     }
     function libWant(kind, names) {
       const need = [];
@@ -1686,6 +1730,139 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         list.forEach(o => n.set(o.id, own(o)));
       }
       return { list, n };
+    }
+
+    // ---- results ranked by your library --------------------------------------
+    // The "In library" sort on a result list: a scene scores the library counts
+    // of its studio plus those of everyone in its cast, so the scenes from the
+    // studios and with the people you have most of come first (ties keep
+    // StashDB's order). Names are counted by libWant, like the dropdowns'.
+    function libWantScenes(scenes) {
+      const st = [], pf = [];
+      (scenes || []).forEach(c => {
+        if (c.studio) st.push(c.studio);
+        (c.cast || []).forEach(p => { if (p && p.name) pf.push(p.name); });
+      });
+      libWant('studio', st);
+      libWant('performer', pf);
+    }
+    const libScene = (c) => libN('studio', c.studio) +
+      (c.cast || []).reduce((t, p) => t + (p && p.name ? libN('performer', p.name) : 0), 0);
+
+    // ---- Stash get (picker 15.141 / native 15.194, browse 15.372) -----------
+    // Scenes to get later, kept on the server (stash_get): "+ Stash get" on a
+    // scene card saves it, the Stash home view opens the list, and a scene can
+    // be marked got or taken off. Every call answers with the whole list.
+    let getItems = [];
+    let getReady = false, getLoading = false, getErr = '';
+    const getHas = (id) => getItems.some(x => x.stash_id === id);
+    const getApi = (body) => api('stash_get', { method: 'POST', body })
+      .then(r => { getItems = (r && r.items) || []; getReady = true; getErr = ''; return r; });
+    function getLoad() {
+      if (getReady || getLoading) return;
+      getLoading = true;
+      getApi({ op: 'list' })
+        .catch(err => { getErr = (err && err.message) || String(err); })
+        .finally(() => { getLoading = false; if (!finished) paint(false, true); });
+    }
+    function getOpen() {
+      if (!getReady) getLoad();
+      push({ type: 'get' });
+    }
+    const getBtn = (c, i) => {
+      if (!c.stash_id) return '';
+      const has = getHas(c.stash_id);
+      // Already one of your files: nothing left to get.
+      if (!has && (c.library || []).length) return '';
+      return '<button type="button" class="ssn-getb' + (has ? ' on' : '') + '" data-getscene="' + i + '" title="' +
+        (has ? 'On your Stash get list - tap to take it off' : 'Save this scene to your Stash get list') + '">' +
+        (has ? '&#10003; In Stash get' : '&#43; Stash get') + '</button>';
+    };
+    function getToggleScene(btn) {
+      const e = top();
+      const c = e && e.data && e.data.scenes[+btn.dataset.getscene];
+      if (!c || !c.stash_id || btn.disabled) return;
+      btn.disabled = true;
+      const body = getHas(c.stash_id)
+        ? { op: 'remove', stash_id: c.stash_id }
+        : { op: 'add', scene: { stash_id: c.stash_id, title: c.title, studio: c.studio, studio_id: c.studio_id,
+            cast: (c.cast || []).map(p => ({ id: p.id, name: p.name })), release_date: c.release_date,
+            cover: c.cover, stash_url: c.stash_url } };
+      getApi(body).then(() => { if (!finished) paint(false, true); })
+        .catch(err => {
+          btn.disabled = false;
+          btn.textContent = 'Could not save';
+          btn.title = (err && err.message) || String(err);
+          setTimeout(() => { if (!finished) paint(false, true); }, 2500);
+        });
+    }
+    function getMark(id, got) {
+      getApi({ op: 'got', stash_id: id, got })
+        .catch(err => { getErr = (err && err.message) || String(err); })
+        .finally(() => { if (!finished) paint(false, true); });
+    }
+    function getRemove(btn) {
+      if (!btn.classList.contains('armed')) {
+        btn.classList.add('armed');
+        btn.textContent = 'Tap again to remove';
+        clearTimeout(btn._ssnT);
+        btn._ssnT = setTimeout(() => {
+          if (!btn.isConnected) return;
+          btn.classList.remove('armed');
+          btn.textContent = 'Remove';
+        }, 3000);
+        return;
+      }
+      getApi({ op: 'remove', stash_id: btn.dataset.getrm })
+        .catch(err => { getErr = (err && err.message) || String(err); })
+        .finally(() => { if (!finished) paint(false, true); });
+    }
+    /** The row on the Stash home view, under the find box and Stash hunt. */
+    function getRowHtml() {
+      const n = getItems.filter(x => !x.got_at).length;
+      return '<div class="ssn-get-row"><button type="button" class="ssn-get-go" data-getopen>&#128229; Stash get</button>' +
+        '<span>' + (getReady && n ? n + ' scene' + (n === 1 ? '' : 's') + ' to get' : 'Scenes you save to get later') + '</span></div>';
+    }
+    function getViewHtml() {
+      const todo = getItems.filter(x => !x.got_at);
+      const done = getItems.filter(x => x.got_at);
+      const card = (c) => {
+        const studio = c.studio
+          ? '<button type="button" class="ssn-stlink" data-stid="' + esc(c.studio_id || '') + '" data-stname="' +
+              esc(c.studio) + '" data-sid="' + esc(c.stash_id) + '">' + esc(c.studio) + '</button>'
+          : 'no studio';
+        const sub = [studio, c.release_date ? esc(c.release_date) : ''].filter(Boolean).join(' &middot; ');
+        const cast = (c.cast || []).map(p =>
+          '<button type="button" class="ssn-perf" data-pid="' + esc(p.id || '') + '" data-pname="' + esc(p.name) +
+          '" data-sid="' + esc(c.stash_id) + '">' + esc(p.name) + '</button>').join('');
+        return '<div class="ssn-card">' +
+          '<div class="ssn-top">' +
+            (c.cover
+              ? '<div class="ssn-cover ssn-thumb' + (revealAll ? ' shown' : '') + '" data-cover><img src="' + esc(c.cover) + '" alt="" loading="lazy">' +
+                '<div class="ssn-veil">Tap 3 times</div></div>'
+              : '<div class="ssn-cover ssn-thumb none">no cover</div>') +
+            '<div class="ssn-tt"><div class="ssn-title">' + (c.title ? esc(c.title) : '(untitled scene)') + '</div>' +
+              '<div class="ssn-sub">' + sub + '</div>' +
+              (c.in_library ? '<div class="ssn-sub"><span class="ssn-gotlib">&#10003; Now in your library</span></div>' : '') +
+            '</div>' +
+          '</div>' +
+          (cast ? '<div class="ssn-cast">' + cast + '</div>' : '') +
+          '<div class="ssn-foot">' +
+            '<button type="button" class="ssn-getgot' + (c.got_at ? ' on' : '') + '" data-getgot="' + esc(c.stash_id) +
+              '" data-val="' + (c.got_at ? '0' : '1') + '">' + (c.got_at ? '&#10003; Got - tap to undo' : 'Got it &#10003;') + '</button>' +
+            '<button type="button" class="ssn-getrm" data-getrm="' + esc(c.stash_id) + '">Remove</button>' +
+            (c.stash_url ? '<button type="button" class="ssn-ext" data-ext="' + esc(c.stash_url) + '">StashDB &#8599;</button>' : '') +
+            (googleUrl(c) ? '<button type="button" class="ssn-google ssn-google-card" data-ext="' + esc(googleUrl(c)) + '">Google &#8599;</button>' : '') +
+            tubeLinks(sceneTerms(c), 'ssn-google ssn-google-card') +
+          '</div>' +
+        '</div>';
+      };
+      return '<div class="ssn-state"><span class="ssn-h">Stash get' + (getReady ? ' &middot; ' + todo.length + ' to get' : '') + '</span></div>' +
+        errHtml(getErr) +
+        (!getReady && !getErr ? '<div class="ssn-state">Loading&hellip;</div>' : '') +
+        (getReady && !getItems.length ? '<div class="ssn-empty">Nothing saved yet. Tap &ldquo;+ Stash get&rdquo; on a scene in any result to keep it here.</div>' : '') +
+        todo.map(card).join('') +
+        (done.length ? '<details class="ssn-getdone"><summary>Got &middot; ' + done.length + '</summary>' + done.map(card).join('') + '</details>' : '');
     }
 
     // Done (picker 15.31 / native 15.40): closes the list it sits in - beside
@@ -2094,6 +2271,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
                           esc(googleUrl(c)) + '">Google &#8599;</button>' : '') +
           tubeLinks(sceneTerms(c), 'ssn-google ssn-google-card') +
           libHtml(c, i) +
+          getBtn(c, i) +
         '</div>' +
         '<div class="ssn-cerr"></div>' +
       '</div>';
@@ -2104,8 +2282,11 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     // the scenes of your own files (browse 14.38's in_library) and puts this
     // studio / performer in the app's tag filter, taking it back out when
     // switched off if it was the one that added it.
-    const libBtn = (e) => '<button type="button" class="ssn-libf' + (e.libOnly ? ' on' : '') + '" data-libonly ' +
-      'title="Only the scenes you have">' + (e.libOnly ? '&#10003; In library' : '&#128218; In library') + '</button>';
+    // Three states (picker 15.141 / native 15.194): off, In library (only the
+    // scenes you have), Not in library (only the scenes none of your files are).
+    const libBtn = (e) => '<button type="button" class="ssn-libf' + (e.libOnly ? ' on' : e.libNot ? ' on not' : '') + '" data-libonly ' +
+      'title="Tap: only the scenes you have. Tap again: only the scenes you do not have. Again: all scenes">' +
+      (e.libOnly ? '&#10003; In library' : e.libNot ? '&#10007; Not in library' : '&#128218; In library') + '</button>';
     function extLinks(name, urls) {
       if (!name) return '';
       const hasIndexxx = (urls || []).some(u => /indexxx\./i.test(u.url || ''));
@@ -2124,7 +2305,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (!e || (e.type !== 'studio' && e.type !== 'performer') || !e.data) return;
       const kind = e.type;
       const who = kind === 'studio' ? e.data.studio : e.data.performer;
-      e.libOnly = !e.libOnly;
+      if (e.libNot) { e.libNot = false; paint(false, true); return; }
+      if (e.libOnly) { e.libOnly = false; e.libNot = true; e.notTries = 0; } else { e.libOnly = true; }
       const val = who ? facetName(kind, who.name) : '';
       const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet(kind) : null;
       if (val && e.libOnly) {
@@ -2457,11 +2639,15 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         load(e, false, true);
         return;
       }
+      if (btn.hasAttribute('data-getopen')) { getOpen(); return; }
+      if (btn.dataset.getscene !== undefined) { getToggleScene(btn); return; }
+      if (btn.dataset.getgot !== undefined) { getMark(btn.dataset.getgot, btn.dataset.val === '1'); return; }
+      if (btn.dataset.getrm !== undefined) { getRemove(btn); return; }
       if (btn.dataset.sort) {
         const e = top();
         if (e && e.sort !== btn.dataset.sort) { e.sort = btn.dataset.sort; paint(false, true); }
         // In a hunt, the next files' searches open in this order too (picker 15.43 / native 15.54).
-        if (e && e.type === 'search' && inHunt && typeof hunt.setSearchSort === 'function') {
+        if (e && e.type === 'search' && inHunt && typeof hunt.setSearchSort === 'function' && btn.dataset.sort !== 'lib') {
           try { hunt.setSearchSort(btn.dataset.sort); } catch (err) { /* this card only */ }
         }
         return;
@@ -2470,7 +2656,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (btn.dataset.lib !== undefined) { openLibrary(+btn.dataset.lib); return; }
       if (btn.dataset.accept !== undefined) { accept(btn); return; }
       if (btn.dataset.take !== undefined) { takeMenu(+btn.dataset.take); return; }
-      if (btn.hasAttribute('data-more')) { const e = top(); if (e && !e.busy) load(e, true); return; }
+      if (btn.hasAttribute('data-more')) { const e = top(); if (e && !e.busy) { e.notTries = 0; load(e, true); } return; }
       if (btn.hasAttribute('data-libonly')) { if (!(top() || {}).busy) toggleLibOnly(); return; }
       if (btn.hasAttribute('data-filter')) {
         const e = top();
@@ -2527,6 +2713,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       }
     }
 
+    getLoad();
     const start = opts.start || { type: 'search', term: startWords(video) };
     push(start.type === 'home' ? { type: 'home' } : start.type === 'performer'
       ? { type: 'performer', id: start.id || '', name: start.name || '', sceneId: start.sceneId || '', fromKey: start.fromKey || '' }

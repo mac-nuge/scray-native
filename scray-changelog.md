@@ -4,6 +4,16 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.142 / native 15.195 / browse 15.374 — test: Female/NB filter in performer lists, outside links search by names
+<!-- 2026-10-30T07:03Z -->
+- **Asked:** (1) in the apps' Stash performer lists, a way to show only female / non-binary performers; (2) Eporner and the other outside links search by studio and performer name, not by the scene's title.
+- **F/NB filter:** an **F/NB** button beside **In library** in every performer list - a studio's Performer list, a performer's With list, and the search results' Performer filter. On, only performers StashDB lists as Female or Non-binary stay (the same two the Missing page reads; trans female is not included). Anyone already picked stays visible so it can be unticked, and a line says how many are hidden. One switch for all performer lists, kept in `scray_dd_fnb`. If no row in a list carries a gender (browse not yet deployed with this change) the list is left whole and says so, rather than going empty. Combines with In library, so the order is still by your library count.
+- **Gender data (browse api.php):** the studio view's `performers` list and `studio_perf_find` now ask StashDB for each performer's `gender` and send `gender_short` (F / M / TF / TM / NB / I / ?). Each query has a fallback without `gender`, so an older StashDB schema just leaves it blank. The app also takes gender from the casts of loaded scenes.
+- **Outside links:** Eporner and Porntrex on a scene now search `studio performer` - the first female / NB performer, else the first listed - and Google on a scene searches the studio and up to two performers (female / NB first), no longer the title as a phrase. Name and studio profile links were already by name. Applies in the apps' Stash modal and browse's Stash pages (`scray-stash-profiles.js`, `scray-stash-search.js`). The Missing page's members-site searches are the studios' own sites and still use the title; say if those should change too.
+- **Not done:** the F/NB button is in the apps only; browse's own Stash profile dropdowns have no such switch.
+- **Tested:** `node --check` on the JS and `php -l` on api.php. Not run against the real StashDB or on a phone.
+- **Files:** picker `scray-stash-nav.js`; native `assets/web/scray-stash-nav.js` (identical); browse `api.php`, `scray-stash-profiles.js`, `scray-stash-search.js`.
+
 ### picker 15.141 / native 15.194 / browse 15.372 — test: Not in library, results sort by library, Stash get list
 <!-- 2026-10-27T09:25Z -->
 - **Asked:** (1) sort the actual results by library count too; (2) the In library toggle gets another setting, Not in library; (3) a new section stored on the server, "Stash get", to save Stash result scenes to a list as a reminder to get them, placed in the Stash button where the studio / performer search and Stash hunt are.

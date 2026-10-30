@@ -1236,7 +1236,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
           const k = ck(p.name);
           if (!k || seen.has(k)) return;
           seen.add(k);
-          const x = pf.get(k) || { k, name: p.name, n: 0, as: [], aliases: [] }; x.n++; pf.set(k, x);
+          const x = pf.get(k) || { k, name: p.name, n: 0, as: [], aliases: [], g: '' }; x.n++; pf.set(k, x);
+          if (!x.g && p.gender_short && p.gender_short !== '?') x.g = p.gender_short;
           // Credited as / aka (picker 15.57 / native 15.68).
           if (p.as && p.as !== p.name && !x.as.includes(p.as)) x.as.push(p.as);
           (p.aliases || []).forEach(a => { if (a && !x.aliases.includes(a)) x.aliases.push(a); });
@@ -1272,6 +1273,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         opts.sort((a, b) => (isOn(b.k) ? 1 : 0) - (isOn(a.k) ? 1 : 0));
         // In library (see libRank): studios and performers by how many of your videos they have.
         const libK = open === 'rfs' ? 'studio' : 'performer';
+        const fl = fnbList(e, open, opts, isOn, 'k');
+        opts.splice(0, opts.length, ...fl.list);
         const byLib = open !== 'rfc' && !!libSort[libK];
         if (byLib) {
           libWant(libK, opts.map(o => o.name));
@@ -1283,8 +1286,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
                                                          : 'Pick several to see scenes they&rsquo;re all in together') + '</div>' +
           '<div class="ssn-dd-top"><input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
             'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + ' in the results&hellip;" value="' + esc(e[DD[open].term] || '') + '">' +
-            (open !== 'rfc' ? sortBtn(e, open) : '') + doneBtn(open) + '</div>' +
-          '<div class="ssn-studio-list">' + (byLib ? libNote() : '') +
+            fnbBtn(e, open) + (open !== 'rfc' ? sortBtn(e, open) : '') + doneBtn(open) + '</div>' +
+          '<div class="ssn-studio-list">' + (byLib ? libNote() : '') + fnbNote(fl) +
             '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-dd="' + open + '" data-rf-pick="">All ' + many + '</button>' +
             opts.map(o => {
               // Performers: who they were credited as here, and aka (picker 15.57 / native 15.68).
@@ -1576,7 +1579,8 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         const m = new Map();
         const add = (p, count) => {
           if (!p || !p.id || !p.name) return null;
-          const o = m.get(p.id) || { id: p.id, name: p.name, count: 0, as: [], aliases: [] };
+          const o = m.get(p.id) || { id: p.id, name: p.name, count: 0, as: [], aliases: [], g: '' };
+          if (!o.g && p.gender_short && p.gender_short !== '?') o.g = p.gender_short;
           (p.aliases || []).forEach(a => { if (a && !o.aliases.includes(a)) o.aliases.push(a); });
           // Credited-as names the StashDB search found (picker 15.58 / native 15.69).
           (Array.isArray(p.as) ? p.as : []).forEach(a => { if (a && a !== o.name && !o.as.includes(a)) o.as.push(a); });
@@ -1690,6 +1694,33 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         '" title="Rank by how many of your videos each has in the library">In library' + (on ? ' &#8595;' : '') + '</button>';
     };
     const libNote = () => libErr ? '<div class="ssn-studio-how">Library counts unavailable: ' + esc(libErr) + '</div>' : '';
+
+    // ---- Female / NB only in a performer list (picker 15.142 / native 15.195) --
+    // One switch for every performer list (a studio's Performer list, a
+    // performer's With list, the search results' Performer filter), kept in
+    // scray_dd_fnb. Female (F) and non-binary (NB) only, as the Missing page
+    // reads them; anyone already picked stays in the list so it can be
+    // unticked. A list with no gender on any row (browse not yet updated to
+    // send it) is left whole rather than emptied.
+    let fnbOn = false;
+    try { fnbOn = localStorage.getItem('scray_dd_fnb') === '1'; } catch (_) { /* no storage */ }
+    const isFnb = (g) => g === 'F' || g === 'NB';
+    const fnbList = (e, dd, opts, isOn, key) => {
+      if (!fnbOn || dd === 'rfc' || libKind(e, dd) !== 'performer') return { list: opts, hidden: 0 };
+      if (!opts.some(o => o.g && o.g !== '?')) return { list: opts, hidden: 0, nodata: true };
+      const list = opts.filter(o => isFnb(o.g) || isOn(o[key]));
+      return { list, hidden: opts.length - list.length };
+    };
+    const fnbBtn = (e, dd) => dd !== 'rfc' && libKind(e, dd) === 'performer'
+      ? '<button type="button" class="ssn-dd-sort ssn-dd-fnb' + (fnbOn ? ' on' : '') + '" data-dd-fnb="1" ' +
+        'title="Only the female and non-binary performers">F/NB</button>' : '';
+    const fnbNote = (fl) => fl.hidden ? '<div class="ssn-studio-how">Female / NB only - ' + fl.hidden + ' hidden (male, trans male, intersex or no gender listed).</div>'
+      : fl.nodata ? '<div class="ssn-studio-how">Genders are not listed for this list yet, so nobody is hidden.</div>' : '';
+    function fnbToggle() {
+      fnbOn = !fnbOn;
+      try { localStorage.setItem('scray_dd_fnb', fnbOn ? '1' : '0'); } catch (_) { /* no storage */ }
+      paint(false, true);
+    }
     /**
      * The options in library order, with each one's count - or null when this
      * list isn't ranked. A network (and its studios) ranks by the studios it
@@ -1952,11 +1983,12 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     function ddListInner(e, dd) {
       const K = DD[dd];
       const { one, many } = ddWords(e, dd);
-      const opts = ddOptions(e, dd);
       const picks = e[K.picks] || [];
       const isOn = (id) => picks.some(x => x.id === id);
+      const fl = fnbList(e, dd, ddOptions(e, dd), isOn, 'id');
+      const opts = fl.list;
       const lib = libRank(e, dd, opts, isOn);
-      return libNote() +
+      return libNote() + fnbNote(fl) +
             '<button type="button" class="ssn-studio-opt' + (!picks.length ? ' on' : '') + '" data-dd="' + dd + '" data-studio-pick="">All ' + many + '</button>' +
             // Picked ones first, so they're easy to find and untick.
             // A nested list keeps its order (a studio stays under its network);
@@ -2012,7 +2044,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
           '<div class="ssn-studio-how">' + how + '</div>' +
           '<div class="ssn-dd-top"><input class="ssn-studio-find" type="search" enterkeyhint="done" spellcheck="false" autocomplete="off" ' +
             'autocorrect="off" autocapitalize="off" placeholder="Search ' + many + '&hellip;" value="' + esc(e[K.term] || '') + '">' +
-            sortBtn(e, dd) + doneBtn(dd) + '</div>' +
+            fnbBtn(e, dd) + sortBtn(e, dd) + doneBtn(dd) + '</div>' +
           '<div class="ssn-studio-list">' + ddListInner(e, dd) + '</div>' +
           doneBtn(dd, true) +
         '</div>';
@@ -2096,12 +2128,16 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     }
 
     // Eporner / Porntrex (picker 15.18 / native 15.19): both search by a
-    // dashed slug in the path. A name as it is; a scene by its title, or the
-    // studio and first performer when it has none.
+    // dashed slug in the path. A name as it is; a scene (picker 15.142 /
+    // native 15.195) by its studio and a performer's name - never its title.
+    // The first female / NB performer, else the first one listed.
+    const castFirst = (c) => {
+      const cast = (c.cast || []).filter(p => p && p.name);
+      return cast.filter(p => isFnb(p.gender_short)).concat(cast.filter(p => !isFnb(p.gender_short)));
+    };
     const siteSlug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-    const sceneTerms = (c) => c.title ||
-      [c.studio, ((c.cast || [])[0] || {}).name].filter(Boolean).join(' ');
+    const sceneTerms = (c) => [c.studio, (castFirst(c)[0] || {}).name].filter(Boolean).join(' ');
     function tubeLinks(text, cls) {
       const slug = siteSlug(text);
       if (!slug) return '';
@@ -2111,13 +2147,13 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
                esc('https://www.porntrex.com/search/' + slug + '/') + '">Porntrex &#8599;</button>';
     }
 
-    // Google for one scene (13.165 / 13.164): the title as an exact phrase,
-    // then the studio and up to two performers to pin it down.
+    // Google for one scene (13.165 / 13.164): the studio and up to two
+    // performers (picker 15.142 / native 15.195: no longer the title as an
+    // exact phrase), female / NB ones first.
     function googleUrl(c) {
       const bits = [];
-      if (c.title) bits.push('"' + String(c.title).replace(/"/g, '') + '"');
       if (c.studio) bits.push(c.studio);
-      (c.cast || []).slice(0, 2).forEach(p => { if (p && p.name) bits.push(p.name); });
+      castFirst(c).slice(0, 2).forEach(p => bits.push(p.name));
       return bits.length ? 'https://www.google.com/search?q=' + encodeURIComponent(bits.join(' ')) : '';
     }
 
@@ -2543,6 +2579,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (btn.dataset.pstudio !== undefined) { pillMenu(btn.dataset.pstudio); return; }
       if (btn.dataset.pperf !== undefined) { pillMenu(btn.dataset.pperf, 'performer'); return; }
       if (btn.dataset.pword !== undefined) { toggleWord(btn.dataset.pword); searchSoon(); return; }
+      if (btn.dataset.ddFnb) { fnbToggle(); return; }
       if (btn.dataset.ddSort) { libToggle(btn.dataset.ddSort); return; }
       if (btn.dataset.ddDone) { closeDd(btn.dataset.ddDone); return; }
       if (btn.dataset.rfToggle) {

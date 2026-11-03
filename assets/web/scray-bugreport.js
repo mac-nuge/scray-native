@@ -392,6 +392,14 @@ console.log("scray-bugreport.js loaded");
         source:     player ? safe(() => scrubUrl(player.source || (player.media && player.media.currentSrc))) : null,
       } : null,
       scray_local_keys: safe(() => Object.keys(localStorage).filter((k) => /^scray/i.test(k)), []),
+      // native 15.197: what is using the phone's localStorage quota, biggest first (KB, UTF-16 so x2 for bytes)
+      scray_local_sizes_kb: safe(() => {
+        const rows = Object.keys(localStorage).map((k) => [k, Math.round(((localStorage.getItem(k) || "").length + k.length) / 102.4) / 10]);
+        rows.sort((a, b) => b[1] - a[1]);
+        const out = { total_chars_kb: Math.round(rows.reduce((n, r) => n + r[1], 0)) };
+        rows.slice(0, 12).forEach(([k, kb]) => { out[k] = kb; });
+        return out;
+      }, {}),
       ui_layers:    safe(uiLayers, []),
       focused:      safe(() => describeEl(document.activeElement)),
       scroll_y:     safe(() => Math.round(window.scrollY || 0)),

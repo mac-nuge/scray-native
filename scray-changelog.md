@@ -4,6 +4,16 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.197 — test: Local basket copy limited to latest 100, storage sizes in diagnostics
+<!-- 2026-11-03T13:10Z -->
+- **Asked:** keep the full basket and history on the server and only a limited latest-100 copy on the phone, so saving cannot fail for lack of room (follows 15.196, SO-521).
+- **Basket:** the copy in localStorage (`scray_basket`) now holds only the newest 100 items (`SCRAY_BASKET_LOCAL_MAX`, basket.js). The basket adds to the top, so these are the latest. The server still has the whole basket and the pull at start rebuilds it in full from the library; the basket in memory is not trimmed, and what gets pushed is unchanged. The local copy only paints the panel before that first pull. Stored entries are still whole video records, not slimmed - a hundred is small, and slimming risks a missing field in the panel.
+- **History:** no change needed - the local copy was already the latest 100 slim entries (`HISTORY_MAX`), the server keeps the same.
+- **Diagnostics:** the state report gains `scray_local_sizes_kb` - the total and the 12 biggest localStorage keys in KB - so the next report shows what is using the phone's allowance.
+- **Not done:** the caches (stash names, name maps, stash state, catalogue) are untouched and still dropped on demand by 15.196. Moving them to IndexedDB is the next step if the sizes say they are the cause.
+- **Tested:** `node --check` on both files. Not run on a phone.
+- **Files:** native `assets/web/basket.js`, `assets/web/scray-bugreport.js`.
+
 ### native 15.196 — test: Basket and history save when phone storage is full
 <!-- 2026-11-03T12:55Z -->
 - **Asked:** adding videos to the basket kept failing, and a history save error appeared (SO-521).

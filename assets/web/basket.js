@@ -36,6 +36,7 @@ renderBasket();
 // refused they are dropped, biggest first, until it fits. The caches that
 // own them already cope with a missing copy (they refetch, and keep the
 // in-memory one if they cannot store it).
+const SCRAY_BASKET_LOCAL_MAX = 100; // ⚙️ newest basket items kept in localStorage
 const SCRAY_EVICTABLE_KEYS = [
   "scray_stash_names_v1",
   "scray_stash_names_v2",
@@ -70,7 +71,11 @@ function saveBasket() {
 basketVideos = window.basketVideos;
 // The local copy is only the offline copy; if it cannot be stored the server
 // push below must still go, so a full phone no longer loses the add.
-scraySetItemSafe("scray_basket", JSON.stringify(basketVideos));
+// native 15.197: only the newest SCRAY_BASKET_LOCAL_MAX are kept here (the
+// basket adds to the top). The server holds the whole basket and the pull
+// after start rebuilds it in full from the library, so this copy is just
+// what paints the panel first. The in-memory basket is not trimmed.
+scraySetItemSafe("scray_basket", JSON.stringify(basketVideos.slice(0, SCRAY_BASKET_LOCAL_MAX)));
 // window.basketVideos already updated above, no need to reassign
 
 // native 15.31: the basket is shared by every install of Native (the server's

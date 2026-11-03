@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.196 — test: Basket and history save when phone storage is full
+<!-- 2026-11-03T12:55Z -->
+- **Asked:** adding videos to the basket kept failing, and a history save error appeared (SO-521).
+- **Cause:** both were `QuotaExceededError` from localStorage - the phone's storage for the app was full. `saveBasket` threw before it reached the server push, so the add was lost (and the swipe action reported failed); `flushHistorySave` threw too.
+- **Fix:** new `scraySetItemSafe` (basket.js). When a write is refused it drops copies the server can send again - the stash names, name maps and stash state caches and the Excel catalogue cache - one at a time until the write fits, and logs which it dropped. `saveBasket` and the history save use it, and a write that still cannot be stored no longer stops the basket's server push. The caches refetch on their own and already keep an in-memory copy if they cannot store it.
+- **Not done:** nothing yet shrinks what is stored, so on a very full phone the caches may be dropped again after a refetch. The basket's stored entries are still whole video records; slimming them is the next step if this recurs. Picker is not changed (a browser's quota is not the problem there).
+- **Tested:** `node --check`; the helper against a fake storage with a limit (frees a cache and saves; returns false when nothing frees enough). Not run on a phone.
+- **Files:** native `assets/web/basket.js`, `assets/web/history.js`.
+
 ### picker 15.142 / native 15.195 / browse 15.374 — test: Female/NB filter in performer lists, outside links search by names
 <!-- 2026-10-30T07:03Z -->
 - **Asked:** (1) in the apps' Stash performer lists, a way to show only female / non-binary performers; (2) Eporner and the other outside links search by studio and performer name, not by the scene's title.

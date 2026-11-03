@@ -93,8 +93,12 @@ historySaveTimer = null;
 if (!historySavePending) return;
 historySavePending = false;
 try {
-    localStorage.setItem(HISTORY_OUTBOX_KEY, JSON.stringify(historyOutbox));
-    localStorage.setItem(HISTORY_LS_KEY, JSON.stringify(historyEntries));
+    // scraySetItemSafe (basket.js) frees re-downloadable caches if the phone is full
+    const put = (typeof window.scraySetItemSafe === "function")
+        ? window.scraySetItemSafe
+        : (k, v) => { localStorage.setItem(k, v); return true; };
+    put(HISTORY_OUTBOX_KEY, JSON.stringify(historyOutbox));
+    put(HISTORY_LS_KEY, JSON.stringify(historyEntries));
 } catch (err) {
     console.error("Saving history failed:", err);
 }

@@ -30,10 +30,47 @@ selectedBasketIds.clear();
 renderBasket();
 }
 
+// native 15.196: a full phone made every localStorage write throw
+// QuotaExceededError - the basket would not take a video and history stopped
+// saving. These are copies the server can send again, so when a write is
+// refused they are dropped, biggest first, until it fits. The caches that
+// own them already cope with a missing copy (they refetch, and keep the
+// in-memory one if they cannot store it).
+const SCRAY_EVICTABLE_KEYS = [
+  "scray_stash_names_v1",
+  "scray_stash_names_v2",
+  "scray_name_maps_v2",
+  "scray_stash_state_v1",
+  "scrayExcelVideosCache"
+];
+function scraySetItemSafe(key, value) {
+  try { localStorage.setItem(key, value); return true; }
+  catch (err) {
+    if (!err || (err.name !== "QuotaExceededError" && err.code !== 22)) { console.warn("[storage] write failed:", key, err); return false; }
+  }
+  for (const k of SCRAY_EVICTABLE_KEYS) {
+    if (k === key) continue;
+    let had = null;
+    try { had = localStorage.getItem(k); } catch { /* storage unavailable */ }
+    if (had === null) continue;
+    try { localStorage.removeItem(k); } catch { continue; }
+    try {
+      localStorage.setItem(key, value);
+      console.warn(`[storage] full - dropped cache ${k} (${Math.round(had.length / 1024)} KB) to save ${key}`);
+      return true;
+    } catch { /* still over quota - drop the next one */ }
+  }
+  console.warn("[storage] still full after dropping caches - not saved locally:", key);
+  return false;
+}
+window.scraySetItemSafe = scraySetItemSafe;
+
 function saveBasket() {
 // ✅ CRITICAL: Sync FROM window.basketVideos first (external code may have updated it)
 basketVideos = window.basketVideos;
-localStorage.setItem("scray_basket", JSON.stringify(basketVideos));
+// The local copy is only the offline copy; if it cannot be stored the server
+// push below must still go, so a full phone no longer loses the add.
+scraySetItemSafe("scray_basket", JSON.stringify(basketVideos));
 // window.basketVideos already updated above, no need to reassign
 
 // native 15.31: the basket is shared by every install of Native (the server's

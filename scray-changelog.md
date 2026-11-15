@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.198 — test: Download Stream always in the browser menu
+<!-- 2026-11-15T10:40Z -->
+- **Asked:** the in-app browser's stream download only shows up at certain times - can it always be there?
+- **Cause:** ⋯ listed Download Stream and Save Stream to Library only once the page in that tab had asked for an .m3u8 (the list starts empty on each page and tab), so before the video played the lines were missing.
+- **Change (ScrayBrowser.swift - Swift, needs an IPA build):** both lines are always in the ⋯ menu. With no stream found yet, tapping one says `No stream found on this page yet - start the video first` (the existing message); once streams are found it works as before, with the count shown when there is more than one.
+- **Not changed:** how streams are detected, so a stream still has to have started playing (or loading) in the page before it can be downloaded.
+- **Tested:** Swift not compiled or run.
+- **Files:** native `modules/scray-native/ios/ScrayBrowser.swift`, `assets/web/VERSION`.
+
 ### native 15.197 — test: Local basket copy limited to latest 100, storage sizes in diagnostics
 <!-- 2026-11-03T13:10Z -->
 - **Asked:** keep the full basket and history on the server and only a limited latest-100 copy on the phone, so saving cannot fail for lack of room (follows 15.196, SO-521).

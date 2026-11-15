@@ -1643,21 +1643,20 @@ final class ScrayBrowserViewController: UIViewController,
         // What goes here instead is whatever Browser Controls puts in the menu.
         for c in controlsLayout.controls(in: .menu) { sheet.addAction(menuAction(for: c)) }
 
-        // Streams (native 15.144): only once a page in this tab has asked for an .m3u8.
+        // Streams (native 15.144; always listed from 15.198). With none found yet,
+        // tapping says to start the video first (chooseStream), so the lines never vanish.
         if let wv = currentWebView {
             let found = streams(for: wv)
-            if !found.isEmpty {
-                let dl = UIAlertAction(title: found.count == 1 ? "Download Stream…"
-                                                               : "Download Stream… (\(found.count))",
-                                       style: .default) { [weak self] _ in self?.downloadStreamTapped() }
-                dl.setValue(UIImage(systemName: "arrow.down.to.line"), forKey: "image")
-                sheet.addAction(dl)
-                let save = UIAlertAction(title: found.count == 1 ? "Save Stream to Library…"
-                                                                 : "Save Stream to Library… (\(found.count))",
-                                         style: .default) { [weak self] _ in self?.saveStreamTapped() }
-                save.setValue(UIImage(systemName: "arrow.down.circle"), forKey: "image")
-                sheet.addAction(save)
-            }
+            let dl = UIAlertAction(title: found.count > 1 ? "Download Stream… (\(found.count))"
+                                                          : "Download Stream…",
+                                   style: .default) { [weak self] _ in self?.downloadStreamTapped() }
+            dl.setValue(UIImage(systemName: "arrow.down.to.line"), forKey: "image")
+            sheet.addAction(dl)
+            let save = UIAlertAction(title: found.count > 1 ? "Save Stream to Library… (\(found.count))"
+                                                            : "Save Stream to Library…",
+                                     style: .default) { [weak self] _ in self?.saveStreamTapped() }
+            save.setValue(UIImage(systemName: "arrow.down.circle"), forKey: "image")
+            sheet.addAction(save)
         }
 
         // Favourites (native 14.8). Offered for a real web page only.

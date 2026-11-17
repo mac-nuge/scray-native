@@ -4,6 +4,18 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.203 — test: TikTok mode is just another player mode
+<!-- 2026-11-17T21:05Z -->
+- **Asked:** make TikTok mode simply a toggle to that player type, like FLS, MPFS and MPB, rather than a mode with its own video order and the rest; in it, offer FLS as well as MPFS, with bigger buttons; keep the existing ways in.
+- **Gone (scray-reels.js):** the random / in-order button and its own random run (`scray_reels_order` no longer read), the orientation button and setting (`scray_reels_orient`), and everything the mode did to the page while it ran - it no longer sets the orientation filter or lifts "soft" out of the excluded tags, on the way in or out. It plays any video the web player can decode, whatever its orientation (a landscape one letterboxed, as before).
+- **Order:** swiping walks the list the video was played from in its own order, the same as > and <, wrapping at both ends (past the last comes the first, before the first the last). The counter shows the place in that list (12 / 87). A filter or search change while it runs (a tag in the title, say) still re-targets what comes next, from where this video sits in the new list.
+- **Ways in (unchanged buttons, new behaviour):** the orientation button's TikTok step, the corner TT and the MPFS TT circle now all do the same thing: switch the video on screen into TikTok mode from the same second (new `scrayReelsFromPlayer` in player.js). With nothing loaded, they turn the mode on and press X, as before. The orientation button's cycle is unchanged (Portrait > TikTok > All); TikTok leaves the filter where it was, so Portrait stays on until the cycle moves on.
+- **Ways out:** **MPFS** and new **FLS** carry the video on screen, from the same second, into that player (FLS through the rotate button's own `toggleManualRotation`, which goes fullscreen first); **Stop** closes the overlay. All three end the mode.
+- **Bigger buttons:** sound, Stop, MPFS, FLS at 13px with 6 x 12 padding and 6px gaps (were 10.5px, 3 x 7, 4px); the title sits a little higher to stay above them.
+- **Tested:** `node --check` on the three files. The overlay in headless Chrome with a real clip: TT with nothing loaded turns the mode on and presses X, filter untouched on and off; five videos opened at the 4th, down four times read 5, 1, 2, 3 and up seven times 2, 1, 5, 4, 3, 2, 1 (wrapping both ways, in list order); the button row is sound / Stop / MPFS / FLS at 13px, clear of the title; FLS hands the video on screen to the player in FLS mode and ends the mode. Not tried on the phone; the switch into FLS itself wasn't run (no player in the test).
+- **Not changed:** picker - its TikTok mode is still the older one from before native 15.184.
+- **Files:** native `assets/web/scray-reels.js`, `assets/web/player.js`, `assets/web/randomiser.js`, `assets/web/VERSION`. Web only, no IPA build.
+
 ### native 15.202 — test: browser menu at bottom, last closed tab, no %20 in downloads
 <!-- 2026-11-17T20:25Z -->
 - **Asked:** in the in-app browser, move ⋯ to the bottom bar between + and Tabs; move Home into the ⋯ menu as one of its lines; make the menu's list a little smaller; add Last Closed Tab to the menu to reopen the tab closed last. And downloaded files shouldn't come out with `%20` where a space should be.

@@ -4912,19 +4912,10 @@ function attachFrameStepButtons() {
     // 0 - S, the stash modal for the video on screen (picker 13.160 / native
     // 13.158), left of X^n / X^T. The same modal as the S button in the
     // now-playing strip, which is tucked behind "..." in both modes.
-    // TT - switch the video on screen to TikTok mode (MPFS only; style.css). Carries on from where it is.
-    // Arming first sets the orientation filter the mode needs; if this video is refused (a landscape one
-    // with landscape off) the mode is switched straight back off.
+    // TT - switch the video on screen to TikTok mode (MPFS only; style.css). Carries on from where it is
+    // (native 15.203: a player switch and nothing else - no filter changes).
     const reelsBtn = makeCircle('plyr-frame-reels', 'TikTok mode', 'TT');
-    setupTapButton(reelsBtn, () => {
-        const Rr = window.scrayReels, v = window.currentPlayingVideo;
-        if (!Rr || !v || Rr.isOpen() || typeof window.scrayPlayReels !== 'function') return;
-        const t = (window.plyrPlayer && window.plyrPlayer.currentTime) || 0;
-        const wasArmed = Rr.armed();
-        Rr.allow(v);            // this video's orientation may be one the setting would refuse: widen to both
-        Rr.arm();
-        if (!window.scrayPlayReels(v, currentListContext, currentVideoIndex, { startAt: t }) && !wasArmed) Rr.disarm();
-    });
+    setupTapButton(reelsBtn, () => { window.scrayReelsFromPlayer?.(); });
 
     const stashBtn = makeCircle('plyr-frame-stash', 'Stash', 'S');
     setupTapButton(stashBtn, () => {
@@ -11048,9 +11039,10 @@ window.scrayPlayImage = scrayPlayImage;
 
 /**
  * TikTok mode (scray-reels.js): while it is armed every play goes to the
- * overlay instead of the Plyr player. The list is the one the video was played
- * from, cut down to portrait videos the web player can decode, played in random
- * order (this one first); swiping walks it. Like scrayPlayImage, each video shown becomes the playing file (green
+ * overlay instead of the Plyr player - it is a player mode like MPB, MPFS and
+ * FLS (native 15.203). The list is the one the video was played from, cut down
+ * to videos the web player can decode, in its own order; swiping walks it as
+ * > and < do, wrapping at the ends. Like scrayPlayImage, each video shown becomes the playing file (green
  * row, history, and where < and > carry on from), and is watched the same way
  * (view count and time) through scrayWatchBegin / scrayWatchStep.
  */
@@ -11065,7 +11057,7 @@ function scrayPlayReels(video, listContext = null, index = null, opts = {}) {
     }
     const R = window.scrayReels;
     if (!R.canPlay(video)) {
-        R.toast('TikTok mode cannot play this one - its orientation button (▯ ▯▭ ▭) sets which videos it takes');
+        R.toast("TikTok mode can't play this file type");
         return false;
     }
     const fullList = (currentListContext !== null && Array.isArray(getVideoListByContext())) ? getVideoListByContext() : [];
@@ -11090,7 +11082,6 @@ function scrayPlayReels(video, listContext = null, index = null, opts = {}) {
         items,
         index: at,
         startAt: opts && opts.startAt,
-        shuffle: true,      // random order: this one first, then the rest shuffled, reshuffled when it runs out
         listKey: live ? () => {
             const l = listNow();
             if (l !== keyList || l.length !== keyN) { keyList = l; keyN = l.length; return {}; }   // a fresh token on change
@@ -11115,14 +11106,33 @@ function scrayPlayReels(video, listContext = null, index = null, opts = {}) {
 }
 window.scrayPlayReels = scrayPlayReels;
 
-// TikTok mode's MPFS button: TikTok mode has already been switched off, so this plays the video in the normal
-// player from where it was, then goes portrait fullscreen (MPFS) like a double-tap would.
-window.scrayPlayFromReels = async function (video, t) {
+// Into TikTok mode with the video on screen, from the same second - what the MPFS TT circle, the corner TT
+// and the orientation button's TikTok step all do (native 15.203). Turns the mode on. False (and the mode
+// left as it was) when nothing is loaded or the overlay can't take it; scray-reels.js then presses X.
+window.scrayReelsFromPlayer = function () {
+    const Rr = window.scrayReels, v = window.currentPlayingVideo;
+    if (!Rr || !v || Rr.isOpen() || !Rr.canPlay(v)) return false;
+    const t = (window.plyrPlayer && window.plyrPlayer.currentTime) || 0;
+    const wasArmed = Rr.armed();
+    Rr.arm();
+    const ok = scrayPlayReels(v, currentListContext, currentVideoIndex, { startAt: t });
+    if (!ok && !wasArmed) Rr.disarm();
+    return !!ok;
+};
+
+// TikTok mode's MPFS and FLS buttons: TikTok mode has already been switched off, so this plays the video in
+// the normal player from where it was, then goes portrait fullscreen (MPFS) like a double-tap would, or
+// landscape fullscreen (FLS) like the rotate button (native 15.203).
+window.scrayPlayFromReels = async function (video, t, mode = 'mpfs') {
     if (!video) return;
     const at = (t && t > 1) ? Math.floor(t) : null;
     await playVideoInline(video, currentListContext || 'main', currentVideoIndex, at);
     setTimeout(() => {
         try {
+            if (mode === 'fls') {
+                if (!manualRotationActive) toggleManualRotation();   // enters fullscreen first if it isn't
+                return;
+            }
             const fs = window.plyrPlayer && window.plyrPlayer.fullscreen;
             if (fs && !fs.active) fs.enter();
         } catch (e) { /* needs a tap on some browsers; the normal player is already playing */ }

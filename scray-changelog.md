@@ -4,6 +4,16 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.202 — test: browser menu at bottom, last closed tab, no %20 in downloads
+<!-- 2026-11-17T20:25Z -->
+- **Asked:** in the in-app browser, move ⋯ to the bottom bar between + and Tabs; move Home into the ⋯ menu as one of its lines; make the menu's list a little smaller; add Last Closed Tab to the menu to reopen the tab closed last. And downloaded files shouldn't come out with `%20` where a space should be.
+- **Layout (ScrayBrowserControls.swift):** the default is now downloads at the top; ‹N, back, forward, last tab, reload, +, ⋯, tabs, ✕ along the bottom; Home in the menu. A layout already saved on the phone (Browser Controls) gets just those two moves, once (`scray.browser.controls.moved15202`): ⋯ goes in front of Tabs (after + if Tabs isn't in the bar, else last), Home to the top of the menu list; everything else stays as arranged, and the editor can move them again afterwards. Reset's message says the new default.
+- **Smaller list:** the ⋯ menu is now a pop-up menu from the button (`UIMenu`, built fresh each time it opens) instead of an action sheet. The sheet's tall rows and large text filled most of the screen; a menu's rows are smaller, and it opens from ⋯ itself. Four groups with dividers: the controls placed in the menu (Home) and Last Closed Tab; the page (streams, favourites, Open in Safari); the browser (history, logins, NordVPN, download folder); Jira and Browser Controls. The first lines sit nearest the button, so from the bottom bar Home and Last Closed Tab are under the thumb. The Cancel line is gone - tapping off the menu closes it.
+- **Last Closed Tab:** closing a tab (✕, the tab list, a batch close, a page closing itself) remembers its address and its back / forward history (`WKWebView.interactionState`), up to 20. The line reopens the most recent at its old place in the list (never among the pinned tabs) with that history, then the one before, and so on; greyed out when there's none. Fresh tabs that never reached a page aren't remembered. Kept while the app runs, including across closing and reopening the browser, not across a restart.
+- **%20 in downloads:** names taken from an address kept their escapes. `percentDecoded` turns each `%XX` back into its character (twice at most, for `%2520`), and leaves a name alone if its escapes don't make text (`100% off`). Applied in `sanitizedFilename` before slashes and colons are made dashes (so `%2F` can't make a folder), which every download now goes through - plain web downloads (WKDownload's suggested name, which used to skip it), page blob downloads and Picker's queued downloads - and to the stream names, on the phone and sent to the server.
+- **Tested:** not compiled here (no Xcode); the remote IPA build was run on the branch before merging as the compile check. Not tried on the phone.
+- **Files:** native `modules/scray-native/ios/ScrayBrowser.swift`, `modules/scray-native/ios/ScrayBrowserControls.swift`, `assets/web/VERSION`. **Needs a new IPA build.**
+
 ### picker 15.145 / native 15.201 — test: Modified in the Date sort
 <!-- 2026-11-17T20:05Z -->
 - **Asked:** add the modified date to the Date sort's choices, alongside Created, Played and the rest.

@@ -10,7 +10,7 @@ import UIKit
 //
 //   top     in the address bar row, after the address (and the StashDB ↱)
 //   bottom  in the bar along the bottom
-//   menu    a line at the top of the ⋯ menu instead of a button
+//   menu    one of the first lines in the ⋯ menu instead of a button
 //   hidden  nowhere
 //
 // Edited from ⋯ > Browser Controls…, saved per phone in UserDefaults
@@ -95,16 +95,20 @@ struct ScrayBrowserLayout: Equatable {
     /// One list per place, in order.
     var lists: [[ScrayBrowserControl]]
 
-    // ⚙️ The layout with nothing saved (native 15.8): home, downloads and ⋯
-    // up by the address; everything else along the bottom, ✕ last.
+    // ⚙️ The layout with nothing saved (native 15.202): downloads up by the
+    // address; ⋯ along the bottom between + and Tabs, with everything else,
+    // ✕ last; Home a line in the ⋯ menu. (15.8 had home, downloads and ⋯ at
+    // the top.)
     static let DEFAULT = ScrayBrowserLayout(lists: [
-        [.home, .downloads, .more],
-        [.picker, .back, .forward, .lastTab, .reload, .newTab, .tabs, .close],
-        [],
+        [.downloads],
+        [.picker, .back, .forward, .lastTab, .reload, .newTab, .more, .tabs, .close],
+        [.home],
         []
     ])
 
     private static let storeKey = "scray.browser.controls.v1"
+    /// Set once the 15.202 move has been made on a saved layout (see load).
+    private static let moved15202Key = "scray.browser.controls.moved15202"
 
     func controls(in place: ScrayBrowserPlace) -> [ScrayBrowserControl] { lists[place.rawValue] }
 
@@ -117,6 +121,7 @@ struct ScrayBrowserLayout: Equatable {
     /// and the two rules applied.
     static func load() -> ScrayBrowserLayout {
         guard let saved = UserDefaults.standard.dictionary(forKey: storeKey) as? [String: [String]] else {
+            UserDefaults.standard.set(true, forKey: moved15202Key)   // DEFAULT already has it
             return DEFAULT
         }
         var seen = Set<ScrayBrowserControl>()
@@ -132,7 +137,23 @@ struct ScrayBrowserLayout: Equatable {
             let home = DEFAULT.place(of: c) ?? .bottom
             lists[home.rawValue].append(c)
         }
-        return ScrayBrowserLayout(lists: lists)
+        var layout = ScrayBrowserLayout(lists: lists)
+        // native 15.202, once: Mac asked for ⋯ in the bottom bar between + and
+        // Tabs and Home in the ⋯ menu, so a layout saved before then gets those
+        // two moves - the rest of it stays as he arranged it. After that the
+        // editor is free to put them anywhere again.
+        if !UserDefaults.standard.bool(forKey: moved15202Key) {
+            layout.lists = layout.lists.map { list in list.filter { $0 != .more && $0 != .home } }
+            var bottom = layout.lists[ScrayBrowserPlace.bottom.rawValue]
+            if let t = bottom.firstIndex(of: .tabs) { bottom.insert(.more, at: t) }
+            else if let n = bottom.firstIndex(of: .newTab) { bottom.insert(.more, at: n + 1) }
+            else { bottom.append(.more) }
+            layout.lists[ScrayBrowserPlace.bottom.rawValue] = bottom
+            layout.lists[ScrayBrowserPlace.menu.rawValue].insert(.home, at: 0)
+            layout.save()
+            UserDefaults.standard.set(true, forKey: moved15202Key)
+        }
+        return layout
     }
 
     func save() {
@@ -174,7 +195,7 @@ final class ScrayBrowserControlsViewController: UITableViewController {
 
     @objc private func resetTapped() {
         let a = UIAlertController(title: "Reset browser controls?",
-                                  message: "Back to home, downloads and ⋯ at the top and the rest along the bottom.",
+                                  message: "Back to downloads at the top, Home in the ⋯ menu, and the rest - ⋯ between + and Tabs - along the bottom.",
                                   preferredStyle: .alert)
         a.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         a.addAction(UIAlertAction(title: "Reset", style: .destructive) { [weak self] _ in
@@ -205,7 +226,7 @@ final class ScrayBrowserControlsViewController: UITableViewController {
         case .bottom: return layout.lists[section].isEmpty
                         ? "Nothing here - the bottom bar goes, and the page gets the room."
                         : "About ten fit across a phone."
-        case .menu:   return "Each shows as a line at the top of the ⋯ menu. ⋯ itself always stays a button."
+        case .menu:   return "Each is one of the first lines in the ⋯ menu, nearest the ⋯ button. ⋯ itself always stays a button."
         case .hidden: return "Not shown anywhere. ✕ can't be hidden - it's the way out."
         case .none:   return nil
         }

@@ -14,10 +14,16 @@
  * source, so at most two videos are buffering. A swipe onto a video that has
  * not caught up yet shows a spinner and plays when it can.
  *
- * native 15.203: JUST ANOTHER PLAYER MODE, like MPB, MPFS and FLS. It used to
- * be a mode of its own - its own random / in-order run, its own orientation
- * setting, and it changed the orientation filter and the excluded tags while
- * it ran. All of that is gone:
+ * native 15.203: A PLAYER MODE, like MPB, MPFS and FLS. It no longer changes
+ * the orientation filter or the excluded tags by itself, on the way in or out.
+ * native 15.204 brought back its two toggles beside sound:
+ *   - 🔀 / ➡️ random or in order (remembered, scray_reels_order). Random is
+ *     this one first, then the list shuffled, reshuffled when it runs out;
+ *     in order walks the list as > and < do;
+ *   - ▯▭ / ▭ / ▯ the page's orientation filter itself (All / Landscape /
+ *     Portrait), so the list - and what comes next - follows it at once. It
+ *     is a filter change like any other and stays when the mode ends.
+ * The rest:
  *   - turning it on (the orientation button's TikTok step, the corner TT, the
  *     MPFS TT circle) carries the video on screen into it from the same
  *     second; with nothing loaded it presses X, as you would. No filter or
@@ -46,6 +52,7 @@
   const FLICK_PX = 60;          // a drag this long moves on
   const FLICK_V = 0.45;         // ...or a flick this fast (px per ms)
   const MUTE_KEY = 'scray_reels_muted';
+  const ORDER_KEY = 'scray_reels_order';      // 'random' (default) or 'ordered' (native 15.184; back in 15.204)
   // Containers the web player can't decode (player.js SCRAY_UNPLAYABLE_EXT).
   const NO_PLAY = new Set(['mkv', 'wmv', 'avi', 'flv', 'mpg', 'mpeg', 'rm', 'rmvb', 'asf',
                            'f4v', 'vob', 'divx', 'ogv', 'mts', 'm2v']);
@@ -123,7 +130,15 @@
     try { await start(); } catch (err) { console.warn('[reels] could not start:', err); toast('TikTok mode could not start: ' + ((err && err.message) || err)); }
   }
 
-  // ---------------------------------------------------------------- the list, in its own order
+  // ---------------------------------------------------------------- the list: random or in its own order
+  function shuffled(list) {
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
   /** If the list behind the mode changed (a filter or search from the title, say), what comes next follows it. */
   function syncList() {
     if (!R || !R.listKey) return;
@@ -138,9 +153,14 @@
     const fresh = (items || []).filter(it => idOf(it.video) !== curId);
     if (!fresh.length) { toast('Nothing else matches - keeping the current list'); return; }
     R.source = items;
-    // Carry on down the new list from where this one sits in it (from its top if it isn't in it).
-    const at = items.findIndex(it => idOf(it.video) === curId);
-    R.items = R.items.slice(0, R.index + 1).concat(at >= 0 ? items.slice(at + 1) : fresh);
+    if (R.pool) {
+      R.pool = items;                   // the whole match, this one included, for the reshuffles after
+      R.items = R.items.slice(0, R.index + 1).concat(shuffled(fresh));
+    } else {
+      // In order: carry on down the new list from where this one sits in it (from its top if it isn't in it).
+      const at = items.findIndex(it => idOf(it.video) === curId);
+      R.items = R.items.slice(0, R.index + 1).concat(at >= 0 ? items.slice(at + 1) : fresh);
+    }
     ensureAround();
     fill(R.slots[2], R.index + 1, 'auto');
     if (Date.now() - R.openedAt > 2500) toast(`Next videos from the ${fresh.length + (curId != null ? 1 : 0)} that match`);   // not for the list settling at the start
@@ -148,11 +168,23 @@
   const idOf = v => (v ? (v.oneDriveId ?? v.idFromAPI ?? v.filename ?? v) : null);
 
   /**
-   * The list wraps, as > and < do: past its end comes its start again, before its start its end. R.items is
-   * the run so far; a copy of the list is added at whichever end is getting close. Adding in front moves
-   * every index along, the slots' and the start-at's included.
+   * Keeps the run going both ways. Random: when the shuffled run is nearly out, another shuffle of the lot
+   * is added (no repeat back to back); it starts at the video played, so there is nothing before that.
+   * In order the list wraps, as > and < do: past its end comes its start again, before its start its end -
+   * a copy of the list is added at whichever end is getting close. Adding in front moves every index along,
+   * the slots' and the start-at's included.
    */
   function ensureAround() {
+    if (R && R.pool) {
+      if (R.pool.length < 2) return;
+      while (R.items.length - R.index < 4) {
+        const last = R.items[R.items.length - 1];
+        const batch = shuffled(R.pool);
+        if (batch[0] === last) { const t = batch[0]; batch[0] = batch[1]; batch[1] = t; }
+        R.items.push(...batch);
+      }
+      return;
+    }
     if (!R || !R.source || R.source.length < 2) return;
     while (R.items.length - R.index < 4) R.items.push(...R.source);
     while (R.index < 2) {
@@ -205,15 +237,16 @@
 #scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-input{font-size:.7rem!important;flex:1 1 0!important;min-width:0!important;width:auto!important}
 #scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-glass{font-size:.7rem!important}
 #scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-x{font-size:.8rem!important;margin:0!important;padding:0 4px!important;border-radius:8px!important}
-/* ⚙️ native 15.203: the buttons a size up (13px, 6 x 12 padding; were 10.5px, 3 x 7) - sound, Stop, MPFS, FLS. */
-.sr-ctl{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 38px);display:flex;gap:6px;align-items:center;opacity:.78}
+/* ⚙️ native 15.203: the buttons a size up (13px; were 10.5px) - sound, order, orientation, Stop, MPFS, FLS. 15.204: six of
+   them again, so 6 x 10 padding and 5px gaps to keep the row inside a phone's width. */
+.sr-ctl{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 38px);display:flex;gap:5px;align-items:center;opacity:.78}
 /* The title is the same clickable path as a list row (createClickablePath): folders, bracket tags and Stash chips
    open the filter / search modal. Its inline colours are for a white page, so they are restated for black. */
 .sr-cap span{color:#fff!important}
 .sr-cap span[style*="underline"]{color:#8cc8ff!important;pointer-events:auto;cursor:pointer}
 .sr-cap span[style*="italic"]{color:#bbb!important}
 html.scray-reels-open .basket-json-modal{z-index:2147483647!important}
-.sr-btn{background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:15px;padding:6px 12px;
+.sr-btn{background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:15px;padding:6px 10px;
   font-size:13px;line-height:1.3;cursor:pointer}
 .sr-btn.stop{background:rgba(200,30,60,.55);border-color:transparent;font-weight:600}
 .sr-btn.mpfs,.sr-btn.fls{letter-spacing:.02em;font-weight:600}
@@ -294,6 +327,8 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
       '<div class="sr-pause">&#9654;</div>' +
       '<div class="sr-top"><span class="sr-count"></span></div><div class="sr-pills"></div>' +
       '<div class="sr-ctl"><button type="button" class="sr-btn mute" aria-label="Sound"></button>' +
+      '<button type="button" class="sr-btn order" aria-label="Order"></button>' +
+      '<button type="button" class="sr-btn land" aria-label="Orientation"></button>' +
       '<button type="button" class="sr-btn stop">Stop</button>' +
       '<button type="button" class="sr-btn mpfs" title="Carry on with this video in the portrait fullscreen player (MPFS)">MPFS</button>' +
       '<button type="button" class="sr-btn fls" title="Carry on with this video in the landscape fullscreen player (FLS)">FLS</button></div>' +
@@ -307,12 +342,15 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
       seek: root.querySelector('.sr-seek'), track: root.querySelector('.sr-track'),
       curPlaying: false, waiters: [], waitT: 0, autoMuted: false, fb: root.querySelector('.sr-fb'), count: root.querySelector('.sr-count'),
       pauseIcon: root.querySelector('.sr-pause'), hint: root.querySelector('.sr-hint'),
-      muteBtn: root.querySelector('.mute'), source: [], startAt: null, wheelLock: false, errTimer: 0
+      muteBtn: root.querySelector('.mute'), orderBtn: root.querySelector('.order'), landBtn: root.querySelector('.land'),
+      source: [], startAt: null, wheelLock: false, errTimer: 0
     };
     root.querySelector('.stop').addEventListener('click', e => { e.stopPropagation(); disarm(); closeOverlay(); });
     root.querySelector('.mpfs').addEventListener('click', e => { e.stopPropagation(); toPlayer('mpfs'); });
     root.querySelector('.fls').addEventListener('click', e => { e.stopPropagation(); toPlayer('fls'); });
     st.muteBtn.addEventListener('click', e => { e.stopPropagation(); setMuted(!R.muted); });
+    st.orderBtn.addEventListener('click', e => { e.stopPropagation(); toggleOrder(); });
+    st.landBtn.addEventListener('click', e => { e.stopPropagation(); toggleOrient(); });
     wireGestures(st);
     wireSeekBar(st);
     return st;
@@ -324,6 +362,60 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     if (persist) { R.autoMuted = false; lsSet(MUTE_KEY, R.muted ? '1' : '0'); }
     R.slots.forEach(s => { s.v.muted = R.muted; });
     R.muteBtn.textContent = R.muted ? '🔇' : '🔊';
+  }
+
+  // ---- orientation (native 15.204): the page's own orientation filter, cycled from here
+  const ORIENT_NEXT = { P: 'any', any: 'L', L: 'P' };
+  const ORIENT_TXT = { P: 'Portrait only', any: 'Portrait and landscape', L: 'Landscape only' };
+  const ORIENT_GLYPH = { P: '▯', any: '▯▭', L: '▭' };
+  const orientNow = () => { const sel = $('orientationFilter'); const m = sel && sel.value; return m === 'P' || m === 'L' ? m : 'any'; };
+  function paintOrient() {
+    if (!R) return;
+    const m = orientNow();
+    R.landBtn.textContent = ORIENT_GLYPH[m];
+    R.landBtn.title = `${ORIENT_TXT[m]} - tap for ${ORIENT_TXT[ORIENT_NEXT[m]].toLowerCase()}`;
+  }
+  /** Portrait and landscape > landscape only > portrait only > both. The list redraws; syncList then feeds what comes next. */
+  function toggleOrient() {
+    const sel = $('orientationFilter');
+    if (!sel) return;
+    const m = ORIENT_NEXT[orientNow()];
+    sel.value = m;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    paintOrient();
+    toast(ORIENT_TXT[m]);
+  }
+
+  // ---- random / in order (the button beside mute; native 15.184, back in 15.204)
+  const isRandom = () => lsGet(ORDER_KEY) !== 'ordered';
+  function paintOrder() {
+    if (!R) return;
+    const rnd = !!R.pool;
+    R.orderBtn.textContent = rnd ? '🔀' : '➡️';
+    R.orderBtn.title = rnd ? 'Random order - tap for in order' : 'In order - tap for random';
+  }
+  /** Switch what comes next between random and the list's own order, from the video on screen, without a restart. */
+  function toggleOrder() {
+    if (!R) return;
+    const goRandom = !R.pool;
+    lsSet(ORDER_KEY, goRandom ? 'random' : 'ordered');
+    const src = R.source && R.source.length ? R.source : R.items;
+    const cur = R.items[R.index];
+    const curId = cur && idOf(cur.video);
+    const head = R.items.slice(0, R.index + 1);
+    if (goRandom) {
+      R.pool = src.slice();
+      R.items = head.concat(shuffled(src.filter(it => idOf(it.video) !== curId)));
+    } else {
+      R.pool = null;
+      const at = src.findIndex(it => idOf(it.video) === curId);
+      R.items = head.concat(at >= 0 ? src.slice(at + 1) : src.filter(it => idOf(it.video) !== curId));
+    }
+    ensureAround();
+    fill(R.slots[2], R.index + 1, 'auto');
+    paintOrder();
+    shown();
+    toast(goRandom ? 'Random order' : 'In order');
   }
 
   function showPaused(on) { if (R) R.pauseIcon.classList.toggle('on', !!on); }
@@ -451,10 +543,13 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
 
   function shown() {
     const it = R.items[R.index];
-    // The place in the list itself.
-    const id = it && idOf(it.video);
-    const at = R.source.length ? R.source.findIndex(s => idOf(s.video) === id) : -1;
-    R.count.textContent = at >= 0 ? `${at + 1} / ${R.source.length}` : '';
+    if (R.pool) R.count.textContent = `${R.index + 1}`;     // random: how many so far
+    else {
+      // In order: the place in the list itself.
+      const id = it && idOf(it.video);
+      const at = R.source.length ? R.source.findIndex(s => idOf(s.video) === id) : -1;
+      R.count.textContent = at >= 0 ? `${at + 1} / ${R.source.length}` : '';
+    }
     paint();
     showPaused(false);
     if (R.onShow && it) { try { R.onShow(it, R.index); } catch (err) { console.warn('[reels] onShow:', err); } }
@@ -834,10 +929,18 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     clearTimeout(R.errTimer);
     Scrub.reset();
     const at = Math.max(0, Math.min(items.length - 1, (opts.index | 0)));
-    // The list in its own order, starting at this one (native 15.203 - no random run of its own).
     R.source = items.slice();
-    R.items = items.slice();
-    R.index = at;
+    if (isRandom()) {
+      // The one played first, then the rest in random order; reshuffled when it runs out.
+      R.pool = items.slice();
+      R.items = [items[at]].concat(shuffled(items.filter((_, i) => i !== at)));
+      R.index = 0;
+    } else {
+      // The list in its own order, starting at this one.
+      R.pool = null;
+      R.items = items.slice();
+      R.index = at;
+    }
     R.slots.forEach(sl => { sl.idx = -1; });
     R.startAt = opts.startAt > 0 ? { idx: R.index, t: opts.startAt } : null;   // carry on from where the other player was
     ensureAround();
@@ -858,12 +961,14 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     document.documentElement.style.overflow = 'hidden';
     window.addEventListener('keydown', onKey, true);
     setMuted(R.muted);
+    paintOrder();
+    paintOrient();
     layout(0, false);
     fill(R.slots[1], R.index, 'auto');
     fill(R.slots[2], R.index + 1, 'auto');
     fill(R.slots[0], R.index - 1, 'metadata');
     shown();
-    R.hint.textContent = 'Swipe up for the next video';
+    R.hint.textContent = R.pool ? 'Swipe up for the next - random' : 'Swipe up for the next - in order';
     R.hint.classList.add('on');
     setTimeout(() => { if (R) R.hint.classList.remove('on'); }, 2600);
     return true;

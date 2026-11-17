@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.144 / native 15.200 — test: hidden FLS title not tappable
+<!-- 2026-11-17T19:55Z -->
+- **Reported:** in FLS the title bar could still be tapped after it had faded out with the controls.
+- **Cause:** the bar's fade rule (`.plyr--hide-controls .fls-video-title { pointer-events: none }`) was outranked twice. FLS's own `body.manual-rotate-landscape .fls-video-title { pointer-events: auto }` is more specific, so the bar kept taking taps, and its click handler swallowed them before the double-tap zones under it. The fullscreen `body.fullscreen-active #inlineVideoContainer *` rule (an id, `!important`) handed `pointer-events: auto` back to everything inside the now-playing strip, so its crumbs and filename stayed live even though the strip itself was switched off. Only the "..." and the tag pills had their own hide rules that beat it.
+- **Change (style.css):** one rule after the tag-pill hide rules switches off the bar and everything in it while it's faded, in FLS and MPFS - with an `#inlineVideoContainer` variant to beat the `*` rule, and one without for a bar outside that container. Same exceptions as the existing rules: a video load holding the bar up, and the filter being edited. A tap where the hidden title sits now reaches the player underneath.
+- **Tested:** headless Chrome with the real style.css: faded - bar, crumbs, filename all `none` (were `auto`); shown, loading and filter-editing unchanged (`auto`). Not tried on the phone.
+- **Files:** picker `style.css`, `VERSION`; native `assets/web/style.css` (same rule), `assets/web/VERSION`. Web only, no IPA build.
+
 ### picker 15.143 / native 15.199 / browse 15.377 — test: Duration diff searches all of a profile's scenes
 <!-- 2026-11-17T10:35Z -->
 - **Asked:** comparing a file on a studio profile and sorting by Duration diff, the right scene didn't show though it exists (narrowing the search found it). Suspected the sort only covered the first batch; make it cover everything the studio has.

@@ -8099,6 +8099,26 @@ body.fullscreen-active.scray-video-loading:not(.fls-peek) .plyr--hide-controls .
 pointer-events: auto !important;
 }
 
+/* ⚙️ HIDDEN MEANS UNTAPPABLE - THE WHOLE BAR (picker 15.144 / native 15.200).
+   The rules above switch off the strip, the "..." and the pills once the bar
+   fades with the controls, but not the bar itself or what's inside the strip:
+   the fullscreen `#inlineVideoContainer *` rule (an id, !important) hands
+   pointer-events back to every descendant, and FLS's own
+   `body.manual-rotate-landscape .fls-video-title { pointer-events: auto }`
+   outranks the plain .plyr--hide-controls one. So the invisible title still
+   took taps - its crumbs and filename opened things, and the bar swallowed
+   taps meant for the double-tap zones under it. This turns off the bar and
+   everything in it while it's faded, in FLS and MPFS. The id variant beats the
+   `#inlineVideoContainer *` rule; the other covers a bar outside that
+   container. Same exceptions as the rules above: a load holding the bar up,
+   and the filter being edited (the bar stays visible then). */
+body.fullscreen-active:not(.scray-video-loading):not(.fls-filter-editing) #inlineVideoContainer .plyr--hide-controls .fls-video-title,
+body.fullscreen-active:not(.scray-video-loading):not(.fls-filter-editing) #inlineVideoContainer .plyr--hide-controls .fls-video-title *,
+body.fullscreen-active:not(.scray-video-loading):not(.fls-filter-editing) .plyr--hide-controls .fls-video-title,
+body.fullscreen-active:not(.scray-video-loading):not(.fls-filter-editing) .plyr--hide-controls .fls-video-title * {
+pointer-events: none !important;
+}
+
 /* =========================================
 BOOKMARK TOOLTIP RAIL IN MPB
 =========================================

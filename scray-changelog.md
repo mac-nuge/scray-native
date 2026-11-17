@@ -4,6 +4,28 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.147 / native 15.206 / browse 15.381 — test: find and replace in bulk rename
+<!-- 2026-11-17T21:45Z -->
+- **Asked:** after 15.146 / 15.205 / 15.380 put find and replace in the single rename modals, add it to the apps' bulk *Rename N files* modal and to any other bulk rename.
+- **Bulk renames covered:**
+  - The apps' bulk select ✎ modal (`scray-bulk-rename.js`, the same file in picker and native).
+  - Browse's data-explorer bulk rename (*RENAME N FILES*).
+  - Manage data's **Clean renames** sheet.
+
+  The CSV bulk rename/delete in the apps isn't included: it takes its names from the CSV, so there's no name box to edit.
+- **What it does:** the same row as the single rename. A **⇄ Find & replace** button opens *Find* → *Replace with*, **Match case**, a live count and **Replace all** (Enter in either field does the same). Here it runs on every name in the list at once, apart from rows already renamed. The count reads *n matches in m files*. It's plain text, it ignores case unless Match case is ticked, a blank replacement removes the text, and the extension is never touched. Only the boxes change: the Rename button still renames. **Undo** puts back each name the last replace changed, as long as none of them has been edited since. Text selected in one row's box goes into *Find* when the row opens.
+- **Remembered:** each app's Find / Replace with / Match case are shared with its single rename modal (`scray_rename_fr_v1` in the apps, `scray_browse_rename_fr_v1` in browse), so a clean-up set up in one is ready in the other. Whether the row is open is kept separately for each modal.
+- **Per place:**
+  - **Apps:** the bulk modal repaints itself as you edit, so the row is redrawn from saved state and typing in *Find* only updates the count, which keeps the keyboard up. On a phone the button gets its own full-width line under Use suggested / Use without parent / Reset.
+  - **data-explorer:** the button is in the bar beside Reset all, with the row under it; it reuses `scray-rename-extras.js`'s styles (exported as `frCss`). The single dialog's settings save now keeps the bulk dialog's open state.
+  - **Manage data:** the button is in the Clean renames bar. It works on the ticked rows, or every row shown when none are ticked, and the note says which. A replaced name counts as an edit (or as no edit, if it ends up back at the suggestion). As everywhere on that page, Esc in *Find* just leaves the box; Esc in *Replace with* closes the row.
+- **Tested:** `node --check` on the JS files and the pages' inline scripts. Headless Chrome:
+  - **Apps** (each repo's bulk module with its `style.css`, at 390px): `%20` → space across two files (10 matches), then removing a prefix, Undo, case-blind vs Match case, a selection filling Find, Esc closing the row without closing the modal, and Rename sending the replaced names.
+  - **data-explorer** (the real page with a stubbed api): the same steps, plus Undo being withdrawn once a replaced row is edited, and Esc closing the row but not the dialog.
+  - **Manage data** (the real page): shown vs ticked rows, Undo, the extension left alone, a half-typed edit included, Esc in *Replace with*.
+  - Not tried on the phone or against the real box.
+- **Files:** picker `scray-bulk-rename.js`, `VERSION`; native `assets/web/scray-bulk-rename.js`, `assets/web/VERSION`; browse `data-explorer.html`, `manage-data.html`, `scray-rename-extras.js`, `VERSION.txt`. Web only, no IPA build.
+
 ### picker 15.146 / native 15.205 / browse 15.380 — test: find and replace in rename
 <!-- 2026-11-17T21:21Z -->
 - **Asked:** in the rename modals, a find and replace that swaps chosen bits of text inside the file name.

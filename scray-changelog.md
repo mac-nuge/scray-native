@@ -4,6 +4,17 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.149 / native 15.209 / browse 15.383 — test: Stash get auto-got and hide got
+<!-- 2026-11-17T22:35Z -->
+- **Asked:** when a file matches a scene on the Stash get list, tick it off as got but leave it in the list, and add an option to filter the got ones out of the view.
+- **Server (browse api.php, `stash_get`):** every call to the list (list, add, remove, got) first ticks off any scene a live library file is matched to (`stash_matches` joined to a non-deleted `videos` row - the same test as `in_library`), setting `got_at` and a new `got_auto = 1`. The row stays in the list. Items now carry `got_auto`. Two new columns, added on first use (`got_auto`, `keep_open`, both default 0), so nothing needs migrating by hand.
+- **By hand wins:** ticking *Got it* by hand clears `got_auto`. Undoing a got puts the scene back to *to get* and sets `keep_open = 1`, so the auto-tick leaves it alone from then on, even if a matched file is still there. A matched file that is later deleted does not un-tick the scene.
+- **Hide got:** a **Hide got** / **Show got (n)** button in the Stash get views of the apps (picker, native) and the data explorer leaves the Got section out; the scenes stay on the list. It shows once something is got, and the choice is remembered (`scray_get_hide_got`; each app and the data explorer keep their own copy).
+- **Apps:** opening Stash get now re-reads the list every time (it used to read it once), so a scene whose file has just been matched shows as got without a reload. A card ticked off that way reads *Now in your library - ticked off as got*.
+- **Tested:** `php -l`; the migration and the auto-tick query in SQLite on a small stand-in (matched, deleted-file, undone-by-hand and unmatched scenes; the migration run twice); the data explorer in headless Chrome with a stubbed list (Hide got hides the section, the count stays, it is remembered after a reload). Not run against the real api.php, and the apps' change isn't run in a browser or on the phone.
+- **Needs:** browse deployed (its push does that) for the auto-tick; the apps without it just show the list as before.
+- **Files:** browse `api.php`, `data-explorer.html`, `VERSION.txt`; picker `scray-stash-nav.js`, `VERSION`; native `assets/web/scray-stash-nav.js`, `assets/web/VERSION`. Web only.
+
 ### picker 15.148 / native 15.208 / browse 15.382 — test: Stash get list in data explorer, Unblur all in Stash get
 <!-- 2026-11-17T22:20Z -->
 - **Asked:** is the Stash get list in the data explorer, and if not, add it; and add an Unblur all option to the Stash get modal.

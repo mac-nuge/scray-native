@@ -526,12 +526,24 @@ final class ScrayBrowserViewController: UIViewController,
         homeWidth.isActive = true
         homeButton.heightAnchor.constraint(equalToConstant: Self.TOOLBAR_BUTTON_HEIGHT).isActive = true
 
-        // ⋯ sits up by the address with home and downloads (native 15.8; it
-        // was in the bottom strip since 14.26) - wherever the controls layout
-        // puts it. Sized with the other control buttons below.
+        // ⋯ is in the bottom bar between + and Tabs (native 15.202; it was up
+        // by the address from 15.8) - wherever the controls layout puts it.
+        // Sized with the other control buttons below.
+        //
+        // native 15.202: a pop-up menu straight off the button, not an action
+        // sheet - its lines are smaller (the sheet's big rows took most of the
+        // screen), and it opens from ⋯ itself. Built fresh each time it opens
+        // (uncached), so every line reads as things are at that moment.
+        // .priority puts the first lines (Home, Last Closed Tab) nearest the
+        // button, so from the bottom bar they're the ones under the thumb.
         moreButton.setImage(UIImage(systemName: "ellipsis.circle", withConfiguration: Self.toolbarSymbol),
                             for: .normal)
-        moreButton.addTarget(self, action: #selector(moreTapped), for: .touchUpInside)
+        moreButton.showsMenuAsPrimaryAction = true
+        moreButton.preferredMenuElementOrder = .priority
+        moreButton.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] done in
+            done(self?.moreMenuElements() ?? [])
+        }])
+        moreButton.accessibilityLabel = "More"
 
         // Hidden everywhere except stashdb.org, so it reads as "this page is
         // the one Scray is waiting for" rather than as general chrome.
@@ -858,7 +870,7 @@ final class ScrayBrowserViewController: UIViewController,
     }
 
     /// The ⋯ menu's line for a control placed there - worded for the moment.
-    private func menuAction(for c: ScrayBrowserControl) -> UIAlertAction {
+    private func menuAction(for c: ScrayBrowserControl) -> UIAction {
         var title = c.title
         var enabled = true
         switch c {
@@ -874,10 +886,8 @@ final class ScrayBrowserViewController: UIViewController,
             title = active > 0 ? "Downloads (\(active) active)" : "Downloads"
         default: break
         }
-        let a = UIAlertAction(title: title, style: .default) { [weak self] _ in self?.performControl(c) }
-        a.setValue(UIImage(systemName: c.symbol), forKey: "image")
-        a.isEnabled = enabled
-        return a
+        return UIAction(title: title, image: UIImage(systemName: c.symbol),
+                        attributes: enabled ? [] : .disabled) { [weak self] _ in self?.performControl(c) }
     }
 
     private func controlsTapped() {
@@ -1105,6 +1115,7 @@ final class ScrayBrowserViewController: UIViewController,
         // A pinned tab only goes once it's been unpinned (native 14.4) - this
         // also covers a page calling window.close() on itself.
         guard !tabs[index].pinned else { return }
+        rememberClosed(tabs[index], at: index)
         let tab = tabs.remove(at: index)
         tab.webView.stopLoading()
         tab.webView.removeFromSuperview()
@@ -1128,6 +1139,9 @@ final class ScrayBrowserViewController: UIViewController,
         // than jumping somewhere arbitrary.
         let survivor = valid.contains(currentIndex) ? nil : currentTab
 
+        // Remembered bottom row first, so Last Closed Tab brings them back
+        // top-down and each lands where it was.
+        for i in valid.sorted(by: >) { rememberClosed(tabs[i], at: i) }
         for i in valid.sorted(by: >) {
             let tab = tabs.remove(at: i)
             tab.webView.stopLoading()
@@ -1143,6 +1157,50 @@ final class ScrayBrowserViewController: UIViewController,
         } else {
             selectTab(min(valid.min() ?? 0, tabs.count - 1))
         }
+    }
+
+    // MARK: - Last closed tab (native 15.202)
+    //
+    // ⋯ > Last Closed Tab reopens the tab closed most recently, at its old
+    // place in the list, with its back / forward history (WKWebView's
+    // interactionState) - so it comes back as it was, not as a fresh page.
+    // Tapped again, the one closed before that, and so on. Kept for the life
+    // of the app (static, so closing and reopening the browser keeps them),
+    // not across a restart.
+
+    private struct ClosedTab {
+        let url: URL
+        let state: Any?
+        let index: Int
+    }
+    /// ⚙️ How many closed tabs are remembered, newest last.
+    private static let CLOSED_TABS_KEPT = 20
+    private static var closedTabs: [ClosedTab] = []
+
+    private func rememberClosed(_ tab: ScrayBrowserTab, at index: Int) {
+        // A tab that never got to a web page (a fresh new tab) has nothing to bring back.
+        guard let url = tab.displayURL, (url.scheme ?? "").hasPrefix("http") else { return }
+        let state: Any? = tab.pending == nil ? tab.webView.interactionState : nil
+        Self.closedTabs.append(ClosedTab(url: url, state: state, index: index))
+        if Self.closedTabs.count > Self.CLOSED_TABS_KEPT {
+            Self.closedTabs.removeFirst(Self.closedTabs.count - Self.CLOSED_TABS_KEPT)
+        }
+    }
+
+    private func reopenClosedTab() {
+        guard let closed = Self.closedTabs.popLast() else { flash("No closed tabs to reopen"); return }
+        let tab = ScrayBrowserTab(webView: makeWebView(configuration: nil))
+        // Back where it was, but never among the pinned tabs at the top.
+        let pinnedCount = tabs.filter { $0.pinned }.count
+        let at = min(max(closed.index, pinnedCount), tabs.count)
+        tabs.insert(tab, at: at)
+        if let state = closed.state {
+            tab.webView.interactionState = state
+        } else {
+            tab.webView.load(URLRequest(url: closed.url))
+        }
+        selectTab(at)
+        persistTabs()
     }
 
     /// If a tab is already sitting on this target, go to it rather than
@@ -1634,90 +1692,83 @@ final class ScrayBrowserViewController: UIViewController,
         }
     }
 
-    @objc private func moreTapped() {
-        let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
-        sheet.popoverPresentationController?.sourceView = moreButton
-        sheet.popoverPresentationController?.sourceRect = moreButton.bounds
+    /// ⋯ opens its menu by itself (native 15.202) - this is only for a
+    /// control that asks for it in code (performControl). Nothing to do: the
+    /// menu needs the tap on the button.
+    @objc private func moreTapped() {}
 
-        // Downloads and New Tab are buttons now, not lines here (native 15.8).
-        // What goes here instead is whatever Browser Controls puts in the menu.
-        for c in controlsLayout.controls(in: .menu) { sheet.addAction(menuAction(for: c)) }
+    /// The ⋯ menu's lines (native 15.202, a menu rather than an action sheet).
+    /// Grouped with dividers: the controls placed in the menu and Last Closed
+    /// Tab; the page; the browser's own things; Scray.
+    private func moreMenuElements() -> [UIMenuElement] {
+        func item(_ title: String, _ symbol: String?, attributes: UIMenuElement.Attributes = [],
+                  _ run: @escaping (ScrayBrowserViewController) -> Void) -> UIAction {
+            UIAction(title: title, image: symbol.flatMap { UIImage(systemName: $0) },
+                     attributes: attributes) { [weak self] _ in
+                guard let self = self else { return }
+                run(self)
+            }
+        }
+        func group(_ items: [UIMenuElement]) -> UIMenu {
+            UIMenu(title: "", options: .displayInline, children: items)
+        }
 
+        // Downloads and New Tab are buttons, not lines here (native 15.8).
+        // What goes first instead is whatever Browser Controls puts in the
+        // menu - Home, as it comes (native 15.202) - then Last Closed Tab.
+        var controls: [UIMenuElement] = controlsLayout.controls(in: .menu).map { menuAction(for: $0) }
+        controls.append(item("Last Closed Tab", "arrow.uturn.backward.square",
+                             attributes: Self.closedTabs.isEmpty ? .disabled : []) { $0.reopenClosedTab() })
+
+        var page: [UIMenuElement] = []
         // Streams (native 15.144; always listed from 15.198). With none found yet,
         // tapping says to start the video first (chooseStream), so the lines never vanish.
         if let wv = currentWebView {
             let found = streams(for: wv)
-            let dl = UIAlertAction(title: found.count > 1 ? "Download Stream… (\(found.count))"
-                                                          : "Download Stream…",
-                                   style: .default) { [weak self] _ in self?.downloadStreamTapped() }
-            dl.setValue(UIImage(systemName: "arrow.down.to.line"), forKey: "image")
-            sheet.addAction(dl)
-            let save = UIAlertAction(title: found.count > 1 ? "Save Stream to Library… (\(found.count))"
-                                                            : "Save Stream to Library…",
-                                     style: .default) { [weak self] _ in self?.saveStreamTapped() }
-            save.setValue(UIImage(systemName: "arrow.down.circle"), forKey: "image")
-            sheet.addAction(save)
+            page.append(item(found.count > 1 ? "Download Stream… (\(found.count))" : "Download Stream…",
+                             "arrow.down.to.line") { $0.downloadStreamTapped() })
+            page.append(item(found.count > 1 ? "Save Stream to Library… (\(found.count))" : "Save Stream to Library…",
+                             "arrow.down.circle") { $0.saveStreamTapped() })
         }
-
         // Favourites (native 14.8). Offered for a real web page only.
         if let url = currentTab?.displayURL, (url.scheme ?? "").hasPrefix("http") {
             let already = isFavourite(url)
-            let fav = UIAlertAction(title: already ? "Remove from Favourites" : "Add to Favourites",
-                                    style: already ? .destructive : .default) { [weak self] _ in
-                self?.toggleFavourite(url: url)
-            }
-            fav.setValue(UIImage(systemName: already ? "bookmark.slash" : "bookmark"), forKey: "image")
-            sheet.addAction(fav)
+            page.append(item(already ? "Remove from Favourites" : "Add to Favourites",
+                             already ? "bookmark.slash" : "bookmark",
+                             attributes: already ? .destructive : []) { $0.toggleFavourite(url: url) })
         }
+        page.append(item("Open in Safari", "safari") { $0.safariTapped() })
 
-        let history = UIAlertAction(title: "History", style: .default) { [weak self] _ in self?.historyTapped() }
-        history.setValue(UIImage(systemName: "clock"), forKey: "image")
-        sheet.addAction(history)
-        let logins = UIAlertAction(title: "Logins Backup…", style: .default) { [weak self] _ in self?.loginsTapped() }
-        logins.setValue(UIImage(systemName: "key"), forKey: "image")
-        sheet.addAction(logins)
-
-        sheet.addAction(UIAlertAction(title: "Open in Safari", style: .default) { [weak self] _ in
-            self?.safariTapped()
-        })
-
+        var browser: [UIMenuElement] = []
+        browser.append(item("History", "clock") { $0.historyTapped() })
+        browser.append(item("Logins Backup…", "key") { $0.loginsTapped() })
         // native 15.20: the NordVPN app, to turn it on or change server before
         // a site - see nordVPNTapped.
-        let vpn = UIAlertAction(title: "Open NordVPN", style: .default) { [weak self] _ in self?.nordVPNTapped() }
-        vpn.setValue(UIImage(systemName: "network.badge.shield.half.filled"), forKey: "image")
-        sheet.addAction(vpn)
-
+        browser.append(item("Open NordVPN", "network.badge.shield.half.filled") { $0.nordVPNTapped() })
         let folder = ScrayDownloadFolder.shared
-        let label = folder.hasFolder
-            ? "Save Downloads To → \(folder.displayName ?? "folder")"
-            : "Save Downloads To → ask every time"
-        sheet.addAction(UIAlertAction(title: label, style: .default) { [weak self] _ in
-            guard let self = self else { return }
-            ScrayDownloadFolder.shared.choose(from: self.dialogPresenter()) { name in
+        browser.append(item(folder.hasFolder
+                                ? "Save Downloads To → \(folder.displayName ?? "folder")"
+                                : "Save Downloads To → ask every time",
+                            "folder") { me in
+            ScrayDownloadFolder.shared.choose(from: me.dialogPresenter()) { [weak me] name in
                 guard let name = name else { return }
-                self.flash("Downloads will be saved to \(name)")
+                me?.flash("Downloads will be saved to \(name)")
             }
         })
-
         if folder.hasFolder {
-            sheet.addAction(UIAlertAction(title: "Ask Every Time Instead", style: .destructive) { [weak self] _ in
+            browser.append(item("Ask Every Time Instead", nil, attributes: .destructive) { me in
                 ScrayDownloadFolder.shared.clear()
-                self?.flash("Downloads will ask where to save")
+                me.flash("Downloads will ask where to save")
             })
         }
 
         // native 15.8
-        let jira = UIAlertAction(title: "Jira Report", style: .default) { [weak self] _ in self?.jiraTapped() }
-        jira.setValue(UIImage(systemName: "ladybug"), forKey: "image")
-        sheet.addAction(jira)
-        let controls = UIAlertAction(title: "Browser Controls…", style: .default) { [weak self] _ in
-            self?.controlsTapped()
-        }
-        controls.setValue(UIImage(systemName: "slider.horizontal.3"), forKey: "image")
-        sheet.addAction(controls)
+        let scray: [UIMenuElement] = [
+            item("Jira Report", "ladybug") { $0.jiraTapped() },
+            item("Browser Controls…", "slider.horizontal.3") { $0.controlsTapped() }
+        ]
 
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        presentSafely(sheet)
+        return [group(controls), group(page), group(browser), group(scray)]
     }
 
     // MARK: - Streams (native 15.144)
@@ -1954,7 +2005,7 @@ final class ScrayBrowserViewController: UIViewController,
     private func queueStream(_ s: ScrayDetectedStream, name: String, title: String) {
         flash("Sending to the server…")
         let body: [String: Any] = ["url": s.url, "referer": s.frame, "user_agent": s.agent,
-                                   "name": name, "title": title, "by": "native-browser"]
+                                   "name": Self.percentDecoded(name), "title": title, "by": "native-browser"]
         ScrayBrowserSync.shared.call("stream_start", body) { [weak self] r in
             switch r {
             case .success(let j):
@@ -2070,7 +2121,7 @@ final class ScrayBrowserViewController: UIViewController,
 
     private func startDeviceStream(_ s: ScrayDetectedStream, name raw: String, toLibrary: Bool = false) {
         guard let wv = currentWebView else { return }
-        var name = Self.trimStreamURLPrefix(raw)
+        var name = Self.trimStreamURLPrefix(Self.percentDecoded(raw))   // native 15.202: no %20
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: "\\", with: "-")
             .replacingOccurrences(of: ":", with: "-")
@@ -3503,12 +3554,42 @@ final class ScrayBrowserViewController: UIViewController,
     }
 
     private func sanitizedFilename(_ raw: String?) -> String {
-        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // native 15.202: "%20" and the like back to what they stand for first,
+        // so a "/" that was "%2F" is still turned into a dash below.
+        let trimmed = Self.percentDecoded(raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let cleaned = trimmed
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: "\\", with: "-")
             .replacingOccurrences(of: ":", with: "-")
         return Self.withExtension(cleaned.isEmpty ? "download" : cleaned)
+    }
+
+    /// native 15.202: a name taken from an address keeps its escapes - "my%20clip.mp4"
+    /// - and was saved like that. Turns each %XX back into its character (twice
+    /// at most, for a name escaped twice: %2520). A name whose escapes don't
+    /// make text (a stray "100% off", say) is left as it was.
+    static func percentDecoded(_ raw: String) -> String {
+        var out = raw
+        for _ in 0..<2 {
+            guard out.range(of: "%[0-9A-Fa-f]{2}", options: .regularExpression) != nil else { break }
+            var bytes: [UInt8] = []
+            var chars = Array(out.utf8)[...]
+            while let c = chars.first {
+                let hex = chars.dropFirst().prefix(2)
+                if c == UInt8(ascii: "%"), hex.count == 2,
+                   hex.allSatisfy({ (Character(UnicodeScalar($0))).isHexDigit }),
+                   let v = UInt8(String(decoding: hex, as: UTF8.self), radix: 16) {
+                    bytes.append(v)
+                    chars = chars.dropFirst(3)
+                } else {
+                    bytes.append(c)
+                    chars = chars.dropFirst()
+                }
+            }
+            guard let decoded = String(bytes: bytes, encoding: .utf8), decoded != out else { break }
+            out = decoded
+        }
+        return out
     }
 
     /// native 15.154: a page with no title of its own reports its address, so a
@@ -3841,7 +3922,8 @@ extension ScrayBrowserViewController: WKDownloadDelegate {
             return
         }
 
-        let name = Self.withExtension(suggestedFilename.isEmpty ? "download" : suggestedFilename)
+        // native 15.202: through sanitizedFilename, so "%20" comes out as a space.
+        let name = sanitizedFilename(suggestedFilename)
         let expected = response.expectedContentLength > 0 ? response.expectedContentLength : 0
 
         // The completion handler may be called asynchronously, which is what

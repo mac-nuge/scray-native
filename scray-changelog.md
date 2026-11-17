@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.145 / native 15.201 — test: Modified in the Date sort
+<!-- 2026-11-17T20:05Z -->
+- **Asked:** add the modified date to the Date sort's choices, alongside Created, Played and the rest.
+- **Change (randomiser.js):** a new `modified` key in `SCRAY_LIST_SORT_KEYS`, reading the file's own last-modified date (`lastModifiedDateTime` - OneDrive's, the box's mtime, or the catalogue's `last_modified_date`, which the sync already maps to it), and a **Modified** item in the Date menu, second after Created. It behaves like the other dates: picking it swaps it in for whichever date was in the sort, picking it again cycles newest first / oldest first / off, and files with no modified date go last either way. The Date button then reads `Modified ↓`.
+- **Also:** the Date button's tooltip lists modified (picker `index.php`, `bookmarks.php`; native `index.html`, `bookmarks.html`).
+- **Not changed:** an open row's details line still shows Created, not the date being sorted on.
+- **Tested:** `node --check`, `php -l`; headless Chrome with each app's randomiser.js: the menu lists Created / Modified / Played / Migrated / Released, newest and oldest first order correctly (including a row with only `last_modified_date`), the undated row goes last both ways, and the button reads Modified with its arrow. Not tried on the phone.
+- **Files:** picker `randomiser.js`, `index.php`, `bookmarks.php`, `VERSION`; native `assets/web/randomiser.js`, `assets/web/index.html`, `assets/web/bookmarks.html`, `assets/web/VERSION`. Web only, no IPA build.
+
 ### picker 15.144 / native 15.200 — test: hidden FLS title not tappable
 <!-- 2026-11-17T19:55Z -->
 - **Reported:** in FLS the title bar could still be tapped after it had faded out with the controls.

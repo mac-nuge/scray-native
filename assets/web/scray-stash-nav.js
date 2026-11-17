@@ -1813,8 +1813,17 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
     }
     function getOpen() {
       if (!getReady) getLoad();
+      else {
+        // picker 15.149 / native 15.209 Every time it opens, not only the first: a scene whose file has since been
+        // matched is ticked off by the server on read, so it shows as got without a reload.
+        getApi({ op: 'list' }).catch(() => {}).finally(() => { if (!finished) paint(false, true); });
+      }
       push({ type: 'get' });
     }
+    // picker 15.149 / native 15.209 Hide got: leaves the got scenes out of the list view - they stay on the list, and the
+    // switch is remembered.
+    let getHideGot = false;
+    try { getHideGot = localStorage.getItem('scray_get_hide_got') === '1'; } catch (er) { /* shown */ }
     const getBtn = (c, i) => {
       if (!c.stash_id) return '';
       const has = getHas(c.stash_id);
@@ -1889,7 +1898,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
               : '<div class="ssn-cover ssn-thumb none">no cover</div>') +
             '<div class="ssn-tt"><div class="ssn-title">' + (c.title ? esc(c.title) : '(untitled scene)') + '</div>' +
               '<div class="ssn-sub">' + sub + '</div>' +
-              (c.in_library ? '<div class="ssn-sub"><span class="ssn-gotlib">&#10003; Now in your library</span></div>' : '') +
+              (c.in_library ? '<div class="ssn-sub"><span class="ssn-gotlib">&#10003; Now in your library' + (c.got_auto ? ' - ticked off as got' : '') + '</span></div>' : '') +
             '</div>' +
           '</div>' +
           (cast ? '<div class="ssn-cast">' + cast + '</div>' : '') +
@@ -1906,12 +1915,16 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       return '<div class="ssn-state"><span class="ssn-h">Stash get' + (getReady ? ' &middot; ' + todo.length + ' to get' : '') + '</span></div>' +
         // Unblur all (picker 15.148 / native 15.208): the one switch the other views have, so the saved
         // scenes' covers can be shown or hidden together here too.
-        (getItems.some(x => x.cover) ? '<div class="ssn-btnrow ssn-topbar">' + unblurBtn() + '</div>' : '') +
+        '<div class="ssn-btnrow ssn-topbar">' +
+          (getItems.some(x => x.got_at) ? '<button type="button" class="ssn-unblur ssn-hidegot' + (getHideGot ? ' on' : '') + '" data-hidegot title="' +
+            (getHideGot ? 'Show the scenes you have got' : 'Leave the scenes you have got out of the list') + '">' +
+            (getHideGot ? 'Show got (' + done.length + ')' : 'Hide got') + '</button>' : '') +
+          (getItems.some(x => x.cover) ? unblurBtn() : '') + '</div>' +
         errHtml(getErr) +
         (!getReady && !getErr ? '<div class="ssn-state">Loading&hellip;</div>' : '') +
         (getReady && !getItems.length ? '<div class="ssn-empty">Nothing saved yet. Tap &ldquo;+ Stash get&rdquo; on a scene in any result to keep it here.</div>' : '') +
         todo.map(card).join('') +
-        (done.length ? '<details class="ssn-getdone"><summary>Got &middot; ' + done.length + '</summary>' + done.map(card).join('') + '</details>' : '');
+        (done.length && !getHideGot ? '<details class="ssn-getdone"><summary>Got &middot; ' + done.length + '</summary>' + done.map(card).join('') + '</details>' : '');
     }
 
     // Done (picker 15.31 / native 15.40): closes the list it sits in - beside
@@ -2631,6 +2644,12 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       }
       if (btn.dataset.stpage !== undefined) { push({ type: 'studio', id: '', name: btn.dataset.stpage || '', sceneId: '' }); return; }
       if (btn.dataset.pfpage !== undefined) { push({ type: 'performer', id: '', name: btn.dataset.pfpage || '', sceneId: '' }); return; }
+      if (btn.hasAttribute('data-hidegot')) {
+        getHideGot = !getHideGot;
+        try { localStorage.setItem('scray_get_hide_got', getHideGot ? '1' : '0'); } catch (er) { /* kept for now only */ }
+        paint(false, true);
+        return;
+      }
       if (btn.hasAttribute('data-unblur')) {
         revealAll = !revealAll;
         host.querySelectorAll('.ssn-cover[data-cover]').forEach(c => {

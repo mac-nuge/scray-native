@@ -139,6 +139,7 @@ ${(cleanSuggestion || noParentSuggestion) ? `
  <button id="prevWordEdgeBtn" class="bracket-btn" title="Jump to previous word edge">&lt;</button>
  <button id="nextWordEdgeBtn" class="bracket-btn" title="Jump to next word edge">&gt;</button>
  <button id="removeWordsBtn" class="bracket-btn bracket-btn-red" title="Remove selected words and following separator">X</button>
+ <button id="renameFrBtn" class="bracket-btn rename-fr-btn" type="button" title="Find and replace in the name">&#8644;</button>
 </div>
 
 ${scopeAsk ? `
@@ -147,6 +148,21 @@ ${scopeAsk ? `
     <label><input type="checkbox" id="renameEverywhereChk" ${scopeOnline ? 'checked' : 'disabled'}> Rename everywhere</label>
     <span class="scray-delete-everywhere-note" id="renameScopeNote"></span>
 </div>` : ''}
+
+<!-- Find and replace (picker 15.146 / native 15.205), opened by the &#8644; button above. -->
+<div id="renameFrRow" class="rename-fr" style="display: none;">
+    <div class="rename-fr-fields">
+        <input type="text" id="renameFrFind" placeholder="Find" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <span class="rename-fr-arrow">&rarr;</span>
+        <input type="text" id="renameFrRepl" placeholder="Replace with" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="rename-fr-actions">
+        <label class="rename-fr-case"><input type="checkbox" id="renameFrCase"> Match case</label>
+        <span class="rename-fr-note" id="renameFrNote"></span>
+        <button type="button" id="renameFrUndo" class="rename-fr-undo" style="display: none;">Undo</button>
+        <button type="button" id="renameFrGo" class="rename-fr-go">Replace all</button>
+    </div>
+</div>
 
 <!-- Rename and Cancel buttons. Stuck to the panel's bottom edge (picker 15.95 /
      native 15.112), so with the keyboard up they stay in view above it rather
@@ -656,6 +672,145 @@ renderRenameTags();
 
 // ✅ Initial render of word selector
 renderWordSelector(nameWithoutExt);
+
+// Find and replace (picker 15.146 / native 15.205): every occurrence of a piece of text in the
+// box swapped for another - "." for " ", "_" for " ", a studio's short name
+// for its full one. Literal text, not a pattern; case-blind unless Match case
+// is ticked; a blank replacement removes it. It only changes the box, like the
+// other buttons here - Rename still does the renaming. Words picked in the
+// word selector (or text selected in the box) go into Find when it opens.
+// Find, Replace with, Match case and open / shut are remembered for the next
+// file, so the same clean-up can be repeated file after file.
+{
+    if (!document.getElementById('scray-rename-fr-style')) {
+        const st = document.createElement('style');
+        st.id = 'scray-rename-fr-style';
+        st.textContent =
+            '.rename-fr{margin-bottom:12px;padding:8px;background:#eef8fa;border:1px solid #bfe3ea;border-radius:4px}' +
+            '.rename-fr-fields{display:flex;align-items:center;gap:6px}' +
+            '.rename-fr-fields input{flex:1 1 0;min-width:0;padding:8px;font-size:16px;border:2px solid #ddd;border-radius:4px;box-sizing:border-box}' +
+            '.rename-fr-fields input:focus{border-color:#17a2b8;outline:none}' +
+            '.rename-fr-arrow{color:#666;font-weight:bold;flex:0 0 auto}' +
+            '.rename-fr-actions{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}' +
+            '.rename-fr-case{display:flex;align-items:center;gap:4px;font-size:0.8rem;color:#444;margin:0;cursor:pointer}' +
+            '.rename-fr-case input{margin:0;width:auto}' +
+            '.rename-fr-note{flex:1 1 auto;font-size:0.8rem;color:#666;min-width:0}' +
+            '.rename-fr-go,.rename-fr-undo{flex:0 0 auto;width:auto;margin:0;border:none;border-radius:4px;padding:7px 12px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap}' +
+            '.rename-fr-go{background:#17a2b8;color:#fff}' +
+            '.rename-fr-go:disabled{background:#9fd3dc;cursor:default}' +
+            '.rename-fr-undo{background:#fff;color:#17a2b8;border:1px solid #17a2b8}' +
+            '.bracket-btn.rename-fr-on{background:#0e6674}';
+        document.head.appendChild(st);
+    }
+    const FR_KEY = 'scray_rename_fr_v1';
+    const frBtn = document.getElementById('renameFrBtn');
+    const frRow = document.getElementById('renameFrRow');
+    const frFind = document.getElementById('renameFrFind');
+    const frRepl = document.getElementById('renameFrRepl');
+    const frCase = document.getElementById('renameFrCase');
+    const frNote = document.getElementById('renameFrNote');
+    const frGo = document.getElementById('renameFrGo');
+    const frUndo = document.getElementById('renameFrUndo');
+    let frSaved = {};
+    try { frSaved = JSON.parse(localStorage.getItem(FR_KEY) || '{}') || {}; } catch (e) { frSaved = {}; }
+    frFind.value = typeof frSaved.find === 'string' ? frSaved.find : '';
+    frRepl.value = typeof frSaved.repl === 'string' ? frSaved.repl : '';
+    frCase.checked = !!frSaved.cs;
+    const frIsOpen = () => frRow.style.display !== 'none';
+    const frSave = () => {
+        try {
+            localStorage.setItem(FR_KEY, JSON.stringify({
+                find: frFind.value, repl: frRepl.value, cs: frCase.checked, open: frIsOpen() }));
+        } catch (e) { /* private mode - it just isn't remembered */ }
+    };
+    const frPattern = () => frFind.value
+        ? new RegExp(frFind.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), frCase.checked ? 'g' : 'gi')
+        : null;
+    const frCount = () => { const re = frPattern(); return re ? (input.value.match(re) || []).length : 0; };
+    const frShowCount = () => {
+        if (!frFind.value) { frNote.textContent = ''; frGo.disabled = true; return; }
+        const n = frCount();
+        frNote.textContent = n ? n + (n === 1 ? ' match' : ' matches') : 'No matches';
+        frGo.disabled = n === 0;
+    };
+    // What to put in Find when it opens: the words picked in the word
+    // selector (first to last, separators included - exactly as they read in
+    // the box), else a selection inside the box that isn't the whole name.
+    const frPicked = () => {
+        if (selectedWords.size) {
+            const idx = Array.from(selectedWords).sort((a, b) => a - b);
+            const words = parseTextIntoWords(input.value);
+            const a = words[idx[0]], b = words[idx[idx.length - 1]];
+            if (a && b) return input.value.slice(a.start, b.end);
+        }
+        const s0 = input.selectionStart, s1 = input.selectionEnd;
+        if (s0 != null && s1 != null && s1 > s0 && !(s0 === 0 && s1 === input.value.length)) {
+            return input.value.slice(s0, s1);
+        }
+        return '';
+    };
+    let frUndoValue = null, frAfterValue = null;
+    const frHideUndo = () => { frUndo.style.display = 'none'; frUndoValue = frAfterValue = null; };
+    const frSetOpen = (open, focus) => {
+        frRow.style.display = open ? '' : 'none';
+        frBtn.classList.toggle('rename-fr-on', open);
+        if (open) {
+            const picked = frPicked();
+            if (picked) frFind.value = picked;
+            frShowCount();
+            if (focus) {
+                // Picked text is already in Find, so straight to Replace with.
+                const f = picked ? frRepl : frFind;
+                f.focus();
+                f.select();
+            }
+        }
+        frSave();
+    };
+    const frReplace = () => {
+        const re = frPattern();
+        const n = frCount();
+        if (!re || !n) { frShowCount(); return; }
+        const repl = frRepl.value;
+        frUndoValue = input.value;
+        input.value = input.value.replace(re, () => repl);   // a function: no $& surprises
+        frAfterValue = input.value;
+        renderWordSelector(input.value);
+        frNote.textContent = 'Replaced ' + n;
+        frGo.disabled = frCount() === 0;
+        frUndo.style.display = '';
+        frSave();
+    };
+    // Desktop: keep the box's selection while the button is pressed.
+    frBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    frBtn.addEventListener('click', () => frSetOpen(!frIsOpen(), true));
+    frGo.addEventListener('click', frReplace);
+    frUndo.addEventListener('click', () => {
+        if (frUndoValue != null && input.value === frAfterValue) {
+            input.value = frUndoValue;
+            renderWordSelector(input.value);
+        }
+        frHideUndo();
+        frShowCount();
+    });
+    frFind.addEventListener('input', () => { frShowCount(); frSave(); });
+    frRepl.addEventListener('input', frSave);
+    frCase.addEventListener('change', () => { frShowCount(); frSave(); });
+    [frFind, frRepl].forEach((f) => f.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); frReplace(); }
+        else if (e.key === 'Escape') { e.preventDefault(); frSetOpen(false); input.focus(); }
+    }));
+    // The count follows the box however it changes - typing, a tag pill, Use
+    // suggested, the bracket buttons - since each of those redraws the word
+    // selector.
+    // The box as a replace just left it keeps its "Replaced n" note.
+    new MutationObserver(() => {
+        if (input.value === frAfterValue) return;
+        frHideUndo();
+        if (frIsOpen()) frShowCount();
+    }).observe(wordSelectorContainer, { childList: true });
+    if (frSaved.open) frSetOpen(true, false);
+}
 
 // Suggested name (13.66). textContent, never innerHTML - a filename is user
 // data. Filling the box is ALL it does: the word selector, the bracket

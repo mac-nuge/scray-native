@@ -4,6 +4,16 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.204 — test: TikTok mode order and orientation toggles back
+<!-- 2026-11-17T21:20Z -->
+- **Asked:** bring back TikTok mode's shuffle / in-order toggle and its orientation toggle (15.203 took them out) - they were useful.
+- **Order (scray-reels.js):** 🔀 / ➡️ beside sound, as in 15.184-15.202: random is this video first, then the list shuffled and reshuffled when it runs out; in order walks the list as > and < do, now wrapping at both ends (15.203). Switching keeps the video on screen. Remembered in `scray_reels_order` as before (random unless set), so it opens the way you last left it.
+- **Orientation:** ▯▭ / ▭ / ▯ beside it, cycling portrait and landscape > landscape only > portrait only. It now IS the page's orientation filter (All / Landscape / Portrait), not a setting of its own: it shows the filter as it is when the mode opens, a tap changes the filter, the list redraws and what comes next follows it. Unlike 15.191-15.202 the mode still doesn't set the filter on the way in or put it back on the way out (15.203), so a change made here stays - like any filter change. `scray_reels_orient` is no longer read.
+- **Kept from 15.203:** the ways in carry the video on screen in from the same second, the MPFS and FLS buttons, no tag changes.
+- **Buttons:** six in the row again (sound, order, orientation, Stop, MPFS, FLS), still 13px; padding 6 x 10 and 5px gaps so the row fits a 375px screen.
+- **Tested:** `node --check`; the overlay in headless Chrome at 375 and 390px: opens random by default (🔀, counter 1, 2, ...), the toggle switches to in order (➡️, place in the list, remembered) and walks and wraps 4, 5, 1, 2, ...; the orientation button cycles the filter All ▯▭ > Landscape ▭ > Portrait ▯ with a change event each time; the filter isn't touched by arming or leaving; the row sits inside the screen below the title. Not tried on the phone.
+- **Files:** native `assets/web/scray-reels.js`, `assets/web/VERSION`. Web only, no IPA build needed for it.
+
 ### native 15.203 — test: TikTok mode is just another player mode
 <!-- 2026-11-17T21:05Z -->
 - **Asked:** make TikTok mode simply a toggle to that player type, like FLS, MPFS and MPB, rather than a mode with its own video order and the rest; in it, offer FLS as well as MPFS, with bigger buttons; keep the existing ways in.

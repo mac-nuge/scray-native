@@ -136,6 +136,10 @@ const SCRAY_LIST_SORT_KEYS = {
   watched:    { type: 'num',  first: 'desc', zero: true, value: v => v.time_viewed },
   played:     { type: 'date', first: 'desc', value: v => v.last_played },
   created:    { type: 'date', first: 'desc', value: v => v.createdDateTime },
+  // The file's own last-modified date - OneDrive's lastModifiedDateTime, the
+  // box's mtime, the catalogue's last_modified_date (picker 15.145 / native
+  // 15.201). Files with none go last.
+  modified:   { type: 'date', first: 'desc', value: v => v.lastModifiedDateTime ?? v.last_modified_date },
   // When migrate last copied it OneDrive -> Hetzner (native 15.10 / picker
   // 15.14, browse 15.53's videos.migrated_at). Never-migrated files go last.
   migrated:   { type: 'date', first: 'desc', value: v => v.migrated_at },
@@ -371,6 +375,7 @@ scrayListSort as the headings and the other buttons.
 ========================================= */
 const SCRAY_DATE_SORT_TYPES = [
   { key: 'created',  label: 'Created' },
+  { key: 'modified', label: 'Modified' },
   { key: 'played',   label: 'Played' },
   { key: 'migrated', label: 'Migrated' },
   { key: 'released', label: 'Released' }

@@ -4823,7 +4823,7 @@ searchBox.addEventListener("keydown", (e) => {
       const entry = reels ? REELS_ENTRY : (ORIENTATION_CYCLE.find(o => o.value === sel.value) || ORIENTATION_CYCLE[0]);
       btn.innerHTML = entry.icon;
       btn.title = entry.value === "any" ? "Orientation filter: all (tap to cycle)"
-                : reels ? "TikTok mode: videos at random, swipe up for the next (tap to stop)"
+                : reels ? "TikTok mode: the TikTok-style player, swipe up for the next (tap to leave)"
                 : `Orientation filter: ${entry.label}`;
       btn.setAttribute("aria-label", entry.value === "any" ? "Orientation: all" : entry.label);
       btn.style.background = entry.value === "any" ? "#555" : reels ? "#e91e63" : "#007bff";

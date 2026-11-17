@@ -2,9 +2,8 @@
  * scray-reels.js - TikTok-style mode. Same file in Picker and Native, like
  * scray-image-viewer.js.
  *
- * What it is: a full-screen overlay that plays videos one at a time - portrait, landscape or both, as the
- * overlay's orientation button is set (default both).
- * Swipe up for the next, down for the one before, tap to pause, Stop to leave.
+ * What it is: a full-screen overlay that plays videos one at a time, TikTok style.
+ * Swipe up for the next, down for the one before, tap to pause.
  * It has its own <video> elements (the normal Plyr player is paused while it is
  * open) and three slots - the one before, the one playing, the one after - that
  * are moved by the finger and then rotated, so the next video is already
@@ -15,21 +14,26 @@
  * source, so at most two videos are buffering. A swipe onto a video that has
  * not caught up yet shows a spinner and plays when it can.
  *
- * The mode ("armed") is separate from the overlay:
- *   - the orientation button's cycle (All > Landscape > Portrait > TikTok)
- *     arms it, which sets the orientation filter to what the overlay's orientation
- *     button is set to (portrait / both / landscape; both by default) and takes the
- *     "soft" tag out of the excluded tags (they go back when the mode ends),
- *     then starts playing a random video;
- *   - while armed, playVideoInline hands every video to the overlay
- *     (player.js scrayPlayReels), and only ones of that orientation play;
- *   - the videos come at random: the list is shuffled, starting with the one
- *     played, and reshuffled when it runs out, so it never ends;
+ * native 15.203: JUST ANOTHER PLAYER MODE, like MPB, MPFS and FLS. It used to
+ * be a mode of its own - its own random / in-order run, its own orientation
+ * setting, and it changed the orientation filter and the excluded tags while
+ * it ran. All of that is gone:
+ *   - turning it on (the orientation button's TikTok step, the corner TT, the
+ *     MPFS TT circle) carries the video on screen into it from the same
+ *     second; with nothing loaded it presses X, as you would. No filter or
+ *     tag is touched, on the way in or out;
+ *   - while it is on, playVideoInline hands every play to the overlay
+ *     (player.js scrayPlayReels) - X, >, a row, anything;
+ *   - swiping walks the list the video was played from, in its own order, as
+ *     > and < do (wrapping at the ends). A filter or search change while it
+ *     runs (a tag in the title, say) re-targets what comes next, as it does
+ *     for >;
  *   - gestures are MPFS's seek gestures: a horizontal drag scrubs (x3 in the
  *     bottom fifth), a horizontal drag on a paused video jogs frame by frame
  *     (128x / 64x / 32x by thirds, bottom to top), a double tap in the left
  *     or right half of the middle band seeks 3 / 10 / 30s back or on;
- *   - Stop closes the overlay AND ends the mode.
+ *   - MPFS / FLS switch to that player with the video on screen, from the
+ *     same second; Stop closes the overlay; all three end the mode.
  *
  * It builds itself the first time it opens. Nothing happens at load beyond
  * wiring the button.
@@ -38,21 +42,15 @@
   'use strict';
   if (window.scrayReels) return;
 
-  // Tags the mode lifts out of the exclude list while it runs (lower case).
-  const SOFT_TAGS = ['soft'];
   const ANIM_MS = 280;
   const FLICK_PX = 60;          // a drag this long moves on
   const FLICK_V = 0.45;         // ...or a flick this fast (px per ms)
   const MUTE_KEY = 'scray_reels_muted';
-  const ORDER_KEY = 'scray_reels_order';      // 'random' (default) or 'ordered'
-  const ORIENT_KEY = 'scray_reels_orient';    // which videos play: 'P' portrait, 'any' both (the default), 'L' landscape
   // Containers the web player can't decode (player.js SCRAY_UNPLAYABLE_EXT).
   const NO_PLAY = new Set(['mkv', 'wmv', 'avi', 'flv', 'mpg', 'mpeg', 'rm', 'rmvb', 'asf',
                            'f4v', 'vob', 'divx', 'ogv', 'mts', 'm2v']);
 
   let armed = false;
-  let saved = null;       // what to put back when the mode ends
-  let ownOrient = null;   // the orientation filter value the mode itself set (so only that is put back)
   let R = null;           // the open overlay's state
   let toastEl = null, toastT = 0;
 
@@ -73,21 +71,8 @@
     const ext = String(v.filename || '').split('.').pop().toLowerCase();
     return !NO_PLAY.has(ext);
   }
-  let orientMem = null;   // the setting this session, for when storage is not available
-  const orientMode = () => {
-    const m = orientMem !== null ? orientMem : lsGet(ORIENT_KEY);
-    return m === 'P' || m === 'L' ? m : 'any';
-  };
-  const isLandscape = v => !!v && (v.orientation ?? (typeof window.deriveOrientation === 'function'
-    ? window.deriveOrientation(v.width, v.height) : null)) === 'L';
-  /** A video the mode will play: playable, and of the orientation the overlay's button is set to (the filter's P / any / L). */
-    function canPlay(v) {
-    if (!playable(v)) return false;
-    const m = orientMode();
-    return m === 'any' || (m === 'P' ? isPortrait(v) : isLandscape(v));
-  }
-  /** Before starting on a particular video (the MPFS TT circle): if the setting would refuse it, widen to both. */
-  function allow(v) { if (playable(v) && !canPlay(v)) setOrient('any'); }
+  /** A video the mode will play: one the web player can decode (native 15.203: any orientation, as in the other players). */
+  function canPlay(v) { return playable(v); }
 
   // ---------------------------------------------------------------- toast
   function toast(text) {
@@ -106,29 +91,10 @@
   }
 
   // ---------------------------------------------------------------- the mode
+  // Just the switch (native 15.203): nothing else changes with it.
   function arm() {
     if (armed) return;
     armed = true;
-    saved = { orient: null, soft: [] };
-    const sel = $('orientationFilter');
-    if (sel) {
-      saved.orient = sel.value;
-      ownOrient = orientMode();
-      if (sel.value !== ownOrient) {
-        sel.value = ownOrient;
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    }
-    // "soft" is a default exclude; it must not hide anything in this mode.
-    const j = window.jQuery;
-    if (j && j('#excludeTagSelect').length) {
-      const cur = j('#excludeTagSelect').val() || [];
-      const gone = cur.filter(t => SOFT_TAGS.includes(String(t).toLowerCase()));
-      if (gone.length) {
-        saved.soft = gone;
-        j('#excludeTagSelect').val(cur.filter(t => !gone.includes(t))).trigger('change');
-      }
-    }
     if (typeof window.syncOrientationToggleLabel === 'function') window.syncOrientationToggleLabel();
   }
 
@@ -136,39 +102,16 @@
     if (!armed) return;
     armed = false;
     if (R) closeOverlay();
-    const s = saved; saved = null;
-    if (s) {
-      const sel = $('orientationFilter');
-      // Only put it back if nobody changed it meanwhile.
-      if (sel && s.orient != null && ownOrient != null && sel.value === ownOrient && s.orient !== ownOrient) {
-        sel.value = s.orient;
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      const j = window.jQuery;
-      if (j && s.soft.length && j('#excludeTagSelect').length) {
-        const cur = j('#excludeTagSelect').val() || [];
-        const back = s.soft.filter(t => !cur.includes(t));
-        if (back.length) j('#excludeTagSelect').val(cur.concat(back)).trigger('change');
-      }
-    }
     if (typeof window.syncOrientationToggleLabel === 'function') window.syncOrientationToggleLabel();
   }
 
-  /** Start playing from the list on screen: a random portrait video, then onwards (random or in order, per the order button). */
+  /** Into the overlay with what is playing, from the same second (player.js scrayReelsFromPlayer); with
+   *  nothing loaded, press X - the same as turning the mode on and pressing X yourself. */
   async function start() {
-    // The portrait filter was only just switched on, and the list redraws asynchronously - wait for it to
-    // hold something playable (up to 4 s) rather than reading it once and giving up.
-    const t0 = Date.now();
-    let list = [], ok = [];
-    for (;;) {
-      list = (window.paginationState && window.paginationState.allVideos) || [];
-      ok = list.filter(canPlay);
-      if (ok.length || Date.now() - t0 > 4000) break;
-      await new Promise(r => setTimeout(r, 200));
-    }
-    if (!ok.length) { toast(`No ${ORIENT_TXT[orientMode()].toLowerCase()} videos in the list (${list.length} listed)`); return; }
-    // Exactly what pressing X does with TikTok mode on: it picks from the list as it stands and plays it,
-    // which TikTok mode hands to the overlay. (playVideoInline is not on window, so it cannot be called from here.)
+    if (typeof window.scrayReelsFromPlayer === 'function' && window.scrayReelsFromPlayer()) return;
+    const list = (window.paginationState && window.paginationState.allVideos) || [];
+    if (!list.some(canPlay)) { toast(`Nothing in the list to play (${list.length} listed)`); return; }
+    // playVideoInline is not on window, so it cannot be called from here; X picks from the list as it stands.
     const x = $('playRandomFilteredBtn');
     if (!x) { toast('The X button is missing'); return; }
     x.click();
@@ -177,21 +120,10 @@
   async function toggle() {
     if (armed) { disarm(); return; }
     arm();
-    // The filter change redraws the list; give it a moment before reading it.
-    await new Promise(r => setTimeout(r, 150));
     try { await start(); } catch (err) { console.warn('[reels] could not start:', err); toast('TikTok mode could not start: ' + ((err && err.message) || err)); }
   }
 
-  // ---------------------------------------------------------------- random order
-  function shuffled(list) {
-    const a = list.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      const t = a[i]; a[i] = a[j]; a[j] = t;
-    }
-    return a;
-  }
-  /** Keep a few videos queued ahead: when the shuffled run is nearly out, add another shuffle of the lot. */
+  // ---------------------------------------------------------------- the list, in its own order
   /** If the list behind the mode changed (a filter or search from the title, say), what comes next follows it. */
   function syncList() {
     if (!R || !R.listKey) return;
@@ -204,28 +136,31 @@
     const cur = R.items[R.index];
     const curId = cur && idOf(cur.video);
     const fresh = (items || []).filter(it => idOf(it.video) !== curId);
-    if (!fresh.length) { toast('Nothing else matches - keeping the current run'); return; }
+    if (!fresh.length) { toast('Nothing else matches - keeping the current list'); return; }
     R.source = items;
-    if (R.pool) {
-      R.pool = items;                   // the whole match, this one included, for the reshuffles after
-      R.items = R.items.slice(0, R.index + 1).concat(shuffled(fresh));
-    } else {                            // in order: carry on down the new list from where this one sits in it
-      const at = items.findIndex(it => idOf(it.video) === curId);
-      R.items = R.items.slice(0, R.index + 1).concat(at >= 0 ? items.slice(at + 1) : fresh);
-    }
-    ensureAhead();
+    // Carry on down the new list from where this one sits in it (from its top if it isn't in it).
+    const at = items.findIndex(it => idOf(it.video) === curId);
+    R.items = R.items.slice(0, R.index + 1).concat(at >= 0 ? items.slice(at + 1) : fresh);
+    ensureAround();
     fill(R.slots[2], R.index + 1, 'auto');
     if (Date.now() - R.openedAt > 2500) toast(`Next videos from the ${fresh.length + (curId != null ? 1 : 0)} that match`);   // not for the list settling at the start
   }
   const idOf = v => (v ? (v.oneDriveId ?? v.idFromAPI ?? v.filename ?? v) : null);
 
-  function ensureAhead() {
-    if (!R || !R.pool || R.pool.length < 2) return;
-    while (R.items.length - R.index < 4) {
-      const last = R.items[R.items.length - 1];
-      const batch = shuffled(R.pool);
-      if (batch[0] === last) { const t = batch[0]; batch[0] = batch[1]; batch[1] = t; }   // no repeat back to back
-      R.items.push(...batch);
+  /**
+   * The list wraps, as > and < do: past its end comes its start again, before its start its end. R.items is
+   * the run so far; a copy of the list is added at whichever end is getting close. Adding in front moves
+   * every index along, the slots' and the start-at's included.
+   */
+  function ensureAround() {
+    if (!R || !R.source || R.source.length < 2) return;
+    while (R.items.length - R.index < 4) R.items.push(...R.source);
+    while (R.index < 2) {
+      const n = R.source.length;
+      R.items = R.source.concat(R.items);
+      R.index += n;
+      R.slots.forEach(sl => { if (sl.idx >= 0) sl.idx += n; });
+      if (R.startAt) R.startAt.idx += n;
     }
   }
 
@@ -239,7 +174,7 @@
    height above it, 70% below - so it uses the space at the top and keeps clear of the title and bar. */
 .sr-slot video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:50% 30%;background:#000;pointer-events:none}
 /* ⚙️ The title sits ABOVE the button row (74px up, the row is 40px + about 28 tall), full width: five buttons are too wide to share a line with it. */
-.sr-cap{position:absolute;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 74px);font-size:11.5px;
+.sr-cap{position:absolute;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 84px);font-size:11.5px;
   line-height:1.3;text-shadow:0 1px 3px #000,0 0 8px #000;pointer-events:none;word-break:break-word;opacity:.72;
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .sr-spin{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border:3px solid rgba(255,255,255,.25);
@@ -270,17 +205,18 @@
 #scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-input{font-size:.7rem!important;flex:1 1 0!important;min-width:0!important;width:auto!important}
 #scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-glass{font-size:.7rem!important}
 #scrayReels .sr-pills > #floatingTagPillsBar .floating-tag-search-wrap.is-focused .search-pill-x{font-size:.8rem!important;margin:0!important;padding:0 4px!important;border-radius:8px!important}
-.sr-ctl{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 38px);display:flex;gap:4px;align-items:center;opacity:.72}
+/* ⚙️ native 15.203: the buttons a size up (13px, 6 x 12 padding; were 10.5px, 3 x 7) - sound, Stop, MPFS, FLS. */
+.sr-ctl{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 38px);display:flex;gap:6px;align-items:center;opacity:.78}
 /* The title is the same clickable path as a list row (createClickablePath): folders, bracket tags and Stash chips
    open the filter / search modal. Its inline colours are for a white page, so they are restated for black. */
 .sr-cap span{color:#fff!important}
 .sr-cap span[style*="underline"]{color:#8cc8ff!important;pointer-events:auto;cursor:pointer}
 .sr-cap span[style*="italic"]{color:#bbb!important}
 html.scray-reels-open .basket-json-modal{z-index:2147483647!important}
-.sr-btn{background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:12px;padding:3px 7px;
-  font-size:10.5px;line-height:1.4;cursor:pointer}
+.sr-btn{background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:15px;padding:6px 12px;
+  font-size:13px;line-height:1.3;cursor:pointer}
 .sr-btn.stop{background:rgba(200,30,60,.55);border-color:transparent;font-weight:600}
-.sr-btn.mpfs{letter-spacing:.02em}
+.sr-btn.mpfs,.sr-btn.fls{letter-spacing:.02em;font-weight:600}
 /* The seek bar, as MPFS's: a thin full-width track, played in white, loaded a little lighter, the time
    as played / left above it. The strip is taller than the track so a thumb can find it. */
 /* ⚙️ --sr-lift (18px, on .sr-root) raises the bar, its time, the title and the buttons clear of the screen's
@@ -301,7 +237,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
 .sr-fb{position:absolute;top:calc(env(safe-area-inset-top,0px) + 56px);background:rgba(0,0,0,.65);padding:6px 12px;border-radius:14px;
   font-size:14px;font-variant-numeric:tabular-nums;opacity:0;transition:opacity .2s;pointer-events:none}
 .sr-fb.on{opacity:1}
-.sr-hint{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 140px);transform:translateX(-50%);
+.sr-hint{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + var(--sr-lift) + 150px);transform:translateX(-50%);
   background:rgba(0,0,0,.6);padding:7px 14px;border-radius:16px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
 .sr-hint.on{opacity:1}
 `;
@@ -358,10 +294,9 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
       '<div class="sr-pause">&#9654;</div>' +
       '<div class="sr-top"><span class="sr-count"></span></div><div class="sr-pills"></div>' +
       '<div class="sr-ctl"><button type="button" class="sr-btn mute" aria-label="Sound"></button>' +
-      '<button type="button" class="sr-btn order" aria-label="Order"></button>' +
-      '<button type="button" class="sr-btn land" aria-label="Landscape videos"></button>' +
       '<button type="button" class="sr-btn stop">Stop</button>' +
-      '<button type="button" class="sr-btn mpfs" title="Leave TikTok mode and carry on in the normal portrait player (MPFS)">MPFS</button></div>' +
+      '<button type="button" class="sr-btn mpfs" title="Carry on with this video in the portrait fullscreen player (MPFS)">MPFS</button>' +
+      '<button type="button" class="sr-btn fls" title="Carry on with this video in the landscape fullscreen player (FLS)">FLS</button></div>' +
       '<div class="sr-seek"><div class="sr-ts">0:00 / 0:00</div><div class="sr-track"><div class="sr-buf"></div><div class="sr-fill"></div></div></div>' +
       '<div class="sr-fb"></div><div class="sr-hint">Swipe up for the next video</div>');
     document.body.appendChild(root);
@@ -372,13 +307,12 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
       seek: root.querySelector('.sr-seek'), track: root.querySelector('.sr-track'),
       curPlaying: false, waiters: [], waitT: 0, autoMuted: false, fb: root.querySelector('.sr-fb'), count: root.querySelector('.sr-count'),
       pauseIcon: root.querySelector('.sr-pause'), hint: root.querySelector('.sr-hint'),
-      muteBtn: root.querySelector('.mute'), orderBtn: root.querySelector('.order'), landBtn: root.querySelector('.land'), source: [], startAt: null, wheelLock: false, errTimer: 0
+      muteBtn: root.querySelector('.mute'), source: [], startAt: null, wheelLock: false, errTimer: 0
     };
     root.querySelector('.stop').addEventListener('click', e => { e.stopPropagation(); disarm(); closeOverlay(); });
-    root.querySelector('.mpfs').addEventListener('click', e => { e.stopPropagation(); toMpfs(); });
+    root.querySelector('.mpfs').addEventListener('click', e => { e.stopPropagation(); toPlayer('mpfs'); });
+    root.querySelector('.fls').addEventListener('click', e => { e.stopPropagation(); toPlayer('fls'); });
     st.muteBtn.addEventListener('click', e => { e.stopPropagation(); setMuted(!R.muted); });
-    st.orderBtn.addEventListener('click', e => { e.stopPropagation(); toggleOrder(); });
-    st.landBtn.addEventListener('click', e => { e.stopPropagation(); toggleLandscape(); });
     wireGestures(st);
     wireSeekBar(st);
     return st;
@@ -390,68 +324,6 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     if (persist) { R.autoMuted = false; lsSet(MUTE_KEY, R.muted ? '1' : '0'); }
     R.slots.forEach(s => { s.v.muted = R.muted; });
     R.muteBtn.textContent = R.muted ? '🔇' : '🔊';
-  }
-
-  // ---- landscape videos (the button beside the order button)
-  const ORIENT_NEXT = { P: 'any', any: 'L', L: 'P' };
-  const ORIENT_TXT = { P: 'Portrait only', any: 'Portrait and landscape', L: 'Landscape only' };
-  const ORIENT_GLYPH = { P: '▯', any: '▯▭', L: '▭' };
-  function paintLand() {
-    if (!R) return;
-    const m = orientMode();
-    R.landBtn.textContent = ORIENT_GLYPH[m];
-    R.landBtn.title = `${ORIENT_TXT[m]} - tap for ${ORIENT_TXT[ORIENT_NEXT[m]].toLowerCase()}`;
-  }
-  /** Set which videos play. The list behind the mode is the orientation filter's, so the filter moves too. */
-  function setOrient(m) {
-    orientMem = m;
-    lsSet(ORIENT_KEY, m);
-    const sel = $('orientationFilter');
-    if (armed && sel && ownOrient != null && sel.value === ownOrient) {
-      ownOrient = m;
-      sel.value = m;
-      sel.dispatchEvent(new Event('change', { bubbles: true }));   // the list redraws; syncList then feeds what comes next
-    }
-    paintLand();
-  }
-  /** The button in the overlay: portrait only > portrait and landscape > landscape only > portrait only. */
-  function toggleLandscape() {
-    const m = ORIENT_NEXT[orientMode()];
-    setOrient(m);
-    toast(ORIENT_TXT[m]);
-  }
-
-  // ---- random / in order (the button beside mute)
-  const isRandom = () => lsGet(ORDER_KEY) !== 'ordered';
-  function paintOrder() {
-    if (!R) return;
-    const rnd = !!R.pool;
-    R.orderBtn.textContent = rnd ? '🔀' : '➡️';
-    R.orderBtn.title = rnd ? 'Random order - tap for in order' : 'In order - tap for random';
-  }
-  /** Switch what comes next between random and the list's own order, from the video on screen, without a restart. */
-  function toggleOrder() {
-    if (!R) return;
-    const goRandom = !R.pool;
-    lsSet(ORDER_KEY, goRandom ? 'random' : 'ordered');
-    const src = R.source && R.source.length ? R.source : R.items;
-    const cur = R.items[R.index];
-    const curId = cur && idOf(cur.video);
-    const head = R.items.slice(0, R.index + 1);
-    if (goRandom) {
-      R.pool = src.slice();
-      R.items = head.concat(shuffled(src.filter(it => idOf(it.video) !== curId)));
-      ensureAhead();
-      if (R.listKey && R.listItems) { clearInterval(R.syncT); R.syncT = setInterval(syncList, 700); }
-    } else {
-      R.pool = null;
-      const at = src.findIndex(it => idOf(it.video) === curId);
-      R.items = head.concat(at >= 0 ? src.slice(at + 1) : src.filter(it => idOf(it.video) !== curId));
-    }
-    fill(R.slots[2], R.index + 1, 'auto');
-    paintOrder();
-    shown();
-    toast(goRandom ? 'Random order' : 'In order');
   }
 
   function showPaused(on) { if (R) R.pauseIcon.classList.toggle('on', !!on); }
@@ -579,13 +451,10 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
 
   function shown() {
     const it = R.items[R.index];
-    if (R.pool) R.count.textContent = `${R.index + 1}`;
-    else {
-      // In order: the place in the list itself, not in the run since the toggle.
-      const id = it && idOf(it.video);
-      const at = R.source.length ? R.source.findIndex(s => idOf(s.video) === id) : -1;
-      R.count.textContent = at >= 0 ? `${at + 1} / ${R.source.length}` : `${R.index + 1} / ${R.items.length}`;
-    }
+    // The place in the list itself.
+    const id = it && idOf(it.video);
+    const at = R.source.length ? R.source.findIndex(s => idOf(s.video) === id) : -1;
+    R.count.textContent = at >= 0 ? `${at + 1} / ${R.source.length}` : '';
     paint();
     showPaused(false);
     if (R.onShow && it) { try { R.onShow(it, R.index); } catch (err) { console.warn('[reels] onShow:', err); } }
@@ -599,8 +468,8 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
   /** Move one video on (+1) or back (-1), sliding the whole screen. */
   function go(dir) {
     if (!R || R.busy) return;
+    ensureAround();                             // first: adding in front moves the index
     const ni = R.index + dir;
-    if (dir > 0) ensureAhead();
     if (ni < 0 || ni >= R.items.length) { bounce(); return; }
     clearTimeout(R.errTimer);
     R.busy = true;
@@ -612,13 +481,14 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
       cur.v.pause();
       if (dir > 0) {
         R.slots.push(R.slots.shift());          // the old "before" becomes the new "after"
-        R.index = ni;
-        ensureAhead();
-        fill(R.slots[2], ni + 1, 'auto');
+        R.index += dir;
+        ensureAround();
+        fill(R.slots[2], R.index + 1, 'auto');
       } else {
         R.slots.unshift(R.slots.pop());         // the old "after" becomes the new "before"
-        R.index = ni;
-        fill(R.slots[0], ni - 1, 'metadata');
+        R.index += dir;
+        ensureAround();
+        fill(R.slots[0], R.index - 1, 'metadata');
       }
       layout(0, false);
       R.curPlaying = false;
@@ -925,14 +795,14 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     bar.addEventListener('pointercancel', up);
   }
 
-  /** The MPFS button: leave TikTok mode and carry on with this video in the normal portrait player. */
-  function toMpfs() {
+  /** The MPFS and FLS buttons: switch player - this video, from the same second, in MPFS or FLS. */
+  function toPlayer(mode) {
     if (!R) return;
     const it = R.items[R.index];
     const t = R.slots[1].v.currentTime || 0;
-    disarm();                                       // ends the mode, filters back as they were
+    disarm();                                       // ends the mode and closes the overlay
     closeOverlay();
-    if (it && typeof window.scrayPlayFromReels === 'function') window.scrayPlayFromReels(it.video, t);
+    if (it && typeof window.scrayPlayFromReels === 'function') window.scrayPlayFromReels(it.video, t, mode);
   }
 
   function onKey(e) {
@@ -964,19 +834,13 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     clearTimeout(R.errTimer);
     Scrub.reset();
     const at = Math.max(0, Math.min(items.length - 1, (opts.index | 0)));
+    // The list in its own order, starting at this one (native 15.203 - no random run of its own).
     R.source = items.slice();
-    if (opts.shuffle && isRandom()) {
-      // The one played first, then the rest in random order; reshuffled when it runs out.
-      R.pool = items.slice();
-      R.items = [items[at]].concat(shuffled(items.filter((_, i) => i !== at)));
-      R.index = 0;
-      ensureAhead();
-    } else {
-      R.pool = null;
-      R.items = items;
-      R.index = at;
-    }
+    R.items = items.slice();
+    R.index = at;
+    R.slots.forEach(sl => { sl.idx = -1; });
     R.startAt = opts.startAt > 0 ? { idx: R.index, t: opts.startAt } : null;   // carry on from where the other player was
+    ensureAround();
     R.onShow = opts.onShow || null;
     R.onClose = opts.onClose || null;
     R.openedAt = Date.now();
@@ -994,14 +858,12 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     document.documentElement.style.overflow = 'hidden';
     window.addEventListener('keydown', onKey, true);
     setMuted(R.muted);
-    paintOrder();
-    paintLand();
     layout(0, false);
     fill(R.slots[1], R.index, 'auto');
     fill(R.slots[2], R.index + 1, 'auto');
     fill(R.slots[0], R.index - 1, 'metadata');
     shown();
-    R.hint.textContent = R.pool ? 'Swipe up for the next - random' : 'Swipe up for the next - in order';
+    R.hint.textContent = 'Swipe up for the next video';
     R.hint.classList.add('on');
     setTimeout(() => { if (R) R.hint.classList.remove('on'); }, 2600);
     return true;
@@ -1053,7 +915,7 @@ html.scray-reels-open #scrayDisguiseDock,html.scray-reels-open #scrayDisguiseStr
     arm, disarm, toggle, start, open,
     close: closeOverlay,
     stop: () => { disarm(); closeOverlay(); },
-    canPlay, allow, toast,
+    canPlay, toast,
     /** The video that comes after the one on screen (for play-next-after-delete), or null. */
     peekNext: () => (R && R.root.classList.contains('on') && R.items[R.index + 1] && R.items[R.index + 1].video) || null
   };

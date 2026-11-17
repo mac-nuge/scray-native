@@ -1768,7 +1768,14 @@ final class ScrayBrowserViewController: UIViewController,
             item("Browser Controls…", "slider.horizontal.3") { $0.controlsTapped() }
         ]
 
-        return [group(controls), group(page), group(browser), group(scray)]
+        // native 15.207: a Close line at the foot of the menu. Any line closes
+        // a pop-up menu, so this one just does nothing - it is there to tap
+        // when you opened ⋯ by accident or changed your mind. From the bottom
+        // bar the menu opens upward with the first group nearest the button
+        // (.priority, above), so it goes first to be the bottom line.
+        let close: [UIMenuElement] = [item("Close", "xmark") { _ in }]
+
+        return [group(close), group(controls), group(page), group(browser), group(scray)]
     }
 
     // MARK: - Streams (native 15.144)

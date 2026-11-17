@@ -929,6 +929,12 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
           if (!more && !entry.costars) body.costars = 1;
           body.page = more ? (entry.data.page || 1) + 1 : 1;
         }
+        // Duration diff on a profile (picker 15.143 / native 15.199, browse 15.377): the server
+        // finds the scenes nearest the file's length out of ALL of them, not just the pages loaded.
+        if (entry.type !== 'search' && entry.sort === 'dur' && !entry.libOnly) {
+          body.by_dur = 1;
+          if (more && entry.data && entry.data.by_dur && entry.data.by_dur.pages) body.dur_pages = entry.data.by_dur.pages;
+        }
         res = await api('stash_nav', { method: 'POST', body });
       } catch (err) {
         if (seq !== loadSeq || top() !== entry) return;
@@ -943,6 +949,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         const seen = new Set(entry.data.scenes.map(s => s.stash_id));
         entry.data.scenes = entry.data.scenes.concat((res.scenes || []).filter(s => !seen.has(s.stash_id)));
         entry.data.page = res.page;
+        entry.data.by_dur = res.by_dur || null;
         entry.data.lastCount = (res.scenes || []).length;
         entry.data.note = res.note || '';
       } else {
@@ -993,7 +1000,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (!entry.libNot || entry.busy || !entry.data || entry.error) return;
       const d = entry.data, n = d.scenes.length;
       const shown = d.scenes.filter(c => !(c.library || []).length).length;
-      const hasMore = d.count != null && n < d.count && d.lastCount >= (d.per_page || 25);
+      const hasMore = moreLeft(d);
       if (shown >= 10 || !hasMore || (entry.notTries || 0) >= 8) return;
       entry.notTries = (entry.notTries || 0) + 1;
       setTimeout(() => { if (!finished && top() === entry && entry.libNot && !entry.busy) load(entry, true); }, 0);
@@ -1104,7 +1111,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       return '<span class="ssn-sort">' +
           (e.data.scored ? '<button type="button" data-sort="match" class="' + (e.sort === 'match' ? 'on' : '') + '">Best match</button>' : '') +
           '<button type="button" data-sort="order" class="' + (e.sort === 'order' ? 'on' : '') + '">' + orderLabel + '</button>' +
-          (hasDur ? '<button type="button" data-sort="dur" class="' + (e.sort === 'dur' ? 'on' : '') + '" title="Closest length to this file first">Duration diff</button>' : '') +
+          (hasDur ? '<button type="button" data-sort="dur" class="' + (e.sort === 'dur' ? 'on' : '') + '" title="Closest length to this file first' + (e.type === 'search' ? '' : ' - out of all the scenes here, not just the ones loaded') + '">Duration diff</button>' : '') +
           '<button type="button" data-sort="lib" class="' + (e.sort === 'lib' ? 'on' : '') + '" title="Scenes from the studios and with the performers you have most of in your library first">In library</button>' +
         '</span>';
     }
@@ -1474,7 +1481,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
             (e.picks && e.picks.length ? ' at that studio' : '') : 'No scenes listed for this performer') +
             (e.withPicks && e.withPicks.length ? ' with ' + esc(e.withPicks.map(x => x.name).join(' + ')) : '') + '.</div>')
         : (sortedScenes(e).map(x => cardHtml(x.s, x.i, p ? p.id : null)).join('') || notEmpty(e, n));
-      const more = d && d.count != null && n < d.count && d.lastCount >= (d.per_page || 25)
+      const more = d && moreLeft(d)
         ? '<button type="button" class="ssn-loadmore" data-more' + (e.busy ? ' disabled' : '') + '>' +
             (e.busy ? 'Loading&hellip;' : 'Load more (' + n + ' of ' + d.count + ')') + '</button>'
         : '';
@@ -1484,9 +1491,17 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         list + more;
     }
 
+    /** Whether a profile's scene list has more to load. Loaded by length (by_dur), more widens the range either side. */
+    function moreLeft(d) {
+      if (!d) return false;
+      const b = d.by_dur;
+      if (b && b.pages) return b.pages[0] > 1 || (b.total_pages != null && b.pages[1] < b.total_pages);
+      return d.count != null && d.scenes.length < d.count && d.lastCount >= (d.per_page || 25);
+    }
     /** The heading over a profile's scenes. */
     function scenesLabel(e, d) {
-      const sortBit = e.sort === 'order' ? ' &middot; newest first' : e.sort === 'lib' ? ' &middot; most in library first' : '';
+      const sortBit = e.sort === 'order' ? ' &middot; newest first' : e.sort === 'lib' ? ' &middot; most in library first'
+        : e.sort === 'dur' && d.by_dur ? ' &middot; nearest in length, from all of them' : '';
       if (e.libNot) {
         const shown = d.scenes.filter(c => !(c.library || []).length).length;
         return 'Not in your library &middot; ' + shown + ' of ' + d.scenes.length + ' loaded' + sortBit;
@@ -1553,7 +1568,7 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         ? (d.note ? '' : '<div class="ssn-empty">' + (e.libOnly ? 'None of your files are' : 'No') + ' scenes listed for this studio' +
             (e.picks && e.picks.length ? ' with ' + esc(e.picks.map(x => x.name).join(' + ')) + ' together' : '') + '.</div>')
         : (sortedScenes(e).map(x => cardHtml(x.s, x.i, (e.picks || []).map(x => x.id), s ? s.id : null)).join('') || notEmpty(e, n));
-      const more = d && d.count != null && n < d.count && d.lastCount >= (d.per_page || 25)
+      const more = d && moreLeft(d)
         ? '<button type="button" class="ssn-loadmore" data-more' + (e.busy ? ' disabled' : '') + '>' +
             (e.busy ? 'Loading&hellip;' : 'Load more (' + n + ' of ' + d.count + ')') + '</button>'
         : '';
@@ -2682,7 +2697,14 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
       if (btn.dataset.getrm !== undefined) { getRemove(btn); return; }
       if (btn.dataset.sort) {
         const e = top();
-        if (e && e.sort !== btn.dataset.sort) { e.sort = btn.dataset.sort; paint(false, true); }
+        if (e && e.sort !== btn.dataset.sort) {
+          const was = e.sort;
+          e.sort = btn.dataset.sort;
+          // A profile's Duration diff loads by length from the server (picker 15.143 / native 15.199);
+          // leaving it goes back to the newest-first pages.
+          if (e.type !== 'search' && !e.libOnly && (e.sort === 'dur' || (was === 'dur' && e.data && e.data.by_dur))) load(e, false, true);
+          else paint(false, true);
+        }
         // In a hunt, the next files' searches open in this order too (picker 15.43 / native 15.54).
         if (e && e.type === 'search' && inHunt && typeof hunt.setSearchSort === 'function' && btn.dataset.sort !== 'lib') {
           try { hunt.setSearchSort(btn.dataset.sort); } catch (err) { /* this card only */ }

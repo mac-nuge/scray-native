@@ -4,6 +4,14 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### native 15.207 — test: close button in browser menu
+<!-- 2026-11-17T22:05Z -->
+- **Asked:** a Close button at the bottom of the browser's ⋯ menu, to close the menu.
+- **Change (ScrayBrowser.swift, `moreMenuElements`):** a new **Close** line (xmark) in its own group, returned first. The menu opens upward from the bottom bar with the first group nearest the button (`.priority`, 15.202), so first is the bottom line, under Home. It does nothing itself: tapping any line closes a pop-up menu, so this is just a target for when ⋯ was opened by accident. If the controls layout puts ⋯ at the top of the screen, the menu opens downward and Close is the first line instead.
+- **Not changed:** the other lines and their order, Browser Controls, Last Closed Tab.
+- **Tested:** not run - Swift, so it needs an IPA build (offline release and remote). Nothing else in the web layer moved.
+- **Files:** native `modules/scray-native/ios/ScrayBrowser.swift`, `assets/web/VERSION`. **IPA build needed.**
+
 ### picker 15.147 / native 15.206 / browse 15.381 — test: find and replace in bulk rename
 <!-- 2026-11-17T21:45Z -->
 - **Asked:** after 15.146 / 15.205 / 15.380 put find and replace in the single rename modals, add it to the apps' bulk *Rename N files* modal and to any other bulk rename.

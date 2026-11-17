@@ -10,6 +10,12 @@
  * original name back. Renames run one after another through renameFile, so a
  * phone file that is also in the catalogue asks (once) whether to rename it
  * everywhere or on this phone only.
+ *
+ * Find and replace (picker 15.147 / native 15.206): the ⇄ button opens the
+ * single rename's find / replace row, run on every name not yet renamed -
+ * literal text, case-blind unless Match case, blank replacement removes it.
+ * Find / Replace with / Match case are shared with the single rename modal
+ * (scray_rename_fr_v1); whether the row is open here is this modal's own.
  */
 (function () {
   "use strict";
@@ -56,6 +62,28 @@
     return "";
   }
 
+  // ---- find and replace (picker 15.147 / native 15.206) ----
+  const FR_KEY = "scray_rename_fr_v1";           // shared with the single rename modal
+  const FR_OPEN_KEY = "scray_bulk_rename_fr_open_v1";
+  function frLoad() {
+    let o = {};
+    try { o = JSON.parse(localStorage.getItem(FR_KEY) || "{}") || {}; } catch (e) { o = {}; }
+    let open = false;
+    try { open = localStorage.getItem(FR_OPEN_KEY) === "1"; } catch (e) { /* closed */ }
+    return { find: typeof o.find === "string" ? o.find : "", repl: typeof o.repl === "string" ? o.repl : "",
+             cs: !!o.cs, open };
+  }
+  function frSave(fr) {
+    try {
+      let o = {};
+      try { o = JSON.parse(localStorage.getItem(FR_KEY) || "{}") || {}; } catch (e) { o = {}; }
+      localStorage.setItem(FR_KEY, JSON.stringify(Object.assign(o, { find: fr.find, repl: fr.repl, cs: fr.cs })));
+      localStorage.setItem(FR_OPEN_KEY, fr.open ? "1" : "0");
+    } catch (e) { /* not remembered, that's all */ }
+  }
+  const frPattern = (fr) => fr.find
+    ? new RegExp(fr.find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), fr.cs ? "g" : "gi") : null;
+
   function open(videos) {
     if (!videos || !videos.length) return;
     if (typeof window.renameFile !== "function" && typeof renameFile !== "function") {
@@ -64,6 +92,9 @@
     document.getElementById("scrayBulkRename")?.remove();
     const rows = rowsFor(videos);
     let running = false, finished = false;
+    const fr = frLoad();
+    let frLast = null;          // { n, files, rows: [{ r, before, after }] } - the last replace, for Undo
+    let frSel = null;           // the row box last left and what was selected in it
 
     const modal = document.createElement("div");
     modal.className = "basket-json-modal";
@@ -102,7 +133,10 @@
             <button class="modal-btn modal-btn-secondary" data-br="all-full" ${running || !nFull ? "disabled" : ""}>Use suggested for all (${nFull})</button>
             <button class="modal-btn modal-btn-secondary" data-br="all-np" ${running || !nNp ? "disabled" : ""}>Use without parent for all (${nNp})</button>
             <button class="modal-btn modal-btn-secondary" data-br="reset" ${running ? "disabled" : ""}>Reset</button>
+            <button class="modal-btn modal-btn-secondary" data-br="fr" ${running ? "disabled" : ""} title="Find and replace in every name"
+              style="${fr.open ? "background:#0e6674;color:#fff;" : ""}">&#8644; Find &amp; replace</button>
           </div>
+          ${fr.open ? frHtml() : ""}
           <div id="brList" style="overflow-y:auto;flex:1;text-align:left;">
             ${rows.map((r, i) => rowHtml(r, i)).join("")}
           </div>
@@ -114,6 +148,86 @@
                  <button class="modal-btn rn-cancel" data-br="close" ${running ? "disabled" : ""}>Cancel</button>`}
           </div>
         </div>`;
+    }
+
+    // The last replace stands while every row it changed still reads as it left it.
+    function frLive() {
+      if (frLast && !frLast.rows.every((x) => x.r.value === x.after && x.r.status !== "ok")) frLast = null;
+      return frLast;
+    }
+    function frCount() {
+      const re = frPattern(fr);
+      let n = 0, files = 0;
+      if (re) rows.forEach((r) => { if (r.status === "ok") return; const m = (r.value.match(re) || []).length; n += m; if (m) files++; });
+      return { n, files };
+    }
+    const frIn = (files) => " in " + files + " file" + (files === 1 ? "" : "s");
+    function frNote() {
+      const last = frLive();
+      if (last) return "Replaced " + last.n + frIn(last.files);
+      if (!fr.find) return "";
+      const c = frCount();
+      return c.n ? c.n + (c.n === 1 ? " match" : " matches") + frIn(c.files) : "No matches";
+    }
+    function frHtml() {
+      const c = frCount(), last = frLive();
+      const inp = "flex:1 1 0;min-width:0;padding:6px;font-size:16px;border:1px solid #bbb;border-radius:4px;box-sizing:border-box;";
+      return `
+          <div style="margin-bottom:8px;padding:8px;background:#eef8fa;border:1px solid #bfe3ea;border-radius:4px;text-align:left;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input type="text" data-br="fr-find" value="${esc(fr.find)}" placeholder="Find" style="${inp}" ${running ? "disabled" : ""}
+                autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+              <span style="color:#666;font-weight:bold;">&rarr;</span>
+              <input type="text" data-br="fr-repl" value="${esc(fr.repl)}" placeholder="Replace with" style="${inp}" ${running ? "disabled" : ""}
+                autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:4px;font-size:.8rem;color:#444;margin:0;">
+                <input type="checkbox" data-br="fr-cs" style="margin:0;width:auto;" ${fr.cs ? "checked" : ""} ${running ? "disabled" : ""}> Match case</label>
+              <span data-br="fr-note" style="flex:1 1 auto;font-size:.8rem;color:#666;min-width:0;">${esc(frNote())}</span>
+              ${last ? `<button class="modal-btn modal-btn-secondary" data-br="fr-undo" style="flex:0 0 auto;width:auto;margin:0;padding:6px 10px;font-size:.8rem;" ${running ? "disabled" : ""}>Undo</button>` : ""}
+              <button class="modal-btn modal-btn-primary" data-br="fr-go" style="flex:0 0 auto;width:auto;margin:0;padding:6px 12px;font-size:.8rem;" ${running || !c.n ? "disabled" : ""}>Replace all</button>
+            </div>
+          </div>`;
+    }
+    // Typing in Find changes only the note and Replace all, so the keyboard stays up.
+    function frRefresh() {
+      const note = modal.querySelector('[data-br="fr-note"]');
+      if (note) note.textContent = frNote();
+      const go = modal.querySelector('button[data-br="fr-go"]');
+      if (go) go.disabled = running || !frCount().n;
+    }
+    function frReplace() {
+      if (running) return;
+      const re = frPattern(fr);
+      if (!re) return;
+      const last = { n: 0, files: 0, rows: [] };
+      rows.forEach((r) => {
+        if (r.status === "ok") return;
+        const m = (r.value.match(re) || []).length;
+        if (!m) return;
+        const before = r.value;
+        r.value = r.value.replace(re, () => fr.repl);   // a function: no $& surprises
+        if (r.status === "fail") { r.status = ""; r.msg = ""; }
+        last.n += m; last.files++; last.rows.push({ r, before, after: r.value });
+      });
+      if (!last.n) { frRefresh(); return; }
+      frLast = last;
+      paint();
+    }
+    function frToggle() {
+      fr.open = !fr.open;
+      let picked = "";
+      if (fr.open && frSel && frSel.end > frSel.start && !(frSel.start === 0 && frSel.end === frSel.value.length)) {
+        picked = frSel.value.slice(frSel.start, frSel.end);
+        fr.find = picked;
+      }
+      frSave(fr);
+      paint();
+      if (fr.open) {
+        const f = modal.querySelector(picked ? 'input[data-br="fr-repl"]' : 'input[data-br="fr-find"]');
+        if (f) { f.focus(); try { f.select(); } catch (e) { /* ok */ } }
+      }
     }
 
     function rowHtml(r, i) {
@@ -153,10 +267,35 @@
     }
 
     modal.addEventListener("input", (e) => {
+      const f = e.target.closest && e.target.closest('input[data-br="fr-find"], input[data-br="fr-repl"]');
+      if (f) {
+        if (f.dataset.br === "fr-find") { fr.find = f.value; frLast = null; } else fr.repl = f.value;
+        frSave(fr); frRefresh(); return;
+      }
       const el = e.target.closest && e.target.closest('input[data-br="in"]');
       if (!el) return;
       rows[Number(el.dataset.i)].value = el.value;
       softRepaint();
+    });
+
+    modal.addEventListener("change", (e) => {
+      if (!e.target.matches || !e.target.matches('input[data-br="fr-cs"]')) return;
+      fr.cs = e.target.checked; frLast = null; frSave(fr); frRefresh();
+    });
+    modal.addEventListener("keydown", (e) => {
+      const f = e.target.closest && e.target.closest('input[data-br="fr-find"], input[data-br="fr-repl"]');
+      if (!f) return;
+      if (e.key === "Enter") { e.preventDefault(); frReplace(); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); if (fr.open) frToggle(); }
+    });
+    // What was selected in a row's box when it lost focus - goes into Find
+    // when the row opens. Desktop keeps the box focused through the press.
+    modal.addEventListener("focusout", (e) => {
+      const el = e.target.closest && e.target.closest('input[data-br="in"]');
+      if (el) frSel = { value: el.value, start: el.selectionStart, end: el.selectionEnd };
+    });
+    modal.addEventListener("mousedown", (e) => {
+      if (e.target.closest && e.target.closest('button[data-br="fr"]')) e.preventDefault();
     });
 
     modal.addEventListener("click", async (e) => {
@@ -166,6 +305,16 @@
       const what = b.dataset.br;
       if (what === "close") { if (!running) modal.remove(); return; }
       if (running) return;
+      if (what === "fr") {
+        const a = document.activeElement;
+        if (a && a.dataset && a.dataset.br === "in") frSel = { value: a.value, start: a.selectionStart, end: a.selectionEnd };
+        frToggle(); return;
+      }
+      if (what === "fr-go") { frReplace(); return; }
+      if (what === "fr-undo") {
+        if (frLive()) frLast.rows.forEach((x) => { if (x.r.value === x.after && x.r.status !== "ok") x.r.value = x.before; });
+        frLast = null; paint(); return;
+      }
       if (what === "all-full") { rows.forEach((r) => { if (r.full && r.status !== "ok") r.value = r.full; }); paint(); return; }
       if (what === "all-np") { rows.forEach((r) => { if (r.np && r.status !== "ok") r.value = r.np; }); paint(); return; }
       if (what === "reset") { rows.forEach((r) => { if (r.status !== "ok") { r.value = r.orig; r.msg = ""; r.status = ""; } }); paint(); return; }

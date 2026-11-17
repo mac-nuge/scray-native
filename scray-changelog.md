@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.143 / native 15.199 / browse 15.377 — test: Duration diff searches all of a profile's scenes
+<!-- 2026-11-17T10:35Z -->
+- **Asked:** comparing a file on a studio profile and sorting by Duration diff, the right scene didn't show though it exists (narrowing the search found it). Suspected the sort only covered the first batch; make it cover everything the studio has.
+- **Cause:** confirmed. A profile's scenes come 25 a page, newest first, and Duration diff only reordered the pages already loaded. A scene from years back sat unloaded.
+- **Server (browse api.php, `stash_nav` ops `studio` and `performer`):** with `by_dur: 1` and a compared file that has a length, the server asks StashDB for the profile's scenes - its filters kept (performers, sub-studios, studios / networks, co-performers) - sorted by DURATION. StashDB can sort by length but has no length filter, so it finds where the file's length falls in that order with rounds of 24 one-scene probes in a single request each (about 4 StashDB requests in all, even for a studio of 8,000), then returns the two 100-scene pages around that point. `by_dur: { pages: [lo, hi], total_pages }` says which pages are loaded; a more with `dur_pages` adds the page beyond each end. Every scene between the shortest and longest loaded is there, so the closest ones are always among them. Scenes with no length sit at one end of StashDB's order and only appear if a page reaches them. In-library mode already loads all its scenes and ignores `by_dur`.
+- **Apps and browse's profiles:** picking Duration diff on a studio or performer profile reloads it that way; the heading / footer says `nearest in length, from all of them`, and Load more widens the range either side. Leaving Duration diff for another order goes back to StashDB's newest-first pages (a by-length slice isn't the newest). Search results (the filename search's own list) are unchanged - they aren't paged by profile. If browse isn't deployed yet the apps just get the old pages and sort those.
+- **Tested:** the position search against a fake StashDB in PHP (3,000 and 8,000 scenes, nulls first and last, file shorter / longer than every scene, tiny studios): the closest scene was always loaded, 4 StashDB calls, 1 per Load more. `php -l` on api.php, `node --check` on the JS. The apps' navigator and browse's profiles in headless Chrome against a stub: Duration diff sends `by_dur`, the closest scene comes first, Load more sends the pages, and leaving it goes back to page 1. Not run against the real StashDB.
+- **Files:** browse `api.php`, `scray-stash-profiles.js`; picker `scray-stash-nav.js`; native `assets/web/scray-stash-nav.js` (identical).
+
 ### native 15.198 — test: Download Stream always in the browser menu
 <!-- 2026-11-15T10:40Z -->
 - **Asked:** the in-app browser's stream download only shows up at certain times - can it always be there?

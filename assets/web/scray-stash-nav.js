@@ -1904,6 +1904,9 @@ mark.ssn-hl.ssn-hl-s { background: #ffb3d6; }
         '</div>';
       };
       return '<div class="ssn-state"><span class="ssn-h">Stash get' + (getReady ? ' &middot; ' + todo.length + ' to get' : '') + '</span></div>' +
+        // Unblur all (picker 15.148 / native 15.208): the one switch the other views have, so the saved
+        // scenes' covers can be shown or hidden together here too.
+        (getItems.some(x => x.cover) ? '<div class="ssn-btnrow ssn-topbar">' + unblurBtn() + '</div>' : '') +
         errHtml(getErr) +
         (!getReady && !getErr ? '<div class="ssn-state">Loading&hellip;</div>' : '') +
         (getReady && !getItems.length ? '<div class="ssn-empty">Nothing saved yet. Tap &ldquo;+ Stash get&rdquo; on a scene in any result to keep it here.</div>' : '') +

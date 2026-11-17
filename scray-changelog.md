@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.148 / native 15.208 / browse 15.382 — test: Stash get list in data explorer, Unblur all in Stash get
+<!-- 2026-11-17T22:20Z -->
+- **Asked:** is the Stash get list in the data explorer, and if not, add it; and add an Unblur all option to the Stash get modal.
+- **Found:** the list (`stash_get`, browse 15.372) was only in the apps' Stash modal. Browse had the table and the api but no page showing it.
+- **Browse (data-explorer.html):** a **📥 Stash get** button beside Profiles… opens a dialog with the same list: scenes still to get, then a collapsed *Got* section. Each card has the cover, title, studio and date, cast, and *Now in your library* when a live file is matched. **Got it ✓** / **Got - tap to undo**, **Remove** (tap twice, as in the apps) and a **StashDB ↗** link. Covers are blurred; **Unblur all** (or **Blur all**) switches every one, and three taps within two seconds on one cover unblurs just that one. Reload re-reads the list; Esc closes it. It uses `stash_get`, which isn't privileged, so no api.php change. The list is still filled from **+ Stash get** in the apps - browse's own Profiles panel has no such button yet.
+- **Apps (`scray-stash-nav.js`, picker and native alike):** the Stash get view gets the same **Unblur all** / **Blur all** button the performer and studio pages have, in a row above the list (shown when a saved scene has a cover). It's the existing `revealAll` switch, so it also covers the covers in the list's *Got* section and carries across views as before.
+- **Tested:** `node --check`; data-explorer in headless Chrome against a stubbed `stash_get`: the list and counts, Unblur all / Blur all, three taps unblurring one cover, Got it, tap-twice Remove (sending `remove` with the id), Esc closing it. The apps' change is one row of markup using the existing button and handler; not run in a browser, and not tried on the phone.
+- **Files:** browse `data-explorer.html`, `VERSION.txt`; picker `scray-stash-nav.js`, `VERSION`; native `assets/web/scray-stash-nav.js`, `assets/web/VERSION`. Web only, no IPA build needed for the Remote app; the offline release IPA carries it.
+
 ### native 15.207 — test: close button in browser menu
 <!-- 2026-11-17T22:05Z -->
 - **Asked:** a Close button at the bottom of the browser's ⋯ menu, to close the menu.

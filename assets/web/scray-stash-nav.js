@@ -3083,13 +3083,16 @@ body.fullscreen-active #ssnPvBar { display: none; }
   /**
    * The performers column tapped on a row with several performers (picker 15.150 /
    * native 15.210). One tap on a name does what tapping that performer's tag
-   * does (performerChoice). Ticking names and then a button at the bottom acts
+   * does (performerChoice). Male performers are listed too, marked ♂.
+   * Ticking names and then a button at the bottom acts
    * on all the ticked ones at once - filter by them, or add them to the
    * search. A name already in the filter shows ticked-in-filter (the ✓ after
    * it) and can be taken out from its own tag modal.
    */
-  function performerPick(video, names) {
+  function performerPick(video, names, opts) {
     names = (names || []).map(n => String(n || '').trim()).filter(Boolean);
+    // Male performers (StashDB M / TM), marked ♂ in the list.
+    const male = new Set(((opts && opts.male) || []).map(n => String(n || '').trim().toLowerCase()));
     if (!names.length) return;
     if (names.length === 1) { performerChoice(video, names[0], 'performer'); return; }
     document.getElementById('scrayPerfPick')?.remove();
@@ -3103,7 +3106,9 @@ body.fullscreen-active #ssnPvBar { display: none; }
       '<div style="display:flex;align-items:center;gap:8px;">' +
         '<input type="checkbox" data-i="' + i + '" style="width:22px;height:22px;flex:none;margin:0;">' +
         '<button type="button" class="modal-btn modal-btn-secondary" data-one="' + i + '" ' +
-          'style="flex:1;text-align:left;margin:0;">' + esc(n) + (inFilter(n) ? ' &#10003;' : '') + '</button>' +
+          'style="flex:1;text-align:left;margin:0;">' + esc(n) +
+          (male.has(n.toLowerCase()) ? ' <span style="color:#3b7dd8;" title="Male performer">&#9794;</span>' : '') +
+          (inFilter(n) ? ' &#10003;' : '') + '</button>' +
       '</div>').join('');
     modal.innerHTML =
       '<div class="basket-json-modal-content" style="max-width:340px;max-height:80vh;overflow-y:auto;">' +

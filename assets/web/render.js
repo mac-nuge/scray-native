@@ -475,8 +475,9 @@ window.scrayListColumns = scrayListColumns;
 /**
  * The performers column tapped (picker 15.150 / native 15.210) - the same as
  * tapping the performer's tag in the open row. One StashDB performer: its
- * filter / search / Stash nav modal (scrayPerformerChoice). Several: a modal
- * listing them all (scrayPerformerPick) to tap one, or tick several and
+ * filter / search / Stash nav modal (scrayPerformerChoice). Several, counting
+ * the male performers the column leaves out: a modal listing them all, men
+ * marked ♂ (scrayPerformerPick) to tap one, or tick several and
  * filter or search by them together. Performers standing in from the folder
  * (no StashDB cast): that folder's filter / search / exclude modal, as the
  * folder crumb does. Returns false when there is nothing to act on.
@@ -486,11 +487,13 @@ function scrayPerformerColumnTap(video) {
   const cols = scrayListColumns(video);
   if (!cols.performers) return false;
   if (!cols.performersFromPath) {
+    // The whole cast, men included - the column itself names only the women
+    // (and non-binary performers), but the modal offers everyone.
     const parts = window.scrayStashNames ? window.scrayStashNames.parts(video) : null;
-    const names = (parts && parts.performerList) || [];
+    const names = (parts && (parts.performerListAll || parts.performerList)) || [];
     if (!names.length) return false;
     if (names.length > 1 && typeof window.scrayPerformerPick === 'function') {
-      window.scrayPerformerPick(video, names);
+      window.scrayPerformerPick(video, names, { male: (parts && parts.performerListM) || [] });
     } else if (typeof window.scrayPerformerChoice === 'function') {
       window.scrayPerformerChoice(video, names[0], 'performer');
     } else if (typeof window.scrayAddTagFilter === 'function') {

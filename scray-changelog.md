@@ -4,6 +4,15 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.150 / native 15.210 — test: Perf column taps like performer tag
+<!-- 2026-11-21T07:55Z -->
+- **Asked:** tapping the performers column in the list should do the same as tapping the performer tag; with several performers, open a modal listing them all to choose from, and allow picking more than one there.
+- **Perf column (`render.js`, `scrayPerformerColumnTap`):** one StashDB performer opens that performer's tag modal (filter / add to search / Stash nav, `scrayPerformerChoice`). Several open a new **Performers** modal. A row with no StashDB cast, where the column shows the last folder, opens that folder's filter / search / exclude modal, as the folder tag does.
+- **Performers modal (`scray-stash-nav.js`, `scrayPerformerPick`):** one line per performer. Tapping a name opens its tag modal. Tick boxes beside the names, with **Filter by ticked**, **Add ticked to search** and **Tick all** / **Untick all**, act on several at once. A ✓ after a name means it is already in the filter.
+- **Settings > Tap a column:** Perf has a new choice, **Performer tag (filter / search)**, and it is now Perf's default (was Play). A device that had saved its taps with Perf on Play moves to the new choice once; choosing Play again afterwards sticks. History and the basket have no tap settings, so there a tap on the performers text does the same.
+- **Tested:** `node --check` on both files in both apps; the Performers modal in jsdom (lists the names, ticking two and Filter by ticked adds both, tapping a name opens its tag modal). Not run in a browser or on the phone.
+- **Files:** picker `render.js`, `scray-stash-nav.js`, `VERSION`; native `assets/web/render.js`, `assets/web/scray-stash-nav.js`, `assets/web/VERSION`. Web only, no IPA build needed.
+
 ### picker 15.149 / native 15.209 / browse 15.383 — test: Stash get auto-got and hide got
 <!-- 2026-11-17T22:35Z -->
 - **Asked:** when a file matches a scene on the Stash get list, tick it off as got but leave it in the list, and add an option to filter the got ones out of the view.

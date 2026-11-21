@@ -473,6 +473,40 @@ function scrayListColumns(video) {
 window.scrayListColumns = scrayListColumns;
 
 /**
+ * The performers column tapped (picker 15.150 / native 15.210) - the same as
+ * tapping the performer's tag in the open row. One StashDB performer: its
+ * filter / search / Stash nav modal (scrayPerformerChoice). Several: a modal
+ * listing them all (scrayPerformerPick) to tap one, or tick several and
+ * filter or search by them together. Performers standing in from the folder
+ * (no StashDB cast): that folder's filter / search / exclude modal, as the
+ * folder crumb does. Returns false when there is nothing to act on.
+ */
+function scrayPerformerColumnTap(video) {
+  if (!video) return false;
+  const cols = scrayListColumns(video);
+  if (!cols.performers) return false;
+  if (!cols.performersFromPath) {
+    const parts = window.scrayStashNames ? window.scrayStashNames.parts(video) : null;
+    const names = (parts && parts.performerList) || [];
+    if (!names.length) return false;
+    if (names.length > 1 && typeof window.scrayPerformerPick === 'function') {
+      window.scrayPerformerPick(video, names);
+    } else if (typeof window.scrayPerformerChoice === 'function') {
+      window.scrayPerformerChoice(video, names[0], 'performer');
+    } else if (typeof window.scrayAddTagFilter === 'function') {
+      window.scrayAddTagFilter('performer', names[0]);
+    }
+    return true;
+  }
+  const crumbs = scrayListCrumbs(video);
+  const folder = crumbs[crumbs.length - 1];
+  if (!folder || typeof window.scrayFolderTagAction !== 'function') return false;
+  window.scrayFolderTagAction(folder);
+  return true;
+}
+window.scrayPerformerColumnTap = scrayPerformerColumnTap;
+
+/**
  * The studio column's names, tappable (native 15.16) - the same as tapping them in
  * the open row. A StashDB studio asks filter or search (scrayPerformerChoice,
  * as the purple chip does); a studio standing in from the folders is one
@@ -795,6 +829,13 @@ function scrayBuildListRow(video, index, cfg) {
   line.addEventListener('click', (e) => {
     if (tapBySize) {
       scrayRunTapAction(li, scrayTapColumnAt(line, e), e);
+      return;
+    }
+    // History and the basket have no tap settings: a tap ON the performers
+    // text there is the performer tag too (picker 15.150 / native 15.210).
+    if (e.target && e.target.closest && e.target.closest('.lc-perf') &&
+        perf.textContent.trim() && scrayPerformerColumnTap(video)) {
+      e.stopPropagation();
       return;
     }
     if (li.classList.contains('lc-open') && li._scrayPlaySpec && li._scrayPlaySpec.onClick) {
@@ -2114,8 +2155,8 @@ window.scraySetSwipeConfig = scraySetSwipeConfig;
    What a tap on each column of a closed or open line does, in the lists with
    a size column (main, random). History and the basket keep their own rule.
    Stored per device like the swipes. Defaults: # and studio do nothing;
-   score and size open the row; performers and file play it (or stop it,
-   if it's the video already playing).
+   score and size open the row; file plays it (or stops it, if it's the
+   video already playing); performers does what its tag does (15.150).
 ========================================= */
 const SCRAY_TAP_COLUMNS = [
   { key: 'num',    cls: 'lc-num',    name: '#' },
@@ -2126,18 +2167,20 @@ const SCRAY_TAP_COLUMNS = [
   { key: 'size',   cls: 'lc-size',   name: 'Size' }
 ];
 // picker 13.205 / native 13.203: # and studio default to nothing (were open).
-const SCRAY_TAP_DEFAULTS = { num: 'none', studio: 'none', perf: 'play', file: 'play', score: 'open', size: 'open' };
+// picker 15.150 / native 15.210: Perf defaults to its performer tag (was play).
+const SCRAY_TAP_DEFAULTS = { num: 'none', studio: 'none', perf: 'tag', file: 'play', score: 'open', size: 'open' };
 const SCRAY_TAP_STORE_KEY = 'scrayTapActions';
 
 /** Everything a column tap can do: the row's own behaviours, then every
- *  button the swipes can offer (P is "play" here, so it's left out). */
-function scrayTapChoices() {
-  return [
+ *  button the swipes can offer (P is "play" here, so it's left out).
+ *  Perf alone also offers its performer tag (picker 15.150 / native 15.210). */
+function scrayTapChoices(colKey) {
+  return (colKey === 'perf' ? [{ value: 'tag', name: 'Performer tag (filter / search)' }] : []).concat([
     { value: 'open', name: 'Open / close the row' },
     { value: 'play', name: 'Play (stop if playing)' },
     { value: 'bulk', name: 'Bulk select this line' },
     { value: 'none', name: 'Nothing' }
-  ].concat(SCRAY_SWIPE_CHOICES.filter(c => c.label !== 'P')
+  ]).concat(SCRAY_SWIPE_CHOICES.filter(c => c.label !== 'P')
     .map(c => ({ value: c.label, name: c.name })));
 }
 window.scrayTapChoices = scrayTapChoices;
@@ -2145,9 +2188,19 @@ window.scrayTapChoices = scrayTapChoices;
 function scrayTapConfig() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(SCRAY_TAP_STORE_KEY) || 'null'); } catch (e) { saved = null; }
-  const known = new Set(scrayTapChoices().map(c => c.value));
+  // picker 15.150 / native 15.210: a device that saved its taps while Perf's
+  // default was play moves to the performer tag once. Picking play again
+  // in Settings afterwards sticks.
+  try {
+    if (saved && saved.perf === 'play' && !localStorage.getItem('scrayTapPerfTagMoved')) {
+      saved.perf = 'tag';
+      localStorage.setItem(SCRAY_TAP_STORE_KEY, JSON.stringify(saved));
+    }
+    localStorage.setItem('scrayTapPerfTagMoved', '1');
+  } catch (e) { /* storage unavailable - the saved value stands */ }
   const out = {};
   SCRAY_TAP_COLUMNS.forEach(c => {
+    const known = new Set(scrayTapChoices(c.key).map(x => x.value));
     const v = saved && saved[c.key];
     out[c.key] = known.has(v) ? v : SCRAY_TAP_DEFAULTS[c.key];
   });
@@ -2206,6 +2259,10 @@ function scrayRunTapAction(li, key, e) {
       return;
     case 'open':
       toggleListRow(li);
+      return;
+    case 'tag':
+      // Nothing to act on (no performers, not even a folder): open the row.
+      if (!scrayPerformerColumnTap(li._scrayVideo)) toggleListRow(li);
       return;
     case 'bulk':
       if (window.scrayBulkSelection && typeof window.scrayBulkSelection.selectRow === 'function') {
@@ -2638,7 +2695,7 @@ document.addEventListener('DOMContentLoaded', () => {
         txt.textContent = col.name;
         const sel = document.createElement('select');
         sel.style.cssText = selectCss;
-        scrayTapChoices().forEach(c => {
+        scrayTapChoices(col.key).forEach(c => {
           const o = document.createElement('option');
           o.value = c.value;
           o.textContent = c.value === SCRAY_TAP_DEFAULTS[col.key] ? `${c.name} (default)` : c.name;

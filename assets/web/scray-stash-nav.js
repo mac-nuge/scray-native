@@ -3080,6 +3080,86 @@ body.fullscreen-active #ssnPvBar { display: none; }
     document.body.appendChild(modal);
   }
 
+  /**
+   * The performers column tapped on a row with several performers (picker 15.150 /
+   * native 15.210). One tap on a name does what tapping that performer's tag
+   * does (performerChoice). Ticking names and then a button at the bottom acts
+   * on all the ticked ones at once - filter by them, or add them to the
+   * search. A name already in the filter shows ticked-in-filter (the ✓ after
+   * it) and can be taken out from its own tag modal.
+   */
+  function performerPick(video, names) {
+    names = (names || []).map(n => String(n || '').trim()).filter(Boolean);
+    if (!names.length) return;
+    if (names.length === 1) { performerChoice(video, names[0], 'performer'); return; }
+    document.getElementById('scrayPerfPick')?.remove();
+    const modal = document.createElement('div');
+    modal.className = 'basket-json-modal';
+    modal.id = 'scrayPerfPick';
+    modal.style.zIndex = '2147483647';
+    const set = typeof window.scrayFacetSet === 'function' ? window.scrayFacetSet('performer') : null;
+    const inFilter = (n) => !!(set && set.has(n.toLowerCase()));
+    const rows = names.map((n, i) =>
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<input type="checkbox" data-i="' + i + '" style="width:22px;height:22px;flex:none;margin:0;">' +
+        '<button type="button" class="modal-btn modal-btn-secondary" data-one="' + i + '" ' +
+          'style="flex:1;text-align:left;margin:0;">' + esc(n) + (inFilter(n) ? ' &#10003;' : '') + '</button>' +
+      '</div>').join('');
+    modal.innerHTML =
+      '<div class="basket-json-modal-content" style="max-width:340px;max-height:80vh;overflow-y:auto;">' +
+        '<h3 style="margin-top:0;">Performers</h3>' +
+        '<p style="margin:0 0 10px;font-size:0.85rem;color:#666;">Tap a name for its options, or tick several and use a button below. &#10003; = already in the filter.</p>' +
+        '<div style="display:flex;flex-direction:column;gap:6px;">' + rows + '</div>' +
+        '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">' +
+          '<button type="button" class="modal-btn modal-btn-primary" data-c="filter" disabled>&#8853; Filter by ticked</button>' +
+          '<button type="button" class="modal-btn modal-btn-secondary" data-c="search" disabled>&#43; Add ticked to search</button>' +
+          '<button type="button" class="modal-btn modal-btn-secondary" data-c="all">Tick all</button>' +
+          '<button type="button" class="modal-btn modal-btn-cancel" data-c="">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    const boxes = () => Array.from(modal.querySelectorAll('input[type=checkbox][data-i]'));
+    const ticked = () => boxes().filter(b => b.checked).map(b => names[+b.dataset.i]);
+    const sync = () => {
+      const n = ticked().length;
+      modal.querySelector('[data-c="filter"]').disabled = !n;
+      modal.querySelector('[data-c="search"]').disabled = !n;
+      modal.querySelector('[data-c="all"]').textContent = n === names.length ? 'Untick all' : 'Tick all';
+    };
+    const done = () => modal.remove();
+    modal.addEventListener('change', sync);
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) { done(); return; }
+      if (e.target.matches && e.target.matches('input[type=checkbox]')) { e.stopPropagation(); return; }
+      const one = e.target.closest('[data-one]');
+      if (one) {
+        e.stopPropagation();
+        done();
+        performerChoice(video, names[+one.dataset.one], 'performer');
+        return;
+      }
+      const b = e.target.closest('[data-c]');
+      if (!b || b.disabled) return;
+      e.stopPropagation();
+      if (b.dataset.c === 'all') {
+        const all = ticked().length !== names.length;
+        boxes().forEach(x => { x.checked = all; });
+        sync();
+        return;
+      }
+      const picked = ticked();
+      done();
+      if (b.dataset.c === 'filter') {
+        picked.forEach(n => {
+          if (typeof window.scrayAddTagFilter === 'function') window.scrayAddTagFilter('performer', n);
+          else if (typeof window.scrayAddSearchTerm === 'function') window.scrayAddSearchTerm(n);
+        });
+      } else if (b.dataset.c === 'search') {
+        if (typeof window.scrayAddSearchTerm === 'function') picked.forEach(n => window.scrayAddSearchTerm(n));
+      }
+    });
+    document.body.appendChild(modal);
+  }
+
   // ---- ?play=<video_key> (picker 13.189 / native 13.190) ------------------
   // What Native's In library link opens. Waits for the lock screen, the player
   // and the library, plays the file in the main list's context where it can,
@@ -3358,4 +3438,5 @@ body.fullscreen-active #ssnPvBar { display: none; }
     // picker 15.91 / native 15.108 - a tap on a word selects it; the hunt's bulk box too.
     wordTap: wordTapOn };
   window.scrayPerformerChoice = performerChoice;
+  window.scrayPerformerPick = performerPick;
 })();

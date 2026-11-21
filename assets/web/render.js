@@ -1717,9 +1717,81 @@ function scrayBuildGroupRow(group, number, cfg) {
   });
   if (scrayOpenGroupsFor(list).has(group.key)) setOpen(true);
 
+  // Swiping the folder line (picker 15.151 / native 15.211) - see scrayGroupSwipeSpec.
+  li._scrayGroupSwipeSpec = (label) => scrayGroupSwipeSpec(li, group, list, label);
+
   return li;
 }
 window.scrayBuildGroupRow = scrayBuildGroupRow;
+
+/**
+ * A swipe button on a misc <100mb folder line (picker 15.151 / native 15.211):
+ * what the same button does, for every file in the folder at once.
+ *   B     the folder into the basket, or out if it is all in (the line's own button)
+ *   D     Download all
+ *   P     plays the folder's first file; next carries on through the rest
+ *   S, R, Move, Del, Ref
+ *         the bulk-select bar's action on the folder's files (scrayBulkSelection.run),
+ *         without touching whatever is ticked in bulk select
+ *   Fold  refreshes the folder, as on any of its files
+ * Buttons that only make sense for one file (score, bookmarks, stats...) are
+ * left out - the line just shows the ones that apply. Colours are borrowed
+ * from a file's own buttons so the two look the same.
+ */
+function scrayGroupSwipeSpec(li, group, list, label) {
+  const files = (group && group.members) || [];
+  if (!files.length) return null;
+  const firstRow = li.querySelector(':scope > .lc-group-body > ul.lc-group-list > li.lc-row');
+  let own = null;
+  const ownSpec = (lab) => {
+    if (!firstRow || typeof ensureListRowDetail !== 'function') return null;
+    if (!own) own = ensureListRowDetail(firstRow) || [];
+    return own.find(b => b && b.label === lab) || null;
+  };
+  const colour = (lab, fallback) => { const b = ownSpec(lab); return (b && b.color) || fallback; };
+  const n = files.length;
+  const bulk = (what, lab, fallback, title) => ({
+    label: lab, color: colour(lab, fallback), title,
+    onClick: () => {
+      const b = window.scrayBulkSelection;
+      if (!b || typeof b.run !== 'function') { alert('That is not available here.'); return; }
+      return b.run(what, files);
+    }
+  });
+  switch (label) {
+    case 'P': {
+      if (!firstRow) return null;
+      ownSpec('P');   // builds the first file's play spec
+      const p = firstRow._scrayPlaySpec;
+      if (!p || typeof p.onClick !== 'function') return null;
+      return { label: 'P', color: p.color || '#28a745', title: 'Play the first file in the folder', onClick: (e) => p.onClick(e) };
+    }
+    case 'B':
+      return {
+        label: 'B', color: colour('B', '#e83e8c'), title: `Add the ${n} files to the basket, or take them out`,
+        onClick: () => {
+          if (list === 'basket' || scrayGroupAllInBasket(group)) window.scrayRemoveVideosFromBasket(files);
+          else window.scrayAddVideosToBasket(files);
+        }
+      };
+    case 'D':
+      return {
+        label: 'D', color: colour('D', '#007bff'), title: `Download the ${n} files`,
+        onClick: () => window.scrayDownloadMany(files)
+      };
+    case 'S':            return bulk('stash',   'S',            '#6c5ce7', `Stash the ${n} files`);
+    case 'R':            return bulk('rename',  'R',            '#6c757d', `Rename the ${n} files`);
+    case 'Move':         return bulk('move',    'Move',         '#17a2b8', `Move the ${n} files`);
+    case 'X':            return bulk('delete',  'X',            '#dc3545', `Delete the ${n} files`);
+    case 'Refresh Data': return bulk('refresh', 'Refresh Data', '#17a2b8', `Refresh data for the ${n} files`);
+    case 'Refresh Folder': {
+      const b = ownSpec('Refresh Folder');
+      return b && !b.disabled ? b : null;
+    }
+    default:
+      return null;
+  }
+}
 
 /**
  * Download a set of files one after another (picker 15.138 / native 15.182) -
@@ -2324,7 +2396,13 @@ const SCRAY_SWIPE_FULL_FRACTION = 0.6; // ⚙️ how far across the row a full s
 
   function specsFor(li, side) {
     const labels = scraySwipeConfig()[side] || [];
-    if (!labels.length || typeof ensureListRowDetail !== 'function') return [];
+    if (!labels.length) return [];
+    // A folder line: each button acts on the whole folder (picker 15.151 / native 15.211).
+    if (typeof li._scrayGroupSwipeSpec === 'function') {
+      return labels.map(label => li._scrayGroupSwipeSpec(label))
+        .filter(s => s && !s.disabled && typeof s.onClick === 'function');
+    }
+    if (typeof ensureListRowDetail !== 'function') return [];
     const buttons = ensureListRowDetail(li) || [];
     return labels.map(label => {
       if (label === 'P') {
@@ -2421,10 +2499,15 @@ const SCRAY_SWIPE_FULL_FRACTION = 0.6; // ⚙️ how far across the row a full s
     if (!target || !target.closest) return null;
     if (target.closest('.lc-swipe-actions')) return null;
     const li = target.closest('li.lc-row');
-    if (!li || li.classList.contains('lc-group')) return null;
+    if (!li) return null;
     if (!li.closest(SCRAY_SWIPE_LISTS)) return null;
     const line = li.querySelector(':scope > .lc-line');
-    return line ? { li, line } : null;
+    if (!line) return null;
+    // A folder line swipes too (picker 15.151 / native 15.211), but only from
+    // the line itself - not from its buttons or the gaps in its open body.
+    if (li.classList.contains('lc-group') &&
+        (typeof li._scrayGroupSwipeSpec !== 'function' || !line.contains(target))) return null;
+    return { li, line };
   }
 
   document.addEventListener('touchstart', (e) => {
@@ -2561,7 +2644,7 @@ document.addEventListener('DOMContentLoaded', () => {
     id: 'swipeActions',
     label: 'Swipe actions',
     type: 'custom',
-    hint: 'Swipe a row in the list to show these buttons. A full swipe, most of the way across, runs the outer one.',
+    hint: 'Swipe a row in the list to show these buttons. A full swipe, most of the way across, runs the outer one. On a misc <100mb folder line they act on every file in it (P plays the first); buttons for one file only, like score, are left off.',
     get: () => scraySwipeConfig(),
     build: () => {
       const cfg = scraySwipeConfig();

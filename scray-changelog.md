@@ -4,6 +4,23 @@ Entries for scray-native. `changelog.html` in scray-browse merges this file with
 
 ## Entries
 
+### picker 15.151 / native 15.211 — test: swipe actions on misc folder lines
+<!-- 2026-11-21T08:55Z -->
+- **Asked:** let the swipe actions work on the *misc <100mb* folder lines in the list.
+- **Found:** the swipe only took file rows. `rowFrom` turned away any `li.lc-group`, so a folder line didn't move. The files inside an opened group already swiped as normal rows.
+- **Change (`render.js`, `scrayGroupSwipeSpec`):** a folder line swipes with the same buttons from Settings > Swipe actions, and each one acts on every file in the folder:
+  - **B:** puts the folder in the basket, or takes it out if it is all in (same as the line's own button; it reads −B then).
+  - **D:** Download all.
+  - **P:** plays the folder's first file.
+  - **S**, **R**, **Move**, **Del** and **Ref:** the bulk-select bar's action, run on the folder's files.
+  - **Fold:** refreshes the folder.
+
+  Buttons that only make sense for one file (score, bookmarks, stats, copy name, link, F tally, Hetz) are left off the folder line, so it shows only the ones that apply. Full swipe runs the outer one as usual. The swipe starts only from the line itself, not from the buttons in an open folder's body. Button colours come from a file's own buttons.
+- **Bulk select (`scray-bulk-select.js`):** `scrayBulkSelection.run(action, files)` runs one of the bar's actions on given files. Whatever is ticked in bulk select is left alone, and the bar's count isn't used for the progress.
+- **Settings:** the Swipe actions hint mentions the folder lines.
+- **Tested:** `node --check` on all four files; in jsdom, a folder line with two files offers P, B, D, S, R, Move, Del, Ref and Fold, and leaves score, bookmarks and stats off. Each one hands both files on, and P plays the first. The swipe gesture itself wasn't run in a browser or on the phone.
+- **Files:** picker `render.js`, `scray-bulk-select.js`, `VERSION`; native `assets/web/render.js`, `assets/web/scray-bulk-select.js`, `assets/web/VERSION`. Web only, no IPA build needed.
+
 ### picker 15.150 / native 15.210 — test: Perf column taps like performer tag
 <!-- 2026-11-21T07:55Z -->
 - **Asked:** tapping the performers column in the list should do the same as tapping the performer tag; with several performers, open a modal listing them all to choose from, male performers included.

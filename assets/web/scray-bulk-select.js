@@ -197,6 +197,7 @@
     selected.clear();
     paintAll();
   }
+  const clearSelectionAll = clearSelection;
 
   /** Every file in the current list - all pages, not just what's drawn. */
   function listVideos() {
@@ -371,12 +372,15 @@
     else console.log('[bulk]', message);
   }
 
-  async function runAction(what) {
+  // given (picker 15.151 / native 15.211): a folder line's swipe runs an action
+  // on its own files. The ticks in bulk select are then left alone.
+  async function runAction(what, given) {
     if (what === 'close') { setBulkMode(false); return; }
     if (what === 'all') { selectAll(); return; }
 
-    const videos = [...selected.values()];
+    const videos = given ? given.filter(v => v && idOf(v)) : [...selected.values()];
     if (!videos.length) return;
+    const clearSelection = given ? () => {} : clearSelectionAll;
 
     if (what === 'basket') {
       if (typeof window.addToBasket !== 'function') { alert('The basket is not available here.'); return; }
@@ -397,7 +401,8 @@
 
     if (what === 'refresh') {
       if (typeof window.refreshVideoFromDb !== 'function') { alert('Refresh is not available here.'); return; }
-      const count = bar?.querySelector('#bulkCount');
+      // A folder swipe's run counts in its toast instead - the bar's count is the ticks'.
+      const count = given ? null : bar?.querySelector('#bulkCount');
       let done = 0, failed = 0;
       for (const v of videos) {
         try {
@@ -418,7 +423,7 @@
     if (what === 'stash') {
       const pick = await askStashMode(videos.length);
       if (pick === 'quick') await bulkOhashCheck(videos);
-      else if (pick === 'manual') await openBulkStash(videos);
+      else if (pick === 'manual') await openBulkStash(videos, !!given);
       // Native 15.160: the hunt's bulk check over the ticked files - StashDB's
       // search on each name, the best scene for each, the sorts and filters,
       // Tick 90+, Match ticked, and 🔎 for one file's full search.
@@ -614,7 +619,7 @@
    * same fields, the same vocabulary and the same dropdowns, applied to every
    * selected file. Borrows that modal's id so it wears its stylesheet.
    */
-  async function openBulkStash(videos) {
+  async function openBulkStash(videos, keepTicks) {
     if (!window.scrayStashEdit || typeof window.scrayStashEdit.open !== 'function') {
       alert('Stash editing is not available here.');
       return;
@@ -654,7 +659,7 @@
               ? `⚠️ ${res.saved} updated, ${res.skipped} skipped${res.why ? ` (${res.why})` : ''}`
               : `✅ Stash details set on ${res.saved} file${res.saved === 1 ? '' : 's'}`,
               res.skipped ? '#c0392b' : undefined);
-            clearSelection();
+            if (!keepTicks) clearSelection();
             if (typeof window.filterDisplayedByFilename === 'function') {
               window.skipSearchScroll = true;
               window.skipPanelAutoOpen = true;
@@ -728,7 +733,10 @@
       if (!bulkOn) setBulkMode(true);
       if (!selected.has(idOf(li._scrayVideo))) setSelected(li, true);
     },
-    isOn: () => bulkOn
+    isOn: () => bulkOn,
+    // A folder line's swipe (render.js, picker 15.151 / native 15.211): one of the
+    // bar's actions on these files, whatever is ticked.
+    run: (what, videos) => runAction(what, Array.isArray(videos) ? videos : null)
   };
 })();
 // ===== END FILE: scray-bulk-select.js =====
